@@ -5,7 +5,7 @@ if (!process.env.CLOUDFLARE_DATABASE_ID) throw new Error('CLOUDFLARE_DATABASE_ID
 if (!process.env.CLOUDFLARE_D1_TOKEN) throw new Error('CLOUDFLARE_D1_TOKEN is not set');
 
 export default defineConfig({
-	schema: './src/lib/server/db/schema.ts',
+	schema: './src/lib/server/db/schema/index.ts',
 	dialect: 'sqlite',
 	driver: 'd1-http',
 	dbCredentials: {
