@@ -8,8 +8,7 @@
 - `HouseholdMeal` — a user recipe or trial recipe snapshot in the household calendar, optionally anchored to a date/time. Survival is recipe metadata, not a separate entity.
 - `GroceryList` — derived demand for a calendar, with persisted purchase state.
 - `PantryStaple` — user-marked ingredient to suppress from grocery reminders.
-- `CookSession` — actual cooking time and outcome facts.
-- `MealFeedback` — holistic user verdict.
+- `MealCheckIn` — post-meal cook-time facts, verdict, servings, and notes.
 - `HouseholdProfile` — household-level planning defaults such as default servings and pantry staples.
 - `UserCookingProfile` — per-user cook-time coefficient keyed by WorkOS User ID.
 - `HardFoodRule` / `TastePreference` — user-level constraints and preferences keyed by WorkOS User ID.
@@ -44,7 +43,7 @@ Keep these separate:
 : Assigned to a date and optional meal slot.
 
 `cooked`
-: User cooked it. A `CookSession` should exist if actual time was recorded.
+: User cooked it. A `MealCheckIn` should exist if actual time or verdict was recorded.
 
 `skipped`
 : Did not happen and no replacement was recorded.
@@ -112,7 +111,7 @@ Cook-time coefficient belongs to a WorkOS user, not the household. Start with a 
 adjustedTotalTime = sourceTotalTime * userCookingProfile.cookTimeCoefficient
 ```
 
-When a household meal has `plannedCookWorkosUserId`, use that user's coefficient for adjusted time. If actual cook differs, `CookSession.actualCookWorkosUserId` records who cooked and whose coefficient should learn from the session. A cook session must link to a household meal, a user recipe, or both; never neither. Update slowly from actual/source ratios reported in cook sessions. Later versions can add per-recipe, per-cuisine, or per-complexity coefficients.
+When a household meal has `plannedCookWorkosUserId`, use that user's coefficient for adjusted time. If actual cook differs, `MealCheckIn.actualCookWorkosUserId` records who cooked and whose coefficient should learn from the session. A meal check-in must link to a household meal, a user recipe, or both; never neither. Update slowly from actual/source ratios reported in meal check-ins. Later versions can add per-recipe, per-cuisine, or per-complexity coefficients.
 
 ## Trial meals
 

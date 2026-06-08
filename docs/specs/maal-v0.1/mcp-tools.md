@@ -36,9 +36,9 @@ Replaces a scheduled household meal with another household meal, takeout, or ext
 
 Records the cooked status and optionally creates a cook session.
 
-### `record_meal_feedback`
+### `record_meal_check_in`
 
-Records `worth_repeating`, `neutral`, or `never_again` plus optional reasons/notes.
+Records the post-meal check-in: optional cook time, servings cooked, verdict, reasons, and notes.
 
 ## Grocery and staples
 

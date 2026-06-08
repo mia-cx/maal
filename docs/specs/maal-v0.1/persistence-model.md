@@ -105,7 +105,7 @@ Derived/cached fields on `user_recipes`:
 - `average_actual_minutes`
 - `source_claimed_minutes`
 
-These can be computed from `household_meals`, `cook_sessions`, and `meal_feedback`. Cache them if ranking needs them quickly.
+These can be computed from `household_meals` and `meal_check_ins`. Cache them if ranking needs them quickly.
 
 Ownership behavior:
 
@@ -181,9 +181,9 @@ Related table:
 
 - `grocery_item_sources` linking grocery items to household meals and original ingredient lines.
 
-### `cook_sessions`
+### `meal_check_ins`
 
-Records actual cook-time facts.
+Records the post-meal check-in moment: cook-time facts, servings, verdict, and notes. A check-in may be cook-only, verdict-only, or both.
 
 Important fields:
 
@@ -192,31 +192,25 @@ Important fields:
 - `user_recipe_id` nullable
 - `planned_cook_workos_user_id` nullable
 - `actual_cook_workos_user_id` nullable
-- `reported_by_workos_user_id` nullable
-- `actual_minutes`
-- `claimed_minutes`
-- `cook_time_ratio`
-- `servings_cooked`
-- timestamps
-
-Constraint:
-
-- at least one of `household_meal_id` or `user_recipe_id` must be present. Both may be present.
-
-### `meal_feedback`
-
-Records holistic verdicts.
-
-Important fields:
-
-- `id`
-- `user_recipe_id` nullable, because trial meals may only have a household meal snapshot
-- `household_meal_id` nullable
-- `cook_session_id` nullable
-- `verdict`
-- `reasons_json`
+- `reported_by_workos_user_id`
+- `actual_minutes` nullable
+- `claimed_minutes` nullable
+- `cook_time_ratio` nullable
+- `servings_cooked` nullable
+- `verdict` nullable
+- `reasons_json` nullable
 - `notes`
 - `created_at`
+
+Constraints:
+
+- at least one of `household_meal_id` or `user_recipe_id` must be present. Both may be present.
+- cook-time coefficient learning only runs when `actual_cook_workos_user_id` and `actual_minutes` are present.
+
+Promotion behavior:
+
+- If a check-in references a household meal snapshot and the reporter has no matching user recipe, Maal can create a `user_recipes` row from that snapshot.
+- `worth_repeating` promotes to safe, `neutral` stores neutral memory, and `never_again` stores avoid memory.
 
 ## Derived API fields
 

@@ -40,17 +40,17 @@
 
 ## After cooking
 
-1. Poke asks how long it actually took.
-2. User reports actual minutes.
-3. Maal records a cook session and updates the cook-time coefficient.
-4. If meal was new/exploration/wildcard, Poke asks: “Worth repeating, neutral, or never again?”
-5. Maal promotes, leaves neutral, or avoids the recipe based on verdict.
+1. Poke asks for a post-meal check-in.
+2. The reporter may provide cook time, verdict, notes, or any subset of those.
+3. Maal records a meal check-in.
+4. If actual cook + actual minutes are present, Maal updates that cook's coefficient.
+5. If the check-in has a verdict, Maal promotes, leaves neutral, or avoids the recipe based on verdict.
 
 ## Data export/delete
 
 1. User requests export or delete.
 2. Maal performs the action without requiring Poke-specific knowledge.
-3. Export includes profile, constraints, staples, user recipes, household meals, groceries, cook sessions, and feedback.
+3. Export includes profile, constraints, staples, user recipes, household meals, groceries, and meal check-ins.
 
 ## Add to my menu
 

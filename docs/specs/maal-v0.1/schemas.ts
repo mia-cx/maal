@@ -312,35 +312,22 @@ export type GroceryCategory =
 	| 'household'
 	| 'other';
 
-export type CookSession = CookSessionBase &
+export type MealCheckIn = MealCheckInBase &
 	(
 		| { householdMealId: HouseholdMealId; userRecipeId?: string }
 		| { householdMealId?: HouseholdMealId; userRecipeId: string }
 	);
 
-export type CookSessionBase = {
+export type MealCheckInBase = {
 	id: string;
 	plannedCookWorkosUserId?: WorkOsUserId;
 	actualCookWorkosUserId?: WorkOsUserId;
-	reportedByWorkosUserId?: WorkOsUserId;
-	startedAt?: ISODateTime;
-	finishedAt?: ISODateTime;
-	actualMinutes: number;
+	reportedByWorkosUserId: WorkOsUserId;
+	actualMinutes?: number;
 	claimedMinutes?: number;
 	cookTimeRatio?: number;
 	servingsCooked?: number;
-	notes?: string;
-	createdAt: ISODateTime;
-};
-
-export type MealFeedback = {
-	id: string;
-	userRecipeId?: string;
-	householdId?: HouseholdId;
-	workosUserId: WorkOsUserId;
-	householdMealId?: HouseholdMealId;
-	cookSessionId?: string;
-	verdict: MealFeedbackVerdict;
+	verdict?: MealFeedbackVerdict;
 	reasons?: MealFeedbackReason[];
 	notes?: string;
 	createdAt: ISODateTime;
@@ -390,6 +377,5 @@ export type UserDataExport = {
 	userRecipes: UserRecipe[];
 	householdMeals: HouseholdMeal[];
 	groceryLists: GroceryList[];
-	cookSessions: CookSession[];
-	mealFeedback: MealFeedback[];
+	mealCheckIns: MealCheckIn[];
 };
