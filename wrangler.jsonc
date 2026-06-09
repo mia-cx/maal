@@ -1,6 +1,6 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "maal",
+	"name": "maal-staging",
 	"compatibility_date": "2026-06-08",
 	"compatibility_flags": ["nodejs_als"],
 	"main": ".svelte-kit/cloudflare/_worker.js",
@@ -9,5 +9,46 @@
 		"directory": ".svelte-kit/cloudflare"
 	},
 	"workers_dev": true,
-	"preview_urls": true
+	"preview_urls": true,
+	"routes": [
+		{
+			"pattern": "development.maal.mia.cx",
+			"custom_domain": true
+		}
+	],
+	"env": {
+		"staging": {
+			"name": "maal-staging",
+			"routes": [
+				{
+					"pattern": "staging.maal.mia.cx",
+					"custom_domain": true
+				}
+			],
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "maal-staging",
+					"database_id": "ae9a49ab-426d-4383-b938-c53e2393e46c",
+					"remote": true
+				}
+			]
+		},
+		"production": {
+			"name": "maal",
+			"routes": [
+				{
+					"pattern": "maal.mia.cx",
+					"custom_domain": true
+				}
+			],
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "maal-prod",
+					"database_id": "d498dfad-9b1f-4f35-9327-441f85a97741"
+				}
+			]
+		}
+	}
 }
