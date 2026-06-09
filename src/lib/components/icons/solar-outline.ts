@@ -8,6 +8,7 @@ export {
 	CloseCircle as XCircleIcon,
 	CloseSquare as XIcon,
 	DangerTriangle as WarningIcon,
+	Home as HomeIcon,
 	InfoCircle as InfoIcon,
 	Magnifier as MagnifyingGlassIcon,
 	MenuDots as DotsThreeIcon,
