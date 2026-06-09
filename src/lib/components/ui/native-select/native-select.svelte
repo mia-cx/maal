@@ -1,18 +1,17 @@
 <script lang="ts">
-	import { cn } from '$lib/utils.js';
-	import type { HTMLSelectAttributes } from 'svelte/elements';
-	import { CaretDownIcon } from '$lib/components/icons/solar-outline';
+	import { cn, type WithElementRef } from "$lib/utils.js";
+	import type { HTMLSelectAttributes } from "svelte/elements";
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 
-	type NativeSelectProps = Omit<HTMLSelectAttributes, 'size'> & {
-		ref?: HTMLSelectElement | null;
-		size?: 'sm' | 'default';
+	type NativeSelectProps = Omit<WithElementRef<HTMLSelectAttributes>, "size"> & {
+		size?: "sm" | "default";
 	};
 
 	let {
 		ref = $bindable(null),
 		value = $bindable(),
 		class: className,
-		size = 'default',
+		size = "default",
 		children,
 		...restProps
 	}: NativeSelectProps = $props();
@@ -20,7 +19,7 @@
 
 <div
 	class={cn(
-		'cn-native-select-wrapper group/native-select relative w-fit has-[select:disabled]:opacity-50',
+		"cn-native-select-wrapper group/native-select relative w-fit has-[select:disabled]:opacity-50",
 		className
 	)}
 	data-slot="native-select-wrapper"
@@ -31,14 +30,10 @@
 		bind:this={ref}
 		data-slot="native-select"
 		data-size={size}
-		class="h-10 w-full min-w-0 appearance-none rounded-none border border-transparent border-b-input bg-transparent py-2 pr-8 pl-0 text-sm transition-[color,border-color] outline-none select-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground focus-visible:border-b-ring disabled:pointer-events-none disabled:cursor-not-allowed aria-invalid:border-b-destructive data-[size=sm]:h-9 dark:aria-invalid:border-b-destructive/50"
+		class="border-input bg-input/20 placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 dark:hover:bg-input/50 focus-visible:border-ring focus-visible:ring-ring/30 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:aria-invalid:border-destructive/50 h-7 w-full min-w-0 appearance-none rounded-md border py-0.5 pr-6 pl-2 text-xs/relaxed transition-colors select-none focus-visible:ring-2 aria-invalid:ring-2 data-[size=sm]:h-6 data-[size=sm]:text-[0.625rem] outline-none disabled:pointer-events-none disabled:cursor-not-allowed"
 		{...restProps}
 	>
 		{@render children?.()}
 	</select>
-	<CaretDownIcon
-		class="pointer-events-none absolute top-1/2 right-0 size-3.5 -translate-y-1/2 text-muted-foreground select-none"
-		aria-hidden
-		data-slot="native-select-icon"
-	/>
+	<ChevronDownIcon class="text-muted-foreground top-1/2 right-1.5 size-3.5 -translate-y-1/2 group-data-[size=sm]/native-select:size-3 group-data-[size=sm]/native-select:-translate-y-[calc(--spacing(1.25))] pointer-events-none absolute select-none" aria-hidden data-slot="native-select-icon" />
 </div>

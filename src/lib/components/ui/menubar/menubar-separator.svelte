@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { Menubar as MenubarPrimitive } from 'bits-ui';
-	import { cn } from '$lib/utils.js';
+	import { Menubar as MenubarPrimitive } from "bits-ui";
+	import { cn } from "$lib/utils.js";
 
 	let {
 		ref = $bindable(null),
@@ -12,6 +12,6 @@
 <MenubarPrimitive.Separator
 	bind:ref
 	data-slot="menubar-separator"
-	class={cn('-mx-1 -mx-1.5 my-1 my-1.5 h-px h-px bg-border/50', className)}
+	class={cn("bg-border/50 -mx-1 my-1 h-px -mx-1 my-1 h-px", className)}
 	{...restProps}
 />

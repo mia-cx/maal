@@ -1,16 +1,16 @@
 <script lang="ts">
-	import { Select as SelectPrimitive } from 'bits-ui';
-	import { cn, type WithoutChild } from '$lib/utils.js';
-	import { CaretDownIcon } from '$lib/components/icons/solar-outline';
+	import { Select as SelectPrimitive } from "bits-ui";
+	import { cn, type WithoutChild } from "$lib/utils.js";
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 
 	let {
 		ref = $bindable(null),
 		class: className,
 		children,
-		size = 'default',
+		size = "default",
 		...restProps
 	}: WithoutChild<SelectPrimitive.TriggerProps> & {
-		size?: 'sm' | 'default';
+		size?: "sm" | "default";
 	} = $props();
 </script>
 
@@ -19,11 +19,11 @@
 	data-slot="select-trigger"
 	data-size={size}
 	class={cn(
-		"flex w-fit items-center justify-between gap-1.5 rounded-none border border-transparent border-b-input bg-transparent px-0 py-2 text-sm whitespace-nowrap transition-[color,border-color] outline-none focus-visible:border-b-ring disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-b-destructive data-placeholder:text-muted-foreground data-[size=default]:h-10 data-[size=sm]:h-9 *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:aria-invalid:border-b-destructive/50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+		"border-input data-placeholder:text-muted-foreground bg-input/20 dark:bg-input/30 dark:hover:bg-input/50 focus-visible:border-ring focus-visible:ring-ring/30 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:aria-invalid:border-destructive/50 gap-1.5 rounded-md border px-2 py-1.5 text-xs/relaxed transition-colors focus-visible:ring-2 aria-invalid:ring-2 data-[size=default]:h-7 data-[size=sm]:h-6 *:data-[slot=select-value]:flex *:data-[slot=select-value]:gap-1.5 [&_svg:not([class*='size-'])]:size-3.5 flex w-fit items-center justify-between whitespace-nowrap outline-none disabled:cursor-not-allowed disabled:opacity-50 *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center [&_svg]:pointer-events-none [&_svg]:shrink-0",
 		className
 	)}
 	{...restProps}
 >
 	{@render children?.()}
-	<CaretDownIcon class="pointer-events-none size-3.5 text-muted-foreground" />
+	<ChevronDownIcon class="text-muted-foreground size-3.5 pointer-events-none" />
 </SelectPrimitive.Trigger>

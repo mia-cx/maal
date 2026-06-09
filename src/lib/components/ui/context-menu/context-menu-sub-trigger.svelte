@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { ContextMenu as ContextMenuPrimitive } from 'bits-ui';
-	import { cn, type WithoutChild } from '$lib/utils.js';
-	import { CaretRightIcon } from '$lib/components/icons/solar-outline';
+	import { ContextMenu as ContextMenuPrimitive } from "bits-ui";
+	import { cn, type WithoutChild } from "$lib/utils.js";
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 
 	let {
 		ref = $bindable(null),
@@ -19,11 +19,11 @@
 	data-slot="context-menu-sub-trigger"
 	data-inset={inset}
 	class={cn(
-		"flex cursor-default items-center rounded-none px-3 py-2 text-xs font-medium tracking-wider uppercase outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-inset:ps-8 data-inset:pl-9.5 data-open:bg-accent data-open:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+		"focus:bg-accent focus:text-accent-foreground data-open:bg-accent data-open:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground min-h-7 gap-2 rounded-md px-2 py-1 text-xs data-inset:pl-7.5 [&_svg:not([class*='size-'])]:size-3.5 flex cursor-default items-center outline-hidden select-none data-inset:ps-8 [&_svg]:pointer-events-none [&_svg]:shrink-0",
 		className
 	)}
 	{...restProps}
 >
 	{@render children?.()}
-	<CaretRightIcon class="ml-auto" />
+	<ChevronRightIcon class="ml-auto" />
 </ContextMenuPrimitive.SubTrigger>

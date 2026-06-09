@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { ContextMenu as ContextMenuPrimitive } from 'bits-ui';
-	import { cn, type WithoutChild } from '$lib/utils.js';
-	import { CheckIcon } from '$lib/components/icons/solar-outline';
+	import { ContextMenu as ContextMenuPrimitive } from "bits-ui";
+	import { cn, type WithoutChild } from "$lib/utils.js";
+	import CheckIcon from '@lucide/svelte/icons/check';
 
 	let {
 		ref = $bindable(null),
@@ -19,15 +19,15 @@
 	data-slot="context-menu-radio-item"
 	data-inset={inset}
 	class={cn(
-		"relative flex cursor-default items-center gap-2.5 rounded-none py-2 pr-8 pl-3 text-xs font-medium tracking-wider uppercase outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-inset:pl-9.5 data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+		"focus:bg-accent focus:text-accent-foreground focus:**:text-accent-foreground min-h-7 gap-2 rounded-md py-1.5 pr-8 pl-2 text-xs data-inset:pl-7.5 [&_svg:not([class*='size-'])]:size-3.5 relative flex cursor-default items-center outline-hidden select-none data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
 		className
 	)}
 	{...restProps}
 >
 	{#snippet children({ checked })}
-		<span class="pointer-events-none absolute right-2">
+		<span class="pointer-events-none absolute right-2 flex items-center justify-center pointer-events-none">
 			{#if checked}
-				<CheckIcon />
+				<CheckIcon  />
 			{/if}
 		</span>
 		{@render childrenProp?.({ checked })}
