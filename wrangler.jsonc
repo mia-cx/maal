@@ -30,6 +30,7 @@
 					"binding": "DB",
 					"database_name": "maal-staging",
 					"database_id": "ae9a49ab-426d-4383-b938-c53e2393e46c",
+					"migrations_dir": "drizzle",
 					"remote": true
 				}
 			]
@@ -46,7 +47,8 @@
 				{
 					"binding": "DB",
 					"database_name": "maal-prod",
-					"database_id": "d498dfad-9b1f-4f35-9327-441f85a97741"
+					"database_id": "d498dfad-9b1f-4f35-9327-441f85a97741",
+					"migrations_dir": "drizzle"
 				}
 			]
 		}
