@@ -28,7 +28,7 @@ The backend table/DTO name is `user_recipes` / `UserRecipe` because the data is 
 
 Maal should model meals as household calendar events, not as items inside a fixed schedule container. The default UI can still be a 7-day board because that matches common grocery rhythms, but the data model is just `household_meals`.
 
-A household meal can be scheduled to a specific date/time or stay floating indefinitely. Floating meals act like a meal watchlist: they can roll forward for months until someone decides “I'm eating this now.”
+A household meal is always a plan, but date/time assignment is optional. Meals with neither date nor time appear in the top meal pool and can roll forward indefinitely until someone anchors them.
 
 ### User recipes
 
@@ -36,18 +36,51 @@ Maal stores user-imported recipes as mostly-standard `schema.org/Recipe` payload
 
 ### Planning board
 
-The default UI is a calendar board plus a floating meal watchlist. The household profile can define the default dashboard range, such as 3 days, 7 days, or a month. Individual users can override the view in the dashboard without changing the household default.
+The default UI is a calendar board plus a top meal pool for meals without date/time. The household profile can define the default dashboard range, such as 3 days, 7 days, or a month. Individual users can override the view in the dashboard without changing the household default.
 
 A meal may be:
 
-- floating in the household meal watchlist
-- scheduled to a date/slot
+- in the top pool with no date/time
+- assigned to a date and optional slot/time
 - cooked
 - skipped
-- postponed back to floating
+- postponed/deferred by clearing date/time
 - replaced by another meal or takeout
 
-Swapping two scheduled meals is not a special status; it is just changing assignments.
+Swapping two assigned meals is not a special status; it is just changing assignments.
+
+### Keyboard-first interaction model
+
+The app should eventually be fully usable keyboard-first. Shortcut handling should be centralized in a small registry rather than scattered across components. Single-letter shortcuts apply only when focus is not inside an editable field (`input`, `textarea`, `select`, contenteditable, or textbox-like controls), and modifier-key browser shortcuts must be respected.
+
+Initial schedule shortcuts:
+
+- `d` switches to Day view.
+- `w` switches to Multi-day / week view.
+- `m` switches to Month view.
+
+Global/context-aware shortcuts:
+
+- `?` opens a keyboard shortcut help overlay.
+- `n` creates a new item in the current context:
+  - Schedule: new meal.
+  - My menu: new recipe/import.
+  - Pantry staples: new staple/item.
+  - Preferences: no-op unless a focused preference section supports creation.
+- `Esc` closes modals, cancels active drag/reorder modes, or clears transient focus state.
+- `/` focuses search/add/import when the current surface supports it.
+
+Schedule/card navigation requirements:
+
+- Calendar focus should be model-level, not only DOM focus, so shortcuts continue to work with infinite/virtualized schedule views.
+- Arrow keys move calendar focus through days/columns/cells.
+- `j`/`k` or arrow keys move focused meal selection within a list.
+- `Enter` opens the focused meal preview.
+- `e` edits the focused meal when editing exists.
+- `Space` can enter a keyboard reorder mode for the focused card.
+- In reorder mode, arrow keys move the card, `Enter` drops, and `Esc` cancels.
+- `Shift+j` / `Shift+k` and `Shift+Down` / `Shift+Up` move focused cards down/up without entering a separate drag mode.
+- Later, `Shift+Left` / `Shift+Right` should move focused cards across days/columns in multi-day and month views.
 
 ### Pantry staples
 
@@ -55,7 +88,7 @@ Users can mark ingredients as staples they usually have at home. Staples are exc
 
 ### Grocery demand
 
-Maal derives grocery demand from scheduled household meals in a date range and optionally selected floating meals. Ingredients are merged by normalized ingredient identity where safe. Original ingredient lines are always preserved.
+Maal derives grocery demand from household meals in a date range and optionally selected top-pool meals. Ingredients are merged by normalized ingredient identity where safe. Original ingredient lines are always preserved.
 
 ### Capacity mode
 
@@ -64,7 +97,7 @@ Capacity mode describes what kind of meal fits today:
 - `adventurous` — exploration/wildcard meals are welcome.
 - `normal` — safe and exploration meals are acceptable.
 - `low` — prefer safe, low-effort, leftovers, and short active time.
-- `survival` — survival-tagged recipes only; scheduled meals may be floated again.
+- `survival` — survival-tagged recipes only; assigned meals may be deferred back to the top pool.
 
 ### Meal familiarity
 

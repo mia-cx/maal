@@ -31,10 +31,10 @@ export const householdMeals = sqliteTable(
 		date: text('date'),
 		slot: text('slot', { enum: ['breakfast', 'lunch', 'dinner', 'snack', 'other'] }),
 		status: text('status', {
-			enum: ['floating', 'scheduled', 'cooked', 'skipped', 'postponed', 'replaced', 'archived']
+			enum: ['planned', 'cooked', 'skipped', 'postponed', 'replaced', 'archived']
 		})
 			.notNull()
-			.default('floating'),
+			.default('planned'),
 		servingsPlanned: real('servings_planned').notNull().default(1),
 		servingsCooked: real('servings_cooked'),
 		plannedCookWorkosUserId: text('planned_cook_workos_user_id'),
@@ -43,7 +43,7 @@ export const householdMeals = sqliteTable(
 		})
 			.notNull()
 			.default('unknown'),
-		floatingSince: text('floating_since'),
+		sortOrder: integer('sort_order'),
 		lastConsideredAt: text('last_considered_at'),
 		replacedByHouseholdMealId: text('replaced_by_household_meal_id'),
 		replacementKind: text('replacement_kind', {

@@ -28,7 +28,7 @@ Keep these separate:
 - Personal library truth: which imported recipes, preferences, and hard food rules a user can carry across households.
 - Household recipe availability truth: which member-owned/saved recipes are visible to the household through membership.
 - Recipe attribution truth: which user imported/created or added a recipe.
-- Calendar truth: which household meals exist, which are floating, and which are anchored to a date/time.
+- Calendar truth: which household meals exist and whether they are in the top pool, date-only, or timed.
 - Household meal truth: which user recipe or trial recipe snapshot is planned, when it is assigned, and how many servings the household intends.
 - Grocery truth: what ingredients are needed and whether they were bought.
 - Cook session truth: what actually happened.
@@ -36,11 +36,8 @@ Keep these separate:
 
 ## Meal status rules
 
-`floating`
-: In the household meal watchlist, not assigned to a date/slot. Floating meals may roll forward indefinitely.
-
-`scheduled`
-: Assigned to a date and optional meal slot.
+`planned`
+: The meal exists as a household plan. If it has neither `date` nor `scheduled_for`, the UI shows it in the top pool. If it has a `date` and no time, it appears at the end of that date. If it has a time, it sorts by time.
 
 `cooked`
 : User cooked it. A `MealCheckIn` should exist if actual time or verdict was recorded.
@@ -49,7 +46,7 @@ Keep these separate:
 : Did not happen and no replacement was recorded.
 
 `postponed`
-: Removed from its date/time and returned to floating.
+: Deferred after being assigned; clearing date/time returns it to the top pool without changing it into a separate status.
 
 `replaced`
 : Superseded by another household meal, takeout, or external meal.
@@ -153,7 +150,7 @@ Floating household meals are excluded by default unless:
 
 - `include_in_grocery_list` is true, or
 - the grocery query explicitly selects their `household_meal_id`, or
-- the caller requests all floating meals.
+- the caller requests top-pool meals with neither date nor time.
 
 Default exclusions:
 

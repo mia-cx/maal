@@ -14,19 +14,19 @@ Copies a recipe visible from a household list, household meal, or another member
 
 ### `add_household_meal`
 
-Creates a `household_meals` row as either floating or scheduled. Input can reference a user recipe, or trial recipe snapshot.
+Creates a `household_meals` row with optional date/time assignment. Input can reference a user recipe, or trial recipe snapshot.
 
 ### `get_calendar`
 
-Returns household meals for a date range plus floating meals, grocery summary, and warnings.
+Returns household meals for a date range plus top-pool meals with neither date nor time, grocery summary, and warnings.
 
 ### `schedule_household_meal`
 
-Assigns a floating household meal to a date/slot/time or moves an existing scheduled household meal.
+Assigns a household meal to a date/slot/time or moves an existing assigned household meal.
 
-### `float_household_meal`
+### `clear_household_meal_time`
 
-Moves a scheduled household meal back to floating.
+Clears date/time assignment so the household meal returns to the top pool.
 
 ### `replace_meal`
 
@@ -44,12 +44,12 @@ Records the post-meal check-in: optional cook time, servings cooked, verdict, re
 
 ### `get_calendar_ingredients`
 
-Returns merged ingredient demand for a calendar date range and optional selected floating meals.
+Returns merged ingredient demand for a calendar date range and optional selected top-pool meals.
 
 Inputs:
 
 - date range
-- include floating meals: `marked`, `none`, `all`, or `selected`
+- include top-pool meals: `marked`, `none`, `all`, or `selected`
 - selected household meal IDs
 - include pantry staples
 - include purchased state
@@ -102,7 +102,7 @@ Scores candidate meals for a date using multiple vectors:
 
 ### `suggest_guest_adjustment`
 
-Given a date and extra servings, recommends meal changes that reuse already scheduled, floating, or purchased ingredients.
+Given a date and extra servings, recommends meal changes that reuse already assigned, top-pool, or purchased ingredients.
 
 ### `suggest_survival_plan`
 

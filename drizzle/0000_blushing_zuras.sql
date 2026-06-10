@@ -126,12 +126,12 @@ CREATE TABLE `household_meals` (
 	`scheduled_for` text,
 	`date` text,
 	`slot` text,
-	`status` text DEFAULT 'floating' NOT NULL,
+	`status` text DEFAULT 'planned' NOT NULL,
 	`servings_planned` real DEFAULT 1 NOT NULL,
 	`servings_cooked` real,
 	`planned_cook_workos_user_id` text,
 	`ingredient_purchase_state` text DEFAULT 'unknown' NOT NULL,
-	`floating_since` text,
+	`sort_order` integer,
 	`last_considered_at` text,
 	`replaced_by_household_meal_id` text,
 	`replacement_kind` text,
@@ -154,6 +154,7 @@ CREATE TABLE `household_profiles` (
 	`default_servings` integer DEFAULT 1 NOT NULL,
 	`default_calendar_duration_days` integer DEFAULT 7 NOT NULL,
 	`default_calendar_anchor` text DEFAULT 'today' NOT NULL,
+	`preferred_dinner_time` text,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
@@ -161,6 +162,7 @@ CREATE TABLE `household_profiles` (
 CREATE TABLE `user_cooking_profiles` (
 	`workos_user_id` text PRIMARY KEY NOT NULL,
 	`cook_time_coefficient` real DEFAULT 1 NOT NULL,
+	`preferred_dinner_time` text,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
 );

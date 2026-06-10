@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "23afda38-3d0b-4b62-9e91-e6851033217d",
+  "id": "5aa293eb-25a4-479a-a183-26f91f3167a4",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "food_entities": {
@@ -892,7 +892,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'floating'"
+          "default": "'planned'"
         },
         "servings_planned": {
           "name": "servings_planned",
@@ -924,9 +924,9 @@
           "autoincrement": false,
           "default": "'unknown'"
         },
-        "floating_since": {
-          "name": "floating_since",
-          "type": "text",
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -1091,6 +1091,13 @@
           "autoincrement": false,
           "default": "'today'"
         },
+        "preferred_dinner_time": {
+          "name": "preferred_dinner_time",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -1131,6 +1138,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": 1
+        },
+        "preferred_dinner_time": {
+          "name": "preferred_dinner_time",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "created_at": {
           "name": "created_at",

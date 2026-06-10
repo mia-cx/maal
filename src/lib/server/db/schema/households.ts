@@ -10,6 +10,7 @@ export const householdProfiles = sqliteTable('household_profiles', {
 	})
 		.notNull()
 		.default('today'),
+	preferredDinnerTime: text('preferred_dinner_time'),
 	createdAt: createdAt(),
 	updatedAt: updatedAt()
 });
@@ -17,6 +18,7 @@ export const householdProfiles = sqliteTable('household_profiles', {
 export const userCookingProfiles = sqliteTable('user_cooking_profiles', {
 	workosUserId: text('workos_user_id').primaryKey(),
 	cookTimeCoefficient: real('cook_time_coefficient').notNull().default(1),
+	preferredDinnerTime: text('preferred_dinner_time'),
 	createdAt: createdAt(),
 	updatedAt: updatedAt()
 });

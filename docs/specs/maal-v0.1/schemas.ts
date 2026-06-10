@@ -138,7 +138,7 @@ export type HouseholdMeal = {
 	servingsCooked?: number;
 	plannedCookWorkosUserId?: WorkOsUserId;
 	ingredientPurchaseState?: IngredientPurchaseState;
-	floatingSince?: ISODateTime;
+	sortOrder?: number;
 	lastConsideredAt?: ISODateTime;
 	replacedByHouseholdMealId?: HouseholdMealId;
 	replacementKind?: MealReplacementKind;
@@ -186,8 +186,7 @@ export type RecipeNutrition = {
 
 export type MealSlot = 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'other';
 export type HouseholdMealStatus =
-	| 'floating'
-	| 'scheduled'
+	| 'planned'
 	| 'cooked'
 	| 'skipped'
 	| 'postponed'
@@ -207,6 +206,7 @@ export type HouseholdProfile = {
 	householdId: HouseholdId;
 	defaultServings: number;
 	defaultCalendarView: CalendarViewPreference;
+	preferredDinnerTime?: string;
 	pantryStaples: PantryStaple[];
 	createdAt: ISODateTime;
 	updatedAt: ISODateTime;
@@ -220,6 +220,7 @@ export type CalendarViewPreference = {
 export type UserCookingProfile = {
 	workosUserId: WorkOsUserId;
 	cookTimeCoefficient: number;
+	preferredDinnerTime?: string;
 	createdAt: ISODateTime;
 	updatedAt: ISODateTime;
 };

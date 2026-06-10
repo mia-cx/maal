@@ -5,12 +5,12 @@
 1. Poke finds a recipe site with `schema.org/Recipe` JSON-LD.
 2. Poke sends the recipe to Maal with source metadata.
 3. Maal stores a stable snapshot and confidence scores.
-4. Poke creates a floating or scheduled `household_meals` row.
+4. Poke creates a `household_meals` row, optionally with date/time assignment.
 
 ## Calendar planning
 
 1. User/Poke adds several candidate meals to `household_meals`.
-2. Some are scheduled; some stay floating.
+2. Some are assigned to dates/times; some stay in the top pool with no date/time.
 3. Poke can ask: “On the menu: rösti, chili, and chicken rice. Want to lock one in for Wednesday?”
 4. User can postpone or swap without shame.
 
@@ -26,7 +26,7 @@
 
 1. User says someone is joining dinner.
 2. Poke calls `suggest_guest_adjustment` with extra servings.
-3. Maal compares scheduled/floating meals by ingredient overlap and grocery delta.
+3. Maal compares assigned and top-pool meals by ingredient overlap and grocery delta.
 4. Poke suggests the least wasteful switch or serving adjustment.
 5. Maal returns an ad-hoc grocery delta.
 
@@ -34,8 +34,8 @@
 
 1. User says they have low capacity or Poke infers it from conversation.
 2. Poke passes capacity mode as request context, e.g. `low` or `survival`.
-3. Maal scores calendar/floating meals for fit.
-4. In survival mode, Poke may move scheduled meals back to floating and schedule a survival-tagged recipe.
+3. Maal scores calendar and top-pool meals for fit.
+4. In survival mode, Poke may clear date/time from assigned meals and assign a survival-tagged recipe.
 5. Purchased/perishable ingredient warnings are preserved.
 
 ## After cooking

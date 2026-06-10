@@ -117,7 +117,7 @@ Ownership behavior:
 
 ### `household_meals`
 
-Calendar event/watchlist row for a household meal. It can reference a user recipe or embed a trial recipe snapshot. Date/time assignment is optional. Household meals intentionally duplicate enough recipe data to keep trials/wildcards schedulable before anyone adds them to their menu.
+Planned household meal row. It can reference a user recipe or embed a trial recipe snapshot. Date/time assignment is optional; meals with neither `date` nor `scheduled_for` appear in the top meal pool. Household meals intentionally duplicate enough recipe data to keep trials/wildcards schedulable before anyone adds them to their menu.
 
 Important fields:
 
@@ -127,13 +127,11 @@ Important fields:
 - `recipe_snapshot_json` nullable
 - `recipe_source_json` nullable
 - `recipe_metadata_json` nullable
-- `include_in_grocery_list` boolean, default false for floating meals
+- `include_in_grocery_list` boolean
 - `scheduled_for` nullable
 - `date` nullable, for date-only planning
 - `slot` nullable
-- `target_eat_time` nullable
-- `target_start_time` nullable
-- `floating_since` nullable
+- `sort_order` nullable, for manual ordering in the top pool and untimed day lists
 - `last_considered_at` nullable
 - `planned_cook_workos_user_id` nullable
 - `status`
@@ -145,7 +143,7 @@ Important fields:
 Constraints:
 
 - exactly one of `user_recipe_id` or `recipe_snapshot_json` should be present.
-- `scheduled` meals should have `scheduled_for`, `date`, or a target time.
+- Top-pool meals have neither `date` nor `scheduled_for`; date-only meals have `date` and null `scheduled_for`.
 
 Related flattened operation tables for trial snapshots:
 
