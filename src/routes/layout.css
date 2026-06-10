@@ -33,6 +33,9 @@
 	--chart-3: oklch(0.439 0 0);
 	--chart-4: oklch(0.371 0 0);
 	--chart-5: oklch(0.269 0 0);
+	--meal-load-low: oklch(0.64 0.14 150);
+	--meal-load-medium: oklch(0.62 0.14 230);
+	--meal-load-high: oklch(0.62 0.16 285);
 	--radius: 0.45rem;
 	--sidebar: oklch(0.985 0 0);
 	--sidebar-foreground: oklch(0.145 0 0);
@@ -68,6 +71,9 @@
 	--chart-3: oklch(0.439 0 0);
 	--chart-4: oklch(0.371 0 0);
 	--chart-5: oklch(0.269 0 0);
+	--meal-load-low: oklch(0.72 0.14 150);
+	--meal-load-medium: oklch(0.74 0.13 230);
+	--meal-load-high: oklch(0.76 0.15 285);
 	--sidebar: oklch(0.205 0 0);
 	--sidebar-foreground: oklch(0.985 0 0);
 	--sidebar-primary: oklch(0.488 0.243 264.376);
@@ -89,6 +95,9 @@
 	--color-sidebar-primary: var(--sidebar-primary);
 	--color-sidebar-foreground: var(--sidebar-foreground);
 	--color-sidebar: var(--sidebar);
+	--color-meal-load-high: var(--meal-load-high);
+	--color-meal-load-medium: var(--meal-load-medium);
+	--color-meal-load-low: var(--meal-load-low);
 	--color-chart-5: var(--chart-5);
 	--color-chart-4: var(--chart-4);
 	--color-chart-3: var(--chart-3);
@@ -125,12 +134,42 @@
 	* {
 		@apply border-border outline-ring/50;
 	}
-	body {
-		@apply bg-background text-foreground;
-	}
 	html {
+		height: 100%;
+		overflow: hidden;
+		overscroll-behavior: none;
 		@apply font-sans;
 	}
+	body {
+		height: 100%;
+		overflow: hidden;
+		overscroll-behavior: none;
+		@apply bg-background text-foreground;
+	}
+}
+
+:where(
+	button,
+	a[href],
+	input,
+	select,
+	textarea,
+	[tabindex]:not([tabindex='-1']),
+	[role='button'],
+	[role='menuitem'],
+	[role='tab']
+):focus-visible {
+	border-radius: var(--radius-md);
+	outline: 2px solid var(--foreground) !important;
+	outline-offset: 3px !important;
+	box-shadow: 0 0 0 5px color-mix(in oklab, var(--ring) 28%, transparent) !important;
+}
+
+[data-meal-card-id]:focus-visible {
+	outline-color: var(--primary) !important;
+	box-shadow:
+		0 0 0 1px var(--background),
+		0 0 0 5px color-mix(in oklab, var(--primary) 30%, transparent) !important;
 }
 
 .sidebar-resizing,

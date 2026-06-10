@@ -24,13 +24,16 @@
 			<DropdownMenu.Trigger>
 				{#snippet child({ props })}
 					<Sidebar.MenuButton
-						size="lg"
-						class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+						class="h-9 gap-2 p-0 pr-3 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-0! data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
 						{...props}
 					>
-						<Avatar.Root class="size-8 rounded-lg">
+						<Avatar.Root
+							class="size-9 rounded-[calc(var(--radius-sm)+2px)] after:rounded-[calc(var(--radius-sm)+2px)]"
+						>
 							<Avatar.Image src={user.avatar} alt={user.name} />
-							<Avatar.Fallback class="rounded-lg">{initials}</Avatar.Fallback>
+							<Avatar.Fallback class="rounded-[calc(var(--radius-sm)+2px)]"
+								>{initials}</Avatar.Fallback
+							>
 						</Avatar.Root>
 						<div class="grid flex-1 text-start text-sm leading-tight">
 							<span class="truncate font-medium">{user.name}</span>
@@ -48,7 +51,7 @@
 			>
 				<DropdownMenu.Label class="p-0 font-normal">
 					<div class="flex items-center gap-2 px-1 py-1.5 text-start text-sm">
-						<Avatar.Root class="size-8 rounded-lg">
+						<Avatar.Root class="size-8 rounded-lg after:rounded-lg">
 							<Avatar.Image src={user.avatar} alt={user.name} />
 							<Avatar.Fallback class="rounded-lg">{initials}</Avatar.Fallback>
 						</Avatar.Root>

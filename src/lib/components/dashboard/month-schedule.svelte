@@ -1,50 +1,88 @@
 <script lang="ts">
-	import FloatingMeals from './floating-meals.svelte';
-	import { formatMonthHeading, isSameMonth, isToday, monthGridDays } from './schedule-date';
-	import PlannedMeal from './planned-meal.svelte';
-	import type { Meal } from './schedule-types';
+	import MealPool from './meal-pool.svelte';
+	import MonthDayCell from './month-day-cell.svelte';
+	import { dateKey, formatMonthHeading, isSameMonth, monthGridDays } from './schedule-date';
+	import { sortScheduledMeals } from './schedule-ordering';
+	import type { Meal, MealDropTarget } from './schedule-types';
 	import { scheduleDays } from './schedule-types';
 
 	let {
-		floatingMeals,
+		mealPool,
 		plannedMeals,
-		anchorDate
-	}: { floatingMeals: Meal[]; plannedMeals: Meal[]; anchorDate: Date } = $props();
+		showMealPoolImages = false,
+		anchorDate,
+		draggingMealId,
+		draggedMeal,
+		dropTarget,
+		onpick,
+		onselect,
+		onselectdate
+	}: {
+		mealPool: Meal[];
+		plannedMeals: Meal[];
+		showMealPoolImages?: boolean;
+		anchorDate: Date;
+		draggingMealId?: string;
+		draggedMeal?: Meal | null;
+		dropTarget?: MealDropTarget | null;
+		onpick?: (meal: Meal, event: PointerEvent) => void;
+		onselect?: (meal: Meal) => void;
+		onselectdate?: (date: Date) => void;
+	} = $props();
 
 	const days = $derived(monthGridDays(anchorDate));
+	const dayName = (date: Date): string =>
+		new Intl.DateTimeFormat('en', { weekday: 'long' }).format(date);
+	const mealsForDate = (date: Date): Meal[] => {
+		const key = dateKey(date);
+		return sortScheduledMeals(
+			plannedMeals.filter((meal) => meal.date === key || (!meal.date && meal.day === dayName(date)))
+		);
+	};
 </script>
 
 <div class="flex h-full min-w-0 flex-col overflow-hidden">
-	<div class="border-b border-border px-4 py-2 text-sm font-medium">
+	<div class="border-b border-border">
+		<MealPool
+			{draggingMealId}
+			{draggedMeal}
+			{dropTarget}
+			{onpick}
+			{onselect}
+			meals={mealPool}
+			density="title"
+			showImages={showMealPoolImages}
+		/>
+	</div>
+	<div class="border-b border-border px-4 py-1 text-xs font-medium">
 		{formatMonthHeading(anchorDate)}
 	</div>
-	<div class="border-b border-border">
-		<FloatingMeals meals={floatingMeals} />
-	</div>
 	<div class="grid grid-cols-[repeat(7,minmax(0,1fr))] border-b border-border">
-		{#each scheduleDays as day (day)}
-			<div class="min-w-0 px-2 py-2 text-sm font-medium text-muted-foreground">{day}</div>
+		{#each scheduleDays as day, index (day)}
+			<div
+				class="min-w-0 border-border px-4 py-1 text-xs font-medium text-muted-foreground"
+				class:border-l={index > 0}
+			>
+				<span class="inline-flex h-5 items-center">{day}</span>
+			</div>
 		{/each}
 	</div>
-	<div class="grid min-h-0 flex-1 grid-cols-[repeat(7,minmax(0,1fr))] border-l border-border">
-		{#each days as day (day.toISOString())}
-			<section class="min-h-0 min-w-0 border-r border-b border-border p-2">
-				<div
-					class:text-muted-foreground={!isSameMonth(day, anchorDate)}
-					class="mb-2 flex size-7 items-center justify-center rounded-sm text-sm font-medium"
-					class:bg-primary={isToday(day)}
-					class:text-primary-foreground={isToday(day)}
-				>
-					{day.getDate()}
-				</div>
-				{#if day.getDate() === 2 && plannedMeals[0] && isSameMonth(day, anchorDate)}
-					<PlannedMeal meal={plannedMeals[0]} compact />
-				{:else if day.getDate() === 4 && plannedMeals[1] && isSameMonth(day, anchorDate)}
-					<PlannedMeal meal={plannedMeals[1]} compact />
-				{:else if day.getDate() === 6 && plannedMeals[2] && isSameMonth(day, anchorDate)}
-					<PlannedMeal meal={plannedMeals[2]} compact />
-				{/if}
-			</section>
+	<div
+		class="grid min-h-0 flex-1 grid-cols-[repeat(7,minmax(0,1fr))] grid-rows-[repeat(6,minmax(0,1fr))] overflow-hidden"
+	>
+		{#each days as day, index (day.toISOString())}
+			<MonthDayCell
+				{day}
+				{index}
+				{anchorDate}
+				meals={isSameMonth(day, anchorDate) ? mealsForDate(day) : []}
+				{draggingMealId}
+				{draggedMeal}
+				{dropTarget}
+				{onpick}
+				{onselect}
+				{onselectdate}
+			/>
 		{/each}
 	</div>
 </div>

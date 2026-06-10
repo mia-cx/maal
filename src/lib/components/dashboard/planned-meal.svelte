@@ -1,19 +1,40 @@
 <script lang="ts">
-	import * as Card from '$lib/components/ui/card/index.js';
-	import type { Meal } from './schedule-types';
+	import { cn } from '$lib/utils.js';
+	import MealPlanCard from './meal-plan-card.svelte';
+	import type { Meal, MealCardDensity, MealPickHandler, MealSelectHandler } from './schedule-types';
 
-	let { meal, compact = false }: { meal: Meal; compact?: boolean } = $props();
+	let {
+		meal,
+		compact = false,
+		density,
+		hidden = false,
+		showImage = false,
+		imageLayout = 'side',
+		onpick,
+		onselect,
+		class: className
+	}: {
+		meal: Meal;
+		compact?: boolean;
+		density?: MealCardDensity;
+		hidden?: boolean;
+		showImage?: boolean;
+		imageLayout?: 'side' | 'side-compact' | 'top' | 'adaptive';
+		onpick?: MealPickHandler;
+		onselect?: MealSelectHandler;
+		class?: string;
+	} = $props();
+
+	const cardDensity = $derived(density ?? (compact ? 'title' : 'summary'));
 </script>
 
-<Card.Root
-	size="sm"
-	class="relative min-w-0 gap-1 bg-card/40 py-1 shadow-none ring-0 after:absolute after:inset-y-1 after:left-0 after:w-px after:bg-card-foreground/80 after:content-['']"
->
-	<Card.Content class="pr-2 pl-3">
-		<div class="truncate text-sm font-medium">{meal.title}</div>
-		<div class="truncate text-sm text-muted-foreground">{meal.time}</div>
-		{#if !compact}
-			<p class="mt-2 line-clamp-2 text-sm text-muted-foreground">Placeholder meal record.</p>
-		{/if}
-	</Card.Content>
-</Card.Root>
+<MealPlanCard
+	{meal}
+	density={cardDensity}
+	{hidden}
+	{showImage}
+	{imageLayout}
+	{onpick}
+	{onselect}
+	class={cn('min-h-0 w-full', className)}
+/>

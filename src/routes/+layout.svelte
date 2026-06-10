@@ -5,6 +5,7 @@
 	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
 	import type { DashboardNavItem } from '$lib/components/dashboard/dashboard-nav';
 	import * as Sidebar from '$lib/components/ui/sidebar';
+	import { uiState, updateUiState } from '$lib/stores/ui-state';
 	import { ModeWatcher } from 'mode-watcher';
 	import type { Snippet } from 'svelte';
 	import type { LayoutData } from './$types';
@@ -17,9 +18,11 @@
 
 	let { children, data }: { children: Snippet; data: LayoutData } = $props();
 
-	let activeNav = $state<DashboardNavItem>('schedule');
-	let sidebarOpen = $state(true);
-	let sidebarWidth = $state(256);
+	const initialUiState = uiState.get();
+
+	let activeNav = $state<DashboardNavItem>(initialUiState.activeNav);
+	let sidebarOpen = $state(initialUiState.sidebarOpen);
+	let sidebarWidth = $state(initialUiState.sidebarWidth);
 	let resizingSidebar = $state(false);
 
 	const sidebarEmail = $derived(data.session?.user.email ?? 'Local preview');
@@ -38,6 +41,10 @@
 	const stopSidebarResize = () => {
 		resizingSidebar = false;
 	};
+
+	$effect(() => {
+		updateUiState({ activeNav, sidebarOpen, sidebarWidth });
+	});
 </script>
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
@@ -60,7 +67,9 @@
 			></button>
 		{/if}
 		<Sidebar.Inset>
-			{@render children()}
+			<main data-dashboard-main class="@container/dashboard-main min-h-svh min-w-0">
+				{@render children()}
+			</main>
 		</Sidebar.Inset>
 	</Sidebar.Provider>
 {:else}

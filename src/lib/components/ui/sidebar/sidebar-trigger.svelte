@@ -23,7 +23,7 @@
 	data-slot="sidebar-trigger"
 	variant="ghost"
 	size="icon-sm"
-	class={cn('cn-sidebar-trigger', className)}
+	class={cn('cn-sidebar-trigger size-9 [&_svg]:size-4', className)}
 	type="button"
 	onclick={(e) => {
 		onclick?.(e);
@@ -31,6 +31,6 @@
 	}}
 	{...restProps}
 >
-	<SidebarIcon />
+	<SidebarIcon class="size-4" />
 	<span class="sr-only">Toggle Sidebar</span>
 </Button>

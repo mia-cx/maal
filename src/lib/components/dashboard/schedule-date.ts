@@ -35,16 +35,74 @@ export const dailyScrollDays = (date: Date): Date[] => {
 	return Array.from({ length: 63 }, (_, index) => addDays(start, index));
 };
 
-export const formatDayHeading = (date: Date): string =>
-	new Intl.DateTimeFormat('en', {
-		weekday: 'long',
-		month: 'long',
-		day: 'numeric',
-		year: 'numeric'
-	}).format(date);
+export const dateKey = (date: Date): string => {
+	const year = date.getFullYear();
+	const month = String(date.getMonth() + 1).padStart(2, '0');
+	const day = String(date.getDate()).padStart(2, '0');
+	return `${year}-${month}-${day}`;
+};
 
-export const formatMonthHeading = (date: Date): string =>
-	new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric' }).format(date);
+export const dateFromKey = (key: string): Date => {
+	const [year, month, day] = key.split('-').map(Number);
+	return new Date(year, month - 1, day);
+};
+
+const dayHeadingFormatter = new Intl.DateTimeFormat('en', {
+	weekday: 'long',
+	month: 'long',
+	day: 'numeric',
+	year: 'numeric'
+});
+
+const monthHeadingFormatter = new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric' });
+
+const relativePrefix = (
+	index: number,
+	labels: { previous: string; current: string; next: string }
+): string | undefined => {
+	if (index === -1) return labels.previous;
+	if (index === 0) return labels.current;
+	if (index === 1) return labels.next;
+};
+
+export const formatDayHeading = (date: Date, reference = new Date()): string => {
+	const dayOffset = Math.round(
+		(startOfDay(date).getTime() - startOfDay(reference).getTime()) / dayMs
+	);
+	const prefix = relativePrefix(dayOffset, {
+		previous: 'Yesterday',
+		current: 'Today',
+		next: 'Tomorrow'
+	});
+	const formatted = dayHeadingFormatter.format(date);
+	return prefix ? `${prefix}, ${formatted}` : formatted;
+};
+
+export const formatWeekHeading = (date: Date, reference = new Date()): string => {
+	const weekStart = startOfWeek(date);
+	const relativeWeekIndex = Math.round(
+		(weekStart.getTime() - startOfWeek(reference).getTime()) / (7 * dayMs)
+	);
+	const prefix = relativePrefix(relativeWeekIndex, {
+		previous: 'Last Week',
+		current: 'This Week',
+		next: 'Next Week'
+	});
+	const formatted = `Week ${isoWeekNumber(date)}, ${weekStart.getFullYear()}`;
+	return prefix ? `${prefix}, ${formatted}` : formatted;
+};
+
+export const formatMonthHeading = (date: Date, reference = new Date()): string => {
+	const relativeMonthIndex =
+		(date.getFullYear() - reference.getFullYear()) * 12 + date.getMonth() - reference.getMonth();
+	const prefix = relativePrefix(relativeMonthIndex, {
+		previous: 'Last Month',
+		current: 'This Month',
+		next: 'Next Month'
+	});
+	const formatted = monthHeadingFormatter.format(date);
+	return prefix ? `${prefix}, ${formatted}` : formatted;
+};
 
 export const isoWeekNumber = (date: Date): number => {
 	const target = startOfDay(date);
