@@ -333,7 +333,7 @@
 	<Dialog.Portal>
 		<Dialog.Overlay />
 		<DialogPrimitive.Content
-			bind:this={previewViewportElement}
+			bind:ref={previewViewportElement}
 			class="fixed inset-0 z-50 h-svh w-full [scrollbar-width:none] overflow-y-auto bg-transparent p-0 outline-none [&::-webkit-scrollbar]:hidden"
 		>
 			{#if meal}
