@@ -44,6 +44,9 @@
 	let draggedInstructionPointerId = $state<number | null>(null);
 	let instructionDragX = $state(0);
 	let instructionDragY = $state(0);
+	let instructionDragOffsetX = $state(0);
+	let instructionDragOffsetY = $state(0);
+	let instructionDragWidth = $state(0);
 	let instructionDropIndex = $state(0);
 	let deleteConfirmOpen = $state(false);
 	let deleteBusy = $state(false);
@@ -311,11 +314,16 @@
 
 	const startInstructionDrag = (instruction: DraftInstruction, event: PointerEvent) => {
 		if (event.pointerType === 'mouse' && event.button !== 0) return;
+		const row = (event.currentTarget as HTMLElement).closest<HTMLElement>('[data-instruction-row]');
+		const rect = row?.getBoundingClientRect();
 		event.preventDefault();
 		draggedInstruction = instruction;
 		draggedInstructionPointerId = event.pointerId;
 		instructionDragX = event.clientX;
 		instructionDragY = event.clientY;
+		instructionDragOffsetX = rect ? event.clientX - rect.left : 0;
+		instructionDragOffsetY = rect ? event.clientY - rect.top : 0;
+		instructionDragWidth = rect?.width ?? 0;
 		instructionDropIndex = sortedInstructions.findIndex(
 			(item) => item.draftId === instruction.draftId
 		);
@@ -533,13 +541,13 @@
 										<div
 											data-instruction-row
 											role="listitem"
-											class="grid gap-2 sm:grid-cols-[5.25rem_minmax(0,1fr)_auto] sm:items-center"
+											class="grid gap-2 sm:grid-cols-[4.75rem_minmax(0,1fr)_auto] sm:items-center"
 										>
 											<div class="flex items-stretch gap-1 text-xs font-medium">
 												<button
 													type="button"
 													aria-label={`Drag instruction ${instruction.position}`}
-													class="flex w-4 cursor-grab touch-none items-center justify-center p-0 text-muted-foreground active:cursor-grabbing"
+													class="flex w-3 cursor-grab touch-none items-center justify-center p-0 text-muted-foreground active:cursor-grabbing"
 													onpointerdown={(event) => startInstructionDrag(instruction, event)}
 												>
 													<GripVerticalIcon class="size-4" />
@@ -640,14 +648,14 @@
 
 {#if draggedInstruction}
 	<div
-		class="pointer-events-none fixed z-[90] w-[min(calc(100vw-2rem),36rem)] -translate-x-1/2 -translate-y-1/2 opacity-80 drop-shadow-xl"
-		style={`left: ${instructionDragX}px; top: ${instructionDragY}px;`}
+		class="pointer-events-none fixed z-[90] opacity-80 drop-shadow-xl"
+		style={`left: ${instructionDragX - instructionDragOffsetX}px; top: ${instructionDragY - instructionDragOffsetY}px; width: ${instructionDragWidth}px; max-width: calc(100vw - 2rem);`}
 	>
 		<div
-			class="grid gap-2 rounded-md border border-border bg-popover p-2 sm:grid-cols-[5.25rem_minmax(0,1fr)] sm:items-center"
+			class="grid gap-2 rounded-md border border-border bg-popover p-2 sm:grid-cols-[4.75rem_minmax(0,1fr)] sm:items-center"
 		>
 			<div class="flex items-stretch gap-1 text-xs font-medium">
-				<span class="flex w-4 items-center justify-center text-muted-foreground">
+				<span class="flex w-3 items-center justify-center text-muted-foreground">
 					<GripVerticalIcon class="size-4" />
 				</span>
 				<div class="grid flex-1 gap-1">
