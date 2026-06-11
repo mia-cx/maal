@@ -4,7 +4,6 @@
 	import { Input } from '$lib/components/ui/input';
 	import * as Select from '$lib/components/ui/select';
 	import SearchCombobox from '$lib/components/ui/search-combobox.svelte';
-	import { Textarea } from '$lib/components/ui/textarea';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { cn } from '$lib/utils.js';
 	import { untrack } from 'svelte';
@@ -16,18 +15,17 @@
 	let defaultServings = $state(untrack(() => String(data.profile.defaultServings)));
 	let locale = $state(untrack(() => data.profile.locale));
 	let timezone = $state(untrack(() => data.profile.timezone ?? ''));
-	const overridesText = (overrides: Record<string, string>) =>
-		Object.entries(overrides)
-			.toSorted(([left], [right]) => left.localeCompare(right))
-			.map(([ingredient, unit]) => `${ingredient}: ${unit}`)
-			.join('\n');
 
 	let weekStartsOn = $state(untrack(() => data.profile.weekStartsOn));
 	let preferredMassUnit = $state(untrack(() => data.profile.preferredMassUnit));
 	let preferredVolumeUnit = $state(untrack(() => data.profile.preferredVolumeUnit));
-	let ingredientUnitOverrides = $state(
-		untrack(() => overridesText(data.profile.ingredientUnitOverrides))
+	const initialPreferredTemperatureUnit = untrack(
+		() =>
+			data.profile.preferredTemperatureUnit ??
+			data.taxonomyOptions.temperaturePresetOptions[0]?.value ??
+			''
 	);
+	let preferredTemperatureUnit = $state(initialPreferredTemperatureUnit);
 	let preferredDinnerTime = $state(untrack(() => data.profile.preferredDinnerTime ?? ''));
 	let appliances = $state(
 		untrack(() =>
@@ -47,20 +45,6 @@
 	const weekStartLabels = {
 		sunday: 'Sunday',
 		monday: 'Monday'
-	};
-	const massUnitLabels = {
-		g: 'g',
-		kg: 'kg',
-		oz: 'oz',
-		lb: 'lb'
-	};
-	const volumeUnitLabels = {
-		ml: 'ml',
-		l: 'l',
-		tsp: 'tsp',
-		tbsp: 'tbsp',
-		cup: 'cup',
-		'fl oz': 'oz'
 	};
 	const localeOptions = [
 		{ value: 'en', label: 'English', keywords: ['english'] },
@@ -84,6 +68,68 @@
 		label: timezone.replaceAll('_', ' '),
 		keywords: timezone.split(/[/_]/)
 	}));
+	type UnitOverrideRow = { id: string; baseUnit: string; preferredUnitAlias: string };
+	type IngredientOverrideRow = {
+		id: string;
+		baseFood: string;
+		preferredFoodAlias: string;
+		preferredMeasureUnit: string;
+	};
+	const serializeUnitOverrideRows = (rows: UnitOverrideRow[]) =>
+		JSON.stringify(
+			rows
+				.map(({ baseUnit, preferredUnitAlias }) => ({
+					baseUnit: baseUnit.trim(),
+					preferredUnitAlias: preferredUnitAlias.trim()
+				}))
+				.filter((row) => row.baseUnit || row.preferredUnitAlias)
+		);
+	const serializeIngredientOverrideRows = (rows: IngredientOverrideRow[]) =>
+		JSON.stringify(
+			rows
+				.map(({ baseFood, preferredFoodAlias, preferredMeasureUnit }) => ({
+					baseFood: baseFood.trim(),
+					preferredFoodAlias: preferredFoodAlias.trim(),
+					preferredMeasureUnit: preferredMeasureUnit.trim()
+				}))
+				.filter((row) => row.baseFood || row.preferredFoodAlias || row.preferredMeasureUnit)
+		);
+	const initialUnitOverrideRows = untrack(() =>
+		serializeUnitOverrideRows(data.displayOverrideRows.unitOverrides)
+	);
+	const initialIngredientOverrideRows = untrack(() =>
+		serializeIngredientOverrideRows(data.displayOverrideRows.ingredientOverrides)
+	);
+	let nextOverrideRowId = 0;
+	let unitOverrideRows = $state<UnitOverrideRow[]>(
+		untrack(() => data.displayOverrideRows.unitOverrides)
+	);
+	let ingredientOverrideRows = $state<IngredientOverrideRow[]>(
+		untrack(() => data.displayOverrideRows.ingredientOverrides)
+	);
+	const addUnitOverrideRow = () => {
+		unitOverrideRows = [
+			...unitOverrideRows,
+			{ id: `unit-override-new-${nextOverrideRowId++}`, baseUnit: '', preferredUnitAlias: '' }
+		];
+	};
+	const removeUnitOverrideRow = (id: string) => {
+		unitOverrideRows = unitOverrideRows.filter((row) => row.id !== id);
+	};
+	const addIngredientOverrideRow = () => {
+		ingredientOverrideRows = [
+			...ingredientOverrideRows,
+			{
+				id: `ingredient-override-new-${nextOverrideRowId++}`,
+				baseFood: '',
+				preferredFoodAlias: '',
+				preferredMeasureUnit: ''
+			}
+		];
+	};
+	const removeIngredientOverrideRow = (id: string) => {
+		ingredientOverrideRows = ingredientOverrideRows.filter((row) => row.id !== id);
+	};
 
 	const householdNameChanged = $derived(householdName.trim() !== data.household.name);
 	const defaultServingsChanged = $derived(defaultServings !== String(data.profile.defaultServings));
@@ -93,9 +139,6 @@
 	const preferredMassUnitChanged = $derived(preferredMassUnit !== data.profile.preferredMassUnit);
 	const preferredVolumeUnitChanged = $derived(
 		preferredVolumeUnit !== data.profile.preferredVolumeUnit
-	);
-	const ingredientUnitOverridesChanged = $derived(
-		ingredientUnitOverrides !== overridesText(data.profile.ingredientUnitOverrides)
 	);
 	const preferredDinnerTimeChanged = $derived(
 		preferredDinnerTime !== (data.profile.preferredDinnerTime ?? '')
@@ -108,8 +151,21 @@
 			weekStartsOnChanged ||
 			preferredDinnerTimeChanged
 	);
+	const temperatureUnitChanged = $derived(
+		preferredTemperatureUnit !== initialPreferredTemperatureUnit
+	);
+	const unitOverrideRowsChanged = $derived(
+		serializeUnitOverrideRows(unitOverrideRows) !== initialUnitOverrideRows
+	);
+	const ingredientOverrideRowsChanged = $derived(
+		serializeIngredientOverrideRows(ingredientOverrideRows) !== initialIngredientOverrideRows
+	);
 	const aliasOverridesChanged = $derived(
-		preferredMassUnitChanged || preferredVolumeUnitChanged || ingredientUnitOverridesChanged
+		preferredMassUnitChanged ||
+			preferredVolumeUnitChanged ||
+			temperatureUnitChanged ||
+			unitOverrideRowsChanged ||
+			ingredientOverrideRowsChanged
 	);
 	const changedAppliances = $derived(
 		appliances.filter((appliance) => {
@@ -300,61 +356,176 @@
 			</section>
 
 			<section
-				class="grid gap-3 border-t border-border pt-4"
+				class="grid gap-4 border-t border-border pt-4"
 				aria-labelledby="aliases-overrides-title"
 			>
 				<h2 id="aliases-overrides-title" class="text-sm font-medium">Aliases & overrides</h2>
-				<form method="post" action="?/updateSettings" class="grid gap-4">
+				<form method="post" action="?/updateSettings" class="grid gap-5">
+					<input type="hidden" name="overrideLocale" value={locale} />
 					<fieldset class="grid gap-3">
-						<legend class="sr-only">Unit defaults</legend>
-						<div class="grid gap-3 md:grid-cols-2">
+						<legend class="text-xs font-semibold text-muted-foreground">Units</legend>
+						<div class="grid gap-3 md:grid-cols-3">
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
-								Weight
+								Weight preset
 								{#if preferredMassUnitChanged}
 									<input type="hidden" name="preferredMassUnit" value={preferredMassUnit} />
 								{/if}
-								<Select.Root type="single" bind:value={preferredMassUnit} disabled={fieldDisabled}>
-									<Select.Trigger class="!h-8 w-full">
-										{massUnitLabels[preferredMassUnit]}
-									</Select.Trigger>
-									<Select.Content>
-										{#each Object.entries(massUnitLabels) as [value, label] (value)}
-											<Select.Item {value}>{label}</Select.Item>
-										{/each}
-									</Select.Content>
-								</Select.Root>
+								<SearchCombobox
+									bind:value={preferredMassUnit}
+									options={data.taxonomyOptions.weightPresetOptions}
+									disabled={fieldDisabled}
+									placeholder="Select weight unit"
+									searchPlaceholder="Search weight units..."
+								/>
 							</label>
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
-								Volume
+								Volume preset
 								{#if preferredVolumeUnitChanged}
 									<input type="hidden" name="preferredVolumeUnit" value={preferredVolumeUnit} />
 								{/if}
-								<Select.Root
-									type="single"
+								<SearchCombobox
 									bind:value={preferredVolumeUnit}
+									options={data.taxonomyOptions.volumePresetOptions}
 									disabled={fieldDisabled}
-								>
-									<Select.Trigger class="!h-8 w-full">
-										{volumeUnitLabels[preferredVolumeUnit]}
-									</Select.Trigger>
-									<Select.Content>
-										{#each Object.entries(volumeUnitLabels) as [value, label] (value)}
-											<Select.Item {value}>{label}</Select.Item>
-										{/each}
-									</Select.Content>
-								</Select.Root>
+									placeholder="Select volume unit"
+									searchPlaceholder="Search volume units..."
+								/>
+							</label>
+							<label class="grid min-w-0 gap-1 text-xs font-medium">
+								Temperature preset
+								{#if temperatureUnitChanged}
+									<input
+										type="hidden"
+										name="preferredTemperatureUnit"
+										value={preferredTemperatureUnit}
+									/>
+								{/if}
+								<SearchCombobox
+									bind:value={preferredTemperatureUnit}
+									options={data.taxonomyOptions.temperaturePresetOptions}
+									disabled={fieldDisabled}
+									placeholder="Select temperature unit"
+									searchPlaceholder="Search temperature units..."
+								/>
 							</label>
 						</div>
-						<label class="grid gap-1 text-xs font-medium">
-							Ingredient units
-							<Textarea
-								name={ingredientUnitOverridesChanged ? 'ingredientUnitOverrides' : undefined}
-								bind:value={ingredientUnitOverrides}
-								readonly={fieldDisabled}
-								placeholder="olive oil: tbsp&#10;water: ml"
-								class="min-h-20"
-							/>
-						</label>
+
+						<input
+							type="hidden"
+							name="unitOverrides"
+							value={serializeUnitOverrideRows(unitOverrideRows)}
+						/>
+						<div class="grid gap-2">
+							{#each unitOverrideRows as override (override.id)}
+								<div
+									class="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end"
+								>
+									<label class="grid min-w-0 gap-1 text-xs font-medium">
+										Base unit
+										<SearchCombobox
+											bind:value={override.baseUnit}
+											options={data.taxonomyOptions.baseUnitOptions}
+											disabled={fieldDisabled}
+											placeholder="base unit"
+											searchPlaceholder="Search base units..."
+										/>
+									</label>
+									<label class="grid min-w-0 gap-1 text-xs font-medium">
+										Preferred alias
+										<SearchCombobox
+											bind:value={override.preferredUnitAlias}
+											options={data.taxonomyOptions.unitAliasOptions}
+											disabled={fieldDisabled}
+											placeholder="alias"
+											searchPlaceholder="Search unit aliases..."
+											allowCustom
+											customOptionLabel={(input) => `Use custom alias “${input}”`}
+										/>
+									</label>
+									{#if canManageHousehold}
+										<Button
+											type="button"
+											variant="ghost"
+											onclick={() => removeUnitOverrideRow(override.id)}
+										>
+											Remove
+										</Button>
+									{/if}
+								</div>
+							{/each}
+							{#if canManageHousehold}
+								<div>
+									<Button type="button" variant="outline" onclick={addUnitOverrideRow}>
+										Add unit override
+									</Button>
+								</div>
+							{/if}
+						</div>
+					</fieldset>
+
+					<fieldset class="grid gap-3">
+						<legend class="text-xs font-semibold text-muted-foreground">Ingredients</legend>
+						<input
+							type="hidden"
+							name="ingredientOverrides"
+							value={serializeIngredientOverrideRows(ingredientOverrideRows)}
+						/>
+						<div class="grid gap-2">
+							{#each ingredientOverrideRows as override (override.id)}
+								<div
+									class="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end"
+								>
+									<label class="grid min-w-0 gap-1 text-xs font-medium">
+										Base food
+										<SearchCombobox
+											bind:value={override.baseFood}
+											options={data.taxonomyOptions.foodOptions}
+											disabled={fieldDisabled}
+											placeholder="base food"
+											searchPlaceholder="Search foods..."
+										/>
+									</label>
+									<label class="grid min-w-0 gap-1 text-xs font-medium">
+										Preferred alias
+										<SearchCombobox
+											bind:value={override.preferredFoodAlias}
+											options={data.taxonomyOptions.foodAliasOptions}
+											disabled={fieldDisabled}
+											placeholder="alias"
+											searchPlaceholder="Search food aliases..."
+											allowCustom
+											customOptionLabel={(input) => `Use custom alias “${input}”`}
+										/>
+									</label>
+									<label class="grid min-w-0 gap-1 text-xs font-medium">
+										Measure unit
+										<SearchCombobox
+											bind:value={override.preferredMeasureUnit}
+											options={data.taxonomyOptions.measureUnitOptions}
+											disabled={fieldDisabled}
+											placeholder="unit"
+											searchPlaceholder="Search measure units..."
+										/>
+									</label>
+									{#if canManageHousehold}
+										<Button
+											type="button"
+											variant="ghost"
+											onclick={() => removeIngredientOverrideRow(override.id)}
+										>
+											Remove
+										</Button>
+									{/if}
+								</div>
+							{/each}
+							{#if canManageHousehold}
+								<div>
+									<Button type="button" variant="outline" onclick={addIngredientOverrideRow}>
+										Add ingredient override
+									</Button>
+								</div>
+							{/if}
+						</div>
 					</fieldset>
 
 					{#if canManageHousehold}
@@ -364,6 +535,7 @@
 					{/if}
 				</form>
 			</section>
+
 			<section class="grid gap-3 border-t border-border pt-4">
 				<h2 class="text-sm font-medium">Members</h2>
 				<div class="divide-y divide-border rounded-md border border-border">

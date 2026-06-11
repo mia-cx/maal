@@ -1,5 +1,5 @@
 import { fail, redirect, type Cookies } from '@sveltejs/kit';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import {
 	householdAppliances,
@@ -9,9 +9,17 @@ import {
 	householdMealInstructions,
 	householdMealMedia,
 	householdMealNutritionFacts,
+	foodAliases,
+	foodHouseholdAliases,
+	foods,
+	householdFoodDisplayOverrides,
 	householdMeals,
 	households,
-	mealCheckIns
+	householdUnitDisplayOverrides,
+	mealCheckIns,
+	unitAliases,
+	unitHouseholdAliases,
+	units
 } from '$lib/server/db/schema';
 import {
 	canManageActiveHousehold,
@@ -97,6 +105,332 @@ const timeFromForm = (value: FormDataEntryValue | null): string | null => {
 	if (typeof value !== 'string') return null;
 	const trimmed = value.trim();
 	return /^\d{2}:\d{2}$/.test(trimmed) ? trimmed : null;
+};
+
+type TaxonomyOption = { value: string; label: string; keywords?: string[] };
+
+type TaxonomyOptions = {
+	weightPresetOptions: TaxonomyOption[];
+	volumePresetOptions: TaxonomyOption[];
+	temperaturePresetOptions: TaxonomyOption[];
+	baseUnitOptions: TaxonomyOption[];
+	unitAliasOptions: TaxonomyOption[];
+	measureUnitOptions: TaxonomyOption[];
+	foodOptions: TaxonomyOption[];
+	foodAliasOptions: TaxonomyOption[];
+};
+
+const emptyTaxonomyOptions = (): TaxonomyOptions => ({
+	weightPresetOptions: [],
+	volumePresetOptions: [],
+	temperaturePresetOptions: [],
+	baseUnitOptions: [],
+	unitAliasOptions: [],
+	measureUnitOptions: [],
+	foodOptions: [],
+	foodAliasOptions: []
+});
+
+const localeFallbacks = (locale: string): string[] => {
+	try {
+		const parsed = new Intl.Locale(locale);
+		return [...new Set([parsed.toString(), parsed.language, defaultLocale])];
+	} catch {
+		return [defaultLocale];
+	}
+};
+
+const labelFromId = (id: string): string => id.replaceAll('_', ' ');
+
+type UnitOverrideInput = { baseUnit: string; preferredUnitAlias: string };
+type IngredientOverrideInput = {
+	baseFood: string;
+	preferredFoodAlias: string;
+	preferredMeasureUnit: string;
+};
+type DisplayOverrideRows = {
+	preferredMassUnit?: string;
+	preferredVolumeUnit?: string;
+	preferredTemperatureUnit?: string;
+	unitOverrides: Array<UnitOverrideInput & { id: string }>;
+	ingredientOverrides: Array<IngredientOverrideInput & { id: string }>;
+};
+
+const parseJsonArray = <T>(value: FormDataEntryValue | null): T[] => {
+	if (typeof value !== 'string' || !value.trim()) return [];
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		return Array.isArray(parsed) ? (parsed as T[]) : [];
+	} catch {
+		return [];
+	}
+};
+
+const loadTaxonomyOptions = async (
+	database: D1Database,
+	locale: string
+): Promise<TaxonomyOptions> => {
+	const db = getDb(database);
+	const [unitRows, unitAliasRows, foodRows, foodAliasRows] = await Promise.all([
+		db.select().from(units),
+		db.select().from(unitAliases).where(isNull(unitAliases.sourceDomain)),
+		db.select().from(foods),
+		db.select().from(foodAliases).where(isNull(foodAliases.sourceDomain))
+	]);
+	const localeRank = new Map(localeFallbacks(locale).map((value, index) => [value, index]));
+	const aliasSort = <T extends { locale: string; defaultForLocale: boolean; alias: string }>(
+		left: T,
+		right: T
+	) =>
+		(localeRank.get(left.locale) ?? 100) - (localeRank.get(right.locale) ?? 100) ||
+		Number(right.defaultForLocale) - Number(left.defaultForLocale) ||
+		left.alias.localeCompare(right.alias);
+	const aliasesByUnit = new Map<string, typeof unitAliasRows>();
+	for (const alias of unitAliasRows) {
+		aliasesByUnit.set(alias.unitId, [...(aliasesByUnit.get(alias.unitId) ?? []), alias]);
+	}
+	const aliasesByFood = new Map<string, typeof foodAliasRows>();
+	for (const alias of foodAliasRows) {
+		aliasesByFood.set(alias.foodId, [...(aliasesByFood.get(alias.foodId) ?? []), alias]);
+	}
+	const unitLabel = (unitId: string) =>
+		[...(aliasesByUnit.get(unitId) ?? [])].sort(aliasSort)[0]?.alias ?? labelFromId(unitId);
+	const foodLabel = (foodId: string) =>
+		[...(aliasesByFood.get(foodId) ?? [])].sort(aliasSort)[0]?.alias ?? labelFromId(foodId);
+	const uniqueByValue = (options: TaxonomyOption[]) => [
+		...new Map(options.map((option) => [option.value, option])).values()
+	];
+	const unitOption = (unit: (typeof unitRows)[number]): TaxonomyOption => ({
+		value: unit.id,
+		label: unitLabel(unit.id),
+		keywords: [unit.id, unit.baseUnitId, labelFromId(unit.id)]
+	});
+	const unitAliasOption = (alias: (typeof unitAliasRows)[number]): TaxonomyOption => ({
+		value: alias.alias,
+		label: alias.alias,
+		keywords: [alias.unitId, alias.baseUnitId, alias.locale]
+	});
+
+	return {
+		weightPresetOptions: uniqueByValue(
+			unitAliasRows.filter((alias) => alias.baseUnitId === 'grams').map(unitAliasOption)
+		),
+		volumePresetOptions: uniqueByValue(
+			unitAliasRows.filter((alias) => alias.baseUnitId === 'milliliters').map(unitAliasOption)
+		),
+		temperaturePresetOptions: uniqueByValue(
+			unitAliasRows.filter((alias) => alias.baseUnitId === 'celsius').map(unitAliasOption)
+		),
+		baseUnitOptions: unitRows
+			.filter((unit) => unit.id === unit.baseUnitId)
+			.map(unitOption)
+			.toSorted((left, right) => left.label.localeCompare(right.label)),
+		unitAliasOptions: uniqueByValue(unitAliasRows.map(unitAliasOption)).toSorted((left, right) =>
+			left.label.localeCompare(right.label)
+		),
+		measureUnitOptions: unitRows
+			.map(unitOption)
+			.toSorted((left, right) => left.label.localeCompare(right.label)),
+		foodOptions: foodRows
+			.map((food) => ({
+				value: food.id,
+				label: foodLabel(food.id),
+				keywords: [food.id, labelFromId(food.id)]
+			}))
+			.toSorted((left, right) => left.label.localeCompare(right.label)),
+		foodAliasOptions: uniqueByValue(
+			foodAliasRows.map((alias) => ({
+				value: alias.alias,
+				label: alias.alias,
+				keywords: [alias.foodId, alias.locale]
+			}))
+		).toSorted((left, right) => left.label.localeCompare(right.label))
+	};
+};
+
+const loadDisplayOverrideRows = async (
+	database: D1Database,
+	householdId: string,
+	locale: string
+): Promise<DisplayOverrideRows> => {
+	const db = getDb(database);
+	const [
+		unitOverrideRows,
+		ingredientOverrideRows,
+		globalUnitAliases,
+		householdUnitAliases,
+		globalFoodAliases,
+		householdFoodAliases
+	] = await Promise.all([
+		db
+			.select()
+			.from(householdUnitDisplayOverrides)
+			.where(
+				and(
+					eq(householdUnitDisplayOverrides.householdId, householdId),
+					eq(householdUnitDisplayOverrides.locale, locale)
+				)
+			),
+		db
+			.select()
+			.from(householdFoodDisplayOverrides)
+			.where(
+				and(
+					eq(householdFoodDisplayOverrides.householdId, householdId),
+					eq(householdFoodDisplayOverrides.locale, locale)
+				)
+			),
+		db.select().from(unitAliases),
+		db.select().from(unitHouseholdAliases).where(eq(unitHouseholdAliases.householdId, householdId)),
+		db.select().from(foodAliases),
+		db.select().from(foodHouseholdAliases).where(eq(foodHouseholdAliases.householdId, householdId))
+	]);
+	const globalUnitAliasById = new Map(globalUnitAliases.map((alias) => [alias.id, alias.alias]));
+	const householdUnitAliasById = new Map(
+		householdUnitAliases.map((alias) => [alias.id, alias.alias])
+	);
+	const globalFoodAliasById = new Map(globalFoodAliases.map((alias) => [alias.id, alias.alias]));
+	const householdFoodAliasById = new Map(
+		householdFoodAliases.map((alias) => [alias.id, alias.alias])
+	);
+	const unitAliasFor = (scope: string | null, id: string | null) => {
+		if (!id) return '';
+		return scope === 'household'
+			? (householdUnitAliasById.get(id) ?? '')
+			: (globalUnitAliasById.get(id) ?? '');
+	};
+	const foodAliasFor = (scope: string | null, id: string | null) => {
+		if (!id) return '';
+		return scope === 'household'
+			? (householdFoodAliasById.get(id) ?? '')
+			: (globalFoodAliasById.get(id) ?? '');
+	};
+	const result: DisplayOverrideRows = { unitOverrides: [], ingredientOverrides: [] };
+	for (const row of unitOverrideRows) {
+		const alias = unitAliasFor(row.preferredUnitAliasScope, row.preferredUnitAliasId);
+		if (!alias) continue;
+		if (row.baseUnitId === 'grams') result.preferredMassUnit = alias;
+		else if (row.baseUnitId === 'milliliters') result.preferredVolumeUnit = alias;
+		else if (row.baseUnitId === 'celsius') result.preferredTemperatureUnit = alias;
+		else
+			result.unitOverrides.push({
+				id: row.id,
+				baseUnit: row.baseUnitId,
+				preferredUnitAlias: alias
+			});
+	}
+	for (const row of ingredientOverrideRows) {
+		result.ingredientOverrides.push({
+			id: row.id,
+			baseFood: row.foodId,
+			preferredFoodAlias: foodAliasFor(row.preferredFoodAliasScope, row.preferredFoodAliasId),
+			preferredMeasureUnit: row.preferredMeasureUnitId ?? ''
+		});
+	}
+	return result;
+};
+
+const unitByAlias = async (
+	database: D1Database,
+	alias: string,
+	baseUnitId?: string
+): Promise<{
+	unitId: string;
+	baseUnitId: string;
+	aliasScope: 'global';
+	aliasId: string;
+} | null> => {
+	const db = getDb(database);
+	const rows = await db
+		.select()
+		.from(unitAliases)
+		.where(
+			and(
+				eq(unitAliases.alias, alias),
+				isNull(unitAliases.sourceDomain),
+				baseUnitId ? eq(unitAliases.baseUnitId, baseUnitId) : undefined
+			)
+		)
+		.limit(1);
+	const row = rows[0];
+	return row
+		? { unitId: row.unitId, baseUnitId: row.baseUnitId, aliasScope: 'global', aliasId: row.id }
+		: null;
+};
+
+const upsertUnitDisplayOverride = async ({
+	database,
+	householdId,
+	locale,
+	baseUnitId,
+	preferredUnitAlias
+}: {
+	database: D1Database;
+	householdId: string;
+	locale: string;
+	baseUnitId?: string;
+	preferredUnitAlias: string;
+}) => {
+	const alias = preferredUnitAlias.trim();
+	if (!alias) return;
+	const db = getDb(database);
+	const globalAlias = await unitByAlias(database, alias, baseUnitId);
+	if (globalAlias) {
+		await db
+			.insert(householdUnitDisplayOverrides)
+			.values({
+				householdId,
+				baseUnitId: globalAlias.baseUnitId,
+				locale,
+				preferredUnitId: globalAlias.unitId,
+				preferredUnitAliasScope: globalAlias.aliasScope,
+				preferredUnitAliasId: globalAlias.aliasId
+			})
+			.onConflictDoUpdate({
+				target: [
+					householdUnitDisplayOverrides.householdId,
+					householdUnitDisplayOverrides.baseUnitId,
+					householdUnitDisplayOverrides.locale
+				],
+				set: {
+					preferredUnitId: globalAlias.unitId,
+					preferredUnitAliasScope: globalAlias.aliasScope,
+					preferredUnitAliasId: globalAlias.aliasId,
+					updatedAt: new Date().toISOString()
+				}
+			});
+		return;
+	}
+	if (!baseUnitId) return;
+	const insertedAliases = await db
+		.insert(unitHouseholdAliases)
+		.values({ householdId, unitId: baseUnitId, baseUnitId, alias, locale })
+		.returning({ id: unitHouseholdAliases.id });
+	const aliasId = insertedAliases[0]?.id;
+	if (!aliasId) return;
+	await db
+		.insert(householdUnitDisplayOverrides)
+		.values({
+			householdId,
+			baseUnitId,
+			locale,
+			preferredUnitId: baseUnitId,
+			preferredUnitAliasScope: 'household',
+			preferredUnitAliasId: aliasId
+		})
+		.onConflictDoUpdate({
+			target: [
+				householdUnitDisplayOverrides.householdId,
+				householdUnitDisplayOverrides.baseUnitId,
+				householdUnitDisplayOverrides.locale
+			],
+			set: {
+				preferredUnitId: baseUnitId,
+				preferredUnitAliasScope: 'household',
+				preferredUnitAliasId: aliasId,
+				updatedAt: new Date().toISOString()
+			}
+		});
 };
 
 const requireLoadedHousehold = async ({ locals, parent }: Parameters<PageServerLoad>[0]) => {
@@ -193,6 +527,7 @@ export const load: PageServerLoad = async (event) => {
 				weekStartsOn: 'monday' as const,
 				preferredMassUnit: 'g' as const,
 				preferredVolumeUnit: 'ml' as const,
+				preferredTemperatureUnit: '°C' as const,
 				ingredientUnitOverrides: {},
 				preferredDinnerTime: '18:30'
 			},
@@ -214,7 +549,9 @@ export const load: PageServerLoad = async (event) => {
 				}
 			],
 			currentUserId: session.user.id,
-			canManageHousehold: true
+			canManageHousehold: true,
+			taxonomyOptions: emptyTaxonomyOptions(),
+			displayOverrideRows: { unitOverrides: [], ingredientOverrides: [] }
 		};
 	}
 
@@ -245,6 +582,15 @@ export const load: PageServerLoad = async (event) => {
 		preferredDinnerTime: null
 	};
 	const applianceByName = new Map(applianceRows.map((row) => [row.appliance, row]));
+	const displayOverrideRows = await loadDisplayOverrideRows(
+		event.platform.env.DB,
+		householdId,
+		profile.locale ?? defaultLocale
+	);
+	const taxonomyOptions = await loadTaxonomyOptions(
+		event.platform.env.DB,
+		profile.locale ?? defaultLocale
+	);
 
 	return {
 		household: {
@@ -261,8 +607,12 @@ export const load: PageServerLoad = async (event) => {
 			locale: profile.locale ?? defaultLocale,
 			timezone: profile.timezone ?? defaultTimezone,
 			weekStartsOn: weekStartDay(profile.weekStartsOn),
-			preferredMassUnit: 'g' as const,
-			preferredVolumeUnit: 'ml' as const,
+			preferredMassUnit: displayOverrideRows.preferredMassUnit ?? 'g',
+			preferredVolumeUnit: displayOverrideRows.preferredVolumeUnit ?? 'ml',
+			preferredTemperatureUnit:
+				displayOverrideRows.preferredTemperatureUnit ??
+				taxonomyOptions.temperaturePresetOptions[0]?.value ??
+				'',
 			ingredientUnitOverrides: {},
 			preferredDinnerTime: profile.preferredDinnerTime
 		},
@@ -277,7 +627,9 @@ export const load: PageServerLoad = async (event) => {
 		}),
 		members,
 		currentUserId: session.user.id,
-		canManageHousehold: hasManagePermission
+		canManageHousehold: hasManagePermission,
+		taxonomyOptions,
+		displayOverrideRows
 	};
 };
 
@@ -331,6 +683,135 @@ export const actions: Actions = {
 		}
 		if (form.has('preferredDinnerTime')) {
 			profileUpdate.preferredDinnerTime = timeFromForm(form.get('preferredDinnerTime'));
+		}
+
+		if (
+			form.has('preferredMassUnit') ||
+			form.has('preferredVolumeUnit') ||
+			form.has('preferredTemperatureUnit') ||
+			form.has('unitOverrides') ||
+			form.has('ingredientOverrides')
+		) {
+			if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
+			const db = getDb(event.platform.env.DB);
+			const locale = localeFromForm(form.get('overrideLocale')) ?? defaultLocale;
+			const preferredMassUnit = String(form.get('preferredMassUnit') ?? '').trim();
+			const preferredVolumeUnit = String(form.get('preferredVolumeUnit') ?? '').trim();
+			const preferredTemperatureUnit = String(form.get('preferredTemperatureUnit') ?? '').trim();
+			if (preferredMassUnit) {
+				updates.push(
+					upsertUnitDisplayOverride({
+						database: event.platform.env.DB,
+						householdId,
+						locale,
+						baseUnitId: 'grams',
+						preferredUnitAlias: preferredMassUnit
+					})
+				);
+			}
+			if (preferredVolumeUnit) {
+				updates.push(
+					upsertUnitDisplayOverride({
+						database: event.platform.env.DB,
+						householdId,
+						locale,
+						baseUnitId: 'milliliters',
+						preferredUnitAlias: preferredVolumeUnit
+					})
+				);
+			}
+			if (preferredTemperatureUnit) {
+				updates.push(
+					upsertUnitDisplayOverride({
+						database: event.platform.env.DB,
+						householdId,
+						locale,
+						baseUnitId: 'celsius',
+						preferredUnitAlias: preferredTemperatureUnit
+					})
+				);
+			}
+			for (const row of parseJsonArray<UnitOverrideInput>(form.get('unitOverrides'))) {
+				if (!row.baseUnit || !row.preferredUnitAlias) continue;
+				updates.push(
+					upsertUnitDisplayOverride({
+						database: event.platform.env.DB,
+						householdId,
+						locale,
+						baseUnitId: row.baseUnit,
+						preferredUnitAlias: row.preferredUnitAlias
+					})
+				);
+			}
+			for (const row of parseJsonArray<IngredientOverrideInput>(form.get('ingredientOverrides'))) {
+				if (!row.baseFood) continue;
+				const unitRows = row.preferredMeasureUnit
+					? await db.select().from(units).where(eq(units.id, row.preferredMeasureUnit)).limit(1)
+					: [];
+				const measureUnit = unitRows[0];
+				let preferredFoodAliasScope: 'global' | 'household' | null = null;
+				let preferredFoodAliasId: string | null = null;
+				const alias = row.preferredFoodAlias.trim();
+				if (alias) {
+					const globalAliases = await db
+						.select()
+						.from(foodAliases)
+						.where(
+							and(
+								eq(foodAliases.foodId, row.baseFood),
+								eq(foodAliases.alias, alias),
+								isNull(foodAliases.sourceDomain)
+							)
+						)
+						.limit(1);
+					const globalAlias = globalAliases[0];
+					if (globalAlias) {
+						preferredFoodAliasScope = 'global';
+						preferredFoodAliasId = globalAlias.id;
+					} else {
+						const insertedAliases = await db
+							.insert(foodHouseholdAliases)
+							.values({
+								householdId,
+								foodId: row.baseFood,
+								alias,
+								locale,
+								defaultMeasureUnitId: measureUnit?.id,
+								defaultMeasureBaseUnitId: measureUnit?.baseUnitId
+							})
+							.returning({ id: foodHouseholdAliases.id });
+						preferredFoodAliasScope = 'household';
+						preferredFoodAliasId = insertedAliases[0]?.id ?? null;
+					}
+				}
+				updates.push(
+					db
+						.insert(householdFoodDisplayOverrides)
+						.values({
+							householdId,
+							foodId: row.baseFood,
+							locale,
+							preferredFoodAliasScope,
+							preferredFoodAliasId,
+							preferredMeasureUnitId: measureUnit?.id,
+							preferredMeasureBaseUnitId: measureUnit?.baseUnitId
+						})
+						.onConflictDoUpdate({
+							target: [
+								householdFoodDisplayOverrides.householdId,
+								householdFoodDisplayOverrides.foodId,
+								householdFoodDisplayOverrides.locale
+							],
+							set: {
+								preferredFoodAliasScope,
+								preferredFoodAliasId,
+								preferredMeasureUnitId: measureUnit?.id,
+								preferredMeasureBaseUnitId: measureUnit?.baseUnitId,
+								updatedAt: new Date().toISOString()
+							}
+						})
+				);
+			}
 		}
 
 		if (Object.keys(profileUpdate).length > 0) {
