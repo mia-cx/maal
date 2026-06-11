@@ -381,7 +381,7 @@
 				)}
 			>
 				<div class="flex min-w-0 items-baseline gap-2">
-					<h3 class="min-w-0 flex-1 truncate text-xs leading-tight font-medium">{meal.title}</h3>
+					<p class="min-w-0 flex-1 truncate text-xs leading-tight font-medium">{meal.title}</p>
 					{#if displayedTime}
 						<time
 							class="hidden shrink-0 text-[0.6875rem] leading-tight text-muted-foreground tabular-nums @min-[12rem]:block"
