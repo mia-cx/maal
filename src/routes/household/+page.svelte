@@ -5,6 +5,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import * as Sidebar from '$lib/components/ui/sidebar';
+	import { cn } from '$lib/utils.js';
 	import { untrack } from 'svelte';
 	import type { ActionData, PageData } from './$types';
 
@@ -318,7 +319,7 @@
 
 			<section class="grid gap-3 border-t border-border pt-4">
 				<h2 class="text-sm font-medium">Appliances</h2>
-				<form method="post" action="?/updateAppliances" class="grid gap-2">
+				<form method="post" action="?/updateAppliances" class="grid gap-3">
 					{#each changedAppliances as appliance (appliance.appliance)}
 						<input
 							type="hidden"
@@ -327,25 +328,25 @@
 						/>
 						<input type="hidden" name={`notes:${appliance.appliance}`} value={appliance.notes} />
 					{/each}
-					<div class="divide-y divide-border rounded-md border border-border">
+					<div class="flex flex-wrap gap-2">
 						{#each appliances as appliance (appliance.appliance)}
-							<div class="grid gap-2 px-3 py-2 sm:grid-cols-[11rem_minmax(0,1fr)] sm:items-center">
-								<label class="flex items-center gap-2 text-xs font-medium">
-									<input
-										type="checkbox"
-										bind:checked={appliance.available}
-										disabled={fieldDisabled}
-										class="size-4 accent-primary"
-									/>
-									{appliance.label}
-								</label>
-								<Input
-									bind:value={appliance.notes}
-									placeholder="Notes"
-									readonly={fieldDisabled}
-									class="h-8 w-full"
+							<label
+								class={cn(
+									'inline-flex min-h-10 items-center rounded-xl border px-3 py-2 text-xs font-semibold shadow-sm transition-colors',
+									appliance.available
+										? 'border-primary bg-primary/10 text-foreground ring-2 ring-primary/30 hover:bg-primary/15'
+										: 'border-border bg-muted/30 text-muted-foreground hover:border-foreground/30 hover:bg-muted/50',
+									fieldDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+								)}
+							>
+								<input
+									type="checkbox"
+									bind:checked={appliance.available}
+									disabled={fieldDisabled}
+									class="sr-only"
 								/>
-							</div>
+								{appliance.label}
+							</label>
 						{/each}
 					</div>
 					{#if canManageHousehold}
