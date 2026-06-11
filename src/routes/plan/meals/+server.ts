@@ -11,6 +11,7 @@ import {
 	householdMealNutritionFacts,
 	householdMeals,
 	householdMealUserRecipes,
+	households,
 	userRecipeClassifications,
 	userRecipeIngredients,
 	userRecipeInstructions,
@@ -20,6 +21,7 @@ import {
 } from '$lib/server/db/schema';
 import { loadMealPlanMeals, mealFromHouseholdMeal } from '$lib/server/db/recipe-mappers';
 import { parseIngredientAmount, parseIngredientLine } from '$lib/recipes/ingredient-text';
+import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
@@ -53,6 +55,25 @@ const readMealId = async (request: Request): Promise<string> => {
 const servingsPlanned = (meal: Meal, defaultServings = 1): number => {
 	const servings = meal.servingsPlanned ?? defaultServings;
 	return Number.isFinite(servings) ? Math.max(1, Math.round(servings)) : 1;
+};
+
+const loadUnitPreferences = async (
+	db: ReturnType<typeof getDb>,
+	workosUserId: string,
+	householdId: string
+) => {
+	const profileRows = await db
+		.select({ locale: households.locale })
+		.from(households)
+		.where(eq(households.householdId, householdId))
+		.limit(1);
+	return (
+		await loadEffectiveTaxonomyPreferences(db, {
+			workosUserId,
+			householdId,
+			locale: profileRows[0]?.locale ?? 'en-US'
+		})
+	).unitPreferences;
 };
 
 const ownedRecipe = async (
@@ -224,13 +245,15 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 	if (!startDate || !endDate) error(400, { message: 'Date range is required.' });
 
 	const db = getDb(platform.env.DB);
+	const unitPreferences = await loadUnitPreferences(db, session.user.id, householdId);
 	return json({
 		meals: await loadMealPlanMeals(db, {
 			workosUserId: session.user.id,
 			householdId,
 			defaultMealServings: await countActiveHouseholdMembers(platform, householdId),
 			startDate,
-			endDate
+			endDate,
+			unitPreferences
 		})
 	});
 };
@@ -245,6 +268,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 
 	const meal = await readMeal(request);
 	const db = getDb(platform.env.DB);
+	const unitPreferences = await loadUnitPreferences(db, session.user.id, householdId);
 	const userRecipeId = meal.userRecipeId;
 	const recipe = userRecipeId ? await ownedRecipe(db, userRecipeId, session.user.id) : undefined;
 	if (userRecipeId && !recipe) error(404, { message: 'Recipe not found.' });
@@ -292,7 +316,15 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 			.from(householdMealInstructions)
 			.where(eq(householdMealInstructions.householdMealId, householdMealId))
 	]);
-	return json({ meal: mealFromHouseholdMeal(createdMeal!, ingredients, instructions, recipe?.id) });
+	return json({
+		meal: mealFromHouseholdMeal(
+			createdMeal!,
+			ingredients,
+			instructions,
+			recipe?.id,
+			unitPreferences
+		)
+	});
 };
 
 export const DELETE: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
@@ -325,6 +357,7 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 
 	const meal = await readMeal(request);
 	const db = getDb(platform.env.DB);
+	const unitPreferences = await loadUnitPreferences(db, session.user.id, householdId);
 
 	const existingMeal = await db
 		.select()
@@ -360,7 +393,8 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 				updatedMeal ?? existingMeal,
 				ingredients,
 				instructions,
-				meal.userRecipeId
+				meal.userRecipeId,
+				unitPreferences
 			)
 		});
 	}

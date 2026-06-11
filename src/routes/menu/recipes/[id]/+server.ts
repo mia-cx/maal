@@ -2,13 +2,14 @@ import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq } from 'drizzle-orm';
 import { resolveActiveHouseholdId } from '$lib/server/auth/household';
 import { getDb } from '$lib/server/db';
-import { userRecipes } from '$lib/server/db/schema';
+import { households, userRecipes } from '$lib/server/db/schema';
 import {
 	loadMenuRecipes,
 	updateRecipeIngredients,
 	updateRecipeInstructions
 } from '$lib/server/db/recipe-mappers';
 import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
@@ -67,14 +68,24 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 	await updateRecipeIngredients(db, recipeId, recipe.ingredients ?? []);
 	await updateRecipeInstructions(db, recipeId, recipe.instructions ?? []);
 
+	const profileRows = householdId
+		? await db
+				.select({ locale: households.locale })
+				.from(households)
+				.where(eq(households.householdId, householdId))
+				.limit(1)
+		: [];
+	const unitPreferences = householdId
+		? (
+				await loadEffectiveTaxonomyPreferences(db, {
+					workosUserId: session.user.id,
+					householdId,
+					locale: profileRows[0]?.locale ?? 'en-US'
+				})
+			).unitPreferences
+		: {};
 	const freshRecipe = (
-		await loadMenuRecipes(db, session.user.id, householdId, {
-			unitPreferences: {
-				preferredMassUnit: 'g' as const,
-				preferredVolumeUnit: 'ml' as const,
-				ingredientUnitOverrides: {}
-			}
-		})
+		await loadMenuRecipes(db, session.user.id, householdId, { unitPreferences })
 	).find((candidate) => candidate.id === recipeId);
 
 	return json({ recipe: freshRecipe ?? recipe });

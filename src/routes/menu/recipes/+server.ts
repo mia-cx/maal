@@ -4,6 +4,7 @@ import { resolveActiveHouseholdId } from '$lib/server/auth/household';
 import { getDb } from '$lib/server/db';
 import {
 	userRecipeClassifications,
+	households,
 	userRecipeMedia,
 	userRecipeNutritionFacts,
 	userRecipes
@@ -20,6 +21,7 @@ import type {
 	RecipeMenuItem
 } from '$lib/components/menu/menu-types';
 import { parseIngredientLine, type UnitPreferences } from '$lib/recipes/ingredient-text';
+import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 
 const fallbackTitle = 'Untitled recipe';
 const maxTitleLength = 160;
@@ -547,11 +549,25 @@ const integerParam = (url: URL, key: string, fallback: number): number => {
 	return Number.isInteger(value) && value >= 0 ? value : fallback;
 };
 
-const loadHouseholdUnitPreferences = async (): Promise<UnitPreferences> => ({
-	preferredMassUnit: 'g',
-	preferredVolumeUnit: 'ml',
-	ingredientUnitOverrides: {}
-});
+const loadHouseholdUnitPreferences = async (
+	db: ReturnType<typeof getDb>,
+	workosUserId: string,
+	householdId: string | null
+): Promise<UnitPreferences> => {
+	if (!householdId) return { preferredMassUnit: 'g', preferredVolumeUnit: 'ml' };
+	const profileRows = await db
+		.select({ locale: households.locale })
+		.from(households)
+		.where(eq(households.householdId, householdId))
+		.limit(1);
+	return (
+		await loadEffectiveTaxonomyPreferences(db, {
+			workosUserId,
+			householdId,
+			locale: profileRows[0]?.locale ?? 'en-US'
+		})
+	).unitPreferences;
+};
 
 const loadRecipeIdentities = async (db: ReturnType<typeof getDb>, workosUserId: string) =>
 	db
@@ -591,7 +607,7 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 	const recipes = await loadMenuRecipes(db, session.user.id, householdId, {
 		limit: limit + 1,
 		offset,
-		unitPreferences: await loadHouseholdUnitPreferences()
+		unitPreferences: await loadHouseholdUnitPreferences(db, session.user.id, householdId)
 	});
 	const hasMoreRecipes = recipes.length > limit;
 	return json({
@@ -657,7 +673,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	}
 
 	const db = getDb(platform.env.DB);
-	const unitPreferences = await loadHouseholdUnitPreferences();
+	const unitPreferences = await loadHouseholdUnitPreferences(db, session.user.id, householdId);
 	const recipeIdentities = await loadRecipeIdentities(db, session.user.id);
 	const existingRecipe = matchingExistingRecipe(recipeIdentities, body);
 	if (existingRecipe) {
