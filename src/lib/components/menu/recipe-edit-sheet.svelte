@@ -230,6 +230,18 @@
 		reorderInstructions(draftId, Math.round(parsedPosition) - 1);
 	};
 
+	const stepInstructionPositionDraft = (draftId: string, direction: -1 | 1) => {
+		const instruction = instructions.find((item) => item.draftId === draftId);
+		if (!instruction) return;
+		const draftPosition = Number(instructionPositionDrafts[draftId] ?? instruction.position);
+		const position = Number.isFinite(draftPosition) ? draftPosition : instruction.position;
+		const nextPosition = Math.min(
+			instructions.length,
+			Math.max(1, Math.round(position) + direction)
+		);
+		instructionPositionDrafts = { ...instructionPositionDrafts, [draftId]: String(nextPosition) };
+	};
+
 	const handleInstructionPositionKeydown = (draftId: string, event: KeyboardEvent) => {
 		if (event.key === 'Enter') {
 			event.preventDefault();
@@ -239,6 +251,10 @@
 		if (event.key === 'Escape') {
 			syncInstructionPositionDrafts(instructions);
 			(event.currentTarget as HTMLInputElement).blur();
+		}
+		if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+			event.preventDefault();
+			stepInstructionPositionDraft(draftId, event.key === 'ArrowUp' ? 1 : -1);
 		}
 	};
 
@@ -574,7 +590,7 @@
 																instruction.draftId,
 																event.currentTarget.value
 															)}
-														onchange={() => commitInstructionPosition(instruction.draftId)}
+														onblur={() => commitInstructionPosition(instruction.draftId)}
 														onkeydown={(event) =>
 															handleInstructionPositionKeydown(instruction.draftId, event)}
 														aria-label="Instruction position"
