@@ -14,9 +14,9 @@ export const menuLoadAccentClasses: Record<MealLoad, string> = {
 };
 
 export const verdictToneClasses: Record<MealFeedbackVerdict, string> = {
-	worth_repeating: 'text-meal-load-low',
+	repeat: 'text-meal-load-low',
 	neutral: 'text-meal-load-medium',
-	never_again: 'text-meal-load-high'
+	avoid: 'text-meal-load-high'
 };
 
 const clamp = (value: number, min = 0, max = 1): number => Math.min(max, Math.max(min, value));
@@ -49,8 +49,8 @@ const usageLoadScore = (recipe: RecipeMenuItem): number => {
 	const planConfidence = smoothstep(0, 12, recipe.plannedCount) * 0.35;
 	const recency = daysSince(recipe.lastCookedAt);
 	const recencyConfidence = recency === undefined ? 0 : Math.max(0, 1 - recency / 120) * 0.25;
-	const positiveVerdict = recipe.latestVerdict === 'worth_repeating' ? 0.2 : 0;
-	const negativeVerdict = recipe.latestVerdict === 'never_again' ? 0.55 : 0;
+	const positiveVerdict = recipe.latestVerdict === 'repeat' ? 0.2 : 0;
+	const negativeVerdict = recipe.latestVerdict === 'avoid' ? 0.55 : 0;
 	const knownGoodScore = clamp(
 		cookConfidence * 0.6 + planConfidence + recencyConfidence + positiveVerdict
 	);

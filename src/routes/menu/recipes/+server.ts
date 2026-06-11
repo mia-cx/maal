@@ -1,8 +1,12 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
-import { eq } from 'drizzle-orm';
 import { resolveActiveHouseholdId } from '$lib/server/auth/household';
 import { getDb } from '$lib/server/db';
-import { householdProfiles, userRecipes } from '$lib/server/db/schema';
+import {
+	userRecipeClassifications,
+	userRecipeMedia,
+	userRecipeNutritionFacts,
+	userRecipes
+} from '$lib/server/db/schema';
 import {
 	loadMenuRecipes,
 	schemaOrgFromRecipeItem,
@@ -14,8 +18,9 @@ import type {
 	RecipeInstructionItem,
 	RecipeMenuItem
 } from '$lib/components/menu/menu-types';
-import { parseIngredientLine } from '$lib/recipes/ingredient-text';
+import { parseIngredientLine, type UnitPreferences } from '$lib/recipes/ingredient-text';
 
+const fallbackTitle = 'Untitled recipe';
 const maxTitleLength = 160;
 const maxUrlLength = 2048;
 const maxImportBytes = 1_500_000;
@@ -160,10 +165,15 @@ const compactNutrition = (value: unknown): RecipeJson | undefined => {
 		'servingSize',
 		'calories',
 		'carbohydrateContent',
+		'cholesterolContent',
 		'proteinContent',
 		'fatContent',
 		'fiberContent',
-		'sodiumContent'
+		'saturatedFatContent',
+		'sodiumContent',
+		'sugarContent',
+		'transFatContent',
+		'unsaturatedFatContent'
 	]) {
 		const text = stringValue(value[key]);
 		if (text) nutrition[key] = text;
@@ -185,6 +195,8 @@ const compactRecipe = (recipe: RecipeJson, nodes: RecipeJson[], sourceUrl: strin
 		name: firstString(recipe.name, recipe.headline) ?? 'Imported recipe',
 		description: stringValue(recipe.description),
 		datePublished: stringValue(recipe.datePublished),
+		dateModified: stringValue(recipe.dateModified),
+		inLanguage: firstString(recipe.inLanguage),
 		image: compactValue(recipe.image, 4),
 		url: firstString(recipe.url, recipe.mainEntityOfPage, sourceUrl) ?? sourceUrl,
 		author: authorName ? { '@type': 'Person', name: authorName } : undefined,
@@ -198,6 +210,14 @@ const compactRecipe = (recipe: RecipeJson, nodes: RecipeJson[], sourceUrl: strin
 		recipeCategory: compactValue(recipe.recipeCategory, 12),
 		recipeCuisine: compactValue(recipe.recipeCuisine, 12),
 		keywords: compactValue(recipe.keywords, 32),
+		suitableForDiet: compactValue(recipe.suitableForDiet, 12),
+		aggregateRating: isRecord(recipe.aggregateRating)
+			? {
+					ratingValue: firstString(recipe.aggregateRating.ratingValue),
+					ratingCount: firstString(recipe.aggregateRating.ratingCount),
+					reviewCount: firstString(recipe.aggregateRating.reviewCount)
+				}
+			: undefined,
 		nutrition: compactNutrition(recipe.nutrition),
 		isBasedOn: firstString(recipe.isBasedOn, recipe.isBasedOnUrl)
 	};
@@ -270,6 +290,21 @@ const durationMinutes = (value: unknown): number | undefined => {
 	return Number(match[1] ?? 0) * 60 + Number(match[2] ?? 0);
 };
 
+const firstNumber = (...values: unknown[]): number | undefined => {
+	for (const value of values) {
+		if (typeof value === 'number' && Number.isFinite(value)) return value;
+		if (typeof value === 'string') {
+			const match = /\d+(?:\.\d+)?/.exec(value);
+			if (match) return Number(match[0]);
+		}
+	}
+};
+
+const ratingValue = (value: unknown, key: string): number | undefined => {
+	if (!isRecord(value)) return;
+	return firstNumber(value[key]);
+};
+
 const instructionText = (value: unknown): string[] => {
 	if (typeof value === 'string') return [value.trim()].filter(Boolean);
 	if (Array.isArray(value)) return value.flatMap(instructionText);
@@ -290,6 +325,148 @@ const ingredientsFromRecipe = (recipe: RecipeJson): RecipeIngredientItem[] =>
 
 const instructionsFromRecipe = (recipe: RecipeJson): RecipeInstructionItem[] =>
 	instructionText(recipe.recipeInstructions).map((text, index) => ({ position: index + 1, text }));
+
+const normalizedValue = (value: string): string =>
+	value
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, ' ')
+		.trim();
+
+const sourceStrings = (value: unknown): string[] =>
+	arrayValue(value)
+		.flatMap((item) => {
+			const text = firstString(item);
+			return text ? [text] : [];
+		})
+		.filter(Boolean);
+
+const saveRecipeClassifications = async (
+	db: ReturnType<typeof getDb>,
+	userRecipeId: string,
+	recipe: RecipeJson
+) => {
+	const entries = [
+		...sourceStrings(recipe.recipeCategory).map((value) => ({ kind: 'category' as const, value })),
+		...sourceStrings(recipe.recipeCuisine).map((value) => ({ kind: 'cuisine' as const, value })),
+		...sourceStrings(recipe.keywords).map((value) => ({ kind: 'keyword' as const, value })),
+		...sourceStrings(recipe.suitableForDiet).map((value) => ({
+			kind: 'diet' as const,
+			value,
+			schemaOrgValue: value
+		}))
+	];
+	for (const entry of entries) {
+		await db.insert(userRecipeClassifications).values({
+			userRecipeId,
+			kind: entry.kind,
+			value: entry.value,
+			normalizedValue: normalizedValue(entry.value),
+			schemaOrgValue: 'schemaOrgValue' in entry ? entry.schemaOrgValue : null,
+			confidence: 1
+		});
+	}
+};
+
+const mediaRecord = (value: unknown): RecipeJson | undefined => {
+	if (typeof value === 'string') return { url: value };
+	return isRecord(value) ? value : undefined;
+};
+
+const saveRecipeMedia = async (
+	db: ReturnType<typeof getDb>,
+	userRecipeId: string,
+	recipe: RecipeJson
+) => {
+	const images = arrayValue(recipe.image).flatMap((item) => {
+		const image = mediaRecord(item);
+		return image ? [image] : [];
+	});
+	const videos = arrayValue(recipe.video).flatMap((item) => {
+		const video = mediaRecord(item);
+		return video ? [video] : [];
+	});
+	for (const [position, image] of images.entries()) {
+		await db.insert(userRecipeMedia).values({
+			userRecipeId,
+			kind: 'image',
+			position,
+			url: firstString(image.url, image['@id']),
+			contentUrl: firstString(image.contentUrl),
+			thumbnailUrl: firstString(image.thumbnailUrl),
+			name: firstString(image.name),
+			caption: firstString(image.caption)
+		});
+	}
+	for (const [position, video] of videos.entries()) {
+		await db.insert(userRecipeMedia).values({
+			userRecipeId,
+			kind: 'video',
+			position,
+			url: firstString(video.url, video['@id']),
+			contentUrl: firstString(video.contentUrl),
+			embedUrl: firstString(video.embedUrl),
+			thumbnailUrl: firstString(video.thumbnailUrl),
+			name: firstString(video.name),
+			caption: firstString(video.description, video.caption)
+		});
+	}
+};
+
+const nutritionProperties = {
+	calories: 'calories',
+	carbohydrateContent: 'carbohydrate',
+	cholesterolContent: 'cholesterol',
+	fatContent: 'fat',
+	fiberContent: 'fiber',
+	proteinContent: 'protein',
+	saturatedFatContent: 'saturated_fat',
+	servingSize: 'serving_size',
+	sodiumContent: 'sodium',
+	sugarContent: 'sugar',
+	transFatContent: 'trans_fat',
+	unsaturatedFatContent: 'unsaturated_fat'
+} as const;
+
+const parseNutritionAmount = (value: string) => {
+	const match = /(\d+(?:[.,]\d+)?)\s*([a-zA-Zµμ%]+)?/.exec(value);
+	return match
+		? { amount: Number(match[1].replace(',', '.')), unit: match[2]?.toLowerCase() }
+		: { amount: undefined, unit: undefined };
+};
+
+const saveRecipeNutritionFacts = async (
+	db: ReturnType<typeof getDb>,
+	userRecipeId: string,
+	recipe: RecipeJson
+) => {
+	if (!isRecord(recipe.nutrition)) return;
+	for (const [schemaOrgProperty, nutrient] of Object.entries(nutritionProperties)) {
+		const originalText = firstString(recipe.nutrition[schemaOrgProperty]);
+		if (!originalText) continue;
+		const parsed = parseNutritionAmount(originalText);
+		await db.insert(userRecipeNutritionFacts).values({
+			userRecipeId,
+			nutrient,
+			schemaOrgProperty,
+			originalText,
+			amount: parsed.amount,
+			baseAmount: parsed.amount,
+			confidence: parsed.amount === undefined ? 0.4 : 0.8
+		});
+	}
+};
+
+const saveRecipeSidecars = async (
+	db: ReturnType<typeof getDb>,
+	userRecipeId: string,
+	recipe: RecipeJson
+) => {
+	await Promise.all([
+		saveRecipeClassifications(db, userRecipeId, recipe),
+		saveRecipeMedia(db, userRecipeId, recipe),
+		saveRecipeNutritionFacts(db, userRecipeId, recipe)
+	]);
+};
 
 const recipeBody = (value: unknown): RecipeMenuItem | undefined => {
 	if (!isRecord(value) || typeof value.title !== 'string') return;
@@ -335,27 +512,11 @@ const integerParam = (url: URL, key: string, fallback: number): number => {
 	return Number.isInteger(value) && value >= 0 ? value : fallback;
 };
 
-const loadHouseholdUnitPreferences = async (
-	db: ReturnType<typeof getDb>,
-	householdId: string | null
-) => {
-	if (!householdId) return {};
-	const profile = await db
-		.select({
-			preferredMassUnit: householdProfiles.preferredMassUnit,
-			preferredVolumeUnit: householdProfiles.preferredVolumeUnit,
-			ingredientUnitOverrides: householdProfiles.ingredientUnitOverrides
-		})
-		.from(householdProfiles)
-		.where(eq(householdProfiles.householdId, householdId))
-		.limit(1)
-		.get();
-	return {
-		preferredMassUnit: profile?.preferredMassUnit ?? 'g',
-		preferredVolumeUnit: profile?.preferredVolumeUnit ?? 'ml',
-		ingredientUnitOverrides: profile?.ingredientUnitOverrides ?? {}
-	};
-};
+const loadHouseholdUnitPreferences = async (): Promise<UnitPreferences> => ({
+	preferredMassUnit: 'g',
+	preferredVolumeUnit: 'ml',
+	ingredientUnitOverrides: {}
+});
 
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
 	const session = locals.session;
@@ -370,7 +531,7 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 	const recipes = await loadMenuRecipes(db, session.user.id, householdId, {
 		limit: limit + 1,
 		offset,
-		unitPreferences: await loadHouseholdUnitPreferences(db, householdId)
+		unitPreferences: await loadHouseholdUnitPreferences()
 	});
 	const hasMoreRecipes = recipes.length > limit;
 	return json({
@@ -436,7 +597,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	}
 
 	const db = getDb(platform.env.DB);
-	const unitPreferences = await loadHouseholdUnitPreferences(db, householdId);
+	const unitPreferences = await loadHouseholdUnitPreferences();
 	const existingRecipe = matchingExistingRecipe(
 		await loadMenuRecipes(db, session.user.id, householdId, { unitPreferences }),
 		body
@@ -466,19 +627,31 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		id: recipeId,
 		workosUserId: session.user.id,
 		savedFromHouseholdId: householdId,
-		schemaOrgRecipeJson: recipeJson,
-		rawJsonLd: null,
+		title: firstString(recipeJson.name, recipeJson.headline) ?? body.recipe?.title ?? fallbackTitle,
+		description: stringValue(recipeJson.description) ?? body.recipe?.description ?? null,
+		imageUrl: firstString(recipeJson.image) ?? body.recipe?.image ?? null,
+		prepTimeMinutes: body.recipe?.prepTimeMinutes ?? durationMinutes(recipeJson.prepTime) ?? null,
+		cookTimeMinutes: body.recipe?.cookTimeMinutes ?? durationMinutes(recipeJson.cookTime) ?? null,
+		totalTimeMinutes:
+			body.recipe?.totalTimeMinutes ?? durationMinutes(recipeJson.totalTime) ?? null,
+		yield: body.recipe?.servings ?? firstNumber(recipeJson.recipeYield, recipeJson.yield) ?? null,
+		sourceYieldText: firstString(recipeJson.recipeYield, recipeJson.yield) ?? null,
+		sourceDatePublished: stringValue(recipeJson.datePublished) ?? null,
+		sourceDateModified: stringValue(recipeJson.dateModified) ?? null,
+		sourceLanguage: stringValue(recipeJson.inLanguage) ?? null,
 		sourceUrl: imported?.sourceUrl ?? body.recipe?.sourceUrl ?? null,
 		sourceSiteName: imported?.sourceSiteName ?? body.recipe?.sourceSiteName ?? null,
 		sourceAuthorName: imported?.sourceAuthorName ?? body.recipe?.sourceAuthorName ?? null,
 		sourcePublisherName: imported?.sourcePublisherName ?? body.recipe?.sourcePublisherName ?? null,
 		sourceIsBasedOnUrl: imported?.sourceIsBasedOnUrl ?? body.recipe?.sourceIsBasedOnUrl ?? null,
+		sourceRatingValue: ratingValue(recipeJson.aggregateRating, 'ratingValue') ?? null,
+		sourceRatingCount: ratingValue(recipeJson.aggregateRating, 'ratingCount') ?? null,
+		sourceReviewCount: ratingValue(recipeJson.aggregateRating, 'reviewCount') ?? null,
 		sourceClaimedMinutes:
 			body.recipe?.cookTimeMinutes ?? durationMinutes(recipeJson.cookTime) ?? null,
 		parseConfidence: imported ? 1 : 0.4,
 		ingredientConfidence: imported ? 1 : body.recipe ? 1 : 0,
-		instructionConfidence: imported ? 1 : body.recipe ? 1 : 0,
-		timeRealismConfidence: imported ? 0.6 : 0
+		instructionConfidence: imported ? 1 : body.recipe ? 1 : 0
 	});
 
 	await updateRecipeIngredients(
@@ -491,6 +664,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		recipeId,
 		body.recipe?.instructions ?? instructionsFromRecipe(recipeJson)
 	);
+	await saveRecipeSidecars(db, recipeId, recipeJson);
 
 	const recipe = (
 		await loadMenuRecipes(db, session.user.id, householdId, { unitPreferences })

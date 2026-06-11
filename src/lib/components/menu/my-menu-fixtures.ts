@@ -35,7 +35,7 @@ export const myMenuRecipes: RecipeMenuItem[] = [
 		timesCooked: 14,
 		plannedCount: 19,
 		lastCookedAt: '2026-05-28',
-		latestVerdict: 'worth_repeating',
+		latestVerdict: 'repeat',
 		reviewSummary: {
 			worthRepeating: 8,
 			neutral: 1,
@@ -76,7 +76,7 @@ export const myMenuRecipes: RecipeMenuItem[] = [
 		timesCooked: 10,
 		plannedCount: 13,
 		lastCookedAt: '2026-05-12',
-		latestVerdict: 'worth_repeating',
+		latestVerdict: 'repeat',
 		reviewSummary: {
 			worthRepeating: 6,
 			neutral: 2,
@@ -117,7 +117,7 @@ export const myMenuRecipes: RecipeMenuItem[] = [
 		timesCooked: 22,
 		plannedCount: 27,
 		lastCookedAt: '2026-06-03',
-		latestVerdict: 'worth_repeating',
+		latestVerdict: 'repeat',
 		reviewSummary: {
 			worthRepeating: 11,
 			neutral: 3,
@@ -239,7 +239,7 @@ export const myMenuRecipes: RecipeMenuItem[] = [
 		timesCooked: 8,
 		plannedCount: 11,
 		lastCookedAt: '2026-05-31',
-		latestVerdict: 'worth_repeating',
+		latestVerdict: 'repeat',
 		reviewSummary: {
 			worthRepeating: 5,
 			neutral: 1,

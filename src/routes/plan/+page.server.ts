@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { commitHouseholdCookie, countActiveHouseholdMembers } from '$lib/server/auth/household';
 import { getDb } from '$lib/server/db';
 import { loadMealPlanMeals, loadMenuRecipes } from '$lib/server/db/recipe-mappers';
-import { householdProfiles } from '$lib/server/db/schema';
+import { households } from '$lib/server/db/schema';
 import type { PageServerLoad } from './$types';
 
 const dateKey = (date: Date): string => date.toISOString().slice(0, 10);
@@ -12,6 +12,9 @@ const addDays = (date: Date, days: number): Date => {
 	nextDate.setDate(nextDate.getDate() + days);
 	return nextDate;
 };
+
+const weekStartsOnName = (value?: number | null): 'sunday' | 'monday' =>
+	value === 0 ? 'sunday' : 'monday';
 
 export const load: PageServerLoad = async ({ cookies, locals, parent, platform, url }) => {
 	const session = locals.session;
@@ -30,28 +33,25 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 		countActiveHouseholdMembers(platform, householdId),
 		db
 			.select({
-				defaultServings: householdProfiles.defaultServings,
-				weekStartsOn: householdProfiles.weekStartsOn,
-				preferredMassUnit: householdProfiles.preferredMassUnit,
-				preferredVolumeUnit: householdProfiles.preferredVolumeUnit,
-				ingredientUnitOverrides: householdProfiles.ingredientUnitOverrides
+				defaultPlannedYield: households.defaultPlannedYield,
+				weekStartsOn: households.weekStartsOn
 			})
-			.from(householdProfiles)
-			.where(eq(householdProfiles.householdId, householdId))
+			.from(households)
+			.where(eq(households.householdId, householdId))
 			.limit(1)
 	]);
 	const householdProfile = profileRows[0];
-	const defaultMealServings = householdProfile?.defaultServings ?? activeMemberCount;
+	const defaultMealServings = householdProfile?.defaultPlannedYield ?? activeMemberCount;
 	const unitPreferences = {
-		preferredMassUnit: householdProfile?.preferredMassUnit ?? 'g',
-		preferredVolumeUnit: householdProfile?.preferredVolumeUnit ?? 'ml',
-		ingredientUnitOverrides: householdProfile?.ingredientUnitOverrides ?? {}
+		preferredMassUnit: 'g' as const,
+		preferredVolumeUnit: 'ml' as const,
+		ingredientUnitOverrides: {}
 	};
 	const recipes = await loadMenuRecipes(db, session.user.id, householdId, { unitPreferences });
 	return {
 		recipes,
 		defaultMealServings,
-		weekStartsOn: householdProfile?.weekStartsOn ?? 'monday',
+		weekStartsOn: weekStartsOnName(householdProfile?.weekStartsOn),
 		unitPreferences,
 		initialMealRange: { start: initialStartDate, end: initialEndDate },
 		meals: await loadMealPlanMeals(db, {

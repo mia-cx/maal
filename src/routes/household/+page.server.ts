@@ -4,13 +4,14 @@ import { getDb } from '$lib/server/db';
 import {
 	householdAppliances,
 	householdMealApplianceRequirements,
+	householdMealClassifications,
 	householdMealIngredients,
 	householdMealInstructions,
-	householdMealNutrition,
+	householdMealMedia,
+	householdMealNutritionFacts,
 	householdMeals,
-	householdProfiles,
-	mealCheckIns,
-	pantryStaples
+	households,
+	mealCheckIns
 } from '$lib/server/db/schema';
 import {
 	canManageActiveHousehold,
@@ -39,14 +40,10 @@ const applianceOptions = [
 ] as const;
 
 const weekStartDays = ['sunday', 'monday'] as const;
-const massUnits = ['g', 'kg', 'oz', 'lb'] as const;
-const volumeUnits = ['ml', 'l', 'tsp', 'tbsp', 'cup', 'fl oz'] as const;
 const maxHouseholdNameLength = 120;
 
 type Appliance = (typeof applianceOptions)[number];
 type WeekStartDay = (typeof weekStartDays)[number];
-type MassUnit = (typeof massUnits)[number];
-type VolumeUnit = (typeof volumeUnits)[number];
 
 const applianceLabels: Record<Appliance, string> = {
 	oven: 'Oven',
@@ -65,37 +62,8 @@ const asWeekStartDay = (value: FormDataEntryValue | null): WeekStartDay => {
 	return weekStartDays.includes(raw as WeekStartDay) ? (raw as WeekStartDay) : 'monday';
 };
 
-const asMassUnit = (value: FormDataEntryValue | null): MassUnit => {
-	const raw = typeof value === 'string' ? value : '';
-	return massUnits.includes(raw as MassUnit) ? (raw as MassUnit) : 'g';
-};
-
-const asVolumeUnit = (value: FormDataEntryValue | null): VolumeUnit => {
-	const raw = typeof value === 'string' ? value : '';
-	return volumeUnits.includes(raw as VolumeUnit) ? (raw as VolumeUnit) : 'ml';
-};
-
-const normalizedIngredientKey = (value: string): string =>
-	value
-		.toLowerCase()
-		.replace(/\([^)]*\)/g, ' ')
-		.replace(/[^a-z0-9]+/g, ' ')
-		.trim();
-
-const parseIngredientUnitOverrides = (value: FormDataEntryValue | null): Record<string, string> => {
-	if (typeof value !== 'string') return {};
-	const overrides: Record<string, string> = {};
-	for (const line of value.split('\n')) {
-		const [rawName, ...rawUnitParts] = line.split(':');
-		const name = normalizedIngredientKey(rawName ?? '');
-		const unit = rawUnitParts.join(':').trim().toLowerCase();
-		if (!name || !unit) continue;
-		if (massUnits.includes(unit as MassUnit) || volumeUnits.includes(unit as VolumeUnit)) {
-			overrides[name] = unit;
-		}
-	}
-	return overrides;
-};
+const weekStartDay = (value?: number | null): WeekStartDay => (value === 0 ? 'sunday' : 'monday');
+const weekStartValue = (value: WeekStartDay): number => (value === 'sunday' ? 0 : 1);
 
 const numberFromForm = (value: FormDataEntryValue | null, fallback: number): number => {
 	if (typeof value !== 'string') return fallback;
@@ -229,13 +197,13 @@ export const load: PageServerLoad = async (event) => {
 	if (!event.platform?.env.DB) redirect(302, '/onboarding');
 
 	const runtime = createAuthRuntime(event.platform);
-	const [organization, profileRows, applianceRows, members, hasManagePermission] =
+	const [organization, householdRows, applianceRows, members, hasManagePermission] =
 		await Promise.all([
 			runtime.workos.organizations.getOrganization(householdId),
 			getDb(event.platform.env.DB)
 				.select()
-				.from(householdProfiles)
-				.where(eq(householdProfiles.householdId, householdId))
+				.from(households)
+				.where(eq(households.householdId, householdId))
 				.limit(1),
 			getDb(event.platform.env.DB)
 				.select()
@@ -245,12 +213,9 @@ export const load: PageServerLoad = async (event) => {
 			canManageActiveHousehold(event.platform, session, householdId)
 		]);
 
-	const profile = profileRows[0] ?? {
-		defaultServings: 1,
-		weekStartsOn: 'monday' as const,
-		preferredMassUnit: 'g' as const,
-		preferredVolumeUnit: 'ml' as const,
-		ingredientUnitOverrides: {},
+	const profile = householdRows[0] ?? {
+		defaultPlannedYield: 1,
+		weekStartsOn: 1,
 		preferredDinnerTime: null
 	};
 	const applianceByName = new Map(applianceRows.map((row) => [row.appliance, row]));
@@ -266,11 +231,11 @@ export const load: PageServerLoad = async (event) => {
 			metadata: organization.metadata
 		},
 		profile: {
-			defaultServings: profile.defaultServings,
-			weekStartsOn: profile.weekStartsOn,
-			preferredMassUnit: profile.preferredMassUnit,
-			preferredVolumeUnit: profile.preferredVolumeUnit,
-			ingredientUnitOverrides: profile.ingredientUnitOverrides,
+			defaultServings: profile.defaultPlannedYield,
+			weekStartsOn: weekStartDay(profile.weekStartsOn),
+			preferredMassUnit: 'g' as const,
+			preferredVolumeUnit: 'ml' as const,
+			ingredientUnitOverrides: {},
 			preferredDinnerTime: profile.preferredDinnerTime
 		},
 		appliances: applianceOptions.map((appliance) => {
@@ -295,11 +260,8 @@ export const actions: Actions = {
 		const { householdId } = managedHousehold;
 		const form = await event.request.formData();
 		const profileUpdate: Partial<{
-			defaultServings: number;
-			weekStartsOn: WeekStartDay;
-			preferredMassUnit: MassUnit;
-			preferredVolumeUnit: VolumeUnit;
-			ingredientUnitOverrides: Record<string, string>;
+			defaultPlannedYield: number;
+			weekStartsOn: number;
 			preferredDinnerTime: string | null;
 		}> = {};
 		const updates: Promise<unknown>[] = [];
@@ -319,23 +281,13 @@ export const actions: Actions = {
 		}
 
 		if (form.has('defaultServings')) {
-			profileUpdate.defaultServings = Math.min(
+			profileUpdate.defaultPlannedYield = Math.min(
 				24,
 				Math.max(1, numberFromForm(form.get('defaultServings'), 1))
 			);
 		}
-		if (form.has('weekStartsOn'))
-			profileUpdate.weekStartsOn = asWeekStartDay(form.get('weekStartsOn'));
-		if (form.has('preferredMassUnit')) {
-			profileUpdate.preferredMassUnit = asMassUnit(form.get('preferredMassUnit'));
-		}
-		if (form.has('preferredVolumeUnit')) {
-			profileUpdate.preferredVolumeUnit = asVolumeUnit(form.get('preferredVolumeUnit'));
-		}
-		if (form.has('ingredientUnitOverrides')) {
-			profileUpdate.ingredientUnitOverrides = parseIngredientUnitOverrides(
-				form.get('ingredientUnitOverrides')
-			);
+		if (form.has('weekStartsOn')) {
+			profileUpdate.weekStartsOn = weekStartValue(asWeekStartDay(form.get('weekStartsOn')));
 		}
 		if (form.has('preferredDinnerTime')) {
 			profileUpdate.preferredDinnerTime = timeFromForm(form.get('preferredDinnerTime'));
@@ -345,19 +297,16 @@ export const actions: Actions = {
 			if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
 			updates.push(
 				getDb(event.platform.env.DB)
-					.insert(householdProfiles)
+					.insert(households)
 					.values({
 						householdId,
-						defaultServings: profileUpdate.defaultServings ?? 1,
-						weekStartsOn: profileUpdate.weekStartsOn ?? 'monday',
-						preferredMassUnit: profileUpdate.preferredMassUnit ?? 'g',
-						preferredVolumeUnit: profileUpdate.preferredVolumeUnit ?? 'ml',
-						ingredientUnitOverrides: profileUpdate.ingredientUnitOverrides ?? {},
+						defaultPlannedYield: profileUpdate.defaultPlannedYield ?? 1,
+						weekStartsOn: profileUpdate.weekStartsOn ?? 1,
 						preferredDinnerTime: profileUpdate.preferredDinnerTime ?? null
 					})
 					.onConflictDoUpdate({
-						target: householdProfiles.householdId,
-						set: { ...profileUpdate, updatedAt: new Date() }
+						target: households.householdId,
+						set: { ...profileUpdate, updatedAt: new Date().toISOString() }
 					})
 			);
 		}
@@ -380,7 +329,7 @@ export const actions: Actions = {
 
 		const form = await event.request.formData();
 		const db = getDb(event.platform.env.DB);
-		const now = new Date();
+		const now = new Date().toISOString();
 
 		try {
 			let changedCount = 0;
@@ -463,14 +412,19 @@ export const actions: Actions = {
 					.delete(householdMealInstructions)
 					.where(inArray(householdMealInstructions.householdMealId, mealIds));
 				await db
-					.delete(householdMealNutrition)
-					.where(inArray(householdMealNutrition.householdMealId, mealIds));
+					.delete(householdMealClassifications)
+					.where(inArray(householdMealClassifications.householdMealId, mealIds));
+				await db
+					.delete(householdMealMedia)
+					.where(inArray(householdMealMedia.householdMealId, mealIds));
+				await db
+					.delete(householdMealNutritionFacts)
+					.where(inArray(householdMealNutritionFacts.householdMealId, mealIds));
 			}
 
 			await db.delete(householdMeals).where(eq(householdMeals.householdId, householdId));
 			await db.delete(householdAppliances).where(eq(householdAppliances.householdId, householdId));
-			await db.delete(householdProfiles).where(eq(householdProfiles.householdId, householdId));
-			await db.delete(pantryStaples).where(eq(pantryStaples.householdId, householdId));
+			await db.delete(households).where(eq(households.householdId, householdId));
 			clearHouseholdCookie(event.cookies);
 		} catch (cause) {
 			console.error('Failed to delete household', cause);

@@ -1,8 +1,11 @@
-import { and, eq, gte, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNull, lte, or } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import type * as schema from '$lib/server/db/schema';
 import {
+	householdMealIngredients,
+	householdMealInstructions,
 	householdMeals,
+	householdMealUserRecipes,
 	mealCheckIns,
 	userRecipeApplianceRequirements,
 	userRecipeIngredients,
@@ -28,82 +31,29 @@ type UserRecipeIngredientRow = typeof userRecipeIngredients.$inferSelect;
 type UserRecipeInstructionRow = typeof userRecipeInstructions.$inferSelect;
 type UserRecipeApplianceRow = typeof userRecipeApplianceRequirements.$inferSelect;
 type HouseholdMealRow = typeof householdMeals.$inferSelect;
+type HouseholdMealIngredientRow = typeof householdMealIngredients.$inferSelect;
+type HouseholdMealInstructionRow = typeof householdMealInstructions.$inferSelect;
 
 type RecipeJson = Record<string, unknown>;
 
 const fallbackTitle = 'Untitled recipe';
 
-const stringValue = (value: unknown): string | undefined =>
-	typeof value === 'string' && value.trim() ? value.trim() : undefined;
-
-const firstString = (...values: unknown[]): string | undefined => {
-	for (const value of values) {
-		if (Array.isArray(value)) {
-			const nested = firstString(...value);
-			if (nested) return nested;
-			continue;
-		}
-		const text = stringValue(value);
-		if (text) return text;
-	}
-};
-
-const namedValue = (value: unknown): string | undefined => {
-	if (typeof value === 'string') return stringValue(value);
-	if (!value || typeof value !== 'object') return;
-	const record = value as Record<string, unknown>;
-	return firstString(record.name, record.url, record['@id']);
-};
-
-const imageValue = (value: unknown): string | undefined => {
-	if (typeof value === 'string') return stringValue(value);
-	if (Array.isArray(value)) return firstString(...value.map(imageValue));
-	if (!value || typeof value !== 'object') return;
-	const record = value as Record<string, unknown>;
-	return firstString(record.url, record.contentUrl, record['@id']);
-};
-
-const parseDurationMinutes = (value: unknown): number | undefined => {
-	const text = stringValue(value);
-	if (!text) return;
-	const match = /^PT(?:(\d+)H)?(?:(\d+)M)?$/i.exec(text);
-	if (!match) return;
-	return Number(match[1] ?? 0) * 60 + Number(match[2] ?? 0);
-};
-
 const duration = (minutes?: number): string | undefined =>
 	minutes === undefined ? undefined : `PT${Math.max(0, Math.round(minutes))}M`;
 
-const firstNumber = (...values: unknown[]): number | undefined => {
-	for (const value of values) {
-		if (typeof value === 'number' && Number.isFinite(value)) return value;
-		if (typeof value === 'string') {
-			const match = /\d+(?:\.\d+)?/.exec(value);
-			if (match) return Number(match[0]);
-		}
-	}
-};
+const recipeTitle = (recipe: UserRecipeRow): string => recipe.title || fallbackTitle;
 
-const recipeJson = (recipe: UserRecipeRow): RecipeJson =>
-	(recipe.schemaOrgRecipeJson ?? {}) as RecipeJson;
+const recipeDescription = (recipe: UserRecipeRow): string => recipe.description ?? '';
 
-const recipeTitle = (recipe: UserRecipeRow): string =>
-	firstString(recipeJson(recipe).name, recipeJson(recipe).headline) ?? fallbackTitle;
-
-const recipeDescription = (recipe: UserRecipeRow): string =>
-	firstString(recipeJson(recipe).description) ?? '';
-
-const recipeImage = (recipe: UserRecipeRow): string | undefined =>
-	imageValue(recipeJson(recipe).image);
+const recipeImage = (recipe: UserRecipeRow): string | undefined => recipe.imageUrl ?? undefined;
 
 const prepMinutes = (recipe: UserRecipeRow): number | undefined =>
-	parseDurationMinutes(recipeJson(recipe).prepTime);
+	recipe.prepTimeMinutes ?? undefined;
 
 const cookMinutes = (recipe: UserRecipeRow): number | undefined =>
-	parseDurationMinutes(recipeJson(recipe).cookTime) ?? recipe.sourceClaimedMinutes ?? undefined;
+	recipe.cookTimeMinutes ?? recipe.sourceClaimedMinutes ?? undefined;
 
-const servings = (recipe: UserRecipeRow): number | undefined =>
-	firstNumber(recipeJson(recipe).recipeYield, recipeJson(recipe).yield);
+const servings = (recipe: UserRecipeRow): number | undefined => recipe.yield ?? undefined;
 
 const ingredientAmount = (
 	ingredient: UserRecipeIngredientRow,
@@ -111,8 +61,8 @@ const ingredientAmount = (
 ): string => {
 	const item = ingredientItem(ingredient);
 	const amount = displayIngredientAmount(
-		ingredient.quantity,
-		ingredient.unit,
+		ingredient.baseQuantity,
+		ingredient.baseUnitId,
 		unitPreferences,
 		item
 	);
@@ -123,7 +73,7 @@ const ingredientAmount = (
 };
 
 const ingredientItem = (ingredient: UserRecipeIngredientRow): string =>
-	ingredient.parsedName ?? ingredient.originalText;
+	ingredient.sourceFoodLabel ?? ingredient.originalText;
 
 const fullIngredientText = (ingredient: RecipeIngredientItem): string =>
 	[ingredient.amount.trim(), ingredient.item.trim()].filter(Boolean).join(' ');
@@ -134,22 +84,50 @@ const reviewSummary = (
 ): RecipeMenuItem['reviewSummary'] => {
 	const checkIns = checkInsByRecipeId.get(recipeId) ?? [];
 	return {
-		worthRepeating: checkIns.filter((checkIn) => checkIn.verdict === 'worth_repeating').length,
+		worthRepeating: checkIns.filter((checkIn) => checkIn.verdict === 'repeat').length,
 		neutral: checkIns.filter((checkIn) => checkIn.verdict === 'neutral').length,
-		neverAgain: checkIns.filter((checkIn) => checkIn.verdict === 'never_again').length,
-		notes: checkIns.map((checkIn) => checkIn.notes).filter((note): note is string => Boolean(note))
+		neverAgain: checkIns.filter((checkIn) => checkIn.verdict === 'avoid').length,
+		notes: checkIns.map((checkIn) => checkIn.reason).filter((note): note is string => Boolean(note))
 	};
 };
 
-const countByRecipeId = (rows: { userRecipeId: string | null; count: number }[]) =>
-	new Map(rows.flatMap((row) => (row.userRecipeId ? [[row.userRecipeId, row.count]] : [])));
+const recipeCookStats = (
+	recipeId: string,
+	mealsByRecipeId: Map<string, HouseholdMealRow[]>
+): Pick<RecipeMenuItem, 'plannedCount' | 'timesCooked' | 'lastCookedAt'> => {
+	const meals = mealsByRecipeId.get(recipeId) ?? [];
+	const cookedMeals = meals.filter((meal) => meal.status === 'cooked');
+	const lastCookedAt = cookedMeals
+		.map((meal) => meal.date ?? meal.updatedAt)
+		.toSorted()
+		.at(-1);
+	return { plannedCount: meals.length, timesCooked: cookedMeals.length, lastCookedAt };
+};
 
-const groupByRecipeId = <T extends { userRecipeId: string | null }>(
-	rows: T[]
-): Map<string, T[]> => {
+const averageActualMinutes = (
+	recipeId: string,
+	checkInsByRecipeId: Map<string, (typeof mealCheckIns.$inferSelect)[]>
+): number | undefined => {
+	const minutes = (checkInsByRecipeId.get(recipeId) ?? [])
+		.map((checkIn) => checkIn.cookTime)
+		.filter((value): value is number => value !== null);
+	if (!minutes.length) return;
+	return minutes.reduce((sum, value) => sum + value, 0) / minutes.length;
+};
+
+const latestVerdict = (
+	recipeId: string,
+	checkInsByRecipeId: Map<string, (typeof mealCheckIns.$inferSelect)[]>
+): MealFeedbackVerdict | undefined =>
+	checkInsByRecipeId
+		.get(recipeId)
+		?.filter((checkIn) => checkIn.verdict)
+		.toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))
+		.at(-1)?.verdict;
+
+const groupByRecipeId = <T extends { userRecipeId: string }>(rows: T[]): Map<string, T[]> => {
 	const grouped = new Map<string, T[]>();
 	for (const row of rows) {
-		if (!row.userRecipeId) continue;
 		grouped.set(row.userRecipeId, [...(grouped.get(row.userRecipeId) ?? []), row]);
 	}
 	return grouped;
@@ -191,6 +169,10 @@ export const menuItemFromRecipe = (params: {
 	instructions: UserRecipeInstructionRow[];
 	appliances: UserRecipeApplianceRow[];
 	plannedCount: number;
+	timesCooked: number;
+	lastCookedAt?: string;
+	averageActualMinutes?: number;
+	latestVerdict?: MealFeedbackVerdict;
 	reviewSummary: RecipeMenuItem['reviewSummary'];
 	unitPreferences?: UnitPreferences;
 }): RecipeMenuItem => {
@@ -202,25 +184,23 @@ export const menuItemFromRecipe = (params: {
 		plannedCount,
 		unitPreferences = {}
 	} = params;
-	const json = recipeJson(recipe);
 	return {
 		id: recipe.id,
 		title: recipeTitle(recipe),
 		description: recipeDescription(recipe),
 		image: recipeImage(recipe),
-		sourceUrl: recipe.sourceUrl ?? firstString(json.url, json.mainEntityOfPage),
+		sourceUrl: recipe.sourceUrl ?? undefined,
 		sourceSiteName: recipe.sourceSiteName ?? undefined,
-		sourceAuthorName: recipe.sourceAuthorName ?? namedValue(json.author),
-		sourcePublisherName: recipe.sourcePublisherName ?? namedValue(json.publisher),
-		sourceIsBasedOnUrl: recipe.sourceIsBasedOnUrl ?? firstString(json.isBasedOn),
+		sourceAuthorName: recipe.sourceAuthorName ?? undefined,
+		sourcePublisherName: recipe.sourcePublisherName ?? undefined,
+		sourceIsBasedOnUrl: recipe.sourceIsBasedOnUrl ?? undefined,
 		sourceImportedAt: recipe.sourceImportedAt,
 		sourceClaimedMinutes: recipe.sourceClaimedMinutes ?? undefined,
-		averageActualMinutes: recipe.averageActualMinutes ?? undefined,
+		averageActualMinutes: params.averageActualMinutes,
 		parseConfidence: recipe.parseConfidence ?? undefined,
 		ingredientConfidence: recipe.ingredientConfidence ?? undefined,
 		instructionConfidence: recipe.instructionConfidence ?? undefined,
 		nutritionConfidence: recipe.nutritionConfidence ?? undefined,
-		timeRealismConfidence: recipe.timeRealismConfidence ?? undefined,
 		userNotes: recipe.userNotes ?? undefined,
 		prepTimeMinutes: prepMinutes(recipe),
 		cookTimeMinutes: cookMinutes(recipe),
@@ -241,10 +221,10 @@ export const menuItemFromRecipe = (params: {
 		ingredientCount: ingredients.length,
 		appliances: appliances.map((appliance) => appliance.appliance),
 		dietTags: [],
-		timesCooked: recipe.timesCooked,
+		timesCooked: params.timesCooked,
 		plannedCount,
-		lastCookedAt: recipe.lastCookedAt ?? undefined,
-		latestVerdict: recipe.latestVerdict as MealFeedbackVerdict | undefined,
+		lastCookedAt: params.lastCookedAt,
+		latestVerdict: params.latestVerdict,
 		reviewSummary: params.reviewSummary
 	};
 };
@@ -258,7 +238,7 @@ export const loadMenuRecipes = async (
 	const recipeQuery = db
 		.select()
 		.from(userRecipes)
-		.where(eq(userRecipes.workosUserId, workosUserId))
+		.where(and(eq(userRecipes.workosUserId, workosUserId), isNull(userRecipes.deletedAt)))
 		.orderBy(userRecipes.createdAt);
 	const recipes = options.limit
 		? await recipeQuery.limit(options.limit).offset(options.offset ?? 0)
@@ -266,7 +246,7 @@ export const loadMenuRecipes = async (
 
 	if (!recipes.length) return [];
 	const recipeIds = recipes.map((recipe) => recipe.id);
-	const [ingredients, instructions, appliances, checkIns, plannedCounts] = await Promise.all([
+	const [ingredients, instructions, appliances, mealLinks] = await Promise.all([
 		db
 			.select()
 			.from(userRecipeIngredients)
@@ -279,37 +259,69 @@ export const loadMenuRecipes = async (
 			.select()
 			.from(userRecipeApplianceRequirements)
 			.where(inArray(userRecipeApplianceRequirements.userRecipeId, recipeIds)),
-		db.select().from(mealCheckIns).where(inArray(mealCheckIns.userRecipeId, recipeIds)),
 		db
-			.select({ userRecipeId: householdMeals.userRecipeId, count: sql<number>`count(*)` })
-			.from(householdMeals)
-			.where(
-				and(
-					inArray(householdMeals.userRecipeId, recipeIds),
-					householdId ? eq(householdMeals.householdId, householdId) : undefined,
-					ne(householdMeals.status, 'archived')
-				)
-			)
-			.groupBy(householdMeals.userRecipeId)
+			.select()
+			.from(householdMealUserRecipes)
+			.where(inArray(householdMealUserRecipes.userRecipeId, recipeIds))
 	]);
+	const linkedMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
+	const householdMealRows = linkedMealIds.length
+		? await db
+				.select()
+				.from(householdMeals)
+				.where(
+					and(
+						inArray(householdMeals.id, linkedMealIds),
+						householdId ? eq(householdMeals.householdId, householdId) : undefined
+					)
+				)
+		: [];
+	const visibleMealIds = new Set(householdMealRows.map((meal) => meal.id));
+	const visibleMealLinks = mealLinks.filter((link) => visibleMealIds.has(link.householdMealId));
+	const checkIns = visibleMealIds.size
+		? await db
+				.select()
+				.from(mealCheckIns)
+				.where(inArray(mealCheckIns.householdMealId, [...visibleMealIds]))
+		: [];
 
 	const ingredientsByRecipeId = groupByRecipeId(ingredients);
 	const instructionsByRecipeId = groupByRecipeId(instructions);
 	const appliancesByRecipeId = groupByRecipeId(appliances);
-	const checkInsByRecipeId = groupByRecipeId(checkIns);
-	const plannedCountByRecipeId = countByRecipeId(plannedCounts);
+	const mealsById = new Map(householdMealRows.map((meal) => [meal.id, meal]));
+	const checkInsByMealId = groupByMealId(checkIns);
+	const mealsByRecipeId = new Map<string, HouseholdMealRow[]>();
+	const checkInsByRecipeId = new Map<string, (typeof mealCheckIns.$inferSelect)[]>();
+	for (const link of visibleMealLinks) {
+		const meal = mealsById.get(link.householdMealId);
+		if (meal) {
+			mealsByRecipeId.set(link.userRecipeId, [
+				...(mealsByRecipeId.get(link.userRecipeId) ?? []),
+				meal
+			]);
+		}
+		checkInsByRecipeId.set(link.userRecipeId, [
+			...(checkInsByRecipeId.get(link.userRecipeId) ?? []),
+			...(checkInsByMealId.get(link.householdMealId) ?? [])
+		]);
+	}
 
-	return recipes.map((recipe) =>
-		menuItemFromRecipe({
+	return recipes.map((recipe) => {
+		const cookStats = recipeCookStats(recipe.id, mealsByRecipeId);
+		return menuItemFromRecipe({
 			recipe,
 			ingredients: ingredientsByRecipeId.get(recipe.id) ?? [],
 			instructions: instructionsByRecipeId.get(recipe.id) ?? [],
 			appliances: appliancesByRecipeId.get(recipe.id) ?? [],
-			plannedCount: plannedCountByRecipeId.get(recipe.id) ?? 0,
+			plannedCount: cookStats.plannedCount,
+			timesCooked: cookStats.timesCooked,
+			lastCookedAt: cookStats.lastCookedAt,
+			averageActualMinutes: averageActualMinutes(recipe.id, checkInsByRecipeId),
+			latestVerdict: latestVerdict(recipe.id, checkInsByRecipeId),
 			reviewSummary: reviewSummary(recipe.id, checkInsByRecipeId),
 			unitPreferences: options.unitPreferences ?? {}
-		})
-	);
+		});
+	});
 };
 
 export const mealFromMenuRecipe = (
@@ -328,50 +340,55 @@ export const mealFromMenuRecipe = (
 	...overrides
 });
 
-const mealSnapshotFromRecipe = (recipe: UserRecipeRow): RecipeJson => {
-	const json = recipeJson(recipe);
+const mealIngredientItem = (
+	ingredient: HouseholdMealIngredientRow | UserRecipeIngredientRow
+): string => ingredient.sourceFoodLabel ?? ingredient.originalText;
+
+const mealIngredientText = (
+	ingredient: HouseholdMealIngredientRow | UserRecipeIngredientRow
+): string => {
+	const item = mealIngredientItem(ingredient);
+	const amount = displayIngredientAmount(ingredient.baseQuantity, ingredient.baseUnitId, {}, item);
+	return [amount, item].filter(Boolean).join(' ') || ingredient.originalText;
+};
+
+export const mealFromHouseholdMeal = (
+	meal: HouseholdMealRow,
+	ingredients: Array<HouseholdMealIngredientRow | UserRecipeIngredientRow> = [],
+	instructions: Array<HouseholdMealInstructionRow | UserRecipeInstructionRow> = [],
+	userRecipeId?: string
+): Meal => {
+	const date = meal.date ?? undefined;
 	return {
-		name: recipeTitle(recipe),
-		description: recipeDescription(recipe),
-		image: recipeImage(recipe),
-		cookTimeMinutes: cookMinutes(recipe),
-		prepTimeMinutes: prepMinutes(recipe),
-		recipeYield: servings(recipe),
-		recipeIngredient: json.recipeIngredient,
-		recipeInstructions: json.recipeInstructions
+		id: meal.id,
+		userRecipeId,
+		title: meal.title || fallbackTitle,
+		date,
+		time: meal.time ?? undefined,
+		sortOrder: meal.sortOrder ?? undefined,
+		cookTimeMinutes: meal.cookTimeMinutes ?? undefined,
+		servingsPlanned: meal.plannedYield ?? meal.yield ?? 1,
+		baseServings: meal.yield ?? meal.plannedYield ?? 1,
+		image: meal.imageUrl ?? undefined,
+		description: meal.description ?? '',
+		ingredients: ingredients
+			.toSorted((left, right) => left.lineIndex - right.lineIndex)
+			.map(mealIngredientText),
+		instructions: instructions
+			.toSorted((left, right) => left.stepIndex - right.stepIndex)
+			.map((instruction) => instruction.text)
 	};
 };
 
-export const mealFromHouseholdMeal = (meal: HouseholdMealRow, recipe?: UserRecipeRow): Meal => {
-	const snapshot = (meal.recipeSnapshotJson ?? {}) as RecipeJson;
-	const source = recipe ? mealSnapshotFromRecipe(recipe) : snapshot;
-	const date = meal.date ?? meal.scheduledFor?.slice(0, 10) ?? undefined;
-	return {
-		id: meal.id,
-		userRecipeId: meal.userRecipeId ?? undefined,
-		title: firstString(source.name, source.title) ?? fallbackTitle,
-		date,
-		time: meal.scheduledFor?.slice(11, 16) ?? undefined,
-		sortOrder: meal.sortOrder ?? undefined,
-		cookTimeMinutes: firstNumber(source.cookTimeMinutes, source.sourceClaimedMinutes),
-		servingsPlanned: meal.servingsPlanned,
-		baseServings: firstNumber(source.recipeYield, source.yield) ?? meal.servingsPlanned,
-		image: imageValue(source.image),
-		description: firstString(source.description) ?? '',
-		ingredients: Array.isArray(source.recipeIngredient)
-			? source.recipeIngredient.map(String)
-			: undefined,
-		instructions: Array.isArray(source.recipeInstructions)
-			? source.recipeInstructions.map((step) =>
-					typeof step === 'string'
-						? step
-						: (firstString(
-								(step as Record<string, unknown>).text,
-								(step as Record<string, unknown>).name
-							) ?? '')
-				)
-			: undefined
-	};
+const groupByMealId = <T extends { householdMealId: string | null }>(
+	rows: T[]
+): Map<string, T[]> => {
+	const grouped = new Map<string, T[]>();
+	for (const row of rows) {
+		if (!row.householdMealId) continue;
+		grouped.set(row.householdMealId, [...(grouped.get(row.householdMealId) ?? []), row]);
+	}
+	return grouped;
 };
 
 export const loadMealPlanMeals = async (
@@ -409,22 +426,36 @@ export const loadMealPlanMeals = async (
 	const householdMealRows = await db
 		.select()
 		.from(householdMeals)
-		.where(
-			and(
-				eq(householdMeals.householdId, params.householdId),
-				ne(householdMeals.status, 'archived'),
-				dateRangeFilter
-			)
-		);
-	const recipeIds = householdMealRows
-		.map((meal) => meal.userRecipeId)
-		.filter((id): id is string => Boolean(id));
-	const recipeRows = recipeIds.length
-		? await db.select().from(userRecipes).where(inArray(userRecipes.id, recipeIds))
-		: [];
-	const recipeById = new Map(recipeRows.map((recipe) => [recipe.id, recipe]));
+		.where(and(eq(householdMeals.householdId, params.householdId), dateRangeFilter));
+	const householdMealIds = householdMealRows.map((meal) => meal.id);
+	const [mealIngredientRows, mealInstructionRows, mealLinks] = householdMealIds.length
+		? await Promise.all([
+				db
+					.select()
+					.from(householdMealIngredients)
+					.where(inArray(householdMealIngredients.householdMealId, householdMealIds)),
+				db
+					.select()
+					.from(householdMealInstructions)
+					.where(inArray(householdMealInstructions.householdMealId, householdMealIds)),
+				db
+					.select()
+					.from(householdMealUserRecipes)
+					.where(inArray(householdMealUserRecipes.householdMealId, householdMealIds))
+			])
+		: [[], [], []];
+	const ingredientsByMealId = groupByMealId(mealIngredientRows);
+	const instructionsByMealId = groupByMealId(mealInstructionRows);
+	const recipeIdByMealId = new Map(
+		mealLinks.map((link) => [link.householdMealId, link.userRecipeId])
+	);
 	const scheduledMeals = householdMealRows.map((meal) =>
-		mealFromHouseholdMeal(meal, meal.userRecipeId ? recipeById.get(meal.userRecipeId) : undefined)
+		mealFromHouseholdMeal(
+			meal,
+			ingredientsByMealId.get(meal.id) ?? [],
+			instructionsByMealId.get(meal.id) ?? [],
+			recipeIdByMealId.get(meal.id)
+		)
 	);
 
 	return [...poolMeals, ...scheduledMeals];
@@ -442,9 +473,10 @@ export const updateRecipeIngredients = async (
 			userRecipeId: recipeId,
 			lineIndex: index,
 			originalText: fullIngredientText(ingredient),
-			parsedName: ingredient.item.trim() || null,
-			quantity: parsedAmount.quantity,
-			unit: parsedAmount.unit,
+			sourceAmountText: ingredient.amount.trim() || null,
+			sourceQuantity: parsedAmount.quantity,
+			sourceUnitLabel: parsedAmount.unit,
+			sourceFoodLabel: ingredient.item.trim() || ingredient.amount.trim() || 'Ingredient',
 			confidence: 1
 		});
 	}
