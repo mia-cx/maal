@@ -4,8 +4,8 @@
 
 - WorkOS Organization — external source of truth for households.
 - WorkOS Organization Membership — external source of truth for household membership.
-- `UserRecipe` — user-owned imported `schema.org/Recipe` snapshot with user-specific metadata.
-- `HouseholdMeal` — a user recipe or trial recipe snapshot in the household calendar, optionally anchored to a date/time. Survival is recipe metadata, not a separate entity.
+- `UserRecipe` — user-owned imported recipe flattened into relational rows with user-specific metadata.
+- `HouseholdMeal` — a copied, editable meal instance in the household calendar, optionally anchored to a date/time. Survival is recipe metadata, not a separate entity.
 - `GroceryList` — derived demand for a calendar, with persisted purchase state.
 - `PantryStaple` — user-marked ingredient to suppress from grocery reminders.
 - `MealCheckIn` — post-meal cook-time facts, verdict, servings, and notes.
@@ -29,7 +29,7 @@ Keep these separate:
 - Household recipe availability truth: which member-owned/saved recipes are visible to the household through membership.
 - Recipe attribution truth: which user imported/created or added a recipe.
 - Calendar truth: which household meals exist and whether they are in the top pool, date-only, or timed.
-- Household meal truth: which user recipe or trial recipe snapshot is planned, when it is assigned, how many servings the household intends, and any appliance requirements known for trial snapshots.
+- Household meal truth: which copied meal instance is planned, when it is assigned, how many servings the household intends, and any one-off ingredient/instruction substitutions.
 - Grocery truth: what ingredients are needed and whether they were bought.
 - Cook session truth: what actually happened.
 - Feedback truth: whether this meal worked for the user overall.
@@ -112,36 +112,29 @@ When a household meal has `plannedCookWorkosUserId`, use that user's coefficient
 
 ## Trial meals
 
-Household meals may contain a duplicated recipe snapshot instead of referencing a user recipe. This supports wildcards and exploration meals that Poke found but no user has committed to their menu yet.
+Household meals do not store full recipe JSON snapshots. A trial/wildcard meal is still just a `household_meals` row plus flattened household meal sidecars. This supports Poke-found meals without committing them to anyone's menu and avoids duplicating opaque recipe blobs per meal.
 
-If the meal works, `worth_repeating` or “Add to my menu” promotes the household meal snapshot into a `user_recipes` row. If it is `neutral` or `never_again`, the household history remains intact without polluting anyone's menu.
+If the meal works, `worth_repeating` or “Add to my menu” promotes the flattened household meal rows into a `user_recipes` row. If it is `neutral` or `never_again`, the household history remains intact without polluting anyone's menu.
 
-## Recipe snapshots vs operational rows
+## Source fidelity vs operational rows
 
-Maal stores imported recipe source truth as JSON blobs and also flattens the pieces it needs for operations.
+Maal treats schema.org as an import/export adapter, not the stored source of truth. Importers flatten recipe data into relational rows immediately.
 
-Source truth:
+Recipe and meal data:
 
-- `schema_org_recipe_json`
-- raw JSON-LD, when available
-- source URL/site/import metadata
+- title, description, image/source metadata, claimed prep/cook/total time, and yield live on `user_recipes` / `household_meals`.
+- ingredients live in `user_recipe_ingredients` / `household_meal_ingredients`.
+- instructions live in `user_recipe_instructions` / `household_meal_instructions`.
+- appliance requirements and nutrition live in their own relational sidecars.
 
-Operational data:
+Why relational only:
 
-- ingredients
-- instructions
-- appliance requirements, when known
-- nutrition summary
-- claimed prep/cook/total time
-- yield/servings
+- D1 storage stays bounded; no per-meal duplicated recipe blobs.
+- Grocery merging, filtering, substitutions, aliases, units, and nutrition all need queryable rows.
+- Ingredient parsing is imperfect, so every flattened ingredient keeps source text (`original_text`, `source_amount_text`, `source_ingredient_label`) plus confidence.
+- Export/share can reconstruct schema.org from relational rows when needed.
 
-Why both:
-
-- The blob preserves fidelity and makes export/debugging possible.
-- Flattened rows make grocery merging, confidence scoring, and nutrition/time summaries practical.
-- Ingredient parsing is imperfect, so every flattened ingredient keeps the original source text and a confidence score.
-
-User recipes should have flattened ingredients/instructions/nutrition and may have appliance requirements inferred from `cookingMethod` or instructions. Trial household meals may also have their own flattened ingredients/instructions/appliance requirements/nutrition when they do not reference a `user_recipes` row. Missing appliance data means unknown, not compatible/incompatible.
+Adding a recipe to the plan copies recipe sidecars into household meal sidecars. One-off substitutions, allergy accommodations, omitted ingredients, and instruction tweaks mutate only the household meal rows, never the reusable recipe template.
 
 ## Grocery inclusion rules
 

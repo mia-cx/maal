@@ -14,7 +14,7 @@ Copies a recipe visible from a household list, household meal, or another member
 
 ### `add_household_meal`
 
-Creates a `household_meals` row with optional date/time assignment. Input can reference a user recipe, or trial recipe snapshot.
+Creates a `household_meals` row with optional date/time assignment. Input can reference a user recipe or provide a trial recipe payload that is flattened into household meal rows.
 
 ### `get_calendar`
 

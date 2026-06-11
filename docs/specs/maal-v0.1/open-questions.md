@@ -18,7 +18,7 @@
 ## MCP/API
 
 1. Should tool calls be user-scoped by auth context only, or include explicit household IDs?
-2. Should `suggest_meals_for_day` return only existing assigned/top-pool household meals, or also accept candidate recipe snapshots from Poke?
+2. Should `suggest_meals_for_day` return only existing assigned/top-pool household meals, or also accept candidate recipe payloads from Poke that Maal immediately flattens?
 3. Should Maal own scoring, Poke own scoring, or both with Maal providing vectors?
 
 ## UX copy

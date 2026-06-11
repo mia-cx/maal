@@ -18,4 +18,4 @@ Maal is a flexible meal logistics layer for Poke: recipes come in as `schema.org
 
 ## v0.1 thesis
 
-Maal is not recipe search and not a cookbook index. Users bring their own recipe links/snapshots directly or through Poke. Maal stores the plan, user recipe snapshots, grocery demand, pantry assumptions, cook-time reality, and user feedback.
+Maal is not recipe search and not a cookbook index. Users bring their own recipe links directly or through Poke. Maal stores the plan, flattened user recipe templates, grocery demand, pantry assumptions, cook-time reality, and user feedback.

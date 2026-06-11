@@ -11,10 +11,22 @@ export const TaxonomyStatus = Schema.Literal('active', 'provisional', 'deprecate
 export const ReviewStatus = Schema.Literal('active', 'pending', 'rejected');
 export const ProposalStatus = Schema.Literal('pending', 'approved', 'rejected', 'merged');
 export const MeasureKind = Schema.Literal('mass', 'volume', 'count');
-export const BaseUnit = Schema.Literal('g', 'ml', 'count');
+export const CanonicalUnitKey = Schema.String;
+export const MealStatus = Schema.Literal(
+	'planned',
+	'cooked',
+	'skipped',
+	'postponed',
+	'replaced',
+	'archived'
+);
 
 export const IngredientId = Schema.String.pipe(Schema.startsWith('ing_'));
 export const UnitId = Schema.String.pipe(Schema.startsWith('unit_'));
+export const RecipeId = Schema.String;
+export const HouseholdMealId = Schema.String;
+export const WorkOsUserId = Schema.String;
+export const MealFeedbackVerdict = Schema.Literal('worth_repeating', 'neutral', 'never_again');
 
 export const Ingredient = Schema.Struct({
 	id: IngredientId,
@@ -52,7 +64,7 @@ export const Unit = Schema.Struct({
 	canonicalKey: Schema.String,
 	symbol: Schema.String,
 	kind: MeasureKind,
-	baseUnit: BaseUnit,
+	baseUnit: CanonicalUnitKey,
 	toBaseFactor: Schema.Number.pipe(Schema.positive()),
 	status: Schema.Literal('active', 'deprecated')
 });
@@ -81,20 +93,141 @@ export const IngredientDisplayOverride = Schema.Struct({
 	preferredUnitId: Schema.optional(UnitId)
 });
 
-export const ParsedRecipeIngredientSidecar = Schema.Struct({
-	// schema.org source fidelity
+export const FlattenedRecipeIngredient = Schema.Struct({
+	// Source fidelity from schema.org recipeIngredient lines or user input.
 	originalText: Schema.String,
 	sourceAmountText: Schema.optional(Schema.String),
 	sourceIngredientLabel: Schema.String,
 
-	// Maal interpretation for merging and display
+	// Maal interpretation for filtering, grocery merging, display, and one-off edits.
 	baseQuantity: Schema.optional(Schema.Number),
-	baseUnit: Schema.optional(BaseUnit),
+	baseUnit: Schema.optional(CanonicalUnitKey),
 	ingredientId: Schema.optional(IngredientId),
 	groceryRollupIngredientId: Schema.optional(IngredientId),
 	displayLabelOverride: Schema.optional(Schema.String),
 	displayUnitOverride: Schema.optional(UnitId),
+	category: Schema.optional(Schema.String),
+	optional: Schema.Boolean,
 	parseConfidence: ConfidenceScore
+});
+
+export const RecipeInstruction = Schema.Struct({
+	stepIndex: Schema.Number,
+	sectionName: Schema.optional(Schema.String),
+	text: Schema.String,
+	durationMinutes: Schema.optional(Schema.Number),
+	confidence: Schema.optional(ConfidenceScore)
+});
+
+export const RecipeClassification = Schema.Struct({
+	kind: Schema.Literal('category', 'cuisine', 'keyword', 'diet'),
+	value: Schema.String,
+	normalizedValue: Schema.String,
+	schemaOrgValue: Schema.optional(Schema.String),
+	locale: Schema.optional(Locale),
+	confidence: ConfidenceScore
+});
+
+export const RecipeMedia = Schema.Struct({
+	kind: Schema.Literal('image', 'video'),
+	position: Schema.Number,
+	url: Schema.optional(Schema.String),
+	contentUrl: Schema.optional(Schema.String),
+	embedUrl: Schema.optional(Schema.String),
+	thumbnailUrl: Schema.optional(Schema.String),
+	name: Schema.optional(Schema.String),
+	caption: Schema.optional(Schema.String)
+});
+
+export const NutritionFact = Schema.Struct({
+	nutrient: Schema.Literal(
+		'calories',
+		'carbohydrate',
+		'cholesterol',
+		'fat',
+		'fiber',
+		'protein',
+		'saturated_fat',
+		'serving_size',
+		'sodium',
+		'sugar',
+		'trans_fat',
+		'unsaturated_fat',
+		'other'
+	),
+	schemaOrgProperty: Schema.String,
+	originalText: Schema.String,
+	amount: Schema.optional(Schema.Number),
+	unit: Schema.optional(Schema.String),
+	baseAmount: Schema.optional(Schema.Number),
+	baseUnit: Schema.optional(Schema.String),
+	locale: Schema.optional(Locale),
+	confidence: ConfidenceScore
+});
+
+export const UserRecipe = Schema.Struct({
+	id: RecipeId,
+	workosUserId: Schema.String,
+	savedFromHouseholdId: Schema.optional(Schema.String),
+	title: Schema.String,
+	description: Schema.optional(Schema.String),
+	imageUrl: Schema.optional(Schema.String),
+	prepTimeMinutes: Schema.optional(Schema.Number),
+	cookTimeMinutes: Schema.optional(Schema.Number),
+	totalTimeMinutes: Schema.optional(Schema.Number),
+	servings: Schema.optional(Schema.Number),
+	sourceYieldText: Schema.optional(Schema.String),
+	sourceDatePublished: Schema.optional(Schema.String),
+	sourceDateModified: Schema.optional(Schema.String),
+	sourceLanguage: Schema.optional(Schema.String),
+	sourceRatingValue: Schema.optional(Schema.Number),
+	sourceRatingCount: Schema.optional(Schema.Number),
+	sourceReviewCount: Schema.optional(Schema.Number),
+	ingredients: Schema.Array(FlattenedRecipeIngredient),
+	instructions: Schema.Array(RecipeInstruction),
+	classifications: Schema.Array(RecipeClassification),
+	media: Schema.Array(RecipeMedia),
+	nutritionFacts: Schema.Array(NutritionFact)
+});
+
+export const HouseholdMeal = Schema.Struct({
+	id: HouseholdMealId,
+	householdId: Schema.String,
+	userRecipeId: Schema.optional(RecipeId),
+	title: Schema.String,
+	description: Schema.optional(Schema.String),
+	imageUrl: Schema.optional(Schema.String),
+	prepTimeMinutes: Schema.optional(Schema.Number),
+	cookTimeMinutes: Schema.optional(Schema.Number),
+	baseServings: Schema.Number.pipe(Schema.positive()),
+	servingsPlanned: Schema.Number.pipe(Schema.positive()),
+	status: MealStatus,
+	sourceYieldText: Schema.optional(Schema.String),
+	sourceDatePublished: Schema.optional(Schema.String),
+	sourceDateModified: Schema.optional(Schema.String),
+	sourceLanguage: Schema.optional(Schema.String),
+	sourceRatingValue: Schema.optional(Schema.Number),
+	sourceRatingCount: Schema.optional(Schema.Number),
+	sourceReviewCount: Schema.optional(Schema.Number),
+	ingredients: Schema.Array(FlattenedRecipeIngredient),
+	instructions: Schema.Array(RecipeInstruction),
+	classifications: Schema.Array(RecipeClassification),
+	media: Schema.Array(RecipeMedia),
+	nutritionFacts: Schema.Array(NutritionFact)
+});
+
+export const MealReview = Schema.Struct({
+	id: Schema.String,
+	householdId: Schema.String,
+	householdMealId: HouseholdMealId,
+	userRecipeId: Schema.optional(RecipeId),
+	workosUserId: WorkOsUserId,
+	rating: Schema.optional(Schema.Number.pipe(Schema.between(1, 5))),
+	verdict: Schema.optional(MealFeedbackVerdict),
+	title: Schema.optional(Schema.String),
+	body: Schema.optional(Schema.String),
+	createdAt: Schema.String,
+	updatedAt: Schema.String
 });
 
 export const TaxonomyProposal = Schema.Struct({
@@ -118,7 +251,11 @@ export const TaxonomyProposal = Schema.Struct({
 export type Ingredient = Schema.Schema.Type<typeof Ingredient>;
 export type IngredientAlias = Schema.Schema.Type<typeof IngredientAlias>;
 export type Unit = Schema.Schema.Type<typeof Unit>;
-export type ParsedRecipeIngredientSidecar = Schema.Schema.Type<
-	typeof ParsedRecipeIngredientSidecar
->;
+export type FlattenedRecipeIngredient = Schema.Schema.Type<typeof FlattenedRecipeIngredient>;
+export type RecipeClassification = Schema.Schema.Type<typeof RecipeClassification>;
+export type RecipeMedia = Schema.Schema.Type<typeof RecipeMedia>;
+export type NutritionFact = Schema.Schema.Type<typeof NutritionFact>;
+export type UserRecipe = Schema.Schema.Type<typeof UserRecipe>;
+export type HouseholdMeal = Schema.Schema.Type<typeof HouseholdMeal>;
+export type MealReview = Schema.Schema.Type<typeof MealReview>;
 export type TaxonomyProposal = Schema.Schema.Type<typeof TaxonomyProposal>;

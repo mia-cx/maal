@@ -1,0 +1,50 @@
+# `unit_user_entries`
+
+`unit_user_entries` stores user-scoped provisional unit identities.
+
+Rows are active immediately for that WorkOS user. They let the parser/UI represent a unit whose canonical global `units` row does not exist yet.
+
+## Table
+
+```txt
+unit_user_entries
+- id                  // index-friendly primary key
+- workosUserId        // WorkOS user id
+- canonicalLabel      // user's canonical label for the unit
+- baseUnitId          // references units.id
+- toBaseFactor        // numeric multiplier from this unit to base unit
+- toBaseOffset        // numeric offset after multiplication; usually 0
+- adoptionStatus      // pending_review | accepted | rejected
+- createdAt
+- updatedAt
+```
+
+## Columns
+
+### `baseUnitId`
+
+Reference to the canonical global base unit used for conversion. For non-convertible count/package units, moderation can promote the provisional unit into `units` with itself as the base unit.
+
+### `adoptionStatus`
+
+Tracks whether this scoped unit has been reviewed for possible global adoption.
+
+- `pending_review` — active for the user and waiting for moderation
+- `accepted` — accepted into global taxonomy or intentionally mapped to an existing global unit
+- `rejected` — remains user-local but should not keep showing up in moderator queues
+
+This is not an activation status. Scoped unit entries are active immediately for their scope regardless of adoption status.
+
+## Constraints
+
+At most one user unit entry per normalized label:
+
+```ts
+uniqueIndex('unit_user_entries_label_unique').on(table.workosUserId, table.canonicalLabel);
+```
+
+`baseUnitId` references `units.id`.
+
+## Reasoning
+
+User entries unblock parser correction for unknown units. They are local identity rows with conversion math, not aliases. Do not add scope columns here; the table already provides user scope.

@@ -4,7 +4,10 @@ export type ISODate = string;
 export type ISODateTime = string;
 export type ISOTime = string;
 export type ISODuration = string;
+export type UserRecipeId = string;
 export type HouseholdMealId = string;
+export type IngredientId = string;
+export type UnitId = string;
 export type ConfidenceScore = number;
 
 export type WorkOsUserId = string;
@@ -35,6 +38,7 @@ export type SchemaOrgRecipe = {
 	keywords?: string | string[];
 	recipeCategory?: string | string[];
 	recipeCuisine?: string | string[];
+	suitableForDiet?: string | string[];
 	aggregateRating?: unknown;
 	video?: unknown;
 };
@@ -79,8 +83,12 @@ export type SchemaOrgNutritionInformation = {
 	proteinContent?: string;
 	fatContent?: string;
 	fiberContent?: string;
+	saturatedFatContent?: string;
 	sugarContent?: string;
 	sodiumContent?: string;
+	cholesterolContent?: string;
+	transFatContent?: string;
+	unsaturatedFatContent?: string;
 	servingSize?: string;
 };
 
@@ -88,23 +96,33 @@ export type UserRecipe = {
 	id: string;
 	workosUserId: WorkOsUserId;
 	savedFromHouseholdId?: HouseholdId;
-	schemaOrgRecipe: SchemaOrgRecipe;
+	title: string;
+	description?: string;
+	imageUrl?: string;
+	prepTimeMinutes?: number;
+	cookTimeMinutes?: number;
+	totalTimeMinutes?: number;
+	servings?: number;
+	sourceYieldText?: string;
+	sourceDatePublished?: ISODate;
+	sourceDateModified?: ISODate;
+	sourceLanguage?: string;
+	sourceRatingValue?: number;
+	sourceRatingCount?: number;
+	sourceReviewCount?: number;
 	source: RecipeSource;
 	metadata: RecipeMetadata;
 	ingredients: RecipeIngredient[];
 	instructions: RecipeInstruction[];
+	classifications?: RecipeClassification[];
+	media?: RecipeMedia[];
 	applianceRequirements?: ApplianceRequirement[];
-	nutrition?: RecipeNutrition;
+	nutritionFacts?: NutritionFact[];
 	createdAt: ISODateTime;
 	updatedAt: ISODateTime;
 };
 
 export type RecipeMetadata = {
-	familiarity: MealFamiliarity;
-	latestVerdict?: MealFeedbackVerdict;
-	timesCooked: number;
-	lastCookedAt?: ISODateTime;
-	averageActualMinutes?: number;
 	sourceClaimedMinutes?: number;
 	sourceQuality?: RecipeSourceQuality;
 	userNotes?: string;
@@ -115,7 +133,6 @@ export type RecipeSourceQuality = {
 	ingredientConfidence?: ConfidenceScore;
 	instructionConfidence?: ConfidenceScore;
 	nutritionConfidence?: ConfidenceScore;
-	timeRealismConfidence?: ConfidenceScore;
 };
 
 export type MealFamiliarity = 'safe' | 'exploration' | 'wildcard';
@@ -124,11 +141,25 @@ export type HouseholdMeal = {
 	id: HouseholdMealId;
 	householdId: HouseholdId;
 	userRecipeId?: string;
-	recipeSnapshot?: HouseholdMealRecipeSnapshot;
+	title: string;
+	description?: string;
+	imageUrl?: string;
+	prepTimeMinutes?: number;
+	cookTimeMinutes?: number;
+	baseServings: number;
+	sourceYieldText?: string;
+	sourceDatePublished?: ISODate;
+	sourceDateModified?: ISODate;
+	sourceLanguage?: string;
+	sourceRatingValue?: number;
+	sourceRatingCount?: number;
+	sourceReviewCount?: number;
 	ingredients?: RecipeIngredient[];
 	instructions?: RecipeInstruction[];
+	classifications?: RecipeClassification[];
+	media?: RecipeMedia[];
 	applianceRequirements?: ApplianceRequirement[];
-	nutrition?: RecipeNutrition;
+	nutritionFacts?: NutritionFact[];
 	includeInGroceryList: boolean;
 	scheduledFor?: ISODateTime;
 	date?: ISODate;
@@ -147,24 +178,24 @@ export type HouseholdMeal = {
 	updatedAt: ISODateTime;
 };
 
-export type HouseholdMealRecipeSnapshot = {
-	schemaOrgRecipe: SchemaOrgRecipe;
-	source: RecipeSource;
-	metadata: RecipeMetadata;
-	promotedToUserRecipeId?: string;
-};
-
 export type RecipeIngredient = {
 	id?: string;
 	lineIndex: number;
 	originalText: string;
-	parsedName?: string;
-	quantity?: number;
-	unit?: string;
+	sourceAmountText?: string;
+	sourceIngredientLabel: string;
+	baseQuantity?: number;
+	baseUnit?: CanonicalUnitKey;
+	ingredientId?: IngredientId;
+	groceryRollupIngredientId?: IngredientId;
+	displayLabelOverride?: string;
+	displayUnitOverride?: UnitId;
 	category?: GroceryCategory;
 	optional?: boolean;
 	confidence: ConfidenceScore;
 };
+
+export type CanonicalUnitKey = string;
 
 export type RecipeInstruction = {
 	id?: string;
@@ -173,6 +204,70 @@ export type RecipeInstruction = {
 	text: string;
 	durationMinutes?: number;
 	confidence?: ConfidenceScore;
+};
+
+export type RecipeClassification = {
+	id?: string;
+	kind: 'category' | 'cuisine' | 'keyword' | 'diet';
+	value: string;
+	normalizedValue: string;
+	schemaOrgValue?: string;
+	locale?: string;
+	confidence: ConfidenceScore;
+};
+
+export type RecipeMedia = {
+	id?: string;
+	kind: 'image' | 'video';
+	position: number;
+	url?: string;
+	contentUrl?: string;
+	embedUrl?: string;
+	thumbnailUrl?: string;
+	name?: string;
+	caption?: string;
+};
+
+export type NutritionFact = {
+	id?: string;
+	nutrient: NutritionNutrient;
+	schemaOrgProperty: string;
+	originalText: string;
+	amount?: number;
+	unit?: string;
+	baseAmount?: number;
+	baseUnit?: string;
+	locale?: string;
+	confidence: ConfidenceScore;
+};
+
+export type NutritionNutrient =
+	| 'calories'
+	| 'carbohydrate'
+	| 'cholesterol'
+	| 'fat'
+	| 'fiber'
+	| 'protein'
+	| 'saturated_fat'
+	| 'serving_size'
+	| 'sodium'
+	| 'sugar'
+	| 'trans_fat'
+	| 'unsaturated_fat'
+	| 'other';
+
+export type MealReview = {
+	id: string;
+	householdId: HouseholdId;
+	householdMealId: HouseholdMealId;
+	userRecipeId?: UserRecipeId;
+	workosUserId: WorkOsUserId;
+	rating?: number;
+	verdict?: MealFeedbackVerdict;
+	title?: string;
+	body?: string;
+	createdAt: ISODateTime;
+	updatedAt: ISODateTime;
 };
 
 export type ApplianceKind =
@@ -195,15 +290,6 @@ export type ApplianceRequirement = {
 	source: ApplianceRequirementSource;
 	confidence: ConfidenceScore;
 	notes?: string;
-};
-
-export type RecipeNutrition = {
-	calories?: number;
-	proteinGrams?: number;
-	carbsGrams?: number;
-	fatGrams?: number;
-	servingSize?: string;
-	confidence?: ConfidenceScore;
 };
 
 export type MealSlot = 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'other';

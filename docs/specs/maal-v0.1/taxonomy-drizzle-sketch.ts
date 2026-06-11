@@ -1,7 +1,7 @@
-// Draft Drizzle shape for review only. This is not wired into the live schema index yet.
-// Recipes and meal snapshots continue to preserve exact schema.org/Recipe JSON;
-// these tables are Maal sidecars for parsing, display preferences, grocery rollups,
-// localization, aliases, and moderation.
+// Draft Drizzle taxonomy shape for review only. This is not wired into the live schema index yet.
+// Live recipe and meal ingredient tables already hold flattened source text, base units,
+// display overrides, and grocery rollup ids. These tables add shared taxonomy,
+// localization, aliases, and moderation on top.
 
 import { sql } from 'drizzle-orm';
 import { index, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
@@ -226,12 +226,15 @@ export const taxonomyProposals = sqliteTable(
 	]
 );
 
-// Future sidecar columns for user_recipe_ingredients and household_meal_ingredients:
-// - source_amount_text: raw amount/unit text from schema.org line, e.g. "2 Tbsp"
+// Live sidecar columns on user_recipe_ingredients and household_meal_ingredients:
+// - original_text: full raw source line, e.g. "2 Tbsp wild rocket"
+// - source_amount_text: raw amount/unit text, e.g. "2 Tbsp"
 // - source_ingredient_label: raw source label, e.g. "wild rocket"
-// - base_quantity: canonical numeric quantity in g/ml/count units
-// - base_unit: canonical storage unit: g | ml | count
-// - ingredient_id: resolved taxonomy ingredient or variant
-// - grocery_rollup_ingredient_id: merge target for grocery lists
-// - display_label_override: per-line label override, preserving schema.org source text
-// - display_unit_override: per-line unit override, preserving canonical storage
+// - base_quantity: canonical numeric quantity normalized where possible
+// - base_unit: canonical unit key. Mass normalizes to g, volume to ml, count/package units
+//   keep their canonical key (each, clove, can, bunch, package, etc.) because they are
+//   not mutually convertible without ingredient/package metadata.
+// - food_entity_id: resolved taxonomy ingredient or variant
+// - grocery_rollup_food_entity_id: merge target for grocery lists
+// - display_label_override: per-line label override
+// - display_unit_override: per-line unit override

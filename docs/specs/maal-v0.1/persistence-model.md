@@ -70,7 +70,7 @@ Important fields:
 
 ### `user_recipes`
 
-A user's recipe collection. This maps a WorkOS User ID to imported recipe snapshots and makes recipes portable across households. Maal does not have a global `recipes` table because it is not a cookbook, search index, or recipe discovery product.
+A user's recipe collection. This maps a WorkOS User ID to flattened imported recipes and makes recipes portable across households. Maal does not have a global `recipes` table because it is not a cookbook, search index, or recipe discovery product.
 
 Maal does not need a local `users` table unless/until it stores app-specific profile data such as avatars or display preferences.
 
@@ -79,10 +79,15 @@ Important fields:
 - `id`
 - `workos_user_id`
 - `saved_from_household_id` nullable
-- `schema_org_recipe_json`
+- `title`
+- `description`
+- `image_url`
+- `prep_time_minutes`
+- `cook_time_minutes`
+- `total_time_minutes`
+- `servings`
 - `source_url`
 - `source_site_name`
-- `raw_json_ld`
 - `source_html_hash`
 - recipe metadata/notes
 - timestamps
@@ -100,24 +105,28 @@ Semantically, a household recipe list is not a separate source of truth in v0.1.
 
 This keeps recipes portable for users while still making household recipe lists easy to query. If later we need explicit household curation independent of membership, we can add a `household_recipe_collections` table.
 
-Derived/cached fields on `user_recipes`:
+Mutable recipe fields on `user_recipes`:
 
-- `familiarity`
-- `times_cooked`
-- `last_cooked_at`
-- `latest_verdict`
-- `average_actual_minutes`
+- `user_notes`
+- source confidence scores
 - `source_claimed_minutes`
+
+Cook history and familiarity fields such as `timesCooked`, `lastCookedAt`, `latestVerdict`, `averageActualMinutes`, and `familiarity` are derived from `household_meals`, `meal_check_ins`, and `meal_reviews`; they are not stored on `user_recipes`.
 
 Related operational tables:
 
+- `user_recipe_ingredients`, one row per flattened source ingredient line.
+- `user_recipe_instructions`, one row per flattened source instruction step.
+- `user_recipe_classifications`, one row per `recipeCategory`, `recipeCuisine`, `keywords`, or `suitableForDiet` value.
+- `user_recipe_media`, one row per image/video.
+- `user_recipe_nutrition_facts`, one row per `NutritionInformation` property, preserving raw localized text plus parsed amount/unit when possible.
 - `user_recipe_appliance_requirements`, one row per inferred or user-confirmed appliance. Absence means unknown; known unavailable household appliances should warn/downrank/filter depending on user intent.
 
 These can be computed from `household_meals` and `meal_check_ins`. Cache them if ranking needs them quickly.
 
 Ownership behavior:
 
-- `user_recipes` are imported source snapshots owned by a WorkOS user.
+- `user_recipes` are imported, flattened recipe templates owned by a WorkOS user.
 - Maal never exposes a global recipe index for discovery.
 - Users bring recipes into Maal themselves, either manually or through Poke, by linking/importing sources that expose `schema.org/Recipe`.
 - If a member leaves a household, their personal recipes stop appearing in the household collection unless those recipes are already referenced by `household_meals`.
@@ -125,18 +134,21 @@ Ownership behavior:
 
 ### `household_meals`
 
-Planned household meal row. It can reference a user recipe or embed a trial recipe snapshot. Date/time assignment is optional; meals with neither `date` nor `scheduled_for` appear in the top meal pool. Floating meal cards are unscheduled `household_meals`, not reusable recipe templates. Moving a card to a day sets `date`; moving it back clears `date`; the meal object and DB row stay the same.
+Planned household meal row. It can reference the user recipe it came from, but it owns a flattened local copy of ingredients, instructions, nutrition, and appliance requirements. Date/time assignment is optional; meals with neither `date` nor `scheduled_for` appear in the top meal pool. Floating meal cards are unscheduled `household_meals`, not reusable recipe templates. Moving a card to a day sets `date`; moving it back clears `date`; the meal object and DB row stay the same.
 
-Every household meal should keep a local copy/snapshot of the recipe at the time it entered the plan. That local copy lets future slices support per-meal substitutions, omitted ingredients, portion changes, and instruction tweaks without mutating the source recipe in My Menu.
+Every household meal keeps local relational rows copied from the recipe at the time it entered the plan. That copy supports per-meal substitutions, omitted ingredients, portion changes, visitor allergy accommodations, and instruction tweaks without mutating the source recipe in My Menu.
 
 Important fields:
 
 - `id`
 - `household_id`
 - `user_recipe_id` nullable
-- `recipe_snapshot_json` nullable
-- `recipe_source_json` nullable
-- `recipe_metadata_json` nullable
+- `title`
+- `description`
+- `image_url`
+- `prep_time_minutes`
+- `cook_time_minutes`
+- `base_servings`
 - `include_in_grocery_list` boolean
 - `scheduled_for` nullable
 - `date` nullable, for date-only planning
@@ -152,23 +164,39 @@ Important fields:
 
 Constraints:
 
-- exactly one of `user_recipe_id` or `recipe_snapshot_json` should be present.
 - Top-pool meals have neither `date` nor `scheduled_for`; date-only meals have `date` and null `scheduled_for`.
+- `user_recipe_id` is provenance only; household meal sidecars are the operational source of truth for planned/cooked/grocery behavior.
 
-Related flattened operation tables for trial snapshots:
+Related flattened operation tables:
 
 - `household_meal_ingredients`
 - `household_meal_instructions`
 - `household_meal_appliance_requirements`
-- `household_meal_nutrition`
+- `household_meal_classifications`
+- `household_meal_media`
+- `household_meal_nutrition_facts`
 
-If a household meal references `user_recipe_id`, Maal can derive ingredients from `user_recipe_ingredients`. If it is a trial snapshot, Maal uses the household meal flattened rows.
+Grocery generation uses `household_meal_ingredients`, not `user_recipe_ingredients`, because planned meals may contain one-off substitutions or omissions.
 
 Promotion behavior:
 
-- Trial/wildcard meals can live only as household meal snapshots.
-- If the user marks a trial meal `worth_repeating` or chooses “Add to my menu”, Maal creates a `user_recipes` row from the household meal snapshot.
-- The household meal keeps its snapshot for history and may also store the resulting `user_recipe_id`.
+- Trial/wildcard meals can live only as household meal rows plus sidecars.
+- If the user marks a trial meal `worth_repeating` or chooses “Add to my menu”, Maal creates a `user_recipes` row from the household meal row and sidecars.
+- The household meal may then store the resulting `user_recipe_id` as provenance, but keeps its own local rows for history.
+
+### `meal_reviews`
+
+First-party user reviews are meal-scoped rows that also carry the linked recipe id when the meal came from a saved recipe.
+
+- `household_meal_id` is required.
+- `user_recipe_id` is nullable provenance for recipe-level aggregation.
+- `workos_user_id` identifies the reviewer.
+- Unique constraint: one review per `(household_meal_id, workos_user_id)`.
+- Multiple household members can review the same meal.
+- Recipe ratings are derived by aggregating `meal_reviews` rows by `user_recipe_id`.
+- Deleting a recipe nulls `user_recipe_id` on reviews but preserves the meal review.
+
+Imported schema.org `Review` graphs are not stored in this table; those are third-party website artifacts and should only be imported if a product feature needs external review provenance.
 
 ### `grocery_lists` and `grocery_items`
 
@@ -219,14 +247,17 @@ Constraints:
 Promotion behavior:
 
 - If a check-in references a household meal snapshot and the reporter has no matching user recipe, Maal can create a `user_recipes` row from that snapshot.
-- `worth_repeating` promotes familiarity to `safe`; `neutral` and `never_again` remain exact rating values used for future search/filtering.
+- `worth_repeating`, `neutral`, and `never_again` remain exact rating values used for future search/filtering; familiarity remains a derived frecency label rather than a persisted mutation.
 
 ## Derived API fields
 
 The API can return derived summaries that are not stored directly on core rows:
 
 - user recipe `timesCooked`
+- user recipe `lastCookedAt`
 - user recipe `latestVerdict`
+- user recipe `averageActualMinutes`
+- user recipe `familiarity`
 - household meal `ingredientPurchaseState`
 - meal candidate fit vectors
 - grocery merge confidence

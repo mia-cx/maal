@@ -4,7 +4,7 @@
 
 1. Poke finds a recipe site with `schema.org/Recipe` JSON-LD.
 2. Poke sends the recipe to Maal with source metadata.
-3. Maal stores a stable snapshot and confidence scores.
+3. Maal flattens the recipe into relational rows with source text and confidence scores.
 4. Poke creates a `household_meals` row, optionally with date/time assignment.
 
 ## Calendar planning
@@ -56,6 +56,6 @@
 
 1. User sees a recipe from the household list, a household meal, or another member's menu.
 2. User chooses “Add to my menu”.
-3. Maal copies the recipe snapshot/source into a new `user_recipes` row for that WorkOS user.
-4. Feedback, familiarity, notes, and cook history start as that user's own recipe metadata.
+3. Maal copies the flattened household meal rows into a new `user_recipes` row for that WorkOS user.
+4. Notes copy as user-owned recipe metadata; feedback, familiarity, and cook history are derived from that user's household meals, check-ins, and reviews.
 5. Because the user is a household member, the copied menu item is visible in the household recipe collection view.

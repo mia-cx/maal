@@ -22,7 +22,7 @@
 
 ### Naming
 
-The backend table/DTO name is `user_recipes` / `UserRecipe` because the data is a user-owned collection of recipe snapshots. The UI can call this collection “my menu” / “your menu”, similar to how Spotify calls a collection a library without naming the table `user_library_items`.
+The backend table/DTO name is `user_recipes` / `UserRecipe` because the data is a user-owned collection of flattened recipe templates. The UI can call this collection “my menu” / “your menu”, similar to how Spotify calls a collection a library without naming the table `user_library_items`.
 
 ### Calendar model
 
@@ -32,7 +32,7 @@ A household meal is always a plan, but date/time assignment is optional. Meals w
 
 ### User recipes
 
-Maal stores user-imported recipes as mostly-standard `schema.org/Recipe` payloads plus Maal metadata. There is no global recipe catalog or recipe search index. Users bring recipes in manually or through Poke by linking/importing sources that expose Recipe schema. The stored snapshot is stable even if the source website changes.
+Maal imports mostly-standard `schema.org/Recipe` payloads, then stores flattened relational recipe rows plus Maal metadata. There is no global recipe catalog or recipe search index. Users bring recipes in manually or through Poke by linking/importing sources that expose Recipe schema. Source ingredient text is preserved per row even if the source website changes.
 
 ### Planning board
 
@@ -112,13 +112,13 @@ Capacity mode describes what kind of meal fits today:
 
 ### Meal familiarity
 
-Meal familiarity is mental-load metadata on a recipe/meal:
+Meal familiarity is derived mental-load metadata on a recipe/meal, based on household meal frecency, reviews, check-ins, and fallback behavior:
 
-- `safe` — known-good for this user, including low-effort fallback meals.
+- `safe` — known-good for this household/user context, including low-effort fallback meals.
 - `exploration` — new-ish, plausible, not proven safe.
 - `wildcard` — intentionally outside normal preferences.
 
-`new` is an umbrella concept for search/import context, not a persisted familiarity value: new recipes should enter as either `exploration` or `wildcard`.
+`new` is an umbrella concept for search/import context, not a persisted familiarity value. Recipe rows do not store familiarity; query/API layers derive it.
 
 Display labels:
 
