@@ -62,12 +62,13 @@ const ingredientAmount = (
 	ingredient: UserRecipeIngredientRow,
 	unitPreferences: UnitPreferences = {}
 ): string => {
-	const item = ingredientItem(ingredient);
+	const item = ingredientItem(ingredient, unitPreferences);
 	const amount = displayIngredientAmount(
 		ingredient.baseQuantity,
 		ingredient.baseUnitId,
 		unitPreferences,
-		item
+		item,
+		ingredient.baseFoodId
 	);
 	if (amount) return amount;
 	return item && ingredient.originalText.endsWith(item)
@@ -75,8 +76,15 @@ const ingredientAmount = (
 		: '';
 };
 
-const ingredientItem = (ingredient: UserRecipeIngredientRow): string =>
-	ingredient.sourceFoodLabel ?? ingredient.originalText;
+const ingredientItem = (
+	ingredient: UserRecipeIngredientRow,
+	unitPreferences: UnitPreferences = {}
+): string =>
+	(ingredient.baseFoodId
+		? unitPreferences.ingredientNameOverrides?.[ingredient.baseFoodId]
+		: undefined) ??
+	ingredient.sourceFoodLabel ??
+	ingredient.originalText;
 
 const ingredientAmountText = (ingredient: RecipeIngredientItem): string =>
 	[ingredient.amount.trim(), ingredient.unit?.trim()].filter(Boolean).join(' ');
@@ -378,14 +386,27 @@ export const mealFromMenuRecipe = (
 });
 
 const mealIngredientItem = (
-	ingredient: HouseholdMealIngredientRow | UserRecipeIngredientRow
-): string => ingredient.sourceFoodLabel ?? ingredient.originalText;
+	ingredient: HouseholdMealIngredientRow | UserRecipeIngredientRow,
+	unitPreferences: UnitPreferences = {}
+): string =>
+	(ingredient.baseFoodId
+		? unitPreferences.ingredientNameOverrides?.[ingredient.baseFoodId]
+		: undefined) ??
+	ingredient.sourceFoodLabel ??
+	ingredient.originalText;
 
 const mealIngredientText = (
-	ingredient: HouseholdMealIngredientRow | UserRecipeIngredientRow
+	ingredient: HouseholdMealIngredientRow | UserRecipeIngredientRow,
+	unitPreferences: UnitPreferences = {}
 ): string => {
-	const item = mealIngredientItem(ingredient);
-	const amount = displayIngredientAmount(ingredient.baseQuantity, ingredient.baseUnitId, {}, item);
+	const item = mealIngredientItem(ingredient, unitPreferences);
+	const amount = displayIngredientAmount(
+		ingredient.baseQuantity,
+		ingredient.baseUnitId,
+		unitPreferences,
+		item,
+		ingredient.baseFoodId
+	);
 	return [amount, item].filter(Boolean).join(' ') || ingredient.originalText;
 };
 
@@ -393,7 +414,8 @@ export const mealFromHouseholdMeal = (
 	meal: HouseholdMealRow,
 	ingredients: Array<HouseholdMealIngredientRow | UserRecipeIngredientRow> = [],
 	instructions: Array<HouseholdMealInstructionRow | UserRecipeInstructionRow> = [],
-	userRecipeId?: string
+	userRecipeId?: string,
+	unitPreferences: UnitPreferences = {}
 ): Meal => {
 	const date = meal.date ?? undefined;
 	return {
@@ -410,7 +432,7 @@ export const mealFromHouseholdMeal = (
 		description: meal.description ?? '',
 		ingredients: ingredients
 			.toSorted((left, right) => left.lineIndex - right.lineIndex)
-			.map(mealIngredientText),
+			.map((ingredient) => mealIngredientText(ingredient, unitPreferences)),
 		instructions: instructions
 			.toSorted((left, right) => left.stepIndex - right.stepIndex)
 			.map((instruction) => instruction.text)
@@ -437,11 +459,13 @@ export const loadMealPlanMeals = async (
 		startDate?: string;
 		endDate?: string;
 		menuRecipes?: RecipeMenuItem[];
+		unitPreferences?: UnitPreferences;
 	}
 ) => {
 	const menuRecipes =
 		params.menuRecipes ?? (await loadMenuRecipes(db, params.workosUserId, params.householdId));
 	const defaultMealServings = Math.max(1, Math.round(params.defaultMealServings ?? 1));
+	const unitPreferences = params.unitPreferences ?? {};
 	const poolMeals = menuRecipes
 		.filter((recipe) => recipe.plannedCount === 0)
 		.map((recipe, index) =>
@@ -491,7 +515,8 @@ export const loadMealPlanMeals = async (
 			meal,
 			ingredientsByMealId.get(meal.id) ?? [],
 			instructionsByMealId.get(meal.id) ?? [],
-			recipeIdByMealId.get(meal.id)
+			recipeIdByMealId.get(meal.id),
+			unitPreferences
 		)
 	);
 

@@ -2,8 +2,12 @@ export type MassUnit = 'g' | 'kg' | 'oz' | 'lb';
 export type VolumeUnit = 'ml' | 'l' | 'tsp' | 'tbsp' | 'cup' | 'fl oz';
 export type UnitPreferences = {
 	preferredMassUnit?: MassUnit;
+	preferredMassUnitLabel?: string;
 	preferredVolumeUnit?: VolumeUnit;
+	preferredVolumeUnitLabel?: string;
 	ingredientUnitOverrides?: Record<string, string>;
+	ingredientUnitLabelOverrides?: Record<string, string>;
+	ingredientNameOverrides?: Record<string, string>;
 };
 
 export type ParsedIngredientLine = {
@@ -187,24 +191,45 @@ const unitKind = (unit: string | undefined): UnitKind | undefined => {
 	return unitDefinitions[canonicalUnit]?.kind;
 };
 
+const ingredientOverrideFor = (
+	overrides: Record<string, string> | undefined,
+	ingredientName?: string,
+	ingredientId?: string | null
+): string | undefined => {
+	if (ingredientId && overrides?.[ingredientId]) return overrides[ingredientId];
+	return ingredientName ? overrides?.[normalizedIngredientKey(ingredientName)] : undefined;
+};
+
 const preferredUnitFor = (
 	unit: string,
 	preferences: UnitPreferences,
-	ingredientName?: string
-): string => {
+	ingredientName?: string,
+	ingredientId?: string | null
+): { unit: string; label?: string } => {
 	const kind = unitKind(unit);
-	const override = ingredientName
-		? preferences.ingredientUnitOverrides?.[normalizedIngredientKey(ingredientName)]
-		: undefined;
+	const override = ingredientOverrideFor(
+		preferences.ingredientUnitOverrides,
+		ingredientName,
+		ingredientId
+	);
+	const labelOverride = ingredientOverrideFor(
+		preferences.ingredientUnitLabelOverrides,
+		ingredientName,
+		ingredientId
+	);
 	if (kind === 'mass') {
 		const target = override === 'oz' ? 'oz' : canonicalIngredientUnit(override);
-		return target && massUnits.has(target) ? target : (preferences.preferredMassUnit ?? 'g');
+		const preferred =
+			target && massUnits.has(target) ? target : (preferences.preferredMassUnit ?? 'g');
+		return { unit: preferred, label: labelOverride ?? preferences.preferredMassUnitLabel };
 	}
 	if (kind === 'volume') {
 		const target = override === 'oz' ? 'fl oz' : canonicalIngredientUnit(override);
-		return target && volumeUnits.has(target) ? target : (preferences.preferredVolumeUnit ?? 'ml');
+		const preferred =
+			target && volumeUnits.has(target) ? target : (preferences.preferredVolumeUnit ?? 'ml');
+		return { unit: preferred, label: labelOverride ?? preferences.preferredVolumeUnitLabel };
 	}
-	return unit;
+	return { unit };
 };
 
 export const canonicalIngredientUnit = (value: string | undefined): string | undefined => {
@@ -307,18 +332,19 @@ export const displayIngredientAmount = (
 	quantity: number | null | undefined,
 	unit: string | null | undefined,
 	preferences: UnitPreferences = {},
-	ingredientName?: string
+	ingredientName?: string,
+	ingredientId?: string | null
 ): string => {
 	if (quantity === null || quantity === undefined) return '';
 	const canonicalUnit = canonicalIngredientUnit(unit ?? undefined) ?? unit ?? '';
-	const targetUnit = preferredUnitFor(canonicalUnit, preferences, ingredientName);
-	if (canonicalUnit === 'g' && massUnits.has(targetUnit)) {
-		const targetQuantity = quantity / unitDefinitions[targetUnit].toMetric;
-		return `${formatDecimal(targetQuantity)} ${targetUnit}`;
+	const target = preferredUnitFor(canonicalUnit, preferences, ingredientName, ingredientId);
+	if (canonicalUnit === 'g' && massUnits.has(target.unit)) {
+		const targetQuantity = quantity / unitDefinitions[target.unit].toMetric;
+		return `${formatDecimal(targetQuantity)} ${target.label ?? target.unit}`;
 	}
-	if (canonicalUnit === 'ml' && volumeUnits.has(targetUnit)) {
-		const targetQuantity = quantity / unitDefinitions[targetUnit].toMetric;
-		const label = targetUnit === 'fl oz' ? 'fl oz' : targetUnit;
+	if (canonicalUnit === 'ml' && volumeUnits.has(target.unit)) {
+		const targetQuantity = quantity / unitDefinitions[target.unit].toMetric;
+		const label = target.label ?? (target.unit === 'fl oz' ? 'fl oz' : target.unit);
 		return `${formatQuantity(targetQuantity)} ${label}`;
 	}
 	return [formatQuantity(quantity), canonicalUnit].filter(Boolean).join(' ');

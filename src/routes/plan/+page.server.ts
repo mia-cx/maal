@@ -4,6 +4,7 @@ import { commitHouseholdCookie, countActiveHouseholdMembers } from '$lib/server/
 import { getDb } from '$lib/server/db';
 import { loadMealPlanMeals, loadMenuRecipes } from '$lib/server/db/recipe-mappers';
 import { households } from '$lib/server/db/schema';
+import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import type { PageServerLoad } from './$types';
 
 const dateKey = (date: Date): string => date.toISOString().slice(0, 10);
@@ -34,7 +35,8 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 		db
 			.select({
 				defaultPlannedYield: households.defaultPlannedYield,
-				weekStartsOn: households.weekStartsOn
+				weekStartsOn: households.weekStartsOn,
+				locale: households.locale
 			})
 			.from(households)
 			.where(eq(households.householdId, householdId))
@@ -42,11 +44,12 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 	]);
 	const householdProfile = profileRows[0];
 	const defaultMealServings = householdProfile?.defaultPlannedYield ?? activeMemberCount;
-	const unitPreferences = {
-		preferredMassUnit: 'g' as const,
-		preferredVolumeUnit: 'ml' as const,
-		ingredientUnitOverrides: {}
-	};
+	const taxonomyPreferences = await loadEffectiveTaxonomyPreferences(db, {
+		workosUserId: session.user.id,
+		householdId,
+		locale: householdProfile?.locale ?? 'en-US'
+	});
+	const unitPreferences = taxonomyPreferences.unitPreferences;
 	const recipes = await loadMenuRecipes(db, session.user.id, householdId, { unitPreferences });
 	return {
 		recipes,
@@ -60,7 +63,8 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 			defaultMealServings,
 			startDate: initialStartDate,
 			endDate: initialEndDate,
-			menuRecipes: recipes
+			menuRecipes: recipes,
+			unitPreferences
 		})
 	};
 };
