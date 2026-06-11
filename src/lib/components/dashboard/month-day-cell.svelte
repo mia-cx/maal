@@ -3,7 +3,13 @@
 	import { onMount, tick } from 'svelte';
 	import { dateKey, isSameMonth, isToday } from './schedule-date';
 	import ScheduledMealList from './scheduled-meal-list.svelte';
-	import type { Meal, MealDropTarget, MealPickHandler, MealSelectHandler } from './schedule-types';
+	import type {
+		Meal,
+		MealAddHandler,
+		MealDropTarget,
+		MealPickHandler,
+		MealSelectHandler
+	} from './schedule-types';
 
 	let {
 		day,
@@ -13,6 +19,7 @@
 		draggingMealId,
 		draggedMeal,
 		dropTarget,
+		onaddmeal,
 		onpick,
 		onselect,
 		onselectdate
@@ -24,6 +31,7 @@
 		draggingMealId?: string;
 		draggedMeal?: Meal | null;
 		dropTarget?: MealDropTarget | null;
+		onaddmeal?: MealAddHandler;
 		onpick?: MealPickHandler;
 		onselect?: MealSelectHandler;
 		onselectdate?: (date: Date) => void;
@@ -59,6 +67,12 @@
 		].join('|')
 	);
 
+	const addMealOnBlankTarget = (event: MouseEvent) => {
+		if (event.target instanceof Element && event.target.closest('button, [data-meal-card-id]'))
+			return;
+		onaddmeal?.(dayKey);
+	};
+
 	const fitVisibleMeals = async () => {
 		const version = ++measureVersion;
 		visibleMealCount = previewSourceMeals.length;
@@ -90,14 +104,14 @@
 
 <section
 	bind:this={sectionElement}
-	data-meal-drop-kind={isInMonth ? 'date' : undefined}
-	data-meal-drop-date={isInMonth ? dayKey : undefined}
+	data-meal-drop-kind="date"
+	data-meal-drop-date={dayKey}
 	class={cn(
 		'flex min-h-0 min-w-0 flex-col overflow-hidden border-border p-1',
 		outlineDropCell && 'bg-primary/5 ring-2 ring-primary/60 ring-inset'
 	)}
 	class:border-l={index % 7 !== 0}
-	class:border-t={index >= 7}
+	class:border-b={true}
 >
 	<button
 		type="button"
@@ -111,12 +125,21 @@
 		{day.getDate()}
 	</button>
 
-	<div bind:this={contentElement} class="min-h-0 flex-1 space-y-1 overflow-hidden">
+	<div
+		bind:this={contentElement}
+		role="button"
+		tabindex="-1"
+		aria-label={`Add meal on ${dayKey}`}
+		class="min-h-0 flex-1 space-y-1 overflow-hidden"
+		ondblclick={addMealOnBlankTarget}
+	>
 		<ScheduledMealList
 			meals={monthVisibleMeals}
 			previewIndex={visiblePreviewIndex}
 			{draggingMealId}
 			{draggedMeal}
+			date={dayKey}
+			{onaddmeal}
 			compact
 			density="title"
 			showEmpty={false}

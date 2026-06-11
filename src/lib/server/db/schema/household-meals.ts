@@ -97,6 +97,47 @@ export const householdMealIngredients = sqliteTable(
 	]
 );
 
+export const householdMealApplianceRequirements = sqliteTable(
+	'household_meal_appliance_requirements',
+	{
+		id: id(),
+		householdMealId: text('household_meal_id')
+			.notNull()
+			.references(() => householdMeals.id, { onDelete: 'cascade' }),
+		appliance: text('appliance', {
+			enum: [
+				'oven',
+				'stovetop',
+				'microwave',
+				'air_fryer',
+				'slow_cooker',
+				'rice_cooker',
+				'blender',
+				'food_processor',
+				'grill'
+			]
+		}).notNull(),
+		required: integer('required', { mode: 'boolean' }).notNull().default(true),
+		source: text('source', {
+			enum: ['schema_org', 'instruction_heuristic', 'poke', 'user']
+		})
+			.notNull()
+			.default('instruction_heuristic'),
+		confidence: real('confidence').notNull().default(0),
+		notes: text('notes'),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(table) => [
+		uniqueIndex('household_meal_appliance_requirements_meal_appliance_unique').on(
+			table.householdMealId,
+			table.appliance
+		),
+		index('household_meal_appliance_requirements_household_meal_id_idx').on(table.householdMealId),
+		index('household_meal_appliance_requirements_appliance_idx').on(table.appliance)
+	]
+);
+
 export const householdMealInstructions = sqliteTable(
 	'household_meal_instructions',
 	{

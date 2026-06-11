@@ -2,7 +2,13 @@
 	import EmptyScheduleSlot from './empty-schedule-slot.svelte';
 	import MealDropSkeleton from './meal-drop-skeleton.svelte';
 	import PlannedMeal from './planned-meal.svelte';
-	import type { Meal, MealCardDensity, MealPickHandler, MealSelectHandler } from './schedule-types';
+	import type {
+		Meal,
+		MealAddHandler,
+		MealCardDensity,
+		MealPickHandler,
+		MealSelectHandler
+	} from './schedule-types';
 
 	let {
 		meals,
@@ -15,6 +21,8 @@
 		showImages = false,
 		imageLayout = 'side',
 		cardClass,
+		date,
+		onaddmeal,
 		onpick,
 		onselect
 	}: {
@@ -28,6 +36,8 @@
 		showImages?: boolean;
 		imageLayout?: 'side' | 'side-compact' | 'top' | 'adaptive';
 		cardClass?: string;
+		date?: string;
+		onaddmeal?: MealAddHandler;
 		onpick?: MealPickHandler;
 		onselect?: MealSelectHandler;
 	} = $props();
@@ -53,6 +63,6 @@
 	<MealDropSkeleton meal={draggedMeal} {density} {showImages} {imageLayout} />
 {:else if showEmpty && meals.length === 0}
 	<div class="min-h-8">
-		<EmptyScheduleSlot />
+		<EmptyScheduleSlot {date} {onaddmeal} />
 	</div>
 {/if}

@@ -1,27 +1,19 @@
 <script lang="ts">
-	import type { HTMLAttributes } from "svelte/elements";
-	import type { WithElementRef } from "$lib/utils.js";
-	import { cn } from "$lib/utils.js";
-	import MinusIcon from '@lucide/svelte/icons/minus';
+	import type { HTMLAttributes } from 'svelte/elements';
+	import type { WithElementRef } from '$lib/utils.js';
+	import DotIcon from '@lucide/svelte/icons/dot';
 
 	let {
 		ref = $bindable(null),
-		class: className,
 		children,
 		...restProps
 	}: WithElementRef<HTMLAttributes<HTMLDivElement>> = $props();
 </script>
 
-<div
-	bind:this={ref}
-	data-slot="input-otp-separator"
-	role="separator"
-	class={cn("[&_svg:not([class*='size-'])]:size-4 flex items-center", className)}
-	{...restProps}
->
+<div bind:this={ref} data-slot="input-otp-separator" role="separator" {...restProps}>
 	{#if children}
 		{@render children?.()}
 	{:else}
-		<MinusIcon  />
+		<DotIcon />
 	{/if}
 </div>

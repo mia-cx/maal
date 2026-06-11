@@ -1,7 +1,13 @@
 <script lang="ts">
 	import { dateKey, formatDayHeading, isToday } from './schedule-date';
 	import ScheduledMealList from './scheduled-meal-list.svelte';
-	import type { Meal, MealDropTarget, MealPickHandler, MealSelectHandler } from './schedule-types';
+	import type {
+		Meal,
+		MealAddHandler,
+		MealDropTarget,
+		MealPickHandler,
+		MealSelectHandler
+	} from './schedule-types';
 
 	let {
 		day,
@@ -10,6 +16,7 @@
 		draggingMealId,
 		draggedMeal,
 		dropTarget,
+		onaddmeal,
 		onpick,
 		onselect
 	}: {
@@ -19,6 +26,7 @@
 		draggingMealId?: string;
 		draggedMeal?: Meal | null;
 		dropTarget?: MealDropTarget | null;
+		onaddmeal?: MealAddHandler;
 		onpick?: MealPickHandler;
 		onselect?: MealSelectHandler;
 	} = $props();
@@ -30,6 +38,11 @@
 	const previewMeals = $derived(
 		previewIndex >= 0 ? meals.filter((meal) => meal.id !== draggingMealId) : meals
 	);
+
+	const addMealOnBlankTarget = (event: MouseEvent) => {
+		if (event.target instanceof Element && event.target.closest('[data-meal-card-id]')) return;
+		onaddmeal?.(dayKey);
+	};
 </script>
 
 <section
@@ -52,12 +65,20 @@
 			{formatDayHeading(day)}
 		</span>
 	</div>
-	<div class="space-y-1 px-1 py-1">
+	<div
+		role="button"
+		tabindex="-1"
+		aria-label={`Add meal on ${dayKey}`}
+		class="space-y-1 px-1 py-1"
+		ondblclick={addMealOnBlankTarget}
+	>
 		<ScheduledMealList
 			meals={previewMeals}
 			{previewIndex}
 			{draggingMealId}
 			{draggedMeal}
+			date={dayKey}
+			{onaddmeal}
 			density="detail"
 			showImages
 			{onpick}

@@ -90,24 +90,56 @@ Users can mark ingredients as staples they usually have at home. Staples are exc
 
 Maal derives grocery demand from household meals in a date range and optionally selected top-pool meals. Ingredients are merged by normalized ingredient identity where safe. Original ingredient lines are always preserved.
 
+### Appliance fit
+
+Maal tracks household appliance availability and recipe appliance requirements when known. This is a capability signal, not a required field for every recipe.
+
+Rules:
+
+- Unknown recipe appliance requirements should not block scheduling.
+- Known appliance requirements should warn, filter, or downrank when the household does not have that appliance.
+- Initial appliance requirements may come from `schema.org` `cookingMethod`, instruction-text heuristics, Poke enrichment, or user correction.
+- Appliance availability is stored at household level because “we do not own an oven” is shared planning context.
+
 ### Capacity mode
 
 Capacity mode describes what kind of meal fits today:
 
 - `adventurous` — exploration/wildcard meals are welcome.
 - `normal` — safe and exploration meals are acceptable.
-- `low` — prefer safe, low-effort, leftovers, and short active time.
-- `survival` — survival-tagged recipes only; assigned meals may be deferred back to the top pool.
+- `low` — prefer safe, low-effort, leftovers, and short active time. Long elapsed oven/slow-cooker time may still fit if active effort is low.
+- `survival` — safe, low-effort fallback recipes only; assigned meals may be deferred back to the top pool.
 
 ### Meal familiarity
 
-Meal familiarity is metadata on a recipe/meal:
+Meal familiarity is mental-load metadata on a recipe/meal:
 
-- `new` — not tried yet.
+- `safe` — known-good for this user, including low-effort fallback meals.
 - `exploration` — new-ish, plausible, not proven safe.
-- `safe` — known-good for this user.
-- `survival` — low-effort fallback meal.
 - `wildcard` — intentionally outside normal preferences.
+
+`new` is an umbrella concept for search/import context, not a persisted familiarity value: new recipes should enter as either `exploration` or `wildcard`.
+
+Display labels:
+
+- `safe` => “Safe”
+- `exploration` => “Exploration”
+- `wildcard` => “Wildcard”
+
+### Labels
+
+Rating labels:
+
+- `repeat` => “Worth repeating”
+- `neutral` => “Indifferent”
+- `avoid` => “Never again”
+
+Capacity mode labels:
+
+- `adventurous` => “Adventurous”
+- `normal` => “Normal”
+- `low` => “Low”
+- `survival` => “Survival”
 
 ### Meal feedback
 
@@ -119,7 +151,7 @@ Verdicts:
 - `neutral` — acceptable, but do not prioritize.
 - `never_again` — avoid this recipe and similar suggestions unless explicitly requested.
 
-Feedback is most useful for `new`, `exploration`, and `wildcard` meals. Safe/survival-tagged recipes can use lighter check-ins.
+Feedback is most useful for `exploration` and `wildcard` meals. Safe recipes can use lighter check-ins.
 
 ## Privacy and data controls
 

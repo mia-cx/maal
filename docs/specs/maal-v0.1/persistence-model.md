@@ -32,12 +32,17 @@ Important fields:
 
 - `household_id` / WorkOS Organization ID
 - `default_servings`
-- `default_calendar_duration_days`
-- `default_calendar_anchor`
+- `week_starts_on`
+- `preferred_mass_unit`
+- `preferred_volume_unit`
+- `ingredient_unit_overrides_json`
 - timestamps
+
+Canonical stored ingredient measures are metric base units: `g` for mass and `ml` for volume. Household unit fields only control display defaults and ingredient-specific display overrides, for example `olive oil: tbsp` while `water` remains `ml`.
 
 Related tables:
 
+- `household_appliances`, one row per known household appliance availability fact
 - `pantry_staples`
 
 ### `user_cooking_profiles`
@@ -98,12 +103,15 @@ This keeps recipes portable for users while still making household recipe lists 
 Derived/cached fields on `user_recipes`:
 
 - `familiarity`
-- `known_status`
 - `times_cooked`
 - `last_cooked_at`
 - `latest_verdict`
 - `average_actual_minutes`
 - `source_claimed_minutes`
+
+Related operational tables:
+
+- `user_recipe_appliance_requirements`, one row per inferred or user-confirmed appliance. Absence means unknown; known unavailable household appliances should warn/downrank/filter depending on user intent.
 
 These can be computed from `household_meals` and `meal_check_ins`. Cache them if ranking needs them quickly.
 
@@ -117,7 +125,9 @@ Ownership behavior:
 
 ### `household_meals`
 
-Planned household meal row. It can reference a user recipe or embed a trial recipe snapshot. Date/time assignment is optional; meals with neither `date` nor `scheduled_for` appear in the top meal pool. Household meals intentionally duplicate enough recipe data to keep trials/wildcards schedulable before anyone adds them to their menu.
+Planned household meal row. It can reference a user recipe or embed a trial recipe snapshot. Date/time assignment is optional; meals with neither `date` nor `scheduled_for` appear in the top meal pool. Floating meal cards are unscheduled `household_meals`, not reusable recipe templates. Moving a card to a day sets `date`; moving it back clears `date`; the meal object and DB row stay the same.
+
+Every household meal should keep a local copy/snapshot of the recipe at the time it entered the plan. That local copy lets future slices support per-meal substitutions, omitted ingredients, portion changes, and instruction tweaks without mutating the source recipe in My Menu.
 
 Important fields:
 
@@ -149,6 +159,7 @@ Related flattened operation tables for trial snapshots:
 
 - `household_meal_ingredients`
 - `household_meal_instructions`
+- `household_meal_appliance_requirements`
 - `household_meal_nutrition`
 
 If a household meal references `user_recipe_id`, Maal can derive ingredients from `user_recipe_ingredients`. If it is a trial snapshot, Maal uses the household meal flattened rows.
@@ -208,7 +219,7 @@ Constraints:
 Promotion behavior:
 
 - If a check-in references a household meal snapshot and the reporter has no matching user recipe, Maal can create a `user_recipes` row from that snapshot.
-- `worth_repeating` promotes to safe, `neutral` stores neutral memory, and `never_again` stores avoid memory.
+- `worth_repeating` promotes familiarity to `safe`; `neutral` and `never_again` remain exact rating values used for future search/filtering.
 
 ## Derived API fields
 
@@ -216,7 +227,6 @@ The API can return derived summaries that are not stored directly on core rows:
 
 - user recipe `timesCooked`
 - user recipe `latestVerdict`
-- user recipe `knownStatus`
 - household meal `ingredientPurchaseState`
 - meal candidate fit vectors
 - grocery merge confidence

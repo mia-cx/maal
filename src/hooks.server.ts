@@ -7,10 +7,20 @@ import {
 	clearSealedSession,
 	readSealedSession
 } from '$lib/server/auth/session';
+import { smokeAuthEnabled, smokeSession } from '$lib/server/auth/smoke';
 import { tryCreateAuthRuntime } from '$lib/server/auth/workos';
 
 const handleAuth: Handle = async ({ event, resolve }) => {
 	event.locals.session = null;
+
+	if (
+		smokeAuthEnabled(event.platform) &&
+		(event.request.headers.get('x-maal-smoke-auth') === '1' ||
+			event.cookies.get('maal_smoke_auth') === '1')
+	) {
+		event.locals.session = smokeSession();
+		return resolve(event);
+	}
 
 	if (!readSealedSession(event.cookies)) return resolve(event);
 

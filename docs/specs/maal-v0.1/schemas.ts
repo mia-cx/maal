@@ -93,6 +93,7 @@ export type UserRecipe = {
 	metadata: RecipeMetadata;
 	ingredients: RecipeIngredient[];
 	instructions: RecipeInstruction[];
+	applianceRequirements?: ApplianceRequirement[];
 	nutrition?: RecipeNutrition;
 	createdAt: ISODateTime;
 	updatedAt: ISODateTime;
@@ -100,7 +101,6 @@ export type UserRecipe = {
 
 export type RecipeMetadata = {
 	familiarity: MealFamiliarity;
-	knownStatus?: KnownMealStatus;
 	latestVerdict?: MealFeedbackVerdict;
 	timesCooked: number;
 	lastCookedAt?: ISODateTime;
@@ -118,8 +118,7 @@ export type RecipeSourceQuality = {
 	timeRealismConfidence?: ConfidenceScore;
 };
 
-export type MealFamiliarity = 'new' | 'exploration' | 'safe' | 'survival' | 'wildcard';
-export type KnownMealStatus = 'safe' | 'neutral' | 'avoid';
+export type MealFamiliarity = 'safe' | 'exploration' | 'wildcard';
 
 export type HouseholdMeal = {
 	id: HouseholdMealId;
@@ -128,6 +127,7 @@ export type HouseholdMeal = {
 	recipeSnapshot?: HouseholdMealRecipeSnapshot;
 	ingredients?: RecipeIngredient[];
 	instructions?: RecipeInstruction[];
+	applianceRequirements?: ApplianceRequirement[];
 	nutrition?: RecipeNutrition;
 	includeInGroceryList: boolean;
 	scheduledFor?: ISODateTime;
@@ -175,6 +175,28 @@ export type RecipeInstruction = {
 	confidence?: ConfidenceScore;
 };
 
+export type ApplianceKind =
+	| 'oven'
+	| 'stovetop'
+	| 'microwave'
+	| 'air_fryer'
+	| 'slow_cooker'
+	| 'rice_cooker'
+	| 'blender'
+	| 'food_processor'
+	| 'grill';
+
+export type ApplianceRequirementSource = 'schema_org' | 'instruction_heuristic' | 'poke' | 'user';
+
+export type ApplianceRequirement = {
+	id?: string;
+	appliance: ApplianceKind;
+	required: boolean;
+	source: ApplianceRequirementSource;
+	confidence: ConfidenceScore;
+	notes?: string;
+};
+
 export type RecipeNutrition = {
 	calories?: number;
 	proteinGrams?: number;
@@ -207,9 +229,17 @@ export type HouseholdProfile = {
 	defaultServings: number;
 	defaultCalendarView: CalendarViewPreference;
 	preferredDinnerTime?: string;
+	appliances?: HouseholdAppliance[];
 	pantryStaples: PantryStaple[];
 	createdAt: ISODateTime;
 	updatedAt: ISODateTime;
+};
+
+export type HouseholdAppliance = {
+	id?: string;
+	appliance: ApplianceKind;
+	available: boolean;
+	notes?: string;
 };
 
 export type CalendarViewPreference = {

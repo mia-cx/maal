@@ -1,5 +1,7 @@
 const dayMs = 24 * 60 * 60 * 1000;
 
+export type WeekStartsOn = 'sunday' | 'monday';
+
 export const addDays = (date: Date, days: number): Date => {
 	const next = new Date(date);
 	next.setDate(next.getDate() + days);
@@ -15,18 +17,18 @@ export const addMonths = (date: Date, months: number): Date => {
 export const startOfDay = (date: Date): Date =>
 	new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
-export const startOfWeek = (date: Date): Date => {
+export const startOfWeek = (date: Date, weekStartsOn: WeekStartsOn = 'monday'): Date => {
 	const start = startOfDay(date);
 	const day = start.getDay();
-	const offset = day === 0 ? -6 : 1 - day;
+	const offset = weekStartsOn === 'sunday' ? -day : day === 0 ? -6 : 1 - day;
 	return addDays(start, offset);
 };
 
-export const startOfMonthGrid = (date: Date): Date =>
-	startOfWeek(new Date(date.getFullYear(), date.getMonth(), 1));
+export const startOfMonthGrid = (date: Date, weekStartsOn: WeekStartsOn = 'monday'): Date =>
+	startOfWeek(new Date(date.getFullYear(), date.getMonth(), 1), weekStartsOn);
 
-export const monthGridDays = (date: Date): Date[] => {
-	const start = startOfMonthGrid(date);
+export const monthGridDays = (date: Date, weekStartsOn: WeekStartsOn = 'monday'): Date[] => {
+	const start = startOfMonthGrid(date, weekStartsOn);
 	return Array.from({ length: 42 }, (_, index) => addDays(start, index));
 };
 
@@ -78,17 +80,21 @@ export const formatDayHeading = (date: Date, reference = new Date()): string => 
 	return prefix ? `${prefix}, ${formatted}` : formatted;
 };
 
-export const formatWeekHeading = (date: Date, reference = new Date()): string => {
-	const weekStart = startOfWeek(date);
+export const formatWeekHeading = (
+	date: Date,
+	reference = new Date(),
+	weekStartsOn: WeekStartsOn = 'monday'
+): string => {
+	const weekStart = startOfWeek(date, weekStartsOn);
 	const relativeWeekIndex = Math.round(
-		(weekStart.getTime() - startOfWeek(reference).getTime()) / (7 * dayMs)
+		(weekStart.getTime() - startOfWeek(reference, weekStartsOn).getTime()) / (7 * dayMs)
 	);
 	const prefix = relativePrefix(relativeWeekIndex, {
 		previous: 'Last Week',
 		current: 'This Week',
 		next: 'Next Week'
 	});
-	const formatted = `Week ${isoWeekNumber(date)}, ${weekStart.getFullYear()}`;
+	const formatted = `Week ${isoWeekNumber(date)}, ${isoWeekYear(date)}`;
 	return prefix ? `${prefix}, ${formatted}` : formatted;
 };
 
@@ -104,10 +110,17 @@ export const formatMonthHeading = (date: Date, reference = new Date()): string =
 	return prefix ? `${prefix}, ${formatted}` : formatted;
 };
 
-export const isoWeekNumber = (date: Date): number => {
+const isoWeekThursday = (date: Date): Date => {
 	const target = startOfDay(date);
 	const dayNumber = (target.getDay() + 6) % 7;
 	target.setDate(target.getDate() - dayNumber + 3);
+	return target;
+};
+
+export const isoWeekYear = (date: Date): number => isoWeekThursday(date).getFullYear();
+
+export const isoWeekNumber = (date: Date): number => {
+	const target = isoWeekThursday(date);
 	const firstThursday = new Date(target.getFullYear(), 0, 4);
 	const firstDayNumber = (firstThursday.getDay() + 6) % 7;
 	firstThursday.setDate(firstThursday.getDate() - firstDayNumber + 3);

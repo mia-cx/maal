@@ -1,7 +1,13 @@
 <script lang="ts">
 	import { dateKey, isToday } from './schedule-date';
 	import ScheduledMealList from './scheduled-meal-list.svelte';
-	import type { Meal, MealDropTarget, MealPickHandler, MealSelectHandler } from './schedule-types';
+	import type {
+		Meal,
+		MealAddHandler,
+		MealDropTarget,
+		MealPickHandler,
+		MealSelectHandler
+	} from './schedule-types';
 
 	let {
 		day,
@@ -11,6 +17,7 @@
 		draggingMealId,
 		draggedMeal,
 		dropTarget,
+		onaddmeal,
 		onpick,
 		onselect
 	}: {
@@ -21,6 +28,7 @@
 		draggingMealId?: string;
 		draggedMeal?: Meal | null;
 		dropTarget?: MealDropTarget | null;
+		onaddmeal?: MealAddHandler;
 		onpick?: MealPickHandler;
 		onselect?: MealSelectHandler;
 	} = $props();
@@ -31,6 +39,9 @@
 	const dayKey = $derived(dateKey(day));
 	const shortDayName = (date: Date): string =>
 		new Intl.DateTimeFormat('en', { weekday: 'short' }).format(date);
+	const shortMonthName = (date: Date): string =>
+		new Intl.DateTimeFormat('en', { month: 'short' }).format(date);
+	const dayNumberLabel = $derived(`${day.getDate()} ${shortMonthName(day)}`);
 	const previewIndex = $derived(
 		dropTarget?.kind === 'date' && dropTarget.date === dayKey ? dropTarget.index : -1
 	);
@@ -38,6 +49,11 @@
 		previewIndex >= 0 ? meals.filter((meal) => meal.id !== draggingMealId) : meals
 	);
 	const imageLayout = $derived(columnHeight >= multiDayTopImageMinHeight ? 'top' : 'side-compact');
+
+	const addMealOnBlankTarget = (event: MouseEvent) => {
+		if (event.target instanceof Element && event.target.closest('[data-meal-card-id]')) return;
+		onaddmeal?.(dayKey);
+	};
 </script>
 
 <section
@@ -59,15 +75,23 @@
 				: 'inline-flex h-5 items-center'}
 		>
 			{shortDayName(day)}
-			<span class:text-muted-foreground={!isToday(day)} class="ml-1">{day.getDate()}</span>
+			<span class:text-muted-foreground={!isToday(day)} class="ml-1">{dayNumberLabel}</span>
 		</span>
 	</div>
-	<div class="space-y-1 p-1">
+	<div
+		role="button"
+		tabindex="-1"
+		aria-label={`Add meal on ${dayKey}`}
+		class="space-y-1 p-1"
+		ondblclick={addMealOnBlankTarget}
+	>
 		<ScheduledMealList
 			meals={previewMeals}
 			{previewIndex}
 			{draggingMealId}
 			{draggedMeal}
+			date={dayKey}
+			{onaddmeal}
 			showImages
 			{imageLayout}
 			{onpick}

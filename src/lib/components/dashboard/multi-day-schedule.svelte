@@ -1,6 +1,23 @@
 <script lang="ts">
+	import {
+		createFastScrollGate,
+		createGridSnapper,
+		createRetargetableScroll,
+		createWheelGestureClassifier,
+		startInertiaScroll as startSdkInertiaScroll,
+		touchById,
+		type ProgrammaticScrollBehavior,
+		wheelDeltaPixels
+	} from '$lib/interaction/scroll-sdk';
 	import { onMount, tick } from 'svelte';
-	import { addDays, dateFromKey, dateKey, formatWeekHeading, startOfDay } from './schedule-date';
+	import {
+		addDays,
+		dateFromKey,
+		dateKey,
+		formatWeekHeading,
+		isoWeekNumber,
+		startOfDay
+	} from './schedule-date';
 	import MealPool from './meal-pool.svelte';
 	import MultiDayColumn from './multi-day-column.svelte';
 	import { sortScheduledMeals } from './schedule-ordering';
@@ -8,8 +25,8 @@
 
 	const pageSize = 21;
 	const minDayColumnWidth = 144;
-	const trackpadDeltaFriction = 0.68;
-	const trackpadSnapIdleMs = 280;
+	const trackpadInputActiveMs = 360;
+	const trackpadTailSnapIdleMs = 96;
 	const touchPanThresholdPx = 6;
 	const touchHorizontalAxisBias = 0.72;
 	const touchVerticalMomentumWindowMs = 360;
@@ -34,10 +51,12 @@
 		plannedMeals,
 		showMealPoolImages = false,
 		anchorDate,
+		weekStartsOn = 'monday',
 		dayNavigationSignal = 0,
 		draggingMealId,
 		draggedMeal,
 		dropTarget,
+		onaddmeal,
 		onpick,
 		onselect,
 		onanchordatechange,
@@ -47,10 +66,12 @@
 		plannedMeals: Meal[];
 		showMealPoolImages?: boolean;
 		anchorDate: Date;
+		weekStartsOn?: 'sunday' | 'monday';
 		dayNavigationSignal?: number;
 		draggingMealId?: string;
 		draggedMeal?: Meal | null;
 		dropTarget?: MealDropTarget | null;
+		onaddmeal?: (date?: string) => void;
 		onpick?: (meal: Meal, event: PointerEvent) => void;
 		onselect?: (meal: Meal) => void;
 		onanchordatechange?: (date: Date) => void;
@@ -62,7 +83,7 @@
 	let contentWidth = $state(0);
 	let loadingMoreDays = false;
 	let scrollFrame: number | undefined;
-	let scrollAnimationFrame: number | undefined;
+	let cancelInertiaScroll: (() => void) | undefined;
 	let scrollReleaseTimeout: ReturnType<typeof setTimeout> | undefined;
 	let suppressAnchorUpdate = false;
 	let draggingScroller = $state(false);
@@ -88,6 +109,8 @@
 	let reflowingLayout = false;
 	let wheelTargetDate: Date | undefined;
 	let wheelInputActiveUntil = 0;
+	let directionalWheelSnapUntil = 0;
+	let directionalWheelSnapDelay = trackpadInputActiveMs;
 	let lastStartTime = $state(0);
 	let lastDayNavigationSignal = $state(0);
 	let lastContentWidth = $state(0);
@@ -96,6 +119,8 @@
 	let lastScrollLeft = 0;
 	let lastScrollTop = 0;
 	let lastVerticalScrollTime = 0;
+	let fastScrollOverlayLabel = $state('');
+	let fastScrollOverlayVisible = $state(false);
 
 	const visibleDayCount = $derived(
 		Math.min(7, Math.max(1, Math.floor(contentWidth / minDayColumnWidth) || 1))
@@ -108,6 +133,10 @@
 
 	const dayName = (date: Date): string =>
 		new Intl.DateTimeFormat('en', { weekday: 'long' }).format(date);
+	const fastScrollMonthFormatter = new Intl.DateTimeFormat('en', {
+		month: 'long',
+		year: 'numeric'
+	});
 	const mealsForDate = (date: Date): Meal[] => {
 		const key = dateKey(date);
 		return sortScheduledMeals(
@@ -121,14 +150,16 @@
 		days = daysAround(date);
 	};
 
-	const easeOutCubic = (progress: number): number => 1 - Math.pow(1 - progress, 3);
+	const wheelGesture = createWheelGestureClassifier();
 
-	const cancelProgrammaticScroll = () => {
-		if (scrollAnimationFrame !== undefined) cancelAnimationFrame(scrollAnimationFrame);
-		scrollAnimationFrame = undefined;
-		if (scrollReleaseTimeout) clearTimeout(scrollReleaseTimeout);
-		scrollReleaseTimeout = undefined;
-	};
+	const fastScrollGate = createFastScrollGate<Date>({
+		debugName: 'multi-day',
+		label: (date) => `Week ${isoWeekNumber(date)}, ${fastScrollMonthFormatter.format(date)}`,
+		onOverlayChange: ({ visible, label }) => {
+			fastScrollOverlayVisible = visible;
+			fastScrollOverlayLabel = label;
+		}
+	});
 
 	const releaseAnchorUpdateSuppression = (delay = 80) => {
 		if (scrollReleaseTimeout) clearTimeout(scrollReleaseTimeout);
@@ -138,47 +169,36 @@
 		}, delay);
 	};
 
-	const scrollToLeft = (left: number, behavior: ScrollBehavior) => {
-		if (!scroller) return;
-		cancelProgrammaticScroll();
-		const targetLeft = Math.max(0, left);
-		if (behavior !== 'smooth') {
-			scroller.scrollTo({ left: targetLeft, behavior: 'auto' });
-			releaseAnchorUpdateSuppression();
-			return;
-		}
+	const horizontalScroll = createRetargetableScroll({
+		axis: 'x',
+		getElement: () => scroller,
+		onPositionChange: (position) => (lastScrollLeft = position),
+		onSettle: () => releaseAnchorUpdateSuppression()
+	});
 
-		const startLeft = scroller.scrollLeft;
-		const distance = targetLeft - startLeft;
-		const duration = Math.min(260, Math.max(140, Math.abs(distance) * 0.45));
-		const startTime = performance.now();
-
-		const step = (time: number) => {
-			const progress = Math.min(1, (time - startTime) / duration);
-			scroller!.scrollLeft = startLeft + distance * easeOutCubic(progress);
-			if (progress < 1) {
-				scrollAnimationFrame = requestAnimationFrame(step);
-				return;
-			}
-			scrollAnimationFrame = undefined;
-			releaseAnchorUpdateSuppression();
-		};
-
-		scrollAnimationFrame = requestAnimationFrame(step);
+	const cancelProgrammaticScroll = () => {
+		horizontalScroll.cancel();
+		cancelInertiaScroll?.();
+		cancelInertiaScroll = undefined;
+		if (scrollReleaseTimeout) clearTimeout(scrollReleaseTimeout);
+		scrollReleaseTimeout = undefined;
 	};
 
-	const scrollToDate = async (date: Date, behavior: ScrollBehavior = 'auto') => {
-		if (!scroller) return;
+	const dayGrid = createGridSnapper({
+		getElement: () => scroller,
+		grid: { x: { selector: '[data-day-key]', dataAttribute: 'dayKey' } },
+		scroll: { x: horizontalScroll }
+	});
+
+	const scrollToDate = async (
+		date: Date,
+		behavior: ProgrammaticScrollBehavior = 'auto'
+	): Promise<boolean> => {
+		if (!scroller) return false;
 		await tick();
-		const daySection = scroller.querySelector<HTMLElement>(`[data-day-key="${dateKey(date)}"]`);
-		if (!daySection) return;
 		suppressAnchorUpdate = true;
-		const targetLeft =
-			scroller.scrollLeft +
-			daySection.getBoundingClientRect().left -
-			scroller.getBoundingClientRect().left;
 		if (snapTimeout) clearTimeout(snapTimeout);
-		scrollToLeft(targetLeft, behavior);
+		return dayGrid.scrollToKey('x', dateKey(date), behavior);
 	};
 
 	const currentHorizontalAnchor = (): { date: string; offset: number } | undefined => {
@@ -231,18 +251,7 @@
 	};
 
 	const currentLeftDate = (): Date | undefined => {
-		if (!scroller) return;
-		const left = scroller.getBoundingClientRect().left;
-		const sections = Array.from(scroller.querySelectorAll<HTMLElement>('[data-day-key]'));
-		const closest = sections
-			.map((section) => ({
-				section,
-				distance: Math.abs(section.getBoundingClientRect().left - left)
-			}))
-			.sort(
-				(leftSection, rightSection) => leftSection.distance - rightSection.distance
-			)[0]?.section;
-		const key = closest?.dataset.dayKey;
+		const key = dayGrid.keyAtEdge('x');
 		return key ? dateFromKey(key) : undefined;
 	};
 
@@ -265,12 +274,16 @@
 		onanchordatechange?.(leftDate);
 	};
 
-	const scheduleSnapToNearestDay = (delay = scrollSnapIdleMs) => {
+	const scheduleSnapToNearestDay = (delay = scrollSnapIdleMs, direction = 0) => {
 		if (draggingScroller || suppressAnchorUpdate || reflowingLayout) return;
 		if (snapTimeout) clearTimeout(snapTimeout);
 		const inputQuietDelay = Math.max(delay, wheelInputActiveUntil - performance.now());
 		snapTimeout = setTimeout(() => {
 			snapTimeout = undefined;
+			if (direction) {
+				snapToDirectionalDay(Math.sign(direction));
+				return;
+			}
 			snapToNearestDay();
 		}, inputQuietDelay);
 	};
@@ -283,12 +296,17 @@
 		const verticalScrollDelta = nextScrollTop - lastScrollTop;
 		const horizontalScrollChanged = Math.abs(horizontalScrollDelta) > 0.5;
 		const verticalScrollChanged = Math.abs(verticalScrollDelta) > 0.5;
+		const now = performance.now();
 		if (verticalScrollChanged) {
 			lastScrollTop = nextScrollTop;
-			lastVerticalScrollTime = performance.now();
+			lastVerticalScrollTime = now;
 		}
 		if (!horizontalScrollChanged) return;
 		lastScrollLeft = nextScrollLeft;
+		const horizontalScrollDirection = Math.sign(horizontalScrollDelta);
+		if (horizontalScrollDirection && now <= directionalWheelSnapUntil) {
+			directionalWheelSnapUntil = now + directionalWheelSnapDelay;
+		}
 
 		loadMoreDays();
 		if (scrollFrame === undefined) {
@@ -298,30 +316,37 @@
 			});
 		}
 
-		if (performance.now() >= wheelInputActiveUntil) scheduleSnapToNearestDay();
+		scheduleSnapToNearestDay(
+			scrollSnapIdleMs,
+			performance.now() <= directionalWheelSnapUntil ? horizontalScrollDirection : 0
+		);
+	};
+
+	const publishDayAndScroll = (date: Date) => {
+		lastAnnouncedKey = dateKey(date);
+		lastStartTime = date.getTime();
+		onanchordatechange?.(date);
+		void scrollToDate(date, 'animated');
 	};
 
 	const snapToNearestDay = () => {
 		if (draggingScroller) return;
 		const leftDate = currentLeftDate();
 		if (!leftDate) return;
-		lastAnnouncedKey = dateKey(leftDate);
-		lastStartTime = leftDate.getTime();
-		onanchordatechange?.(leftDate);
-		void scrollToDate(leftDate, 'smooth');
+		publishDayAndScroll(leftDate);
 	};
 
-	const isDedicatedHorizontalWheel = (event: WheelEvent): boolean =>
-		event.deltaX !== 0 && Math.abs(event.deltaY) < 1 && Number.isInteger(event.deltaX);
+	const currentDirectionalDay = (direction: number): Date | undefined => {
+		const key = dayGrid.keyAtEdge('x', direction);
+		return key ? dateFromKey(key) : currentLeftDate();
+	};
 
-	const isLikelyDiscreteWheel = (event: WheelEvent, delta: number): boolean =>
-		event.shiftKey ||
-		event.deltaMode !== 0 ||
-		isDedicatedHorizontalWheel(event) ||
-		Math.abs(delta) >= 80;
-
-	const isLikelyTouchpadWheel = (event: WheelEvent, delta: number): boolean =>
-		event.deltaMode === 0 && !isLikelyDiscreteWheel(event, delta);
+	const snapToDirectionalDay = (direction: number) => {
+		if (draggingScroller) return;
+		const date = currentDirectionalDay(direction);
+		if (!date) return;
+		publishDayAndScroll(date);
+	};
 
 	const clearWheelTargetSoon = () => {
 		if (wheelTargetClearTimeout) clearTimeout(wheelTargetClearTimeout);
@@ -333,18 +358,21 @@
 
 	const scrollByWheelStep = async (direction: number) => {
 		const leftDate = wheelTargetDate ?? currentLeftDate() ?? anchorDate;
-		const nextDate = addDays(leftDate, direction);
+		const fastTargetDate = addDays(leftDate, direction * visibleDayCount);
+		const fastScroll = fastScrollGate.shouldSkipAnimation(direction, fastTargetDate);
+		const nextDate = fastScroll ? fastTargetDate : addDays(leftDate, direction);
+		const behavior: ProgrammaticScrollBehavior = fastScroll ? 'auto' : 'animated';
 		wheelTargetDate = nextDate;
 		clearWheelTargetSoon();
 		ensureDateLoaded(nextDate);
 		lastAnnouncedKey = dateKey(nextDate);
 		lastStartTime = nextDate.getTime();
 		onanchordatechange?.(nextDate);
-		await scrollToDate(nextDate, 'smooth');
+		const snapped = await scrollToDate(nextDate, behavior);
+		if (!snapped && scroller) {
+			scroller.scrollLeft += direction * dayColumnWidth() * (fastScroll ? visibleDayCount : 1);
+		}
 	};
-
-	const touchById = (touches: TouchList, id: number): Touch | undefined =>
-		Array.from(touches).find((touch) => touch.identifier === id);
 
 	const clearPendingSnap = () => {
 		if (!snapTimeout) return;
@@ -354,12 +382,18 @@
 
 	const clearTouchInput = () => {
 		wheelInputActiveUntil = 0;
+		directionalWheelSnapUntil = 0;
+		directionalWheelSnapDelay = trackpadInputActiveMs;
 	};
 
-	const snapAfterTouch = () => {
+	const snapAfterTouch = (direction?: number) => {
 		clearPendingSnap();
 		clearTouchInput();
 		suppressAnchorUpdate = false;
+		if (direction) {
+			snapToDirectionalDay(direction);
+			return;
+		}
 		snapToNearestDay();
 	};
 
@@ -377,7 +411,7 @@
 		lastAnnouncedKey = dateKey(nextDate);
 		lastStartTime = nextDate.getTime();
 		onanchordatechange?.(nextDate);
-		void scrollToDate(nextDate, 'smooth');
+		void scrollToDate(nextDate, 'animated');
 	};
 
 	const startInertiaScroll = (
@@ -388,28 +422,20 @@
 	) => {
 		if (!scroller) return;
 		cancelProgrammaticScroll();
-		let lastFrameTime = performance.now();
-		let currentVelocity = velocity;
-		wheelInputActiveUntil = performance.now() + snapIdleMs;
-
-		const step = (time: number) => {
-			if (!scroller) return;
-			const elapsed = Math.max(1, time - lastFrameTime);
-			lastFrameTime = time;
-			scroller.scrollLeft += currentVelocity * elapsed;
-			currentVelocity *= Math.pow(decay, elapsed / 16.67);
-			wheelInputActiveUntil = performance.now() + snapIdleMs;
-
-			if (Math.abs(currentVelocity) >= snapVelocityThreshold) {
-				scrollAnimationFrame = requestAnimationFrame(step);
-				return;
+		const keepInputActive = () => (wheelInputActiveUntil = performance.now() + snapIdleMs);
+		keepInputActive();
+		cancelInertiaScroll = startSdkInertiaScroll({
+			axis: 'x',
+			getElement: () => scroller,
+			velocity,
+			snapVelocityThreshold,
+			decay,
+			onActive: keepInputActive,
+			onSettle: () => {
+				cancelInertiaScroll = undefined;
+				snapAfterTouch(Math.sign(velocity));
 			}
-
-			scrollAnimationFrame = undefined;
-			snapAfterTouch();
-		};
-
-		scrollAnimationFrame = requestAnimationFrame(step);
+		});
 	};
 
 	const startTouchScroll = (event: TouchEvent) => {
@@ -496,7 +522,7 @@
 		}
 
 		if (Math.abs(releaseDistance) >= snapTouchNearestDistance()) {
-			snapAfterTouch();
+			snapAfterTouch(releaseDistance < 0 ? 1 : -1);
 			return;
 		}
 
@@ -508,36 +534,53 @@
 		snapAfterTouch();
 	};
 
+	const restoreLockedScrollLeft = (lockedScrollLeft: number) => {
+		if (!scroller) return;
+		scroller.scrollLeft = lockedScrollLeft;
+		lastScrollLeft = lockedScrollLeft;
+	};
+
 	const handleWheel = (event: WheelEvent) => {
 		if (!scroller) return;
 		const horizontalDelta = Math.abs(event.deltaX) >= Math.abs(event.deltaY) ? event.deltaX : 0;
 		const shiftWheelDelta = event.shiftKey ? event.deltaY : 0;
 		const delta = horizontalDelta || shiftWheelDelta;
-		if (!delta) return;
-
-		event.preventDefault();
-		event.stopPropagation();
-		if (suppressAnchorUpdate) {
-			cancelProgrammaticScroll();
-			suppressAnchorUpdate = false;
-			scroller.scrollTo({ left: scroller.scrollLeft, behavior: 'auto' });
-		}
-		if (draggingScroller || reflowingLayout) return;
-		if (snapTimeout) {
-			clearTimeout(snapTimeout);
-			snapTimeout = undefined;
-		}
-
-		if (isLikelyTouchpadWheel(event, delta)) {
+		const wheel = wheelGesture.classify(event);
+		if (wheel.kind === 'continuous') {
+			if (draggingScroller || reflowingLayout) return;
+			clearPendingSnap();
 			wheelTargetDate = undefined;
 			if (wheelTargetClearTimeout) clearTimeout(wheelTargetClearTimeout);
 			wheelTargetClearTimeout = undefined;
-			wheelInputActiveUntil = performance.now() + trackpadSnapIdleMs;
-			scroller.scrollLeft += delta * trackpadDeltaFriction;
-			scheduleSnapToNearestDay(trackpadSnapIdleMs);
+			const now = performance.now();
+			const snapDelay = wheel.settleSoon ? trackpadTailSnapIdleMs : trackpadInputActiveMs;
+			wheelInputActiveUntil = now + snapDelay;
+			directionalWheelSnapDelay = snapDelay;
+			directionalWheelSnapUntil = now + snapDelay;
+			cancelProgrammaticScroll();
+			suppressAnchorUpdate = false;
+			scheduleSnapToNearestDay(snapDelay, Math.sign(wheel.dominantDelta));
 			return;
 		}
 
+		if (!delta) {
+			if (!event.deltaY) return;
+			const lockedScrollLeft = scroller.scrollLeft;
+			event.preventDefault();
+			event.stopPropagation();
+			scroller.scrollTop += wheelDeltaPixels(scroller, event, event.deltaY);
+			restoreLockedScrollLeft(lockedScrollLeft);
+			requestAnimationFrame(() => restoreLockedScrollLeft(lockedScrollLeft));
+			return;
+		}
+
+		event.preventDefault();
+		event.stopPropagation();
+		if (draggingScroller || reflowingLayout) return;
+		clearPendingSnap();
+
+		directionalWheelSnapUntil = 0;
+		directionalWheelSnapDelay = trackpadInputActiveMs;
 		wheelInputActiveUntil = performance.now() + discreteWheelActiveMs;
 		void scrollByWheelStep(delta > 0 ? 1 : -1);
 	};
@@ -575,6 +618,7 @@
 	const stopDragScroll = (event: PointerEvent) => {
 		if (!scroller || !draggingScroller) return;
 		const releaseVelocity = dragVelocity;
+		const releaseDistance = scroller.scrollLeft - dragStartScrollLeft;
 		draggingScroller = false;
 		dragVelocity = 0;
 		if (scroller.hasPointerCapture(event.pointerId))
@@ -588,7 +632,7 @@
 			);
 			return;
 		}
-		snapAfterTouch();
+		snapAfterTouch(Math.abs(releaseDistance) > 1 ? Math.sign(releaseDistance) : undefined);
 	};
 
 	onMount(() => {
@@ -611,6 +655,8 @@
 			if (snapTimeout) clearTimeout(snapTimeout);
 			if (wheelTargetClearTimeout) clearTimeout(wheelTargetClearTimeout);
 			if (reflowTimeout) clearTimeout(reflowTimeout);
+			wheelGesture.reset();
+			fastScrollGate.destroy();
 		};
 	});
 
@@ -650,7 +696,7 @@
 		lastDayNavigationSignal = nextDayNavigationSignal;
 		ensureDateLoaded(anchorDate);
 		lastAnnouncedKey = dateKey(anchorDate);
-		void scrollToDate(anchorDate, keyboardNavigation ? 'smooth' : 'auto');
+		void scrollToDate(anchorDate, keyboardNavigation ? 'animated' : 'auto');
 	});
 </script>
 
@@ -663,6 +709,7 @@
 			{draggingMealId}
 			{draggedMeal}
 			{dropTarget}
+			{onaddmeal}
 			{onpick}
 			{onselect}
 			meals={mealPool}
@@ -670,35 +717,49 @@
 		/>
 	</div>
 	<div class="border-b border-border px-4 py-1 text-xs font-medium">
-		{formatWeekHeading(anchorDate)}
+		{formatWeekHeading(anchorDate, new Date(), weekStartsOn)}
 	</div>
 
-	<div
-		bind:this={scroller}
-		data-drag-secondary-scroll
-		role="region"
-		aria-label="Multi-day schedule"
-		onscroll={handleScroll}
-		onpointerdown={startDragScroll}
-		onpointermove={dragScroll}
-		onpointerup={stopDragScroll}
-		onpointercancel={stopDragScroll}
-		class="grid min-h-0 flex-1 touch-pan-y [scrollbar-width:none] grid-flow-col overflow-x-auto overflow-y-auto overscroll-x-none [overflow-anchor:none] [&::-webkit-scrollbar]:hidden"
-		class:select-none={draggingScroller}
-		style="--visible-days: {visibleDayCount}; grid-auto-columns: calc(100% / var(--visible-days));"
-	>
-		{#each days as day, index (day.toISOString())}
-			<MultiDayColumn
-				{day}
-				{index}
-				meals={mealsForDate(day)}
-				{draggingScroller}
-				{draggingMealId}
-				{draggedMeal}
-				{dropTarget}
-				{onpick}
-				{onselect}
-			/>
-		{/each}
+	<div class="relative min-h-0 flex-1">
+		<div
+			bind:this={scroller}
+			data-drag-secondary-scroll
+			role="region"
+			aria-label="Multi-day schedule"
+			onscroll={handleScroll}
+			onpointerdown={startDragScroll}
+			onpointermove={dragScroll}
+			onpointerup={stopDragScroll}
+			onpointercancel={stopDragScroll}
+			class="grid h-full min-h-0 touch-pan-y [scrollbar-width:none] grid-flow-col overflow-x-auto overflow-y-auto overscroll-x-none [overflow-anchor:none] [&::-webkit-scrollbar]:hidden"
+			class:select-none={draggingScroller}
+			style="--visible-days: {visibleDayCount}; grid-auto-columns: calc(100% / var(--visible-days));"
+		>
+			{#each days as day, index (day.toISOString())}
+				<MultiDayColumn
+					{day}
+					{index}
+					meals={mealsForDate(day)}
+					{draggingScroller}
+					{draggingMealId}
+					{draggedMeal}
+					{dropTarget}
+					{onaddmeal}
+					{onpick}
+					{onselect}
+				/>
+			{/each}
+		</div>
+		{#if fastScrollOverlayVisible}
+			<div
+				class="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-foreground/10 backdrop-blur-[1px] dark:bg-background/45"
+			>
+				<div
+					class="rounded-md border border-border bg-background/90 px-4 py-2 text-sm font-semibold shadow-sm"
+				>
+					{fastScrollOverlayLabel}
+				</div>
+			</div>
+		{/if}
 	</div>
 </div>

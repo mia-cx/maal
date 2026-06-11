@@ -1,35 +1,37 @@
 <script lang="ts">
-	import { HomeIcon } from '$lib/components/icons/solar-outline';
+	import { resolve } from '$app/paths';
 	import NavUser from '$lib/components/nav-user.svelte';
 	import TeamSwitcher from '$lib/components/team-switcher.svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import CalendarDaysIcon from '@lucide/svelte/icons/calendar-days';
-	import GalleryVerticalEndIcon from '@lucide/svelte/icons/gallery-vertical-end';
-	import HeartIcon from '@lucide/svelte/icons/heart';
+	import HomeIcon from '@lucide/svelte/icons/house';
 	import ListIcon from '@lucide/svelte/icons/list';
-	import Settings2Icon from '@lucide/svelte/icons/settings-2';
 	import SoupIcon from '@lucide/svelte/icons/soup';
 	import type { DashboardNavItem } from './dashboard-nav';
 
-	let {
-		email,
-		activeNav = $bindable<DashboardNavItem>('schedule')
-	}: { email: string; activeNav?: DashboardNavItem } = $props();
+	type SidebarUser = { name: string; email: string; avatar: string; emailVerified: boolean };
+	type Household = { id: string; name: string };
 
-	const teams = [
-		{ name: 'Home', logo: HomeIcon, plan: 'Household' },
-		{ name: 'Test kitchen', logo: GalleryVerticalEndIcon, plan: 'Preview' }
-	];
-	const user = $derived({
-		name: email === 'Local preview' ? 'Local preview' : email.split('@')[0],
-		email,
-		avatar: ''
-	});
+	let {
+		user,
+		activeNav = 'meal-plan',
+		households = [],
+		activeHouseholdId = null
+	}: {
+		user: SidebarUser;
+		activeNav?: DashboardNavItem;
+		households?: Household[];
+		activeHouseholdId?: string | null;
+	} = $props();
+
+	const planHref = resolve('/plan');
+	const menuHref = resolve('/menu');
+	const householdHref = resolve('/household');
 </script>
 
 <Sidebar.Root collapsible="icon" data-testid="app-sidebar">
 	<Sidebar.Header>
-		<TeamSwitcher {teams} label="Households" />
+		<TeamSwitcher {households} {activeHouseholdId} label="Households" />
 	</Sidebar.Header>
 
 	<Sidebar.Content>
@@ -39,56 +41,54 @@
 				<Sidebar.Menu>
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton
-							isActive={activeNav === 'schedule'}
-							tooltipContent="Schedule"
+							isActive={activeNav === 'meal-plan'}
+							tooltipContent="Meal Plan"
 							class="h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
-							onclick={() => (activeNav = 'schedule')}
 						>
-							<CalendarDaysIcon />
-							<span>Schedule</span>
+							{#snippet child({ props })}
+								<a href={planHref} {...props}>
+									<CalendarDaysIcon />
+									<span>Meal Plan</span>
+								</a>
+							{/snippet}
 						</Sidebar.MenuButton>
 					</Sidebar.MenuItem>
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton
 							isActive={activeNav === 'my-menu'}
-							tooltipContent="My menu"
+							tooltipContent="My Menu"
 							class="h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
-							onclick={() => (activeNav = 'my-menu')}
 						>
-							<ListIcon />
-							<span>My menu</span>
+							{#snippet child({ props })}
+								<a href={menuHref} {...props}>
+									<ListIcon />
+									<span>My Menu</span>
+								</a>
+							{/snippet}
 						</Sidebar.MenuButton>
 					</Sidebar.MenuItem>
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton
-							isActive={activeNav === 'pantry-staples'}
-							tooltipContent="Pantry staples"
+							isActive={activeNav === 'household'}
+							tooltipContent="Household"
 							class="h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
-							onclick={() => (activeNav = 'pantry-staples')}
 						>
-							<SoupIcon />
-							<span>Pantry staples</span>
-						</Sidebar.MenuButton>
-					</Sidebar.MenuItem>
-					<Sidebar.MenuItem>
-						<Sidebar.MenuButton
-							isActive={activeNav === 'preferences'}
-							tooltipContent="Preferences"
-							class="h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
-							onclick={() => (activeNav = 'preferences')}
-						>
-							<HeartIcon />
-							<span>Preferences</span>
+							{#snippet child({ props })}
+								<a href={householdHref} {...props}>
+									<HomeIcon />
+									<span>Household</span>
+								</a>
+							{/snippet}
 						</Sidebar.MenuButton>
 					</Sidebar.MenuItem>
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton
 							disabled
-							tooltipContent="Settings"
-							class="h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
+							tooltipContent="Pantry staples coming soon"
+							class="h-9 text-muted-foreground group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
 						>
-							<Settings2Icon />
-							<span>Settings</span>
+							<SoupIcon />
+							<span>Pantry staples</span>
 						</Sidebar.MenuButton>
 					</Sidebar.MenuItem>
 				</Sidebar.Menu>

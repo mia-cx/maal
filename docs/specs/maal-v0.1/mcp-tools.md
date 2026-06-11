@@ -106,7 +106,7 @@ Given a date and extra servings, recommends meal changes that reuse already assi
 
 ### `suggest_survival_plan`
 
-For survival mode, recommends survival-tagged recipes and plan changes that minimize waste.
+For survival mode, recommends safe low-effort fallback recipes and plan changes that minimize waste.
 
 ## Data controls
 

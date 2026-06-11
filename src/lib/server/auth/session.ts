@@ -20,6 +20,7 @@ export interface AuthUser {
 	firstName: string | null;
 	lastName: string | null;
 	profilePictureUrl: string | null;
+	emailVerified: boolean;
 }
 
 export interface AuthSession {
@@ -57,7 +58,8 @@ const toAuthUser = (user: User): AuthUser => ({
 	name: user.name,
 	firstName: user.firstName,
 	lastName: user.lastName,
-	profilePictureUrl: user.profilePictureUrl
+	profilePictureUrl: user.profilePictureUrl,
+	emailVerified: user.emailVerified
 });
 
 const accessTokenFrom = (response: AuthenticatedSessionResponse): string | undefined => {

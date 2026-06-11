@@ -3,6 +3,7 @@ import { WorkOS } from '@workos-inc/node';
 
 export interface AuthRuntime {
 	workos: WorkOS;
+	apiKey: string;
 	clientId: string;
 	cookiePassword: string;
 }
@@ -44,6 +45,7 @@ const createRuntime = (authEnv: Required<AuthEnv>): AuthRuntime => ({
 		apiKey: authEnv.WORKOS_API_KEY,
 		clientId: authEnv.WORKOS_CLIENT_ID
 	}),
+	apiKey: authEnv.WORKOS_API_KEY,
 	clientId: authEnv.WORKOS_CLIENT_ID,
 	cookiePassword: authEnv.WORKOS_COOKIE_PASSWORD
 });

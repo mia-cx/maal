@@ -5,18 +5,37 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { useSidebar } from '$lib/components/ui/sidebar/index.js';
-	import BadgeCheckIcon from '@lucide/svelte/icons/badge-check';
-	import BellIcon from '@lucide/svelte/icons/bell';
+	import UserSettingsDialog from '$lib/components/user-settings-dialog.svelte';
 	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
-	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
+	import Settings2Icon from '@lucide/svelte/icons/settings-2';
 
-	let { user }: { user: { name: string; email: string; avatar: string } } = $props();
+	type NavUser = { name: string; email: string; avatar: string; emailVerified: boolean };
+
+	let { user }: { user: NavUser } = $props();
 	const sidebar = useSidebar();
 
-	const initials = $derived(user.name.slice(0, 2).toUpperCase());
+	let localUser = $derived(user);
+	let settingsOpen = $state(false);
+
+	const initials = $derived(localUser.name.slice(0, 2).toUpperCase());
 	const logoutHref = resolve('/auth/logout' as Pathname);
+
+	const updateLocalUser = (updatedUser: {
+		name: string | null;
+		email: string;
+		emailVerified: boolean;
+	}) => {
+		localUser = {
+			...localUser,
+			name: updatedUser.name ?? updatedUser.email,
+			email: updatedUser.email,
+			emailVerified: updatedUser.emailVerified
+		};
+	};
 </script>
+
+<UserSettingsDialog bind:open={settingsOpen} user={localUser} onuserupdate={updateLocalUser} />
 
 <Sidebar.Menu>
 	<Sidebar.MenuItem>
@@ -30,14 +49,14 @@
 						<Avatar.Root
 							class="size-9 rounded-[calc(var(--radius-sm)+2px)] after:rounded-[calc(var(--radius-sm)+2px)]"
 						>
-							<Avatar.Image src={user.avatar} alt={user.name} />
+							<Avatar.Image src={localUser.avatar} alt={localUser.name} />
 							<Avatar.Fallback class="rounded-[calc(var(--radius-sm)+2px)]"
 								>{initials}</Avatar.Fallback
 							>
 						</Avatar.Root>
 						<div class="grid flex-1 text-start text-sm leading-tight">
-							<span class="truncate font-medium">{user.name}</span>
-							<span class="truncate text-xs">{user.email}</span>
+							<span class="truncate font-medium">{localUser.name}</span>
+							<span class="truncate text-xs">{localUser.email}</span>
 						</div>
 						<ChevronsUpDownIcon class="ms-auto size-4" />
 					</Sidebar.MenuButton>
@@ -52,28 +71,20 @@
 				<DropdownMenu.Label class="p-0 font-normal">
 					<div class="flex items-center gap-2 px-1 py-1.5 text-start text-sm">
 						<Avatar.Root class="size-8 rounded-lg after:rounded-lg">
-							<Avatar.Image src={user.avatar} alt={user.name} />
+							<Avatar.Image src={localUser.avatar} alt={localUser.name} />
 							<Avatar.Fallback class="rounded-lg">{initials}</Avatar.Fallback>
 						</Avatar.Root>
 						<div class="grid flex-1 text-start text-sm leading-tight">
-							<span class="truncate font-medium">{user.name}</span>
-							<span class="truncate text-xs">{user.email}</span>
+							<span class="truncate font-medium">{localUser.name}</span>
+							<span class="truncate text-xs">{localUser.email}</span>
 						</div>
 					</div>
 				</DropdownMenu.Label>
 				<DropdownMenu.Separator />
 				<DropdownMenu.Group>
-					<DropdownMenu.Item>
-						<BadgeCheckIcon />
-						Account
-					</DropdownMenu.Item>
-					<DropdownMenu.Item>
-						<CreditCardIcon />
-						Billing
-					</DropdownMenu.Item>
-					<DropdownMenu.Item>
-						<BellIcon />
-						Notifications
+					<DropdownMenu.Item onclick={() => (settingsOpen = true)} class="cursor-pointer">
+						<Settings2Icon />
+						User settings
 					</DropdownMenu.Item>
 				</DropdownMenu.Group>
 				<DropdownMenu.Separator />

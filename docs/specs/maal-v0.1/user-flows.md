@@ -35,7 +35,7 @@
 1. User says they have low capacity or Poke infers it from conversation.
 2. Poke passes capacity mode as request context, e.g. `low` or `survival`.
 3. Maal scores calendar and top-pool meals for fit.
-4. In survival mode, Poke may clear date/time from assigned meals and assign a survival-tagged recipe.
+4. In survival mode, Poke may clear date/time from assigned meals and assign a safe low-effort fallback recipe.
 5. Purchased/perishable ingredient warnings are preserved.
 
 ## After cooking

@@ -9,7 +9,7 @@
 - `GroceryList` — derived demand for a calendar, with persisted purchase state.
 - `PantryStaple` — user-marked ingredient to suppress from grocery reminders.
 - `MealCheckIn` — post-meal cook-time facts, verdict, servings, and notes.
-- `HouseholdProfile` — household-level planning defaults such as default servings and pantry staples.
+- `HouseholdProfile` — household-level planning defaults such as default servings, available appliances, and pantry staples.
 - `UserCookingProfile` — per-user cook-time coefficient keyed by WorkOS User ID.
 - `HardFoodRule` / `TastePreference` — user-level constraints and preferences keyed by WorkOS User ID.
 
@@ -29,7 +29,7 @@ Keep these separate:
 - Household recipe availability truth: which member-owned/saved recipes are visible to the household through membership.
 - Recipe attribution truth: which user imported/created or added a recipe.
 - Calendar truth: which household meals exist and whether they are in the top pool, date-only, or timed.
-- Household meal truth: which user recipe or trial recipe snapshot is planned, when it is assigned, and how many servings the household intends.
+- Household meal truth: which user recipe or trial recipe snapshot is planned, when it is assigned, how many servings the household intends, and any appliance requirements known for trial snapshots.
 - Grocery truth: what ingredients are needed and whether they were bought.
 - Cook session truth: what actually happened.
 - Feedback truth: whether this meal worked for the user overall.
@@ -95,9 +95,9 @@ Fuzzy merges should preserve original lines and lower confidence. The display ma
 
 ## Feedback promotion rules
 
-- New/exploration/wildcard + `worth_repeating` => promote to `safe`.
-- New/exploration/wildcard + `neutral` => known neutral; do not prioritize.
-- Any meal + `never_again` => avoid recipe and similar suggestions.
+- Exploration/wildcard + `worth_repeating` => promote to `safe`.
+- Exploration/wildcard + `neutral` => keep the exact neutral rating for future search/filtering; do not prioritize.
+- Any meal + `never_again` => keep the exact never-again rating and avoid the recipe and similar suggestions.
 - Safe + negative light check-in may demote from `safe`.
 
 ## Cook-time coefficient
@@ -114,7 +114,7 @@ When a household meal has `plannedCookWorkosUserId`, use that user's coefficient
 
 Household meals may contain a duplicated recipe snapshot instead of referencing a user recipe. This supports wildcards and exploration meals that Poke found but no user has committed to their menu yet.
 
-If the meal works, `worth_repeating` or “Add to my menu” promotes the household meal snapshot into a `user_recipes` row. If it is neutral or never again, the household history remains intact without polluting anyone's menu.
+If the meal works, `worth_repeating` or “Add to my menu” promotes the household meal snapshot into a `user_recipes` row. If it is `neutral` or `never_again`, the household history remains intact without polluting anyone's menu.
 
 ## Recipe snapshots vs operational rows
 
@@ -130,6 +130,7 @@ Operational data:
 
 - ingredients
 - instructions
+- appliance requirements, when known
 - nutrition summary
 - claimed prep/cook/total time
 - yield/servings
@@ -140,7 +141,7 @@ Why both:
 - Flattened rows make grocery merging, confidence scoring, and nutrition/time summaries practical.
 - Ingredient parsing is imperfect, so every flattened ingredient keeps the original source text and a confidence score.
 
-User recipes should have flattened ingredients/instructions/nutrition. Trial household meals may also have their own flattened ingredients/instructions/nutrition when they do not reference a `user_recipes` row.
+User recipes should have flattened ingredients/instructions/nutrition and may have appliance requirements inferred from `cookingMethod` or instructions. Trial household meals may also have their own flattened ingredients/instructions/appliance requirements/nutrition when they do not reference a `user_recipes` row. Missing appliance data means unknown, not compatible/incompatible.
 
 ## Grocery inclusion rules
 

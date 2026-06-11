@@ -1,1 +1,1 @@
-export type DashboardNavItem = 'schedule' | 'my-menu' | 'pantry-staples' | 'preferences';
+export type DashboardNavItem = 'meal-plan' | 'my-menu' | 'household';

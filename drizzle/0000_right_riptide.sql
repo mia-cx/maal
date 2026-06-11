@@ -67,6 +67,22 @@ CREATE TABLE `taste_preferences` (
 --> statement-breakpoint
 CREATE INDEX `taste_preferences_workos_user_id_idx` ON `taste_preferences` (`workos_user_id`);--> statement-breakpoint
 CREATE INDEX `taste_preferences_food_entity_id_idx` ON `taste_preferences` (`food_entity_id`);--> statement-breakpoint
+CREATE TABLE `household_meal_appliance_requirements` (
+	`id` text PRIMARY KEY NOT NULL,
+	`household_meal_id` text NOT NULL,
+	`appliance` text NOT NULL,
+	`required` integer DEFAULT true NOT NULL,
+	`source` text DEFAULT 'instruction_heuristic' NOT NULL,
+	`confidence` real DEFAULT 0 NOT NULL,
+	`notes` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`household_meal_id`) REFERENCES `household_meals`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `household_meal_appliance_requirements_meal_appliance_unique` ON `household_meal_appliance_requirements` (`household_meal_id`,`appliance`);--> statement-breakpoint
+CREATE INDEX `household_meal_appliance_requirements_household_meal_id_idx` ON `household_meal_appliance_requirements` (`household_meal_id`);--> statement-breakpoint
+CREATE INDEX `household_meal_appliance_requirements_appliance_idx` ON `household_meal_appliance_requirements` (`appliance`);--> statement-breakpoint
 CREATE TABLE `household_meal_ingredients` (
 	`id` text PRIMARY KEY NOT NULL,
 	`household_meal_id` text NOT NULL,
@@ -149,6 +165,18 @@ CREATE INDEX `household_meals_status_idx` ON `household_meals` (`status`);--> st
 CREATE INDEX `household_meals_scheduled_for_idx` ON `household_meals` (`scheduled_for`);--> statement-breakpoint
 CREATE INDEX `household_meals_date_idx` ON `household_meals` (`date`);--> statement-breakpoint
 CREATE INDEX `household_meals_include_in_grocery_list_idx` ON `household_meals` (`include_in_grocery_list`);--> statement-breakpoint
+CREATE TABLE `household_appliances` (
+	`id` text PRIMARY KEY NOT NULL,
+	`household_id` text NOT NULL,
+	`appliance` text NOT NULL,
+	`available` integer DEFAULT true NOT NULL,
+	`notes` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX `household_appliances_household_id_idx` ON `household_appliances` (`household_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `household_appliances_household_appliance_unique` ON `household_appliances` (`household_id`,`appliance`);--> statement-breakpoint
 CREATE TABLE `household_profiles` (
 	`household_id` text PRIMARY KEY NOT NULL,
 	`default_servings` integer DEFAULT 1 NOT NULL,
@@ -192,6 +220,22 @@ CREATE INDEX `meal_check_ins_household_meal_id_idx` ON `meal_check_ins` (`househ
 CREATE INDEX `meal_check_ins_user_recipe_id_idx` ON `meal_check_ins` (`user_recipe_id`);--> statement-breakpoint
 CREATE INDEX `meal_check_ins_reported_by_idx` ON `meal_check_ins` (`reported_by_workos_user_id`);--> statement-breakpoint
 CREATE INDEX `meal_check_ins_actual_cook_idx` ON `meal_check_ins` (`actual_cook_workos_user_id`);--> statement-breakpoint
+CREATE TABLE `user_recipe_appliance_requirements` (
+	`id` text PRIMARY KEY NOT NULL,
+	`user_recipe_id` text NOT NULL,
+	`appliance` text NOT NULL,
+	`required` integer DEFAULT true NOT NULL,
+	`source` text DEFAULT 'instruction_heuristic' NOT NULL,
+	`confidence` real DEFAULT 0 NOT NULL,
+	`notes` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`user_recipe_id`) REFERENCES `user_recipes`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `user_recipe_appliance_requirements_recipe_appliance_unique` ON `user_recipe_appliance_requirements` (`user_recipe_id`,`appliance`);--> statement-breakpoint
+CREATE INDEX `user_recipe_appliance_requirements_user_recipe_id_idx` ON `user_recipe_appliance_requirements` (`user_recipe_id`);--> statement-breakpoint
+CREATE INDEX `user_recipe_appliance_requirements_appliance_idx` ON `user_recipe_appliance_requirements` (`appliance`);--> statement-breakpoint
 CREATE TABLE `user_recipe_ingredients` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_recipe_id` text NOT NULL,
@@ -248,10 +292,11 @@ CREATE TABLE `user_recipes` (
 	`source_url` text,
 	`source_site_name` text,
 	`source_author_name` text,
+	`source_publisher_name` text,
+	`source_is_based_on_url` text,
 	`source_imported_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`source_html_hash` text,
-	`familiarity` text DEFAULT 'new' NOT NULL,
-	`known_status` text,
+	`familiarity` text DEFAULT 'exploration' NOT NULL,
 	`latest_verdict` text,
 	`times_cooked` integer DEFAULT 0 NOT NULL,
 	`last_cooked_at` text,
@@ -269,5 +314,4 @@ CREATE TABLE `user_recipes` (
 --> statement-breakpoint
 CREATE INDEX `user_recipes_workos_user_id_idx` ON `user_recipes` (`workos_user_id`);--> statement-breakpoint
 CREATE INDEX `user_recipes_saved_from_household_id_idx` ON `user_recipes` (`saved_from_household_id`);--> statement-breakpoint
-CREATE INDEX `user_recipes_known_status_idx` ON `user_recipes` (`known_status`);--> statement-breakpoint
 CREATE INDEX `user_recipes_familiarity_idx` ON `user_recipes` (`familiarity`);

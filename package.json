@@ -19,7 +19,9 @@
 		"db:generate": "drizzle-kit generate",
 		"db:migrate:local": "wrangler d1 migrations apply maal-staging --local --env staging",
 		"db:migrate:staging": "wrangler d1 migrations apply maal-staging --remote --env staging",
-		"db:migrate:production": "wrangler d1 migrations apply maal-prod --remote --env production"
+		"db:migrate:production": "wrangler d1 migrations apply maal-prod --remote --env production",
+		"db:seed:smoke:local": "wrangler d1 execute maal-staging --local --env staging --file scripts/smoke/seed.sql",
+		"db:seed:smoke:staging": "wrangler d1 execute maal-staging --remote --env staging --file scripts/smoke/seed.sql"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",

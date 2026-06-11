@@ -30,7 +30,7 @@ const todayKey = (): string => {
 };
 
 const defaultUiState = (): UiState => ({
-	activeNav: 'schedule',
+	activeNav: 'meal-plan',
 	sidebarOpen: true,
 	sidebarWidth: defaultSidebarWidth,
 	scheduleMode: 'multi-day',
@@ -38,19 +38,21 @@ const defaultUiState = (): UiState => ({
 	dailyScroll: null
 });
 
-const dashboardNavItems: DashboardNavItem[] = [
-	'schedule',
-	'my-menu',
-	'pantry-staples',
-	'preferences'
-];
+const dashboardNavItems: DashboardNavItem[] = ['meal-plan', 'my-menu'];
 const scheduleModes: ScheduleMode[] = ['daily', 'multi-day', 'monthly'];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
 
-const isDashboardNavItem = (value: unknown): value is DashboardNavItem =>
-	typeof value === 'string' && dashboardNavItems.includes(value as DashboardNavItem);
+const dashboardNavItemFromStoredValue = (
+	value: unknown,
+	fallback: DashboardNavItem
+): DashboardNavItem => {
+	if (value === 'schedule') return 'meal-plan';
+	return typeof value === 'string' && dashboardNavItems.includes(value as DashboardNavItem)
+		? (value as DashboardNavItem)
+		: fallback;
+};
 
 const scheduleModeFromStoredValue = (value: unknown, fallback: ScheduleMode): ScheduleMode => {
 	if (value === 'weekly') return 'multi-day';
@@ -84,7 +86,7 @@ const normalizeUiState = (value: unknown): UiState => {
 		: null;
 
 	return {
-		activeNav: isDashboardNavItem(value.activeNav) ? value.activeNav : fallback.activeNav,
+		activeNav: dashboardNavItemFromStoredValue(value.activeNav, fallback.activeNav),
 		sidebarOpen: typeof value.sidebarOpen === 'boolean' ? value.sidebarOpen : fallback.sidebarOpen,
 		sidebarWidth: clampSidebarWidth(value.sidebarWidth),
 		scheduleMode: scheduleModeFromStoredValue(value.scheduleMode, fallback.scheduleMode),

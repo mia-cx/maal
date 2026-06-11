@@ -23,9 +23,8 @@
 
 ## UX copy
 
-1. Final English label for “voor herhaling vatbaar”: “Worth repeating”, “Make again”, or “Repeat-worthy”?
-2. Should “never again” be softened in UI while staying explicit in data?
-3. What wording best avoids shame around skipped/takeout meals?
+1. Should “Never again” be softened in some UI surfaces while staying explicit in data?
+2. What wording best avoids shame around skipped/takeout meals?
 
 ## Keyboard UX
 

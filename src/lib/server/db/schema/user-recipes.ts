@@ -14,16 +14,17 @@ export const userRecipes = sqliteTable(
 		sourceUrl: text('source_url'),
 		sourceSiteName: text('source_site_name'),
 		sourceAuthorName: text('source_author_name'),
+		sourcePublisherName: text('source_publisher_name'),
+		sourceIsBasedOnUrl: text('source_is_based_on_url'),
 		sourceImportedAt: text('source_imported_at')
 			.notNull()
 			.default(sql`CURRENT_TIMESTAMP`),
 		sourceHtmlHash: text('source_html_hash'),
 		familiarity: text('familiarity', {
-			enum: ['new', 'exploration', 'safe', 'survival', 'wildcard']
+			enum: ['safe', 'exploration', 'wildcard']
 		})
 			.notNull()
-			.default('new'),
-		knownStatus: text('known_status', { enum: ['safe', 'neutral', 'avoid'] }),
+			.default('exploration'),
 		latestVerdict: text('latest_verdict', {
 			enum: ['worth_repeating', 'neutral', 'never_again']
 		}),
@@ -43,7 +44,6 @@ export const userRecipes = sqliteTable(
 	(table) => [
 		index('user_recipes_workos_user_id_idx').on(table.workosUserId),
 		index('user_recipes_saved_from_household_id_idx').on(table.savedFromHouseholdId),
-		index('user_recipes_known_status_idx').on(table.knownStatus),
 		index('user_recipes_familiarity_idx').on(table.familiarity)
 	]
 );
@@ -75,6 +75,47 @@ export const userRecipeIngredients = sqliteTable(
 		),
 		index('user_recipe_ingredients_user_recipe_id_idx').on(table.userRecipeId),
 		index('user_recipe_ingredients_food_entity_id_idx').on(table.foodEntityId)
+	]
+);
+
+export const userRecipeApplianceRequirements = sqliteTable(
+	'user_recipe_appliance_requirements',
+	{
+		id: id(),
+		userRecipeId: text('user_recipe_id')
+			.notNull()
+			.references(() => userRecipes.id, { onDelete: 'cascade' }),
+		appliance: text('appliance', {
+			enum: [
+				'oven',
+				'stovetop',
+				'microwave',
+				'air_fryer',
+				'slow_cooker',
+				'rice_cooker',
+				'blender',
+				'food_processor',
+				'grill'
+			]
+		}).notNull(),
+		required: integer('required', { mode: 'boolean' }).notNull().default(true),
+		source: text('source', {
+			enum: ['schema_org', 'instruction_heuristic', 'poke', 'user']
+		})
+			.notNull()
+			.default('instruction_heuristic'),
+		confidence: real('confidence').notNull().default(0),
+		notes: text('notes'),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(table) => [
+		uniqueIndex('user_recipe_appliance_requirements_recipe_appliance_unique').on(
+			table.userRecipeId,
+			table.appliance
+		),
+		index('user_recipe_appliance_requirements_user_recipe_id_idx').on(table.userRecipeId),
+		index('user_recipe_appliance_requirements_appliance_idx').on(table.appliance)
 	]
 );
 

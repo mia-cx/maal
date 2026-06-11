@@ -22,11 +22,12 @@
 !.env.example
 !.env.test
 
-# Test output
+# Test and debug output
 /coverage/
 /test-results/
 /playwright-report/
 /blob-report/
+/debug/
 
 # Generated files
 /worker-configuration.d.ts

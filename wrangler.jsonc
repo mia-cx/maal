@@ -2,7 +2,7 @@
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "maal-staging",
 	"compatibility_date": "2026-06-08",
-	"compatibility_flags": ["nodejs_als"],
+	"compatibility_flags": ["nodejs_compat"],
 	"main": ".svelte-kit/cloudflare/_worker.js",
 	"assets": {
 		"binding": "ASSETS",
@@ -29,7 +29,7 @@
 				{
 					"binding": "DB",
 					"database_name": "maal-staging",
-					"database_id": "ae9a49ab-426d-4383-b938-c53e2393e46c",
+					"database_id": "c843aee2-d94c-4f9f-b26c-02deea38b86a",
 					"migrations_dir": "drizzle",
 					"remote": true
 				}

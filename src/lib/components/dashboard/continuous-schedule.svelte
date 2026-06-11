@@ -22,6 +22,7 @@
 		draggingMealId,
 		draggedMeal,
 		dropTarget,
+		onaddmeal,
 		onpick,
 		onselect,
 		onscrollstatechange
@@ -36,6 +37,7 @@
 		draggingMealId?: string;
 		draggedMeal?: Meal | null;
 		dropTarget?: MealDropTarget | null;
+		onaddmeal?: (date?: string) => void;
 		onpick?: (meal: Meal, event: PointerEvent) => void;
 		onselect?: (meal: Meal) => void;
 		onscrollstatechange?: (scrollState: DailyScrollState) => void;
@@ -231,6 +233,7 @@
 			{draggingMealId}
 			{draggedMeal}
 			{dropTarget}
+			{onaddmeal}
 			{onpick}
 			{onselect}
 			meals={mealPool}
@@ -246,6 +249,7 @@
 			{draggingMealId}
 			{draggedMeal}
 			{dropTarget}
+			{onaddmeal}
 			{onpick}
 			{onselect}
 		/>

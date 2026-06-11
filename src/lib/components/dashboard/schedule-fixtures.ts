@@ -28,7 +28,7 @@ export const scheduleMeals: Meal[] = [
 		title: 'Tomato soup',
 		sortOrder: 2000,
 		cookTimeMinutes: 35,
-		familiarity: 'survival',
+		familiarity: 'safe',
 		image:
 			'https://images.unsplash.com/photo-1547592166-23ac45744acd?auto=format&fit=crop&w=900&q=80',
 		description: 'Silky tomato soup with toasted bread and a little cream at the end.',

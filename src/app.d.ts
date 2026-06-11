@@ -4,6 +4,7 @@ import type { AuthSession, PublicAuthSession } from '$lib/server/auth/session';
 
 declare global {
 	interface Env {
+		DB: D1Database;
 		WORKOS_API_KEY: string;
 		WORKOS_CLIENT_ID: string;
 		WORKOS_COOKIE_PASSWORD: string;
@@ -11,6 +12,7 @@ declare global {
 		PUBLIC_STRIPE_PUBLISHABLE_KEY: string;
 		STRIPE_WEBHOOK_SECRET?: string;
 		STRIPE_DEFAULT_PRICE_ID?: string;
+		MAAL_SMOKE_AUTH_ENABLED?: string;
 	}
 
 	namespace App {

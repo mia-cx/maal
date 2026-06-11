@@ -1,16 +1,45 @@
 <script lang="ts">
+	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
+	import {
+		addScheduleMealFromRecipe,
+		deleteScheduleMeal,
+		hydrateScheduleMeals,
+		mergeHydratedScheduleMeals,
+		moveScheduleMealToDropTarget,
+		scheduleMealStore,
+		selectScheduleMeal,
+		selectedMealStore,
+		updateScheduleMealSchedule
+	} from '$lib/stores/schedule-meals';
+	import { createMenuRecipe, hydrateMenuRecipes, menuRecipesStore } from '$lib/stores/menu-recipes';
 	import { setDailyScroll, uiState, updateUiState } from '$lib/stores/ui-state';
+	import AddMealDialog from './add-meal-dialog.svelte';
 	import ContinuousSchedule from './continuous-schedule.svelte';
+	import RecipeEditSheet from '$lib/components/menu/recipe-edit-sheet.svelte';
 	import MealDragOverlay from './meal-drag-overlay.svelte';
 	import MealPreviewDialog from './meal-preview-dialog.svelte';
 	import MonthSchedule from './month-schedule.svelte';
 	import MultiDaySchedule from './multi-day-schedule.svelte';
 	import ScheduleHeader from './schedule-header.svelte';
 	import { addDays, addMonths, dateFromKey, dateKey, startOfDay } from './schedule-date';
-	import { scheduleMeals } from './schedule-fixtures';
-	import { dropTargetFromPointer, moveMealToDropTarget } from './schedule-dnd';
+	import { dropTargetFromPointer } from './schedule-dnd';
 	import { isMealInPool, sortMealPool } from './schedule-ordering';
+	import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
 	import type { Meal, MealDropTarget, ScheduleMode } from './schedule-types';
+
+	let {
+		meals: initialMeals = [],
+		recipes: initialRecipes = [],
+		defaultMealServings = 1,
+		weekStartsOn = 'monday',
+		initialMealRange
+	}: {
+		meals?: Meal[];
+		recipes?: RecipeMenuItem[];
+		defaultMealServings?: number;
+		weekStartsOn?: 'sunday' | 'monday';
+		initialMealRange?: { start: string; end: string };
+	} = $props();
 
 	const initialUiState = uiState.get();
 	const mealPoolImageMinHeight = 760;
@@ -22,11 +51,15 @@
 	let todaySignal = $state(0);
 	let dayNavigationSignal = $state(0);
 	let dashboardHeight = $state(0);
-	let meals = $state<Meal[]>(scheduleMeals.map((meal) => ({ ...meal })));
 	let draggedMeal = $state<Meal | null>(null);
 	let draggedPointerId = $state<number | null>(null);
-	let selectedMeal = $state<Meal | null>(null);
 	let previewOpen = $state(false);
+	let addMealOpen = $state(false);
+	let addMealDate = $state<string | undefined>();
+	let addMealBusy = $state(false);
+	let addMealError = $state<string | null>(null);
+	let recipeEditorOpen = $state(false);
+	let draftRecipe = $state<RecipeMenuItem | null>(null);
 	let dragX = $state(0);
 	let dragY = $state(0);
 	let dropTarget = $state<MealDropTarget | null>(null);
@@ -34,9 +67,15 @@
 	let secondaryScrollElement: HTMLElement | null = null;
 	let secondaryScrollX = 0;
 	let secondaryScrollY = 0;
+	let hydratedMealsSignature = $state('');
+	let hydratedRecipesSignature = $state('');
+	let loadedMealRanges = $state<{ start: string; end: string }[]>([]);
+	let loadingMealRangeKey = $state('');
 
-	const mealPool = $derived(sortMealPool(meals.filter(isMealInPool)));
-	const plannedMeals = $derived(meals.filter((meal) => !isMealInPool(meal)));
+	const mealPool = $derived(sortMealPool($scheduleMealStore.filter(isMealInPool)));
+	const plannedMeals = $derived($scheduleMealStore.filter((meal) => !isMealInPool(meal)));
+	const selectedMeal = $derived($selectedMealStore);
+	const menuRecipes = $derived($menuRecipesStore);
 	const showDateControls = $derived(mode === 'daily' || mode === 'multi-day' || mode === 'monthly');
 	const showStepControls = $derived(mode === 'multi-day' || mode === 'monthly');
 	const showMealPoolImages = $derived(dashboardHeight >= mealPoolImageMinHeight);
@@ -46,13 +85,44 @@
 		m: 'monthly'
 	};
 
-	const isEditableTarget = (target: EventTarget | null): boolean =>
-		target instanceof Element &&
-		Boolean(
-			target.closest(
-				'input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="textbox"]'
-			)
-		);
+	const scheduleShortcutCombos = [
+		'ArrowLeft',
+		'ArrowRight',
+		'ArrowUp',
+		'ArrowDown',
+		'h',
+		'j',
+		'k',
+		'l',
+		'd',
+		'w',
+		'm'
+	].map((key) => ({ key, meta: false, ctrl: false, alt: false }));
+
+	const mealLoadRangeFor = (date: Date) => {
+		const start = dateKey(addDays(date, -45));
+		const end = dateKey(addDays(date, 90));
+		return { start, end, key: `${start}:${end}` };
+	};
+
+	const hasLoadedMealRange = (start: string, end: string): boolean =>
+		loadedMealRanges.some((range) => range.start <= start && range.end >= end);
+
+	const loadMealRange = async (range: { start: string; end: string; key: string }) => {
+		if (hasLoadedMealRange(range.start, range.end) || loadingMealRangeKey === range.key) return;
+		loadingMealRangeKey = range.key;
+		try {
+			const response = await fetch(`/plan/meals?start=${range.start}&end=${range.end}`);
+			if (!response.ok) throw new Error(await response.text());
+			const body = (await response.json()) as { meals: Meal[] };
+			mergeHydratedScheduleMeals(body.meals, range.start, range.end);
+			loadedMealRanges = [...loadedMealRanges, { start: range.start, end: range.end }];
+		} catch (error) {
+			console.error('Failed to load meal range', error);
+		} finally {
+			if (loadingMealRangeKey === range.key) loadingMealRangeKey = '';
+		}
+	};
 
 	const visibleMealCards = (): HTMLElement[] =>
 		Array.from(document.querySelectorAll<HTMLElement>('[data-meal-card-id]')).filter((card) => {
@@ -99,10 +169,13 @@
 		updateUiState({ dailyScroll: null });
 	};
 
-	const handleScheduleShortcut = (event: KeyboardEvent) => {
-		if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
-		if (isEditableTarget(event.target)) return;
+	const moveByMonthRow = (rowDelta: number): boolean => {
+		if (mode !== 'monthly') return false;
+		anchorDate = startOfDay(addDays(anchorDate, rowDelta * 7));
+		return true;
+	};
 
+	const handleScheduleShortcut = (event: KeyboardEvent) => {
 		const activeMealCard =
 			event.target instanceof Element
 				? event.target.closest<HTMLElement>('[data-meal-card-id]')
@@ -134,6 +207,16 @@
 		if (event.key === 'ArrowRight' || event.key.toLowerCase() === 'l') {
 			event.preventDefault();
 			moveByDay(1);
+			return;
+		}
+
+		if (event.key === 'ArrowUp' || event.key.toLowerCase() === 'k') {
+			if (moveByMonthRow(-1)) event.preventDefault();
+			return;
+		}
+
+		if (event.key === 'ArrowDown' || event.key.toLowerCase() === 'j') {
+			if (moveByMonthRow(1)) event.preventDefault();
 			return;
 		}
 
@@ -172,13 +255,82 @@
 		setDailyScroll(scrollState);
 	};
 
-	const updateMultiDayAnchor = (date: Date) => {
+	const updateVisibleAnchor = (date: Date) => {
 		anchorDate = startOfDay(date);
 	};
 
 	const previewMeal = (meal: Meal) => {
-		selectedMeal = meal;
+		selectScheduleMeal(meal.id);
 		previewOpen = true;
+	};
+
+	const createMeal = (date?: string) => {
+		addMealDate = date;
+		addMealError = null;
+		addMealOpen = true;
+	};
+
+	const previewAddedRecipe = (recipe: RecipeMenuItem) => {
+		const meal = addScheduleMealFromRecipe(recipe, addMealDate, defaultMealServings);
+		selectScheduleMeal(meal.id);
+		previewOpen = true;
+		addMealOpen = false;
+		addMealDate = undefined;
+	};
+
+	const readAddMealError = (error: unknown): string => {
+		if (error instanceof Error) return error.message;
+		return 'Could not add that recipe.';
+	};
+
+	const draftRecipeFromTitle = (title: string): RecipeMenuItem => ({
+		id: `draft-recipe-${crypto.randomUUID()}`,
+		title,
+		description: '',
+		ingredientCount: 0,
+		appliances: [],
+		timesCooked: 0,
+		plannedCount: 0,
+		reviewSummary: {
+			worthRepeating: 0,
+			neutral: 0,
+			neverAgain: 0,
+			notes: []
+		},
+		ingredients: [{ amount: '', item: '' }],
+		instructions: [{ position: 1, text: '' }]
+	});
+
+	const createRecipeFromTitle = (title: string) => {
+		draftRecipe = draftRecipeFromTitle(title);
+		addMealOpen = false;
+		recipeEditorOpen = true;
+	};
+
+	const saveDraftRecipe = async (recipe: RecipeMenuItem) => {
+		addMealBusy = true;
+		addMealError = null;
+		try {
+			previewAddedRecipe(await createMenuRecipe({ recipe }));
+			draftRecipe = null;
+		} catch (error) {
+			addMealError = readAddMealError(error);
+			addMealOpen = true;
+		} finally {
+			addMealBusy = false;
+		}
+	};
+
+	const importRecipeFromUrl = async (url: string) => {
+		addMealBusy = true;
+		addMealError = null;
+		try {
+			previewAddedRecipe(await createMenuRecipe({ url }));
+		} catch (error) {
+			addMealError = readAddMealError(error);
+		} finally {
+			addMealBusy = false;
+		}
 	};
 
 	const startMealDrag = (meal: Meal, event: PointerEvent) => {
@@ -187,7 +339,7 @@
 		draggedPointerId = event.pointerId;
 		dragX = event.clientX;
 		dragY = event.clientY;
-		dropTarget = dropTargetFromPointer(event, meal, meals);
+		dropTarget = dropTargetFromPointer(event, meal, $scheduleMealStore);
 	};
 
 	const startSecondaryTouchScroll = (event: PointerEvent) => {
@@ -227,12 +379,12 @@
 		if (!draggedMeal || draggedPointerId !== event.pointerId) return;
 		dragX = event.clientX;
 		dragY = event.clientY;
-		dropTarget = dropTargetFromPointer(event, draggedMeal, meals);
+		dropTarget = dropTargetFromPointer(event, draggedMeal, $scheduleMealStore);
 	};
 
 	const updateDraggedMeal = (target: MealDropTarget) => {
 		if (!draggedMeal) return;
-		meals = moveMealToDropTarget(meals, draggedMeal, target);
+		moveScheduleMealToDropTarget(draggedMeal, target, defaultMealServings);
 	};
 
 	const stopMealDrag = (event: PointerEvent) => {
@@ -247,6 +399,26 @@
 	};
 
 	$effect(() => {
+		const signature = initialMeals.map((meal) => meal.id).join('|');
+		if (signature === hydratedMealsSignature) return;
+		hydratedMealsSignature = signature;
+		hydrateScheduleMeals(initialMeals);
+		loadedMealRanges = initialMealRange ? [initialMealRange] : [];
+	});
+
+	$effect(() => {
+		const signature = initialRecipes.map((recipe) => recipe.id).join('|');
+		if (signature === hydratedRecipesSignature) return;
+		hydratedRecipesSignature = signature;
+		hydrateMenuRecipes(initialRecipes);
+	});
+
+	$effect(() => {
+		const range = mealLoadRangeFor(anchorDate);
+		void loadMealRange(range);
+	});
+
+	$effect(() => {
 		updateUiState({ scheduleMode: mode, scheduleAnchorDate: dateKey(anchorDate) });
 	});
 </script>
@@ -256,11 +428,22 @@
 	onpointermove={moveMealDrag}
 	onpointerup={stopMealDrag}
 	onpointercancel={stopMealDrag}
-	onkeydown={handleScheduleShortcut}
 />
 
 <section
 	bind:clientHeight={dashboardHeight}
+	use:keyboardShortcut={{
+		target: 'window',
+		bindings: [
+			{
+				id: 'schedule.navigate',
+				combo: scheduleShortcutCombos,
+				preventDefault: false,
+				ignoreRepeat: false,
+				handler: handleScheduleShortcut
+			}
+		]
+	}}
 	class="flex h-svh min-w-0 flex-col overflow-hidden bg-background text-foreground"
 	class:select-none={draggedMeal}
 >
@@ -287,6 +470,7 @@
 				draggingMealId={draggedMeal?.id}
 				{draggedMeal}
 				{dropTarget}
+				onaddmeal={createMeal}
 				onpick={startMealDrag}
 				onselect={previewMeal}
 				onscrollstatechange={updateDailyScroll}
@@ -297,14 +481,16 @@
 				{plannedMeals}
 				{showMealPoolImages}
 				{anchorDate}
+				{weekStartsOn}
 				{dayNavigationSignal}
+				onvisibledaycountchange={(dayCount) => (multiDayStep = dayCount)}
 				draggingMealId={draggedMeal?.id}
 				{draggedMeal}
 				{dropTarget}
+				onaddmeal={createMeal}
 				onpick={startMealDrag}
 				onselect={previewMeal}
-				onanchordatechange={updateMultiDayAnchor}
-				onvisibledaycountchange={(dayCount) => (multiDayStep = dayCount)}
+				onanchordatechange={updateVisibleAnchor}
 			/>
 		{:else}
 			<MonthSchedule
@@ -312,16 +498,35 @@
 				{plannedMeals}
 				{showMealPoolImages}
 				{anchorDate}
+				{weekStartsOn}
 				draggingMealId={draggedMeal?.id}
 				{draggedMeal}
 				{dropTarget}
+				onaddmeal={createMeal}
 				onpick={startMealDrag}
 				onselect={previewMeal}
 				onselectdate={openDay}
+				onanchordatechange={updateVisibleAnchor}
 			/>
 		{/if}
 	</div>
 
 	<MealDragOverlay meal={draggedMeal} x={dragX} y={dragY} />
-	<MealPreviewDialog bind:open={previewOpen} meal={selectedMeal} />
+	<AddMealDialog
+		bind:open={addMealOpen}
+		date={addMealDate}
+		recipes={menuRecipes}
+		busy={addMealBusy}
+		error={addMealError}
+		onexisting={previewAddedRecipe}
+		onnewrecipe={createRecipeFromTitle}
+		onurl={importRecipeFromUrl}
+	/>
+	<RecipeEditSheet bind:open={recipeEditorOpen} recipe={draftRecipe} onsaved={saveDraftRecipe} />
+	<MealPreviewDialog
+		bind:open={previewOpen}
+		meal={selectedMeal}
+		onmealchange={updateScheduleMealSchedule}
+		onmealdelete={deleteScheduleMeal}
+	/>
 </section>

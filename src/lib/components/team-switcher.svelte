@@ -1,18 +1,24 @@
 <script lang="ts">
+	import { HomeIcon } from '$lib/components/icons/solar-outline';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { useSidebar } from '$lib/components/ui/sidebar/index.js';
 	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
-	import PlusIcon from '@lucide/svelte/icons/plus';
-	import type { Component } from 'svelte';
 
-	type Team = { name: string; logo: Component<{ class?: string }>; plan: string };
+	type Household = { id: string; name: string };
 
-	let { teams, label = 'Teams' }: { teams: Team[]; label?: string } = $props();
+	let {
+		households = [],
+		activeHouseholdId = null,
+		label = 'Households'
+	}: { households?: Household[]; activeHouseholdId?: string | null; label?: string } = $props();
 	const sidebar = useSidebar();
 
-	// svelte-ignore state_referenced_locally
-	let activeTeam = $state(teams[0]);
+	const activeHousehold = $derived(
+		households.find((household) => household.id === activeHouseholdId) ?? households[0] ?? null
+	);
+	const householdName = $derived(activeHousehold?.name ?? 'No household');
+	const householdMeta = $derived(activeHousehold ? 'Household' : 'Create one from Meal Plan');
 </script>
 
 <Sidebar.Menu>
@@ -27,13 +33,11 @@
 						<span
 							class="flex size-9 shrink-0 items-center justify-center bg-primary text-primary-foreground"
 						>
-							<activeTeam.logo class="size-4" />
+							<HomeIcon class="size-4" />
 						</span>
 						<div class="grid flex-1 text-start text-sm leading-tight">
-							<span class="truncate font-medium">
-								{activeTeam.name}
-							</span>
-							<span class="truncate text-xs">{activeTeam.plan}</span>
+							<span class="truncate font-medium">{householdName}</span>
+							<span class="truncate text-xs">{householdMeta}</span>
 						</div>
 						<ChevronsUpDownIcon class="ms-auto" />
 					</Sidebar.MenuButton>
@@ -46,18 +50,19 @@
 				sideOffset={4}
 			>
 				<DropdownMenu.Label class="text-xs text-muted-foreground">{label}</DropdownMenu.Label>
-				{#each teams as team, index (team.name)}
-					<DropdownMenu.Item onSelect={() => (activeTeam = team)} class="gap-2 p-2">
-						<team.logo class="size-5 shrink-0 text-primary" />
-						{team.name}
-						<DropdownMenu.Shortcut>⌘{index + 1}</DropdownMenu.Shortcut>
+				{#if households.length > 0}
+					{#each households as household (household.id)}
+						<DropdownMenu.Item class="gap-2 p-2" disabled={household.id === activeHousehold?.id}>
+							<HomeIcon class="size-5 shrink-0 text-primary" />
+							<span class="truncate">{household.name}</span>
+						</DropdownMenu.Item>
+					{/each}
+				{:else}
+					<DropdownMenu.Item disabled class="gap-2 p-2 text-muted-foreground">
+						<HomeIcon class="size-5 shrink-0" />
+						No household yet
 					</DropdownMenu.Item>
-				{/each}
-				<DropdownMenu.Separator />
-				<DropdownMenu.Item class="gap-2 p-2">
-					<PlusIcon class="size-5 shrink-0" />
-					<div class="font-medium text-muted-foreground">Add team</div>
-				</DropdownMenu.Item>
+				{/if}
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>
 	</Sidebar.MenuItem>

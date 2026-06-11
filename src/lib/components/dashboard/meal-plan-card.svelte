@@ -1,31 +1,17 @@
 <script lang="ts">
-	import { Badge } from '$lib/components/ui/badge';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { cn } from '$lib/utils.js';
-	import type {
-		Meal,
-		MealCardDensity,
-		MealFamiliarity,
-		MealPickHandler,
-		MealSelectHandler
-	} from './schedule-types';
+	import SparklesIcon from '@lucide/svelte/icons/sparkles';
+	import TimerIcon from '@lucide/svelte/icons/timer';
+	import { familiarityLabels } from './meal-labels';
+	import type { Meal, MealCardDensity, MealPickHandler, MealSelectHandler } from './schedule-types';
 
 	type MealLoad = 'low' | 'medium' | 'high';
 
-	const familiarityLabels: Record<MealFamiliarity, string> = {
-		new: 'new',
-		exploration: 'explore',
-		safe: 'safe',
-		survival: 'fallback',
-		wildcard: 'wildcard'
-	};
-
-	const familiarityLoad: Record<MealFamiliarity, MealLoad> = {
-		new: 'medium',
-		exploration: 'medium',
-		safe: 'low',
-		survival: 'low',
-		wildcard: 'high'
+	const familiarityLoadScore: Record<Meal['familiarity'] & string, number> = {
+		exploration: 0.55,
+		safe: 0.15,
+		wildcard: 0.85
 	};
 
 	const loadAccentClasses: Record<MealLoad, string> = {
@@ -33,6 +19,9 @@
 		medium: 'after:bg-meal-load-medium',
 		high: 'after:bg-meal-load-high'
 	};
+	const dayMinutes = 24 * 60;
+	const lowCookLoadMinutes = 20;
+	const highCookLoadMinutes = 75;
 	const defaultDragStartThresholdPx = 6;
 	const touchLongPressDelayMs = 420;
 	const touchLongPressMoveTolerancePx = 16;
@@ -61,7 +50,59 @@
 		class?: string;
 	} = $props();
 
-	const mealLoad = $derived(meal.familiarity ? familiarityLoad[meal.familiarity] : 'medium');
+	const minutesFromTime = (time: string): number | null => {
+		const match = /^(\d{2}):(\d{2})(?::\d{2})?$/.exec(time);
+		if (!match) return null;
+		return Number(match[1]) * 60 + Number(match[2]);
+	};
+
+	const timeFromMinutes = (minutes: number): string => {
+		const wrappedMinutes = ((minutes % dayMinutes) + dayMinutes) % dayMinutes;
+		const hours = Math.floor(wrappedMinutes / 60)
+			.toString()
+			.padStart(2, '0');
+		const remainingMinutes = (wrappedMinutes % 60).toString().padStart(2, '0');
+		return `${hours}:${remainingMinutes}`;
+	};
+
+	const startCookingTime = (meal: Meal): string | undefined => {
+		if (!meal.time) return;
+		const duration = meal.adjustedCookTimeMinutes ?? meal.cookTimeMinutes;
+		if (!duration) return meal.time;
+		const eatingTime = minutesFromTime(meal.time);
+		return eatingTime === null ? meal.time : timeFromMinutes(eatingTime - duration);
+	};
+
+	const clamp = (value: number, min = 0, max = 1): number => Math.min(max, Math.max(min, value));
+
+	const smoothstep = (edge0: number, edge1: number, value: number): number => {
+		const progress = clamp((value - edge0) / (edge1 - edge0));
+		return progress * progress * (3 - 2 * progress);
+	};
+
+	const cookTimeLoadScore = (meal: Meal): number =>
+		smoothstep(
+			lowCookLoadMinutes,
+			highCookLoadMinutes,
+			meal.adjustedCookTimeMinutes ?? meal.cookTimeMinutes ?? lowCookLoadMinutes
+		);
+
+	const combinedMentalLoadScore = (meal: Meal): number => {
+		const familiarityScore = meal.familiarity ? familiarityLoadScore[meal.familiarity] : 0.45;
+		const timeScore = cookTimeLoadScore(meal);
+		const independentLoad = 1 - (1 - familiarityScore) ** 0.65 * (1 - timeScore) ** 0.45;
+		const interactionLoad = 0.12 * familiarityScore * timeScore;
+		return clamp(independentLoad + interactionLoad);
+	};
+
+	const mentalLoadLevel = (score: number): MealLoad => {
+		if (score < 0.35) return 'low';
+		if (score < 0.7) return 'medium';
+		return 'high';
+	};
+
+	const mealLoad = $derived(mentalLoadLevel(combinedMentalLoadScore(meal)));
+	const displayedTime = $derived(startCookingTime(meal));
 	const showMetadata = $derived(density !== 'title' && (meal.cookTimeMinutes || meal.familiarity));
 	const showDescription = $derived(density === 'detail' && meal.description);
 	const showCardImage = $derived(showImage && density !== 'title' && meal.image);
@@ -83,11 +124,11 @@
 	const sideImageClass = $derived(
 		imageAspect === 'portrait'
 			? cn(
-					'pointer-events-none aspect-[3/4] w-14 shrink-0 self-stretch object-cover select-none [-webkit-user-drag:none] @min-[14rem]:w-16 @min-[18rem]:w-20 @min-[24rem]:w-24',
+					'pointer-events-none h-full w-14 shrink-0 self-stretch object-cover select-none [-webkit-user-drag:none] @min-[14rem]:w-16 @min-[18rem]:w-20 @min-[24rem]:w-24',
 					showAdaptiveImage || showCompactSideImage ? 'block' : 'hidden @min-[14rem]:block'
 				)
 			: cn(
-					'pointer-events-none aspect-[3/2] w-16 shrink-0 self-stretch object-cover select-none [-webkit-user-drag:none] @min-[14rem]:w-20 @min-[24rem]:w-24 @min-[32rem]:w-28',
+					'pointer-events-none h-full w-16 shrink-0 self-stretch object-cover select-none [-webkit-user-drag:none] @min-[14rem]:w-20 @min-[24rem]:w-24 @min-[32rem]:w-28',
 					showAdaptiveImage || showCompactSideImage ? 'block' : 'hidden @min-[18rem]:block'
 				)
 	);
@@ -258,7 +299,7 @@
 	<Card.Root
 		size="sm"
 		class={cn(
-			"relative w-full min-w-0 gap-1 overflow-hidden bg-card/50 py-1 shadow-sm ring-1 ring-border/70 after:absolute after:inset-y-0 after:left-0 after:w-0.5 after:content-[''] data-[size=sm]:py-1",
+			"relative h-full w-full min-w-0 gap-1 overflow-hidden bg-card/50 py-1 shadow-sm ring-1 ring-border/70 after:absolute after:inset-y-0 after:left-0 after:w-1 after:content-[''] data-[size=sm]:py-1",
 			showTopImage && 'pt-0',
 			showSideImage && 'py-0 data-[size=sm]:py-0',
 			showAdaptiveImage &&
@@ -278,35 +319,54 @@
 		{/if}
 
 		<div
-			class={cn('min-w-0 px-2.5 py-0', showTopImage && 'pt-1', showSideImage && sideLayoutClass)}
+			class={cn(
+				'min-w-0 px-2.5 py-0',
+				showTopImage && 'pt-1',
+				showSideImage && 'h-full',
+				showSideImage && sideLayoutClass
+			)}
 		>
-			<div class={cn('min-w-0 flex-1', showSideImage && 'py-1')}>
+			<div
+				class={cn(
+					'@container/meal-card-body min-w-0 flex-1',
+					showSideImage && 'flex flex-col justify-start py-2'
+				)}
+			>
 				<div class="flex min-w-0 items-baseline gap-2">
 					<h3 class="min-w-0 flex-1 truncate text-xs leading-tight font-medium">{meal.title}</h3>
-					{#if meal.time}
+					{#if displayedTime}
 						<time
-							class="hidden shrink-0 text-[0.6875rem] leading-tight text-muted-foreground tabular-nums @min-[9rem]:block"
-							datetime={meal.time}
+							class="hidden shrink-0 text-[0.6875rem] leading-tight text-muted-foreground tabular-nums @min-[12rem]:block"
+							datetime={displayedTime}
 						>
-							{meal.time}
+							{displayedTime}
 						</time>
 					{/if}
 				</div>
 
 				{#if showMetadata}
-					<div class="mt-0.5 flex min-w-0 flex-wrap gap-1 overflow-visible">
+					<div
+						class="mt-0.5 grid min-w-0 gap-0.5 overflow-visible text-[0.6875rem] leading-tight text-muted-foreground @min-[28ch]/meal-card-body:flex @min-[28ch]/meal-card-body:flex-wrap @min-[28ch]/meal-card-body:items-center @min-[28ch]/meal-card-body:gap-x-1.5 @min-[28ch]/meal-card-body:gap-y-0.5"
+					>
 						{#if meal.cookTimeMinutes}
-							<Badge
-								variant="outline"
-								class="h-4 rounded-sm px-1.5 text-[0.625rem] leading-none tabular-nums"
+							<span class="inline-flex min-w-0 items-center gap-1 tabular-nums">
+								<TimerIcon class="size-3 shrink-0" />
+								<span>{meal.cookTimeMinutes} min</span>
+							</span>
+						{/if}
+						{#if meal.cookTimeMinutes && meal.familiarity}
+							<span
+								aria-hidden="true"
+								class="hidden text-muted-foreground/60 @min-[28ch]/meal-card-body:inline"
 							>
-								{meal.cookTimeMinutes} min
-							</Badge>
+								•
+							</span>
 						{/if}
 						{#if meal.familiarity}
-							<Badge variant="outline" class="h-4 rounded-sm px-1.5 text-[0.625rem] leading-none">
-								{familiarityLabels[meal.familiarity]}
-							</Badge>
+							<span class="inline-flex min-w-0 items-center gap-1">
+								<SparklesIcon class="size-3 shrink-0" />
+								<span>{familiarityLabels[meal.familiarity]}</span>
+							</span>
 						{/if}
 					</div>
 				{/if}
