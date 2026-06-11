@@ -89,6 +89,7 @@
 	let scrollReleaseTimeout: ReturnType<typeof setTimeout> | undefined;
 	let suppressAnchorUpdate = false;
 	let draggingScroller = $state(false);
+	let pendingDragScrollPointerId: number | null = null;
 	let dragStartX = 0;
 	let dragStartScrollLeft = 0;
 	let dragLastX = 0;
@@ -589,23 +590,32 @@
 
 	const startDragScroll = (event: PointerEvent) => {
 		if (!scroller || event.pointerType === 'touch' || event.button !== 0) return;
-		if (event.target instanceof Element && event.target.closest('[data-meal-card-id]')) return;
-		clearPendingSnap();
-		clearTouchInput();
-		cancelProgrammaticScroll();
-		suppressAnchorUpdate = false;
-		draggingScroller = true;
+		if (
+			event.target instanceof Element &&
+			event.target.closest(
+				'button, a, input, textarea, select, [contenteditable=""], [contenteditable="true"], [data-meal-card-id]'
+			)
+		)
+			return;
+		pendingDragScrollPointerId = event.pointerId;
 		dragStartX = event.clientX;
 		dragStartScrollLeft = scroller.scrollLeft;
 		dragLastX = event.clientX;
 		dragLastTime = performance.now();
 		dragVelocity = 0;
-		scroller.setPointerCapture(event.pointerId);
-		event.preventDefault();
 	};
 
 	const dragScroll = (event: PointerEvent) => {
-		if (!scroller || !draggingScroller) return;
+		if (!scroller || pendingDragScrollPointerId !== event.pointerId) return;
+		if (!draggingScroller) {
+			if (Math.abs(event.clientX - dragStartX) < touchPanThresholdPx) return;
+			clearPendingSnap();
+			clearTouchInput();
+			cancelProgrammaticScroll();
+			suppressAnchorUpdate = false;
+			draggingScroller = true;
+			scroller.setPointerCapture(event.pointerId);
+		}
 		const now = performance.now();
 		const delta = dragLastX - event.clientX;
 		const elapsed = Math.max(1, now - dragLastTime);
@@ -618,7 +628,9 @@
 	};
 
 	const stopDragScroll = (event: PointerEvent) => {
-		if (!scroller || !draggingScroller) return;
+		if (!scroller || pendingDragScrollPointerId !== event.pointerId) return;
+		pendingDragScrollPointerId = null;
+		if (!draggingScroller) return;
 		const releaseVelocity = dragVelocity;
 		const releaseDistance = scroller.scrollLeft - dragStartScrollLeft;
 		draggingScroller = false;

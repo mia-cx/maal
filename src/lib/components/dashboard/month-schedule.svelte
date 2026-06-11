@@ -86,6 +86,7 @@
 	let scrollReleaseTimeout: ReturnType<typeof setTimeout> | undefined;
 	let suppressAnchorUpdate = false;
 	let draggingScroller = $state(false);
+	let pendingDragScrollPointerId: number | null = null;
 	let dragStartY = 0;
 	let dragStartScrollTop = 0;
 	let dragLastY = 0;
@@ -539,22 +540,25 @@
 			)
 		)
 			return;
-		clearPendingSnap();
-		clearTouchInput();
-		cancelProgrammaticScroll();
-		suppressAnchorUpdate = false;
-		draggingScroller = true;
+		pendingDragScrollPointerId = event.pointerId;
 		dragStartY = event.clientY;
 		dragStartScrollTop = scroller.scrollTop;
 		dragLastY = event.clientY;
 		dragLastTime = performance.now();
 		dragVelocity = 0;
-		scroller.setPointerCapture(event.pointerId);
-		event.preventDefault();
 	};
 
 	const dragScroll = (event: PointerEvent) => {
-		if (!scroller || !draggingScroller) return;
+		if (!scroller || pendingDragScrollPointerId !== event.pointerId) return;
+		if (!draggingScroller) {
+			if (Math.abs(event.clientY - dragStartY) < touchPanThresholdPx) return;
+			clearPendingSnap();
+			clearTouchInput();
+			cancelProgrammaticScroll();
+			suppressAnchorUpdate = false;
+			draggingScroller = true;
+			scroller.setPointerCapture(event.pointerId);
+		}
 		const now = performance.now();
 		const delta = dragLastY - event.clientY;
 		const elapsed = Math.max(1, now - dragLastTime);
@@ -567,7 +571,9 @@
 	};
 
 	const stopDragScroll = (event: PointerEvent) => {
-		if (!scroller || !draggingScroller) return;
+		if (!scroller || pendingDragScrollPointerId !== event.pointerId) return;
+		pendingDragScrollPointerId = null;
+		if (!draggingScroller) return;
 		const releaseVelocity = dragVelocity;
 		draggingScroller = false;
 		dragVelocity = 0;
