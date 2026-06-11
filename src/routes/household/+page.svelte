@@ -106,10 +106,10 @@
 			localeChanged ||
 			timezoneChanged ||
 			weekStartsOnChanged ||
-			preferredMassUnitChanged ||
-			preferredVolumeUnitChanged ||
-			ingredientUnitOverridesChanged ||
 			preferredDinnerTimeChanged
+	);
+	const aliasOverridesChanged = $derived(
+		preferredMassUnitChanged || preferredVolumeUnitChanged || ingredientUnitOverridesChanged
 	);
 	const changedAppliances = $derived(
 		appliances.filter((appliance) => {
@@ -251,6 +251,60 @@
 						</div>
 					</fieldset>
 
+					{#if canManageHousehold}
+						<div>
+							<Button type="submit" disabled={!householdSettingsChanged}>Save household</Button>
+						</div>
+					{/if}
+				</form>
+			</section>
+
+			<section class="grid gap-3 border-t border-border pt-4">
+				<h2 class="text-sm font-medium">Appliances</h2>
+				<form method="post" action="?/updateAppliances" class="grid gap-3">
+					{#each changedAppliances as appliance (appliance.appliance)}
+						<input
+							type="hidden"
+							name={`available:${appliance.appliance}`}
+							value={appliance.available ? 'on' : 'off'}
+						/>
+						<input type="hidden" name={`notes:${appliance.appliance}`} value={appliance.notes} />
+					{/each}
+					<div class="flex flex-wrap gap-2">
+						{#each appliances as appliance (appliance.appliance)}
+							<label
+								class={cn(
+									'inline-flex min-h-10 items-center rounded-xl border px-3 py-2 text-xs font-semibold shadow-sm transition-colors',
+									appliance.available
+										? 'border-primary bg-primary/10 text-foreground ring-2 ring-primary/30 hover:bg-primary/15'
+										: 'border-border bg-muted/30 text-muted-foreground hover:border-foreground/30 hover:bg-muted/50',
+									fieldDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+								)}
+							>
+								<input
+									type="checkbox"
+									bind:checked={appliance.available}
+									disabled={fieldDisabled}
+									class="sr-only"
+								/>
+								{appliance.label}
+							</label>
+						{/each}
+					</div>
+					{#if canManageHousehold}
+						<div>
+							<Button type="submit" disabled={!appliancesChanged}>Save appliances</Button>
+						</div>
+					{/if}
+				</form>
+			</section>
+
+			<section
+				class="grid gap-3 border-t border-border pt-4"
+				aria-labelledby="aliases-overrides-title"
+			>
+				<h2 id="aliases-overrides-title" class="text-sm font-medium">Aliases & overrides</h2>
+				<form method="post" action="?/updateSettings" class="grid gap-4">
 					<fieldset class="grid gap-3">
 						<legend class="sr-only">Unit defaults</legend>
 						<div class="grid gap-3 md:grid-cols-2">
@@ -305,12 +359,11 @@
 
 					{#if canManageHousehold}
 						<div>
-							<Button type="submit" disabled={!householdSettingsChanged}>Save household</Button>
+							<Button type="submit" disabled={!aliasOverridesChanged}>Save overrides</Button>
 						</div>
 					{/if}
 				</form>
 			</section>
-
 			<section class="grid gap-3 border-t border-border pt-4">
 				<h2 class="text-sm font-medium">Members</h2>
 				<div class="divide-y divide-border rounded-md border border-border">
@@ -340,46 +393,6 @@
 						</div>
 					{/each}
 				</div>
-			</section>
-
-			<section class="grid gap-3 border-t border-border pt-4">
-				<h2 class="text-sm font-medium">Appliances</h2>
-				<form method="post" action="?/updateAppliances" class="grid gap-3">
-					{#each changedAppliances as appliance (appliance.appliance)}
-						<input
-							type="hidden"
-							name={`available:${appliance.appliance}`}
-							value={appliance.available ? 'on' : 'off'}
-						/>
-						<input type="hidden" name={`notes:${appliance.appliance}`} value={appliance.notes} />
-					{/each}
-					<div class="flex flex-wrap gap-2">
-						{#each appliances as appliance (appliance.appliance)}
-							<label
-								class={cn(
-									'inline-flex min-h-10 items-center rounded-xl border px-3 py-2 text-xs font-semibold shadow-sm transition-colors',
-									appliance.available
-										? 'border-primary bg-primary/10 text-foreground ring-2 ring-primary/30 hover:bg-primary/15'
-										: 'border-border bg-muted/30 text-muted-foreground hover:border-foreground/30 hover:bg-muted/50',
-									fieldDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-								)}
-							>
-								<input
-									type="checkbox"
-									bind:checked={appliance.available}
-									disabled={fieldDisabled}
-									class="sr-only"
-								/>
-								{appliance.label}
-							</label>
-						{/each}
-					</div>
-					{#if canManageHousehold}
-						<div>
-							<Button type="submit" disabled={!appliancesChanged}>Save appliances</Button>
-						</div>
-					{/if}
-				</form>
 			</section>
 
 			{#if Object.keys(data.household.metadata).length > 0}
