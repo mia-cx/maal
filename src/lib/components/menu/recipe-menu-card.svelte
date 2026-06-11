@@ -50,12 +50,7 @@
 		)}
 	>
 		{#if recipe.image}
-			<img
-				src={recipe.image}
-				alt=""
-				loading="lazy"
-				class="aspect-[2/1] w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
-			/>
+			<img src={recipe.image} alt="" loading="lazy" class="aspect-[2/1] w-full object-cover" />
 		{/if}
 
 		<Card.Header class="space-y-1.5 p-3 pb-2 pl-4">
