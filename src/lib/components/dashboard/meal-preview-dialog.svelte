@@ -303,6 +303,7 @@
 	<Dialog.Portal>
 		<Dialog.Overlay />
 		<DialogPrimitive.Content
+			data-sheet-viewport
 			class="fixed inset-0 z-50 h-svh w-full [scrollbar-width:none] overflow-y-auto bg-transparent py-4 outline-none [&::-webkit-scrollbar]:hidden"
 		>
 			{#if meal}
