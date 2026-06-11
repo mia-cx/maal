@@ -146,7 +146,7 @@
 							/>
 						</label>
 						<label class="grid min-w-0 gap-1 text-xs font-medium">
-							Default servings
+							Default yield
 							<Input
 								name={defaultServingsChanged ? 'defaultServings' : undefined}
 								type="number"

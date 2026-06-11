@@ -32,7 +32,7 @@ export type RecipeMenuItem = {
 	prepTimeMinutes?: number;
 	cookTimeMinutes?: number;
 	totalTimeMinutes?: number;
-	servings?: number;
+	yield?: number;
 	ingredients?: RecipeIngredientItem[];
 	instructions?: RecipeInstructionItem[];
 	ingredientCount: number;

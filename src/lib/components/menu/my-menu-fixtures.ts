@@ -14,7 +14,7 @@ export const myMenuRecipes: RecipeMenuItem[] = [
 		prepTimeMinutes: 10,
 		cookTimeMinutes: 25,
 		totalTimeMinutes: 35,
-		servings: 3,
+		yield: 3,
 		ingredientCount: 9,
 		ingredients: [
 			{ amount: '1 lb', item: 'chicken thighs' },
@@ -56,7 +56,7 @@ export const myMenuRecipes: RecipeMenuItem[] = [
 		prepTimeMinutes: 8,
 		cookTimeMinutes: 35,
 		totalTimeMinutes: 43,
-		servings: 4,
+		yield: 4,
 		ingredientCount: 7,
 		ingredients: [
 			{ amount: '28 oz', item: 'canned tomatoes' },
@@ -97,7 +97,7 @@ export const myMenuRecipes: RecipeMenuItem[] = [
 		prepTimeMinutes: 10,
 		cookTimeMinutes: 30,
 		totalTimeMinutes: 40,
-		servings: 4,
+		yield: 4,
 		ingredientCount: 8,
 		ingredients: [
 			{ amount: '12 oz', item: 'pasta' },
@@ -138,7 +138,7 @@ export const myMenuRecipes: RecipeMenuItem[] = [
 		prepTimeMinutes: 15,
 		cookTimeMinutes: 45,
 		totalTimeMinutes: 60,
-		servings: 2,
+		yield: 2,
 		ingredientCount: 10,
 		ingredients: [
 			{ amount: '2 fillets', item: 'salmon' },
@@ -178,7 +178,7 @@ export const myMenuRecipes: RecipeMenuItem[] = [
 		prepTimeMinutes: 20,
 		cookTimeMinutes: 40,
 		totalTimeMinutes: 60,
-		servings: 4,
+		yield: 4,
 		ingredientCount: 13,
 		ingredients: [
 			{ amount: '8', item: 'tortillas' },
@@ -219,7 +219,7 @@ export const myMenuRecipes: RecipeMenuItem[] = [
 		prepTimeMinutes: 15,
 		cookTimeMinutes: 20,
 		totalTimeMinutes: 35,
-		servings: 3,
+		yield: 3,
 		ingredientCount: 8,
 		ingredients: [
 			{ amount: '1 cup', item: 'lentils' },

@@ -2,6 +2,8 @@
 	import * as Button from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 	import XIcon from '@lucide/svelte/icons/x';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import type { RecipeIngredientItem, RecipeInstructionItem, RecipeMenuItem } from './menu-types';
@@ -32,7 +34,7 @@
 	let image = $state('');
 	let prepTimeMinutes = $state('');
 	let cookTimeMinutes = $state('');
-	let servings = $state('');
+	let recipeYield = $state('');
 	let ingredients = $state<DraftIngredient[]>([]);
 	let instructions = $state<DraftInstruction[]>([]);
 	let deleteConfirmOpen = $state(false);
@@ -84,7 +86,7 @@
 		image = nextRecipe?.image ?? '';
 		prepTimeMinutes = numberText(nextRecipe?.prepTimeMinutes);
 		cookTimeMinutes = numberText(nextRecipe?.cookTimeMinutes);
-		servings = numberText(nextRecipe?.servings);
+		recipeYield = numberText(nextRecipe?.yield);
 		ingredients = nextRecipe ? defaultIngredients(nextRecipe) : [];
 		instructions = nextRecipe ? defaultInstructions(nextRecipe) : [];
 	};
@@ -214,7 +216,7 @@
 			prepTimeMinutes: optionalNumber(prepTimeMinutes),
 			cookTimeMinutes: optionalNumber(cookTimeMinutes),
 			totalTimeMinutes: undefined,
-			servings: optionalWholeNumber(servings),
+			yield: optionalWholeNumber(recipeYield),
 			ingredients: savedIngredients,
 			ingredientCount: savedIngredients.length,
 			instructions: savedInstructions()
@@ -338,8 +340,8 @@
 										<Input type="number" min="0" bind:value={cookTimeMinutes} />
 									</label>
 									<label class="grid gap-1 text-xs font-medium">
-										Default servings
-										<Input type="number" min="1" step="1" bind:value={servings} />
+										Yield
+										<Input type="number" min="1" step="1" bind:value={recipeYield} />
 									</label>
 								</div>
 							</div>
@@ -393,8 +395,19 @@
 										<div
 											class="grid gap-2 rounded-md border border-border/70 p-2 sm:grid-cols-[4.5rem_minmax(0,1fr)_auto] sm:items-start"
 										>
-											<label class="grid gap-1 text-xs font-medium">
-												Position
+											<div class="grid gap-1 text-xs font-medium">
+												<span>Position</span>
+												<Button.Root
+													type="button"
+													variant="ghost"
+													size="sm"
+													class="h-7 px-2"
+													disabled={index === 0}
+													aria-label="Move instruction up"
+													onclick={() => swapInstructionPosition(instruction.draftId, -1)}
+												>
+													<ChevronUpIcon class="size-4" />
+												</Button.Root>
 												<Input
 													type="text"
 													inputmode="numeric"
@@ -406,7 +419,18 @@
 														)}
 													aria-label="Instruction position"
 												/>
-											</label>
+												<Button.Root
+													type="button"
+													variant="ghost"
+													size="sm"
+													class="h-7 px-2"
+													disabled={index === sortedInstructions.length - 1}
+													aria-label="Move instruction down"
+													onclick={() => swapInstructionPosition(instruction.draftId, 1)}
+												>
+													<ChevronDownIcon class="size-4" />
+												</Button.Root>
+											</div>
 											<label class="grid gap-1 text-xs font-medium">
 												Text
 												<textarea
@@ -418,22 +442,7 @@
 											</label>
 											<div class="flex flex-wrap gap-1 sm:mt-5 sm:flex-col">
 												<Button.Root
-													variant="ghost"
-													size="sm"
-													disabled={index === 0}
-													onclick={() => swapInstructionPosition(instruction.draftId, -1)}
-												>
-													Up
-												</Button.Root>
-												<Button.Root
-													variant="ghost"
-													size="sm"
-													disabled={index === sortedInstructions.length - 1}
-													onclick={() => swapInstructionPosition(instruction.draftId, 1)}
-												>
-													Down
-												</Button.Root>
-												<Button.Root
+													type="button"
 													variant="ghost"
 													size="sm"
 													onclick={() => removeInstruction(instruction.draftId)}

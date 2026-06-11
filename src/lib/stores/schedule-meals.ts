@@ -45,7 +45,7 @@ const mealFromRecipe = (
 	image: recipe.image,
 	cookTimeMinutes: recipe.cookTimeMinutes,
 	servingsPlanned: normalizedServings(plannedServings),
-	baseServings: normalizedServings(recipe.servings ?? plannedServings),
+	baseServings: normalizedServings(recipe.yield ?? plannedServings),
 	ingredients: recipe.ingredients?.map(recipeIngredientText),
 	instructions: recipe.instructions?.map((instruction) => instruction.text),
 	...overrides

@@ -154,7 +154,7 @@ export const schemaOrgFromRecipeItem = (recipe: RecipeMenuItem): RecipeJson => (
 			? (recipe.prepTimeMinutes ?? 0) + (recipe.cookTimeMinutes ?? 0)
 			: undefined
 	),
-	recipeYield: recipe.servings,
+	recipeYield: recipe.yield,
 	recipeIngredient: recipe.ingredients?.map(fullIngredientText),
 	recipeInstructions: recipe.instructions?.map((instruction) => ({
 		'@type': 'HowToStep',
@@ -208,7 +208,7 @@ export const menuItemFromRecipe = (params: {
 			prepMinutes(recipe) !== undefined || cookMinutes(recipe) !== undefined
 				? (prepMinutes(recipe) ?? 0) + (cookMinutes(recipe) ?? 0)
 				: undefined,
-		servings: servings(recipe),
+		yield: servings(recipe),
 		ingredients: ingredients
 			.toSorted((left, right) => left.lineIndex - right.lineIndex)
 			.map((ingredient) => ({
@@ -342,8 +342,8 @@ export const mealFromMenuRecipe = (
 	id: recipe.id,
 	title: recipe.title,
 	cookTimeMinutes: recipe.cookTimeMinutes,
-	servingsPlanned: recipe.servings ?? 1,
-	baseServings: recipe.servings ?? 1,
+	servingsPlanned: recipe.yield ?? 1,
+	baseServings: recipe.yield ?? 1,
 	image: recipe.image,
 	description: recipe.description,
 	ingredients: recipe.ingredients?.map(fullIngredientText),
@@ -422,7 +422,7 @@ export const loadMealPlanMeals = async (
 			mealFromMenuRecipe(recipe, {
 				userRecipeId: recipe.id,
 				servingsPlanned: defaultMealServings,
-				baseServings: recipe.servings ?? defaultMealServings,
+				baseServings: recipe.yield ?? defaultMealServings,
 				sortOrder: (index + 1) * 1000
 			})
 		);

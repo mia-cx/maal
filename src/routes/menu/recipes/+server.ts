@@ -298,6 +298,17 @@ const durationMinutes = (value: unknown): number | undefined => {
 	return Number(match[1] ?? 0) * 60 + Number(match[2] ?? 0);
 };
 
+const cookMinutesFromRecipe = (recipe: RecipeJson): number | undefined => {
+	const cookMinutes = durationMinutes(recipe.cookTime);
+	if (cookMinutes !== undefined) return cookMinutes;
+
+	const totalMinutes = durationMinutes(recipe.totalTime);
+	if (totalMinutes === undefined) return;
+
+	const prepMinutes = durationMinutes(recipe.prepTime);
+	return prepMinutes === undefined ? totalMinutes : Math.max(0, totalMinutes - prepMinutes);
+};
+
 const firstNumber = (...values: unknown[]): number | undefined => {
 	for (const value of values) {
 		if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -686,10 +697,10 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		description: stringValue(recipeJson.description) ?? body.recipe?.description ?? null,
 		imageUrl: firstString(recipeJson.image) ?? body.recipe?.image ?? null,
 		prepTimeMinutes: body.recipe?.prepTimeMinutes ?? durationMinutes(recipeJson.prepTime) ?? null,
-		cookTimeMinutes: body.recipe?.cookTimeMinutes ?? durationMinutes(recipeJson.cookTime) ?? null,
+		cookTimeMinutes: body.recipe?.cookTimeMinutes ?? cookMinutesFromRecipe(recipeJson) ?? null,
 		totalTimeMinutes:
 			body.recipe?.totalTimeMinutes ?? durationMinutes(recipeJson.totalTime) ?? null,
-		yield: body.recipe?.servings ?? firstNumber(recipeJson.recipeYield, recipeJson.yield) ?? null,
+		yield: body.recipe?.yield ?? firstNumber(recipeJson.recipeYield, recipeJson.yield) ?? null,
 		sourceYieldText: firstString(recipeJson.recipeYield, recipeJson.yield) ?? null,
 		sourceDatePublished: stringValue(recipeJson.datePublished) ?? null,
 		sourceDateModified: stringValue(recipeJson.dateModified) ?? null,
@@ -702,8 +713,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		sourceRatingValue: ratingValue(recipeJson.aggregateRating, 'ratingValue') ?? null,
 		sourceRatingCount: ratingValue(recipeJson.aggregateRating, 'ratingCount') ?? null,
 		sourceReviewCount: ratingValue(recipeJson.aggregateRating, 'reviewCount') ?? null,
-		sourceClaimedMinutes:
-			body.recipe?.cookTimeMinutes ?? durationMinutes(recipeJson.cookTime) ?? null,
+		sourceClaimedMinutes: body.recipe?.cookTimeMinutes ?? cookMinutesFromRecipe(recipeJson) ?? null,
 		parseConfidence: imported ? 1 : 0.4,
 		ingredientConfidence: imported ? 1 : body.recipe ? 1 : 0,
 		instructionConfidence: imported ? 1 : body.recipe ? 1 : 0

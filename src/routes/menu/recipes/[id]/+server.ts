@@ -52,7 +52,7 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 			prepTimeMinutes: recipe.prepTimeMinutes ?? null,
 			cookTimeMinutes: recipe.cookTimeMinutes ?? null,
 			totalTimeMinutes: recipe.totalTimeMinutes ?? null,
-			yield: recipe.servings ?? null,
+			yield: recipe.yield ?? null,
 			sourceUrl: recipe.sourceUrl ?? null,
 			sourceSiteName: recipe.sourceSiteName ?? null,
 			sourceAuthorName: recipe.sourceAuthorName ?? null,
