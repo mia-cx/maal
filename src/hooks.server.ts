@@ -7,6 +7,7 @@ import {
 	clearSealedSession,
 	readSealedSession
 } from '$lib/server/auth/session';
+import { provisionAuthSession } from '$lib/server/auth/provisioning';
 import { smokeAuthEnabled, smokeSession } from '$lib/server/auth/smoke';
 import { tryCreateAuthRuntime } from '$lib/server/auth/workos';
 
@@ -19,6 +20,7 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 			event.cookies.get('maal_smoke_auth') === '1')
 	) {
 		event.locals.session = smokeSession();
+		await provisionAuthSession(event.platform, event.locals.session);
 		return resolve(event);
 	}
 
@@ -35,6 +37,7 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 		cookies: event.cookies,
 		url: event.url
 	});
+	if (event.locals.session) await provisionAuthSession(event.platform, event.locals.session);
 
 	return resolve(event);
 };

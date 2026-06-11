@@ -114,6 +114,10 @@ export const resolveActiveHouseholdId = async (input: {
 	session: { user: { id: string }; organizationId?: string | null };
 }): Promise<{ householdId: string | null; hasAnyHousehold: boolean }> => {
 	if (input.session.organizationId) {
+		await provisionAuthSession(input.platform, {
+			user: input.session.user,
+			organizationId: input.session.organizationId
+		});
 		commitHouseholdCookie(input.cookies, input.session.organizationId, input.url);
 		return { householdId: input.session.organizationId, hasAnyHousehold: true };
 	}
@@ -125,7 +129,13 @@ export const resolveActiveHouseholdId = async (input: {
 			? cookieHouseholdId
 			: (householdIds[0] ?? null);
 
-	if (householdId) commitHouseholdCookie(input.cookies, householdId, input.url);
+	if (householdId) {
+		await provisionAuthSession(input.platform, {
+			user: input.session.user,
+			organizationId: householdId
+		});
+		commitHouseholdCookie(input.cookies, householdId, input.url);
+	}
 	return { householdId, hasAnyHousehold: householdIds.length > 0 };
 };
 
