@@ -539,7 +539,7 @@
 									{/each}
 								</div>
 								<div>
-									<Button.Root variant="outline" size="sm" onclick={addIngredient}
+									<Button.Root variant="outline" size="sm" class="w-full" onclick={addIngredient}
 										>Add ingredient</Button.Root
 									>
 								</div>
@@ -635,7 +635,7 @@
 									{/each}
 								</div>
 								<div>
-									<Button.Root variant="outline" size="sm" onclick={addInstruction}
+									<Button.Root variant="outline" size="sm" class="w-full" onclick={addInstruction}
 										>Add step</Button.Root
 									>
 								</div>
