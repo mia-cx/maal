@@ -208,7 +208,7 @@
 							{#if weekStartsOnChanged}
 								<input type="hidden" name="weekStartsOn" value={weekStartsOn} />
 							{/if}
-							<Select.Root bind:value={weekStartsOn} disabled={fieldDisabled}>
+							<Select.Root type="single" bind:value={weekStartsOn} disabled={fieldDisabled}>
 								<Select.Trigger class="!h-8 w-full">
 									{weekStartLabels[weekStartsOn]}
 								</Select.Trigger>
@@ -224,7 +224,7 @@
 							{#if preferredMassUnitChanged}
 								<input type="hidden" name="preferredMassUnit" value={preferredMassUnit} />
 							{/if}
-							<Select.Root bind:value={preferredMassUnit} disabled={fieldDisabled}>
+							<Select.Root type="single" bind:value={preferredMassUnit} disabled={fieldDisabled}>
 								<Select.Trigger class="!h-8 w-full">
 									{massUnitLabels[preferredMassUnit]}
 								</Select.Trigger>
@@ -240,7 +240,7 @@
 							{#if preferredVolumeUnitChanged}
 								<input type="hidden" name="preferredVolumeUnit" value={preferredVolumeUnit} />
 							{/if}
-							<Select.Root bind:value={preferredVolumeUnit} disabled={fieldDisabled}>
+							<Select.Root type="single" bind:value={preferredVolumeUnit} disabled={fieldDisabled}>
 								<Select.Trigger class="!h-8 w-full">
 									{volumeUnitLabels[preferredVolumeUnit]}
 								</Select.Trigger>
