@@ -3,6 +3,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Select from '$lib/components/ui/select';
+	import SearchCombobox from '$lib/components/ui/search-combobox.svelte';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { cn } from '$lib/utils.js';
@@ -61,20 +62,23 @@
 		cup: 'cup',
 		'fl oz': 'oz'
 	};
-	const localeOptions = ['en-US', 'en-GB', 'nl-NL', 'fr-FR', 'de-DE', 'es-ES'];
-	const timezoneOptions = [
-		'UTC',
-		'Europe/Amsterdam',
-		'Europe/London',
-		'Europe/Paris',
-		'Europe/Berlin',
-		'America/New_York',
-		'America/Chicago',
-		'America/Denver',
-		'America/Los_Angeles',
-		'America/Toronto',
-		'America/Phoenix'
+	const localeOptions = [
+		{ value: 'en-US', label: 'English (United States)', keywords: ['english', 'us', 'usa'] },
+		{ value: 'en-GB', label: 'English (United Kingdom)', keywords: ['english', 'uk', 'gb'] },
+		{ value: 'nl-NL', label: 'Dutch (Netherlands)', keywords: ['dutch', 'nederlands'] },
+		{ value: 'fr-FR', label: 'French (France)', keywords: ['french', 'français'] },
+		{ value: 'fr-CA', label: 'French (Canada)', keywords: ['french', 'canada', 'québec'] },
+		{ value: 'de-DE', label: 'German (Germany)', keywords: ['german', 'deutsch'] },
+		{ value: 'es-ES', label: 'Spanish (Spain)', keywords: ['spanish', 'español'] },
+		{ value: 'es-MX', label: 'Spanish (Mexico)', keywords: ['spanish', 'mexico', 'español'] },
+		{ value: 'it-IT', label: 'Italian (Italy)', keywords: ['italian', 'italiano'] },
+		{ value: 'pt-BR', label: 'Portuguese (Brazil)', keywords: ['portuguese', 'brazil'] }
 	];
+	const timezoneOptions = ['UTC', ...Intl.supportedValuesOf('timeZone')].map((timezone) => ({
+		value: timezone,
+		label: timezone.replaceAll('_', ' '),
+		keywords: timezone.split(/[/_]/)
+	}));
 
 	const householdNameChanged = $derived(householdName.trim() !== data.household.name);
 	const defaultServingsChanged = $derived(defaultServings !== String(data.profile.defaultServings));
@@ -152,16 +156,6 @@
 			{/if}
 
 			<section class="grid gap-3 border-t border-border pt-4">
-				<datalist id="household-locale-options">
-					{#each localeOptions as option (option)}
-						<option value={option}></option>
-					{/each}
-				</datalist>
-				<datalist id="household-timezone-options">
-					{#each timezoneOptions as option (option)}
-						<option value={option}></option>
-					{/each}
-				</datalist>
 				<form method="post" action="?/updateSettings" class="grid gap-3">
 					<div class="grid gap-3 md:grid-cols-2">
 						<label class="grid min-w-0 gap-1 text-xs font-medium">
@@ -189,24 +183,24 @@
 						</label>
 						<label class="grid min-w-0 gap-1 text-xs font-medium">
 							Locale
-							<Input
+							<SearchCombobox
 								name={localeChanged ? 'locale' : undefined}
 								bind:value={locale}
-								list="household-locale-options"
-								placeholder="en-US"
-								readonly={fieldDisabled}
-								class="h-8 w-full"
+								options={localeOptions}
+								disabled={fieldDisabled}
+								placeholder="Select locale"
+								searchPlaceholder="Search locales..."
 							/>
 						</label>
 						<label class="grid min-w-0 gap-1 text-xs font-medium">
 							Timezone
-							<Input
+							<SearchCombobox
 								name={timezoneChanged ? 'timezone' : undefined}
 								bind:value={timezone}
-								list="household-timezone-options"
-								placeholder="Europe/Amsterdam"
-								readonly={fieldDisabled}
-								class="h-8 w-full"
+								options={timezoneOptions}
+								disabled={fieldDisabled}
+								placeholder="Select timezone"
+								searchPlaceholder="Search timezones..."
 							/>
 						</label>
 						<label class="grid min-w-0 gap-1 text-xs font-medium">
