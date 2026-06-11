@@ -31,7 +31,7 @@
 					"database_name": "maal-staging",
 					"database_id": "c843aee2-d94c-4f9f-b26c-02deea38b86a",
 					"migrations_dir": "drizzle",
-					"remote": true
+					"remote": false
 				}
 			]
 		},
