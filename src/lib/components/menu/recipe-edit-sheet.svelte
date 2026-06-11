@@ -40,24 +40,14 @@
 	let deleteConfirmOpen = $state(false);
 	let deleteBusy = $state(false);
 	let deleteError = $state<string | null>(null);
-	let sheetViewportElement = $state<HTMLElement>();
-	let sheetElement = $state<HTMLElement>();
 	let sheetHeroElement = $state<HTMLElement>();
 	let sheetViewportHeight = $state(0);
 	let sheetHeroHeight = $state(0);
-	let sheetPinned = $state(false);
 
 	const sheetViewportGutter = 16;
 	const sheetTopOffset = $derived(
 		Math.max(sheetViewportGutter, (sheetViewportHeight - sheetHeroHeight) / 2)
 	);
-	const sheetHandoffScroll = $derived(Math.max(0, sheetTopOffset - sheetViewportGutter));
-	const sheetMaxHeight = $derived(Math.max(240, sheetViewportHeight - sheetViewportGutter * 2));
-	const sheetOverflowClass = $derived(sheetPinned ? 'overflow-y-auto' : 'overflow-visible');
-	const sheetStyle = $derived(
-		`top: ${sheetViewportGutter}px; ${sheetPinned ? `max-height: ${sheetMaxHeight}px;` : ''}`
-	);
-
 	const textareaClass =
 		'min-h-20 w-full rounded-md border border-input bg-input/20 px-2 py-1.5 text-sm transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 md:text-xs/relaxed';
 
@@ -113,11 +103,7 @@
 	);
 
 	$effect(() => {
-		if (recipe?.id === editingRecipeId) return;
-		syncRecipe(recipe);
-		sheetViewportElement?.scrollTo({ top: 0 });
-		sheetElement?.scrollTo({ top: 0 });
-		sheetPinned = false;
+		if (recipe?.id !== editingRecipeId) syncRecipe(recipe);
 	});
 
 	$effect(() => {
@@ -125,21 +111,6 @@
 		deleteConfirmOpen = false;
 		deleteBusy = false;
 		deleteError = null;
-	});
-
-	$effect(() => {
-		if (!open || !sheetViewportElement) {
-			sheetPinned = false;
-			return;
-		}
-
-		const updateSheetPin = () => {
-			sheetPinned = sheetViewportElement.scrollTop >= sheetHandoffScroll - 1;
-		};
-		updateSheetPin();
-		sheetViewportElement.addEventListener('scroll', updateSheetPin, { passive: true });
-
-		return () => sheetViewportElement?.removeEventListener('scroll', updateSheetPin);
 	});
 
 	$effect(() => {
@@ -305,7 +276,6 @@
 	<Dialog.Portal>
 		<Dialog.Overlay />
 		<DialogPrimitive.Content
-			bind:ref={sheetViewportElement}
 			class="fixed inset-0 z-50 h-svh w-full [scrollbar-width:none] overflow-y-auto bg-transparent p-0 outline-none [&::-webkit-scrollbar]:hidden"
 		>
 			{#if recipe}
@@ -321,9 +291,7 @@
 					style={`padding-top: ${sheetTopOffset}px; padding-bottom: ${sheetViewportGutter}px;`}
 				>
 					<form
-						bind:this={sheetElement}
-						class={`pointer-events-auto sticky w-full rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10 ${sheetOverflowClass}`}
-						style={sheetStyle}
+						class="pointer-events-auto w-full rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10"
 						onsubmit={saveRecipe}
 					>
 						<div bind:this={sheetHeroElement} class="relative">

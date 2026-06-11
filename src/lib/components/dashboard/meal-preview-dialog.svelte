@@ -44,12 +44,9 @@
 	let servingsDraft = $state('1');
 	let scheduleEditorOpen = $state(false);
 	let deleteConfirmOpen = $state(false);
-	let previewViewportElement = $state<HTMLElement>();
-	let previewSheetElement = $state<HTMLElement>();
 	let heroElement = $state<HTMLElement>();
 	let previewViewportHeight = $state(0);
 	let heroHeight = $state(0);
-	let previewSheetPinned = $state(false);
 
 	const numericServings = (value: string): number => {
 		const servings = Number(value);
@@ -81,17 +78,6 @@
 	const previewTopOffset = $derived(
 		Math.max(previewViewportGutter, (previewViewportHeight - heroHeight) / 2)
 	);
-	const previewHandoffScroll = $derived(Math.max(0, previewTopOffset - previewViewportGutter));
-	const previewMaxHeight = $derived(
-		Math.max(240, previewViewportHeight - previewViewportGutter * 2)
-	);
-	const previewSheetOverflowClass = $derived(
-		previewSheetPinned ? 'overflow-y-auto' : 'overflow-visible'
-	);
-	const previewSheetStyle = $derived(
-		`top: ${previewViewportGutter}px; ${previewSheetPinned ? `max-height: ${previewMaxHeight}px;` : ''}`
-	);
-
 	const dateFormatter = new Intl.DateTimeFormat('en-GB', {
 		weekday: 'short',
 		day: 'numeric',
@@ -253,24 +239,6 @@
 		descriptionDraft = meal?.description ?? '';
 		cookTimeDraft = String(meal?.cookTimeMinutes ?? fallbackDurationMinutes);
 		servingsDraft = String(Math.max(1, Math.round(meal?.servingsPlanned ?? 1)));
-		previewViewportElement?.scrollTo({ top: 0 });
-		previewSheetElement?.scrollTo({ top: 0 });
-		previewSheetPinned = false;
-	});
-
-	$effect(() => {
-		if (!open || !previewViewportElement) {
-			previewSheetPinned = false;
-			return;
-		}
-
-		const updatePreviewPin = () => {
-			previewSheetPinned = previewViewportElement.scrollTop >= previewHandoffScroll - 1;
-		};
-		updatePreviewPin();
-		previewViewportElement.addEventListener('scroll', updatePreviewPin, { passive: true });
-
-		return () => previewViewportElement?.removeEventListener('scroll', updatePreviewPin);
 	});
 
 	$effect(() => {
@@ -333,7 +301,6 @@
 	<Dialog.Portal>
 		<Dialog.Overlay />
 		<DialogPrimitive.Content
-			bind:ref={previewViewportElement}
 			class="fixed inset-0 z-50 h-svh w-full [scrollbar-width:none] overflow-y-auto bg-transparent p-0 outline-none [&::-webkit-scrollbar]:hidden"
 		>
 			{#if meal}
@@ -349,9 +316,7 @@
 					style={`padding-top: ${previewTopOffset}px; padding-bottom: ${previewViewportGutter}px;`}
 				>
 					<div
-						bind:this={previewSheetElement}
-						class={`pointer-events-auto sticky rounded-xl border border-border bg-popover shadow-2xl ring-1 ring-foreground/10 ${previewSheetOverflowClass}`}
-						style={previewSheetStyle}
+						class="pointer-events-auto relative rounded-xl border border-border bg-popover shadow-2xl ring-1 ring-foreground/10"
 					>
 						<div bind:this={heroElement} class="relative overflow-hidden rounded-t-xl">
 							<Dialog.Close
