@@ -383,8 +383,7 @@
 										<div
 											class="grid gap-2 sm:grid-cols-[4.5rem_5rem_minmax(0,1fr)_auto] sm:items-end"
 										>
-											<label class="grid gap-1 text-xs font-medium">
-												Amt
+											<div>
 												<Input
 													value={ingredient.amount}
 													oninput={(event) =>
@@ -392,9 +391,8 @@
 													aria-label={`Ingredient ${index + 1} amount`}
 													placeholder="2"
 												/>
-											</label>
-											<label class="grid gap-1 text-xs font-medium">
-												Unit
+											</div>
+											<div>
 												<Input
 													value={ingredient.unit ?? ''}
 													oninput={(event) =>
@@ -402,9 +400,8 @@
 													aria-label={`Ingredient ${index + 1} unit`}
 													placeholder="tbsp"
 												/>
-											</label>
-											<label class="grid gap-1 text-xs font-medium">
-												Ingredient
+											</div>
+											<div>
 												<Input
 													value={ingredient.item}
 													oninput={(event) =>
@@ -412,7 +409,7 @@
 													aria-label={`Ingredient ${index + 1}`}
 													placeholder="olive oil"
 												/>
-											</label>
+											</div>
 											<Button.Root
 												variant="ghost"
 												size="sm"
@@ -436,7 +433,6 @@
 									{#each sortedInstructions as instruction, index (instruction.draftId)}
 										<div class="grid gap-2 sm:grid-cols-[4.5rem_minmax(0,1fr)_auto] sm:items-start">
 											<div class="grid gap-1 text-xs font-medium">
-												<span>Position</span>
 												<Button.Root
 													type="button"
 													variant="ghost"
@@ -471,16 +467,14 @@
 													<ChevronDownIcon class="size-4" />
 												</Button.Root>
 											</div>
-											<label class="grid gap-1 text-xs font-medium">
-												Text
-												<textarea
-													value={instruction.text}
-													oninput={(event) =>
-														updateInstructionText(instruction.draftId, event.currentTarget.value)}
-													class={textareaClass}
-												></textarea>
-											</label>
-											<div class="flex flex-wrap gap-1 sm:mt-5 sm:flex-col">
+											<textarea
+												value={instruction.text}
+												oninput={(event) =>
+													updateInstructionText(instruction.draftId, event.currentTarget.value)}
+												aria-label={`Instruction ${index + 1} text`}
+												class={textareaClass}
+											></textarea>
+											<div class="flex flex-wrap gap-1 sm:flex-col">
 												<Button.Root
 													type="button"
 													variant="ghost"
