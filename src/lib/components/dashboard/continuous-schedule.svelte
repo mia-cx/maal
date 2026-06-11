@@ -6,7 +6,7 @@
 	import MealPool from './meal-pool.svelte';
 	import { sortScheduledMeals } from './schedule-ordering';
 	import type { DailyScrollState } from '$lib/stores/ui-state';
-	import type { Meal, MealDropTarget } from './schedule-types';
+	import type { Meal, MealCheckInHandler, MealDropTarget } from './schedule-types';
 
 	const edgeThreshold = 480;
 	const pageSize = 21;
@@ -25,6 +25,7 @@
 		onaddmeal,
 		onpick,
 		onselect,
+		oncheckin,
 		onscrollstatechange
 	}: {
 		mealPool: Meal[];
@@ -40,6 +41,7 @@
 		onaddmeal?: (date?: string) => void;
 		onpick?: (meal: Meal, event: PointerEvent) => void;
 		onselect?: (meal: Meal) => void;
+		oncheckin?: MealCheckInHandler;
 		onscrollstatechange?: (scrollState: DailyScrollState) => void;
 	} = $props();
 
@@ -252,6 +254,7 @@
 			{onaddmeal}
 			{onpick}
 			{onselect}
+			{oncheckin}
 		/>
 	{/each}
 </div>

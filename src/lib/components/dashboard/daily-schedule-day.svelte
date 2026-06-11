@@ -5,6 +5,7 @@
 		Meal,
 		MealAddHandler,
 		MealDropTarget,
+		MealCheckInHandler,
 		MealPickHandler,
 		MealSelectHandler
 	} from './schedule-types';
@@ -18,7 +19,8 @@
 		dropTarget,
 		onaddmeal,
 		onpick,
-		onselect
+		onselect,
+		oncheckin
 	}: {
 		day: Date;
 		meals: Meal[];
@@ -29,6 +31,7 @@
 		onaddmeal?: MealAddHandler;
 		onpick?: MealPickHandler;
 		onselect?: MealSelectHandler;
+		oncheckin?: MealCheckInHandler;
 	} = $props();
 
 	const dayKey = $derived(dateKey(day));
@@ -83,6 +86,7 @@
 			showImages
 			{onpick}
 			{onselect}
+			{oncheckin}
 		/>
 	</div>
 </section>

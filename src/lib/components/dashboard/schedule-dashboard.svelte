@@ -16,6 +16,7 @@
 	import AddMealDialog from './add-meal-dialog.svelte';
 	import ContinuousSchedule from './continuous-schedule.svelte';
 	import RecipeEditSheet from '$lib/components/menu/recipe-edit-sheet.svelte';
+	import MealCheckInDialog, { type MealCheckInPayload } from './meal-check-in-dialog.svelte';
 	import MealDragOverlay from './meal-drag-overlay.svelte';
 	import MealPreviewDialog from './meal-preview-dialog.svelte';
 	import MonthSchedule from './month-schedule.svelte';
@@ -54,6 +55,8 @@
 	let draggedMeal = $state<Meal | null>(null);
 	let draggedPointerId = $state<number | null>(null);
 	let previewOpen = $state(false);
+	let checkInOpen = $state(false);
+	let checkInMeal = $state<Meal | null>(null);
 	let addMealOpen = $state(false);
 	let addMealDate = $state<string | undefined>();
 	let addMealBusy = $state(false);
@@ -262,6 +265,20 @@
 	const previewMeal = (meal: Meal) => {
 		selectScheduleMeal(meal.id);
 		previewOpen = true;
+	};
+
+	const openMealCheckIn = (meal: Meal) => {
+		checkInMeal = meal;
+		checkInOpen = true;
+	};
+
+	const saveMealCheckIn = async ({ meal, verdict, cookTime, reason }: MealCheckInPayload) => {
+		const response = await fetch('/plan/check-ins', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ mealId: meal.id, verdict, cookTime, reason })
+		});
+		if (!response.ok) throw new Error(await response.text());
 	};
 
 	const createMeal = (date?: string) => {
@@ -473,6 +490,7 @@
 				onaddmeal={createMeal}
 				onpick={startMealDrag}
 				onselect={previewMeal}
+				oncheckin={openMealCheckIn}
 				onscrollstatechange={updateDailyScroll}
 			/>
 		{:else if mode === 'multi-day'}
@@ -490,6 +508,7 @@
 				onaddmeal={createMeal}
 				onpick={startMealDrag}
 				onselect={previewMeal}
+				oncheckin={openMealCheckIn}
 				onanchordatechange={updateVisibleAnchor}
 			/>
 		{:else}
@@ -505,6 +524,7 @@
 				onaddmeal={createMeal}
 				onpick={startMealDrag}
 				onselect={previewMeal}
+				oncheckin={openMealCheckIn}
 				onselectdate={openDay}
 				onanchordatechange={updateVisibleAnchor}
 			/>
@@ -529,4 +549,5 @@
 		onmealchange={updateScheduleMealSchedule}
 		onmealdelete={deleteScheduleMeal}
 	/>
+	<MealCheckInDialog bind:open={checkInOpen} meal={checkInMeal} onsubmit={saveMealCheckIn} />
 </section>

@@ -1,7 +1,13 @@
 <script lang="ts">
 	import { cn } from '$lib/utils.js';
 	import MealPlanCard from './meal-plan-card.svelte';
-	import type { Meal, MealCardDensity, MealPickHandler, MealSelectHandler } from './schedule-types';
+	import type {
+		Meal,
+		MealCardDensity,
+		MealCheckInHandler,
+		MealPickHandler,
+		MealSelectHandler
+	} from './schedule-types';
 
 	let {
 		meal,
@@ -12,6 +18,7 @@
 		imageLayout = 'side',
 		onpick,
 		onselect,
+		oncheckin,
 		class: className
 	}: {
 		meal: Meal;
@@ -22,6 +29,7 @@
 		imageLayout?: 'side' | 'side-compact' | 'top' | 'adaptive';
 		onpick?: MealPickHandler;
 		onselect?: MealSelectHandler;
+		oncheckin?: MealCheckInHandler;
 		class?: string;
 	} = $props();
 
@@ -36,5 +44,6 @@
 	{imageLayout}
 	{onpick}
 	{onselect}
+	{oncheckin}
 	class={cn('min-h-0 w-full', className)}
 />

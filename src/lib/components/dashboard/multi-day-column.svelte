@@ -5,6 +5,7 @@
 		Meal,
 		MealAddHandler,
 		MealDropTarget,
+		MealCheckInHandler,
 		MealPickHandler,
 		MealSelectHandler
 	} from './schedule-types';
@@ -19,7 +20,8 @@
 		dropTarget,
 		onaddmeal,
 		onpick,
-		onselect
+		onselect,
+		oncheckin
 	}: {
 		day: Date;
 		index: number;
@@ -31,6 +33,7 @@
 		onaddmeal?: MealAddHandler;
 		onpick?: MealPickHandler;
 		onselect?: MealSelectHandler;
+		oncheckin?: MealCheckInHandler;
 	} = $props();
 
 	let columnHeight = $state(0);
@@ -96,6 +99,7 @@
 			{imageLayout}
 			{onpick}
 			{onselect}
+			{oncheckin}
 		/>
 	</div>
 </section>

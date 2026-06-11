@@ -6,6 +6,7 @@ export type MealCardDensity = 'title' | 'summary' | 'detail';
 
 export type MealPickHandler = (meal: Meal, event: PointerEvent) => void;
 export type MealSelectHandler = (meal: Meal) => void;
+export type MealCheckInHandler = (meal: Meal) => void;
 export type MealAddHandler = (date?: string) => void;
 
 export type Meal = {

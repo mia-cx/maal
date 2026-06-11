@@ -1,10 +1,17 @@
 <script lang="ts">
+	import * as Button from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { cn } from '$lib/utils.js';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import TimerIcon from '@lucide/svelte/icons/timer';
 	import { familiarityLabels } from './meal-labels';
-	import type { Meal, MealCardDensity, MealPickHandler, MealSelectHandler } from './schedule-types';
+	import type {
+		Meal,
+		MealCardDensity,
+		MealCheckInHandler,
+		MealPickHandler,
+		MealSelectHandler
+	} from './schedule-types';
 
 	type MealLoad = 'low' | 'medium' | 'high';
 
@@ -36,6 +43,7 @@
 		dragStartThreshold = defaultDragStartThresholdPx,
 		onpick,
 		onselect,
+		oncheckin,
 		class: className
 	}: {
 		meal: Meal;
@@ -47,6 +55,7 @@
 		dragStartThreshold?: number;
 		onpick?: MealPickHandler;
 		onselect?: MealSelectHandler;
+		oncheckin?: MealCheckInHandler;
 		class?: string;
 	} = $props();
 
@@ -157,7 +166,27 @@
 	let touchScrollElement: HTMLElement | null = null;
 	let touchScrollStarted = false;
 	let latestPickupEvent: PointerEvent | undefined;
+	let currentDate = $state(new Date());
 	let longPressTimeout: ReturnType<typeof setTimeout> | undefined;
+
+	const localDateKey = (date: Date): string => {
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, '0');
+		const day = String(date.getDate()).padStart(2, '0');
+		return `${year}-${month}-${day}`;
+	};
+
+	const mealCanCheckIn = (meal: Meal, now: Date): boolean => {
+		if (!meal.date) return false;
+		const today = localDateKey(now);
+		if (meal.date < today) return true;
+		if (meal.date > today) return false;
+		const nowMinutes = now.getHours() * 60 + now.getMinutes();
+		const mealMinutes = meal.time ? minutesFromTime(meal.time) : null;
+		return nowMinutes >= 18 * 60 || (mealMinutes !== null && mealMinutes <= nowMinutes);
+	};
+
+	const showCheckIn = $derived(Boolean(oncheckin && mealCanCheckIn(meal, currentDate)));
 
 	const clearLongPress = () => {
 		if (!longPressTimeout) return;
@@ -284,6 +313,18 @@
 		onselect?.(meal);
 	};
 
+	const checkIn = (event: MouseEvent) => {
+		event.preventDefault();
+		event.stopPropagation();
+		oncheckin?.(meal);
+	};
+
+	const selectMealFromKeyboard = (event: KeyboardEvent) => {
+		if (event.key !== 'Enter' && event.key !== ' ') return;
+		event.preventDefault();
+		onselect?.(meal);
+	};
+
 	const wrapperClass = $derived(
 		cn(
 			'@container min-w-0 touch-none appearance-none border-0 bg-transparent p-0 text-left text-inherit select-none',
@@ -293,6 +334,13 @@
 			className
 		)
 	);
+
+	$effect(() => {
+		const interval = setInterval(() => {
+			currentDate = new Date();
+		}, 60_000);
+		return () => clearInterval(interval);
+	});
 </script>
 
 {#snippet card()}
@@ -389,12 +437,26 @@
 				/>
 			{/if}
 		</div>
+
+		{#if showCheckIn}
+			<Button.Root
+				type="button"
+				variant="outline"
+				size={density === 'title' ? 'xs' : 'sm'}
+				class="mx-2 mb-1 w-[calc(100%-1rem)]"
+				onpointerdown={(event) => event.stopPropagation()}
+				onclick={checkIn}
+			>
+				Check in
+			</Button.Root>
+		{/if}
 	</Card.Root>
 {/snippet}
 
 {#if onselect}
-	<button
-		type="button"
+	<div
+		role="button"
+		tabindex="0"
 		aria-label={`Open ${meal.title}`}
 		data-meal-card-id={meal.id}
 		onpointerdown={startPickupCandidate}
@@ -402,10 +464,11 @@
 		onpointerup={releasePointer}
 		onpointercancel={cancelPointer}
 		onclick={selectMeal}
+		onkeydown={selectMealFromKeyboard}
 		class={wrapperClass}
 	>
 		{@render card()}
-	</button>
+	</div>
 {:else}
 	<div
 		role="presentation"

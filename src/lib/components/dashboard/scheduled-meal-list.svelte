@@ -6,6 +6,7 @@
 		Meal,
 		MealAddHandler,
 		MealCardDensity,
+		MealCheckInHandler,
 		MealPickHandler,
 		MealSelectHandler
 	} from './schedule-types';
@@ -24,7 +25,8 @@
 		date,
 		onaddmeal,
 		onpick,
-		onselect
+		onselect,
+		oncheckin
 	}: {
 		meals: Meal[];
 		previewIndex?: number;
@@ -40,6 +42,7 @@
 		onaddmeal?: MealAddHandler;
 		onpick?: MealPickHandler;
 		onselect?: MealSelectHandler;
+		oncheckin?: MealCheckInHandler;
 	} = $props();
 </script>
 
@@ -56,6 +59,7 @@
 		hidden={previewIndex < 0 && meal.id === draggingMealId}
 		{onpick}
 		{onselect}
+		{oncheckin}
 		class={cardClass}
 	/>
 {/each}

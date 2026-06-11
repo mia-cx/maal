@@ -21,7 +21,7 @@
 	import MealPool from './meal-pool.svelte';
 	import MultiDayColumn from './multi-day-column.svelte';
 	import { sortScheduledMeals } from './schedule-ordering';
-	import type { Meal, MealDropTarget } from './schedule-types';
+	import type { Meal, MealCheckInHandler, MealDropTarget } from './schedule-types';
 
 	const pageSize = 21;
 	const minDayColumnWidth = 144;
@@ -59,6 +59,7 @@
 		onaddmeal,
 		onpick,
 		onselect,
+		oncheckin,
 		onanchordatechange,
 		onvisibledaycountchange
 	}: {
@@ -74,6 +75,7 @@
 		onaddmeal?: (date?: string) => void;
 		onpick?: (meal: Meal, event: PointerEvent) => void;
 		onselect?: (meal: Meal) => void;
+		oncheckin?: MealCheckInHandler;
 		onanchordatechange?: (date: Date) => void;
 		onvisibledaycountchange?: (dayCount: number) => void;
 	} = $props();
@@ -747,6 +749,7 @@
 					{onaddmeal}
 					{onpick}
 					{onselect}
+					{oncheckin}
 				/>
 			{/each}
 		</div>

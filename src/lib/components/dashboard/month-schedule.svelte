@@ -22,7 +22,7 @@
 		startOfWeek
 	} from './schedule-date';
 	import { sortScheduledMeals } from './schedule-ordering';
-	import type { Meal, MealDropTarget } from './schedule-types';
+	import type { Meal, MealCheckInHandler, MealDropTarget } from './schedule-types';
 	import { scheduleDaysFor } from './schedule-types';
 
 	const pageSizeWeeks = 12;
@@ -57,6 +57,7 @@
 		onaddmeal,
 		onpick,
 		onselect,
+		oncheckin,
 		onselectdate,
 		onanchordatechange
 	}: {
@@ -71,6 +72,7 @@
 		onaddmeal?: (date?: string) => void;
 		onpick?: (meal: Meal, event: PointerEvent) => void;
 		onselect?: (meal: Meal) => void;
+		oncheckin?: MealCheckInHandler;
 		onselectdate?: (date: Date) => void;
 		onanchordatechange?: (date: Date) => void;
 	} = $props();
@@ -695,6 +697,7 @@
 								{onaddmeal}
 								{onpick}
 								{onselect}
+								{oncheckin}
 								{onselectdate}
 							/>
 						{/each}
