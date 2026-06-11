@@ -78,6 +78,7 @@
 	const previewTopOffset = $derived(
 		Math.max(previewViewportGutter, (previewViewportHeight - heroHeight) / 2)
 	);
+	const previewLeadIn = $derived(Math.max(0, previewTopOffset - previewViewportGutter));
 	const dateFormatter = new Intl.DateTimeFormat('en-GB', {
 		weekday: 'short',
 		day: 'numeric',
@@ -301,7 +302,7 @@
 	<Dialog.Portal>
 		<Dialog.Overlay />
 		<DialogPrimitive.Content
-			class="fixed inset-0 z-50 h-svh w-full [scrollbar-width:none] overflow-y-auto bg-transparent p-0 outline-none [&::-webkit-scrollbar]:hidden"
+			class="fixed inset-0 z-50 h-svh w-full [scrollbar-width:none] overflow-y-auto bg-transparent py-4 outline-none [&::-webkit-scrollbar]:hidden"
 		>
 			{#if meal}
 				<button
@@ -313,7 +314,7 @@
 				></button>
 				<div
 					class="pointer-events-none relative z-10 mx-auto w-full max-w-[min(100vw-1rem,42rem)] px-2 sm:max-w-[42rem] sm:px-4"
-					style={`padding-top: ${previewTopOffset}px; padding-bottom: ${previewViewportGutter}px;`}
+					style={`padding-top: ${previewLeadIn}px;`}
 				>
 					<div
 						class="pointer-events-auto relative rounded-xl border border-border bg-popover shadow-2xl ring-1 ring-foreground/10"
@@ -469,7 +470,7 @@
 						</div>
 
 						<div
-							class="sticky bottom-0 z-20 flex items-center justify-between gap-3 rounded-b-xl border-t border-border bg-popover/95 px-5 pt-3 pb-7 shadow-[0_-12px_24px_-18px_rgba(0,0,0,0.45)] backdrop-blur"
+							class="sticky bottom-0 z-20 flex items-center justify-between gap-3 rounded-b-xl border-t border-border bg-popover/95 px-5 py-3 shadow-[0_-12px_24px_-18px_rgba(0,0,0,0.45)] backdrop-blur"
 						>
 							<Button.Root variant="destructive" onclick={openDeleteConfirm}>Delete</Button.Root>
 							<Button.Root onclick={saveMealDraft}>Save meal</Button.Root>

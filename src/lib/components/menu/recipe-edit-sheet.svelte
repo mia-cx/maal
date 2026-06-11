@@ -48,6 +48,7 @@
 	const sheetTopOffset = $derived(
 		Math.max(sheetViewportGutter, (sheetViewportHeight - sheetHeroHeight) / 2)
 	);
+	const sheetLeadIn = $derived(Math.max(0, sheetTopOffset - sheetViewportGutter));
 	const textareaClass =
 		'min-h-20 w-full rounded-md border border-input bg-input/20 px-2 py-1.5 text-sm transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 md:text-xs/relaxed';
 
@@ -276,7 +277,7 @@
 	<Dialog.Portal>
 		<Dialog.Overlay />
 		<DialogPrimitive.Content
-			class="fixed inset-0 z-50 h-svh w-full [scrollbar-width:none] overflow-y-auto bg-transparent p-0 outline-none [&::-webkit-scrollbar]:hidden"
+			class="fixed inset-0 z-50 h-svh w-full [scrollbar-width:none] overflow-y-auto bg-transparent py-4 outline-none [&::-webkit-scrollbar]:hidden"
 		>
 			{#if recipe}
 				<button
@@ -288,7 +289,7 @@
 				></button>
 				<div
 					class="pointer-events-none relative z-10 mx-auto w-full max-w-[min(100vw-1rem,42rem)] px-2 sm:max-w-[42rem] sm:px-4"
-					style={`padding-top: ${sheetTopOffset}px; padding-bottom: ${sheetViewportGutter}px;`}
+					style={`padding-top: ${sheetLeadIn}px;`}
 				>
 					<form
 						class="pointer-events-auto w-full rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10"
@@ -490,7 +491,7 @@
 						</div>
 
 						<div
-							class="sticky bottom-0 z-10 flex items-center justify-between gap-2 border-t border-border bg-popover/95 px-3 pt-3 pb-7 backdrop-blur"
+							class="sticky bottom-0 z-10 flex items-center justify-between gap-2 border-t border-border bg-popover/95 p-3 backdrop-blur"
 						>
 							<div>
 								{#if ondeleted}
