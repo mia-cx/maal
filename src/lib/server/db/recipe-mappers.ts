@@ -37,6 +37,8 @@ type HouseholdMealInstructionRow = typeof householdMealInstructions.$inferSelect
 type RecipeJson = Record<string, unknown>;
 
 const fallbackTitle = 'Untitled recipe';
+const maxIngredientRowsPerInsert = 8;
+const maxInstructionRowsPerInsert = 16;
 
 const duration = (minutes?: number): string | undefined =>
 	minutes === undefined ? undefined : `PT${Math.max(0, Math.round(minutes))}M`;
@@ -479,21 +481,25 @@ export const updateRecipeIngredients = async (
 ) => {
 	await db.delete(userRecipeIngredients).where(eq(userRecipeIngredients.userRecipeId, recipeId));
 	if (!ingredients.length) return;
-	await db.insert(userRecipeIngredients).values(
-		ingredients.map((ingredient, index) => {
-			const parsedAmount = parseIngredientAmount(ingredient.amount);
-			return {
-				userRecipeId: recipeId,
-				lineIndex: index,
-				originalText: fullIngredientText(ingredient),
-				sourceAmountText: ingredient.amount.trim() || null,
-				sourceQuantity: parsedAmount.quantity,
-				sourceUnitLabel: parsedAmount.unit,
-				sourceFoodLabel: ingredient.item.trim() || ingredient.amount.trim() || 'Ingredient',
-				confidence: 1
-			};
-		})
-	);
+
+	const rows = ingredients.map((ingredient, index) => {
+		const parsedAmount = parseIngredientAmount(ingredient.amount);
+		return {
+			userRecipeId: recipeId,
+			lineIndex: index,
+			originalText: fullIngredientText(ingredient),
+			sourceAmountText: ingredient.amount.trim() || null,
+			sourceQuantity: parsedAmount.quantity,
+			sourceUnitLabel: parsedAmount.unit,
+			sourceFoodLabel: ingredient.item.trim() || ingredient.amount.trim() || 'Ingredient',
+			confidence: 1
+		};
+	});
+	for (let index = 0; index < rows.length; index += maxIngredientRowsPerInsert) {
+		await db
+			.insert(userRecipeIngredients)
+			.values(rows.slice(index, index + maxIngredientRowsPerInsert));
+	}
 };
 
 export const updateRecipeInstructions = async (
@@ -503,12 +509,15 @@ export const updateRecipeInstructions = async (
 ) => {
 	await db.delete(userRecipeInstructions).where(eq(userRecipeInstructions.userRecipeId, recipeId));
 	if (!instructions.length) return;
-	await db.insert(userRecipeInstructions).values(
-		instructions.map((instruction, index) => ({
-			userRecipeId: recipeId,
-			stepIndex: index,
-			text: instruction.text,
-			confidence: 1
-		}))
-	);
+	const rows = instructions.map((instruction, index) => ({
+		userRecipeId: recipeId,
+		stepIndex: index,
+		text: instruction.text,
+		confidence: 1
+	}));
+	for (let index = 0; index < rows.length; index += maxInstructionRowsPerInsert) {
+		await db
+			.insert(userRecipeInstructions)
+			.values(rows.slice(index, index + maxInstructionRowsPerInsert));
+	}
 };

@@ -27,6 +27,9 @@ const maxUrlLength = 2048;
 const maxImportBytes = 1_500_000;
 const defaultRecipePageSize = 24;
 const maxRecipePageSize = 60;
+const maxClassificationRowsPerInsert = 12;
+const maxMediaRowsPerInsert = 10;
+const maxNutritionRowsPerInsert = 10;
 
 type RecipeJson = Record<string, unknown>;
 
@@ -375,16 +378,19 @@ const saveRecipeClassifications = async (
 		}))
 	];
 	if (!entries.length) return;
-	await db.insert(userRecipeClassifications).values(
-		entries.map((entry) => ({
-			userRecipeId,
-			kind: entry.kind,
-			value: entry.value,
-			normalizedValue: normalizedValue(entry.value),
-			schemaOrgValue: 'schemaOrgValue' in entry ? entry.schemaOrgValue : null,
-			confidence: 1
-		}))
-	);
+	const rows = entries.map((entry) => ({
+		userRecipeId,
+		kind: entry.kind,
+		value: entry.value,
+		normalizedValue: normalizedValue(entry.value),
+		schemaOrgValue: 'schemaOrgValue' in entry ? entry.schemaOrgValue : null,
+		confidence: 1
+	}));
+	for (let index = 0; index < rows.length; index += maxClassificationRowsPerInsert) {
+		await db
+			.insert(userRecipeClassifications)
+			.values(rows.slice(index, index + maxClassificationRowsPerInsert));
+	}
 };
 
 const mediaRecord = (value: unknown): RecipeJson | undefined => {
@@ -428,7 +434,9 @@ const saveRecipeMedia = async (
 			caption: firstString(video.description, video.caption)
 		}))
 	];
-	if (media.length) await db.insert(userRecipeMedia).values(media);
+	for (let index = 0; index < media.length; index += maxMediaRowsPerInsert) {
+		await db.insert(userRecipeMedia).values(media.slice(index, index + maxMediaRowsPerInsert));
+	}
 };
 
 const nutritionProperties = {
@@ -476,7 +484,11 @@ const saveRecipeNutritionFacts = async (
 			}
 		];
 	});
-	if (facts.length) await db.insert(userRecipeNutritionFacts).values(facts);
+	for (let index = 0; index < facts.length; index += maxNutritionRowsPerInsert) {
+		await db
+			.insert(userRecipeNutritionFacts)
+			.values(facts.slice(index, index + maxNutritionRowsPerInsert));
+	}
 };
 
 const saveRecipeSidecars = async (
