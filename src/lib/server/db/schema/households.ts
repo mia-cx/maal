@@ -1,24 +1,24 @@
-import { sql } from 'drizzle-orm';
-import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
-import { createdAt, id, json, updatedAt } from './common';
+import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { createdAt, id, updatedAt } from './common';
 
-export const householdProfiles = sqliteTable('household_profiles', {
+const applianceValues = [
+	'oven',
+	'stovetop',
+	'microwave',
+	'air_fryer',
+	'slow_cooker',
+	'rice_cooker',
+	'blender',
+	'food_processor',
+	'grill'
+] as const;
+
+export const households = sqliteTable('households', {
 	householdId: text('household_id').primaryKey(),
-	defaultServings: integer('default_servings').notNull().default(1),
-	weekStartsOn: text('week_starts_on', { enum: ['sunday', 'monday'] })
-		.notNull()
-		.default('monday'),
-	preferredMassUnit: text('preferred_mass_unit', { enum: ['g', 'kg', 'oz', 'lb'] })
-		.notNull()
-		.default('g'),
-	preferredVolumeUnit: text('preferred_volume_unit', {
-		enum: ['ml', 'l', 'tsp', 'tbsp', 'cup', 'fl oz']
-	})
-		.notNull()
-		.default('ml'),
-	ingredientUnitOverrides: json<Record<string, string>>('ingredient_unit_overrides_json')
-		.notNull()
-		.default(sql`'{}'`),
+	locale: text('locale').notNull().default('en-US'),
+	timezone: text('timezone'),
+	weekStartsOn: integer('week_starts_on').notNull().default(1),
+	defaultPlannedYield: integer('default_planned_yield').notNull().default(1),
 	preferredDinnerTime: text('preferred_dinner_time'),
 	createdAt: createdAt(),
 	updatedAt: updatedAt()
@@ -28,20 +28,10 @@ export const householdAppliances = sqliteTable(
 	'household_appliances',
 	{
 		id: id(),
-		householdId: text('household_id').notNull(),
-		appliance: text('appliance', {
-			enum: [
-				'oven',
-				'stovetop',
-				'microwave',
-				'air_fryer',
-				'slow_cooker',
-				'rice_cooker',
-				'blender',
-				'food_processor',
-				'grill'
-			]
-		}).notNull(),
+		householdId: text('household_id')
+			.notNull()
+			.references(() => households.householdId, { onDelete: 'cascade' }),
+		appliance: text('appliance', { enum: applianceValues }).notNull(),
 		available: integer('available', { mode: 'boolean' }).notNull().default(true),
 		notes: text('notes'),
 		createdAt: createdAt(),
@@ -55,11 +45,3 @@ export const householdAppliances = sqliteTable(
 		)
 	]
 );
-
-export const userCookingProfiles = sqliteTable('user_cooking_profiles', {
-	workosUserId: text('workos_user_id').primaryKey(),
-	cookTimeCoefficient: real('cook_time_coefficient').notNull().default(1),
-	preferredDinnerTime: text('preferred_dinner_time'),
-	createdAt: createdAt(),
-	updatedAt: updatedAt()
-});

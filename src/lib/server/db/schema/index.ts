@@ -2,4 +2,8 @@ export * from './food';
 export * from './household-meals';
 export * from './households';
 export * from './meal-check-ins';
+export * from './preferences';
+export * from './relations';
+export * from './units';
 export * from './user-recipes';
+export * from './users';

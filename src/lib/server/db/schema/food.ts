@@ -1,130 +1,229 @@
 import { sql } from 'drizzle-orm';
-import { check, index, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
-import { createdAt, id, json, updatedAt } from './common';
+import {
+	check,
+	foreignKey,
+	index,
+	integer,
+	sqliteTable,
+	text,
+	uniqueIndex
+} from 'drizzle-orm/sqlite-core';
+import { createdAt, id, updatedAt } from './common';
+import { households } from './households';
+import { units } from './units';
+import { users } from './users';
 
-export const foodEntities = sqliteTable(
-	'food_entities',
+const adoptionStatusValues = ['pending_review', 'accepted', 'rejected'] as const;
+
+export const foods = sqliteTable(
+	'foods',
 	{
-		id: id(),
-		canonicalName: text('canonical_name').notNull(),
-		type: text('type', {
-			enum: ['ingredient', 'ingredient_group', 'cuisine', 'texture', 'tag']
-		}).notNull(),
-		parentId: text('parent_id'),
-		createdAt: createdAt(),
-		updatedAt: updatedAt()
+		id: text('id').primaryKey(),
+		defaultMeasureUnitId: text('default_measure_unit_id').notNull(),
+		defaultMeasureBaseUnitId: text('default_measure_base_unit_id').notNull()
 	},
 	(table) => [
-		uniqueIndex('food_entities_canonical_name_unique').on(table.canonicalName),
-		index('food_entities_parent_id_idx').on(table.parentId)
+		foreignKey({
+			columns: [table.defaultMeasureUnitId, table.defaultMeasureBaseUnitId],
+			foreignColumns: [units.id, units.baseUnitId],
+			name: 'foods_default_measure_unit_base_fk'
+		})
 	]
 );
 
-export const foodEntityAliases = sqliteTable(
-	'food_entity_aliases',
+export const foodAliases = sqliteTable(
+	'food_aliases',
 	{
 		id: id(),
-		foodEntityId: text('food_entity_id')
+		foodId: text('food_id')
 			.notNull()
-			.references(() => foodEntities.id, { onDelete: 'cascade' }),
+			.references(() => foods.id, { onDelete: 'cascade' }),
 		alias: text('alias').notNull(),
-		createdAt: createdAt()
-	},
-	(table) => [
-		uniqueIndex('food_entity_aliases_alias_unique').on(table.alias),
-		index('food_entity_aliases_food_entity_id_idx').on(table.foodEntityId)
-	]
-);
-
-export const hardFoodRules = sqliteTable(
-	'hard_food_rules',
-	{
-		id: id(),
-		workosUserId: text('workos_user_id').notNull(),
-		type: text('type', { enum: ['allergy', 'diet_constraint'] }).notNull(),
-		foodEntityId: text('food_entity_id').references(() => foodEntities.id, {
-			onDelete: 'set null'
-		}),
-		rawSubject: text('raw_subject'),
-		severity: text('severity', { enum: ['block', 'warn'] })
-			.notNull()
-			.default('block'),
-		notes: text('notes'),
+		locale: text('locale').notNull(),
+		sourceDomain: text('source_domain'),
+		defaultForLocale: integer('default_for_locale', { mode: 'boolean' }).notNull().default(false),
+		defaultMeasureUnitId: text('default_measure_unit_id'),
+		defaultMeasureBaseUnitId: text('default_measure_base_unit_id'),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()
 	},
 	(table) => [
-		index('hard_food_rules_workos_user_id_idx').on(table.workosUserId),
-		index('hard_food_rules_food_entity_id_idx').on(table.foodEntityId),
+		foreignKey({
+			columns: [table.defaultMeasureUnitId, table.defaultMeasureBaseUnitId],
+			foreignColumns: [units.id, units.baseUnitId],
+			name: 'food_aliases_default_measure_unit_base_fk'
+		}),
+		uniqueIndex('food_aliases_default_per_food_locale')
+			.on(table.foodId, table.locale)
+			.where(sql`${table.defaultForLocale} = 1 AND ${table.sourceDomain} IS NULL`),
+		index('food_aliases_food_id_idx').on(table.foodId),
+		index('food_aliases_locale_alias_idx').on(table.locale, table.alias),
+		index('food_aliases_import_lookup_idx').on(table.sourceDomain, table.locale, table.alias),
 		check(
-			'hard_food_rules_subject_check',
-			sql`${table.foodEntityId} IS NOT NULL OR ${table.rawSubject} IS NOT NULL`
+			'food_aliases_domain_not_default_check',
+			sql`${table.sourceDomain} IS NULL OR ${table.defaultForLocale} = 0`
+		),
+		check(
+			'food_aliases_default_measure_pair_check',
+			sql`(${table.defaultMeasureUnitId} IS NULL AND ${table.defaultMeasureBaseUnitId} IS NULL) OR (${table.defaultMeasureUnitId} IS NOT NULL AND ${table.defaultMeasureBaseUnitId} IS NOT NULL)`
 		)
 	]
 );
 
-export const tastePreferences = sqliteTable(
-	'taste_preferences',
+const scopedFoodAliasColumns = () => ({
+	foodId: text('food_id')
+		.notNull()
+		.references(() => foods.id, { onDelete: 'cascade' }),
+	alias: text('alias').notNull(),
+	locale: text('locale').notNull(),
+	sourceDomain: text('source_domain'),
+	adoptionStatus: text('adoption_status', { enum: adoptionStatusValues })
+		.notNull()
+		.default('pending_review'),
+	defaultMeasureUnitId: text('default_measure_unit_id'),
+	defaultMeasureBaseUnitId: text('default_measure_base_unit_id')
+});
+
+export const foodUserAliases = sqliteTable(
+	'food_user_aliases',
 	{
 		id: id(),
-		workosUserId: text('workos_user_id').notNull(),
-		foodEntityId: text('food_entity_id').references(() => foodEntities.id, {
-			onDelete: 'set null'
-		}),
-		rawSubject: text('raw_subject'),
-		subjectType: text('subject_type', {
-			enum: ['ingredient', 'recipe', 'cuisine', 'texture', 'tag']
-		}).notNull(),
-		rating: text('rating', {
-			enum: ['favourite', 'like', 'mostly_indifferent', 'hate']
-		}).notNull(),
-		notes: text('notes'),
+		workosUserId: text('workos_user_id')
+			.notNull()
+			.references(() => users.workosUserId, { onDelete: 'cascade' }),
+		...scopedFoodAliasColumns(),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()
 	},
 	(table) => [
-		index('taste_preferences_workos_user_id_idx').on(table.workosUserId),
-		index('taste_preferences_food_entity_id_idx').on(table.foodEntityId),
+		foreignKey({
+			columns: [table.defaultMeasureUnitId, table.defaultMeasureBaseUnitId],
+			foreignColumns: [units.id, units.baseUnitId],
+			name: 'food_user_aliases_default_measure_unit_base_fk'
+		}),
+		index('food_user_aliases_user_idx').on(table.workosUserId),
+		index('food_user_aliases_food_id_idx').on(table.foodId),
+		index('food_user_aliases_lookup_idx').on(table.workosUserId, table.locale, table.alias),
+		index('food_user_aliases_adoption_idx').on(table.adoptionStatus),
 		check(
-			'taste_preferences_subject_check',
-			sql`${table.foodEntityId} IS NOT NULL OR ${table.rawSubject} IS NOT NULL`
+			'food_user_aliases_default_measure_pair_check',
+			sql`(${table.defaultMeasureUnitId} IS NULL AND ${table.defaultMeasureBaseUnitId} IS NULL) OR (${table.defaultMeasureUnitId} IS NOT NULL AND ${table.defaultMeasureBaseUnitId} IS NOT NULL)`
 		)
 	]
 );
 
-export const pantryStaples = sqliteTable(
-	'pantry_staples',
+export const foodHouseholdAliases = sqliteTable(
+	'food_household_aliases',
 	{
 		id: id(),
-		householdId: text('household_id').notNull(),
-		foodEntityId: text('food_entity_id').references(() => foodEntities.id, {
-			onDelete: 'set null'
-		}),
-		name: text('name').notNull(),
-		aliasesJson: json<string[]>('aliases_json')
+		householdId: text('household_id')
 			.notNull()
-			.default(sql`'[]'`),
-		category: text('category', {
-			enum: [
-				'produce',
-				'meat_seafood',
-				'dairy_eggs',
-				'bakery',
-				'pantry',
-				'spices',
-				'oil_vinegar',
-				'frozen',
-				'household',
-				'other'
-			]
-		}),
-		defaultUnit: text('default_unit'),
-		notes: text('notes'),
+			.references(() => households.householdId, { onDelete: 'cascade' }),
+		...scopedFoodAliasColumns(),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()
 	},
 	(table) => [
-		index('pantry_staples_household_id_idx').on(table.householdId),
-		index('pantry_staples_food_entity_id_idx').on(table.foodEntityId)
+		foreignKey({
+			columns: [table.defaultMeasureUnitId, table.defaultMeasureBaseUnitId],
+			foreignColumns: [units.id, units.baseUnitId],
+			name: 'food_household_aliases_default_measure_unit_base_fk'
+		}),
+		index('food_household_aliases_household_idx').on(table.householdId),
+		index('food_household_aliases_food_id_idx').on(table.foodId),
+		index('food_household_aliases_lookup_idx').on(table.householdId, table.locale, table.alias),
+		index('food_household_aliases_adoption_idx').on(table.adoptionStatus),
+		check(
+			'food_household_aliases_default_measure_pair_check',
+			sql`(${table.defaultMeasureUnitId} IS NULL AND ${table.defaultMeasureBaseUnitId} IS NULL) OR (${table.defaultMeasureUnitId} IS NOT NULL AND ${table.defaultMeasureBaseUnitId} IS NOT NULL)`
+		)
+	]
+);
+
+const scopedFoodEntryColumns = () => ({
+	canonicalLabel: text('canonical_label').notNull(),
+	defaultMeasureUnitId: text('default_measure_unit_id'),
+	defaultMeasureBaseUnitId: text('default_measure_base_unit_id'),
+	adoptionStatus: text('adoption_status', { enum: adoptionStatusValues })
+		.notNull()
+		.default('pending_review')
+});
+
+export const foodUserEntries = sqliteTable(
+	'food_user_entries',
+	{
+		id: id(),
+		workosUserId: text('workos_user_id')
+			.notNull()
+			.references(() => users.workosUserId, { onDelete: 'cascade' }),
+		...scopedFoodEntryColumns(),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(table) => [
+		uniqueIndex('food_user_entries_label_unique').on(table.workosUserId, table.canonicalLabel),
+		foreignKey({
+			columns: [table.defaultMeasureUnitId, table.defaultMeasureBaseUnitId],
+			foreignColumns: [units.id, units.baseUnitId],
+			name: 'food_user_entries_default_measure_unit_base_fk'
+		}),
+		index('food_user_entries_user_idx').on(table.workosUserId),
+		index('food_user_entries_adoption_idx').on(table.adoptionStatus),
+		check(
+			'food_user_entries_default_measure_pair_check',
+			sql`(${table.defaultMeasureUnitId} IS NULL AND ${table.defaultMeasureBaseUnitId} IS NULL) OR (${table.defaultMeasureUnitId} IS NOT NULL AND ${table.defaultMeasureBaseUnitId} IS NOT NULL)`
+		)
+	]
+);
+
+export const foodHouseholdEntries = sqliteTable(
+	'food_household_entries',
+	{
+		id: id(),
+		householdId: text('household_id')
+			.notNull()
+			.references(() => households.householdId, { onDelete: 'cascade' }),
+		...scopedFoodEntryColumns(),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(table) => [
+		uniqueIndex('food_household_entries_label_unique').on(table.householdId, table.canonicalLabel),
+		foreignKey({
+			columns: [table.defaultMeasureUnitId, table.defaultMeasureBaseUnitId],
+			foreignColumns: [units.id, units.baseUnitId],
+			name: 'food_household_entries_default_measure_unit_base_fk'
+		}),
+		index('food_household_entries_household_idx').on(table.householdId),
+		index('food_household_entries_adoption_idx').on(table.adoptionStatus),
+		check(
+			'food_household_entries_default_measure_pair_check',
+			sql`(${table.defaultMeasureUnitId} IS NULL AND ${table.defaultMeasureBaseUnitId} IS NULL) OR (${table.defaultMeasureUnitId} IS NOT NULL AND ${table.defaultMeasureBaseUnitId} IS NOT NULL)`
+		)
+	]
+);
+
+export const userFoodPreferences = sqliteTable(
+	'user_food_preferences',
+	{
+		id: id(),
+		workosUserId: text('workos_user_id')
+			.notNull()
+			.references(() => users.workosUserId, { onDelete: 'cascade' }),
+		foodId: text('food_id')
+			.notNull()
+			.references(() => foods.id, { onDelete: 'cascade' }),
+		preference: text('preference', {
+			enum: ['favourite', 'like', 'dislike', 'disallowed']
+		}).notNull(),
+		reason: text('reason'),
+		createdAt: createdAt(),
+		updatedAt: updatedAt()
+	},
+	(table) => [
+		uniqueIndex('user_food_preferences_user_food_unique').on(table.workosUserId, table.foodId),
+		index('user_food_preferences_user_idx').on(table.workosUserId),
+		index('user_food_preferences_food_idx').on(table.foodId),
+		index('user_food_preferences_preference_idx').on(table.preference)
 	]
 );
