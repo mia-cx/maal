@@ -20,6 +20,8 @@
 		placeholder = 'Select option',
 		searchPlaceholder = 'Search...',
 		emptyText = 'No results found.',
+		allowCustom = false,
+		customOptionLabel = (input: string) => `Use “${input}”`,
 		class: className
 	}: {
 		value: string;
@@ -29,6 +31,8 @@
 		placeholder?: string;
 		searchPlaceholder?: string;
 		emptyText?: string;
+		allowCustom?: boolean;
+		customOptionLabel?: (input: string) => string;
 		class?: string;
 	} = $props();
 
@@ -37,6 +41,12 @@
 
 	const selectedOption = $derived(options.find((option) => option.value === value));
 	const displayValue = $derived(selectedOption?.label ?? (value || placeholder));
+	const customValue = $derived(search.trim());
+	const showCustomOption = $derived(
+		allowCustom &&
+			customValue.length > 0 &&
+			!options.some((option) => option.value.toLowerCase() === customValue.toLowerCase())
+	);
 </script>
 
 {#if name}
@@ -64,6 +74,19 @@
 			<Command.Input bind:value={search} placeholder={searchPlaceholder} />
 			<Command.List>
 				<Command.Empty>{emptyText}</Command.Empty>
+				{#if showCustomOption}
+					<Command.Item
+						value={customValue}
+						forceMount
+						onSelect={() => {
+							value = customValue;
+							search = '';
+							open = false;
+						}}
+					>
+						<span class="truncate">{customOptionLabel(customValue)}</span>
+					</Command.Item>
+				{/if}
 				{#each options as option (option.value)}
 					<Command.Item
 						value={option.value}

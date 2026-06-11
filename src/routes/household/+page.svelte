@@ -63,12 +63,17 @@
 		'fl oz': 'oz'
 	};
 	const localeOptions = [
+		{ value: 'en', label: 'English', keywords: ['english'] },
 		{ value: 'en-US', label: 'English (United States)', keywords: ['english', 'us', 'usa'] },
 		{ value: 'en-GB', label: 'English (United Kingdom)', keywords: ['english', 'uk', 'gb'] },
+		{ value: 'nl', label: 'Dutch', keywords: ['dutch', 'nederlands'] },
 		{ value: 'nl-NL', label: 'Dutch (Netherlands)', keywords: ['dutch', 'nederlands'] },
+		{ value: 'fr', label: 'French', keywords: ['french', 'français'] },
 		{ value: 'fr-FR', label: 'French (France)', keywords: ['french', 'français'] },
 		{ value: 'fr-CA', label: 'French (Canada)', keywords: ['french', 'canada', 'québec'] },
+		{ value: 'de', label: 'German', keywords: ['german', 'deutsch'] },
 		{ value: 'de-DE', label: 'German (Germany)', keywords: ['german', 'deutsch'] },
+		{ value: 'es', label: 'Spanish', keywords: ['spanish', 'español'] },
 		{ value: 'es-ES', label: 'Spanish (Spain)', keywords: ['spanish', 'español'] },
 		{ value: 'es-MX', label: 'Spanish (Mexico)', keywords: ['spanish', 'mexico', 'español'] },
 		{ value: 'it-IT', label: 'Italian (Italy)', keywords: ['italian', 'italiano'] },
@@ -189,7 +194,9 @@
 								options={localeOptions}
 								disabled={fieldDisabled}
 								placeholder="Select locale"
-								searchPlaceholder="Search locales..."
+								searchPlaceholder="Search or type a BCP 47 locale..."
+								allowCustom
+								customOptionLabel={(input) => `Use custom locale “${input}”`}
 							/>
 						</label>
 						<label class="grid min-w-0 gap-1 text-xs font-medium">
