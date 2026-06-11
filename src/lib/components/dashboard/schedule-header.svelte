@@ -2,7 +2,6 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as ButtonGroup from '$lib/components/ui/button-group';
 	import * as Sidebar from '$lib/components/ui/sidebar';
-	import WordmarkLogo from '$lib/components/wordmark-logo.svelte';
 	import type { ScheduleMode } from './schedule-types';
 
 	let {
@@ -31,7 +30,6 @@
 		<div class="flex w-9 shrink-0 items-center justify-center">
 			<Sidebar.Trigger />
 		</div>
-		<WordmarkLogo class="hidden h-5 w-16 sm:block" />
 	</div>
 	<ButtonGroup.Root
 		aria-label="Meal plan view"

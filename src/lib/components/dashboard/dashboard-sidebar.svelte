@@ -3,6 +3,7 @@
 	import NavUser from '$lib/components/nav-user.svelte';
 	import TeamSwitcher from '$lib/components/team-switcher.svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar';
+	import WordmarkLogo from '$lib/components/wordmark-logo.svelte';
 	import CalendarDaysIcon from '@lucide/svelte/icons/calendar-days';
 	import HomeIcon from '@lucide/svelte/icons/house';
 	import ListIcon from '@lucide/svelte/icons/list';
@@ -36,7 +37,9 @@
 
 	<Sidebar.Content>
 		<Sidebar.Group>
-			<Sidebar.GroupLabel>Maal</Sidebar.GroupLabel>
+			<Sidebar.GroupLabel class="h-10 px-2 text-sidebar-foreground">
+				<WordmarkLogo class="h-5 w-16" />
+			</Sidebar.GroupLabel>
 			<Sidebar.GroupContent>
 				<Sidebar.Menu>
 					<Sidebar.MenuItem>

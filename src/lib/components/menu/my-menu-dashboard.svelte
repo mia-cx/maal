@@ -1,6 +1,5 @@
 <script lang="ts">
 	import * as Sidebar from '$lib/components/ui/sidebar';
-	import WordmarkLogo from '$lib/components/wordmark-logo.svelte';
 	import { resolve } from '$app/paths';
 	import type { Pathname } from '$app/types';
 	import {
@@ -89,7 +88,6 @@
 			<div class="flex w-9 shrink-0 items-center justify-center">
 				<Sidebar.Trigger />
 			</div>
-			<WordmarkLogo class="h-5 w-16" />
 		</div>
 	</header>
 

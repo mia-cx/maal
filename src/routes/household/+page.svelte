@@ -5,7 +5,6 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import * as Sidebar from '$lib/components/ui/sidebar';
-	import WordmarkLogo from '$lib/components/wordmark-logo.svelte';
 	import { untrack } from 'svelte';
 	import type { ActionData, PageData } from './$types';
 
@@ -111,7 +110,6 @@
 			<div class="flex w-9 shrink-0 items-center justify-center">
 				<Sidebar.Trigger />
 			</div>
-			<WordmarkLogo class="h-5 w-16" />
 		</div>
 	</header>
 
