@@ -5,80 +5,17 @@
 
 	let {
 		leadIn = 0,
-		gutter = 16,
 		closeLabel = 'Close sheet',
 		onclose,
 		children,
 		footer
 	}: {
 		leadIn?: number;
-		gutter?: number;
 		closeLabel?: string;
 		onclose: () => void;
 		children: Snippet;
 		footer?: Snippet;
 	} = $props();
-
-	let trackElement = $state<HTMLElement>();
-	let shellElement = $state<HTMLElement>();
-	let bodyElement = $state<HTMLElement>();
-	let footerElement = $state<HTMLElement>();
-	let viewportHeight = $state(0);
-	let bodyHeight = $state(0);
-	let footerHeight = $state(0);
-	let contentOffset = $state(0);
-	let pinned = $state(false);
-
-	const contentHeight = $derived(bodyHeight + footerHeight);
-	const maxShellHeight = $derived(Math.max(240, viewportHeight - gutter * 2));
-	const shellHeight = $derived(Math.min(contentHeight || maxShellHeight, maxShellHeight));
-	const bodyMaskHeight = $derived(Math.max(0, shellHeight - footerHeight));
-	const maxContentOffset = $derived(Math.max(0, bodyHeight - bodyMaskHeight));
-	const trackStyle = $derived(contentHeight > 0 ? `min-height: ${contentHeight}px;` : '');
-	const shellStyle = $derived(
-		`top: ${gutter}px; ${pinned ? `height: ${shellHeight}px; overflow: hidden;` : ''}`
-	);
-	const bodyMaskStyle = $derived(pinned ? `height: ${bodyMaskHeight}px; overflow: hidden;` : '');
-	const bodyStyle = $derived(pinned ? `transform: translate3d(0, -${contentOffset}px, 0);` : '');
-
-	const clamp = (value: number, minimum: number, maximum: number) =>
-		Math.min(maximum, Math.max(minimum, value));
-
-	$effect(() => {
-		const track = trackElement;
-		const shell = shellElement;
-		const body = bodyElement;
-		const viewport = shell?.closest('[data-sheet-viewport]');
-		if (!track || !shell || !body || !(viewport instanceof HTMLElement)) return;
-
-		const updateMetrics = () => {
-			viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-			bodyHeight = body.scrollHeight;
-			footerHeight = footerElement?.offsetHeight ?? 0;
-
-			const viewportTop = viewport.getBoundingClientRect().top;
-			const trackTop = track.getBoundingClientRect().top - viewportTop + viewport.scrollTop;
-			const pinStart = trackTop - gutter;
-			const rawOffset = viewport.scrollTop - pinStart;
-			pinned = rawOffset >= 0;
-			contentOffset = pinned ? clamp(rawOffset, 0, maxContentOffset) : 0;
-		};
-
-		const observer = new ResizeObserver(updateMetrics);
-		observer.observe(body);
-		if (footerElement) observer.observe(footerElement);
-		updateMetrics();
-		viewport.addEventListener('scroll', updateMetrics, { passive: true });
-		window.visualViewport?.addEventListener('resize', updateMetrics);
-		window.addEventListener('resize', updateMetrics);
-
-		return () => {
-			observer.disconnect();
-			viewport.removeEventListener('scroll', updateMetrics);
-			window.visualViewport?.removeEventListener('resize', updateMetrics);
-			window.removeEventListener('resize', updateMetrics);
-		};
-	});
 </script>
 
 <button
@@ -89,14 +26,11 @@
 	onclick={onclose}
 ></button>
 <div
-	class="pointer-events-none relative z-10 mx-auto w-full max-w-[min(100vw-1rem,42rem)] px-2 sm:max-w-[42rem] sm:px-4"
-	style={`padding-top: ${leadIn}px;`}
+	class="pointer-events-none relative z-10 mx-auto my-4 h-[calc(100svh-2rem)] w-full max-w-[min(100vw-1rem,42rem)] [scrollbar-width:none] overflow-y-auto rounded-xl px-2 sm:max-w-[42rem] sm:px-4 [&::-webkit-scrollbar]:hidden"
 >
-	<div bind:this={trackElement} style={trackStyle}>
+	<div style={`padding-top: ${leadIn}px;`}>
 		<div
-			bind:this={shellElement}
-			class="pointer-events-auto sticky flex flex-col overflow-visible rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10"
-			style={shellStyle}
+			class={`pointer-events-auto relative bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10 ${footer ? 'rounded-t-xl border border-b-0 border-border' : 'rounded-xl border border-border'}`}
 		>
 			<Dialog.Close
 				aria-label={closeLabel}
@@ -104,16 +38,14 @@
 			>
 				<XIcon class="relative z-10 size-5" />
 			</Dialog.Close>
-			<div style={bodyMaskStyle}>
-				<div bind:this={bodyElement} style={bodyStyle}>
-					{@render children()}
-				</div>
-			</div>
-			{#if footer}
-				<div bind:this={footerElement} class="shrink-0">
-					{@render footer()}
-				</div>
-			{/if}
+			{@render children()}
 		</div>
+		{#if footer}
+			<div
+				class="pointer-events-auto sticky bottom-0 z-20 rounded-b-xl border-x border-b border-border bg-popover/95 shadow-[0_-12px_24px_-18px_rgba(0,0,0,0.45)] backdrop-blur"
+			>
+				{@render footer()}
+			</div>
+		{/if}
 	</div>
 </div>
