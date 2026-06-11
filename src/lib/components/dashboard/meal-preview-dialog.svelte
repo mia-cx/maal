@@ -8,7 +8,7 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import { parseDate, type DateValue } from '@internationalized/date';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
-	import { routeSheetWheel } from '$lib/interaction/sheet-scroll';
+	import { attachSheetWheelRouter } from '$lib/interaction/sheet-scroll';
 	import { scaleIngredientText } from '$lib/recipes/ingredient-text';
 	import { familiarityLabels } from './meal-labels';
 	import type { Meal, MealFamiliarity } from './schedule-types';
@@ -224,14 +224,6 @@
 		open = false;
 	};
 
-	const handleSheetWheel = (event: WheelEvent) => {
-		routeSheetWheel(event, {
-			viewport: previewViewportElement,
-			sheet: previewSheetElement,
-			handoffScroll: previewHandoffScroll
-		});
-	};
-
 	$effect(() => {
 		const nextDate = scheduledDateValue?.toString() ?? '';
 		if (nextDate && nextDate !== scheduledDate) scheduledDate = nextDate;
@@ -255,6 +247,15 @@
 		descriptionDraft = meal?.description ?? '';
 		cookTimeDraft = String(meal?.cookTimeMinutes ?? fallbackDurationMinutes);
 		servingsDraft = String(Math.max(1, Math.round(meal?.servingsPlanned ?? 1)));
+	});
+
+	$effect(() => {
+		if (!previewSheetElement) return;
+		return attachSheetWheelRouter(previewSheetElement, () => ({
+			viewport: previewViewportElement,
+			sheet: previewSheetElement,
+			handoffScroll: previewHandoffScroll
+		}));
 	});
 
 	$effect(() => {
@@ -336,7 +337,6 @@
 						bind:this={previewSheetElement}
 						class="pointer-events-auto relative overflow-y-auto rounded-xl border border-border bg-popover shadow-2xl ring-1 ring-foreground/10"
 						style={`max-height: ${previewMaxHeight}px;`}
-						onwheel={handleSheetWheel}
 					>
 						<div bind:this={heroElement} class="relative overflow-hidden rounded-t-xl">
 							<Dialog.Close

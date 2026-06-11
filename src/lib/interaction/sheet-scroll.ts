@@ -4,6 +4,8 @@ type SheetScrollElements = {
 	handoffScroll: number;
 };
 
+type SheetScrollElementsGetter = () => SheetScrollElements;
+
 const scrollBy = (element: HTMLElement, deltaY: number): number => {
 	const previousScrollTop = element.scrollTop;
 	const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
@@ -16,9 +18,9 @@ export const routeSheetWheel = (
 	event: WheelEvent,
 	{ viewport, sheet, handoffScroll }: SheetScrollElements
 ) => {
-	if (!viewport || !sheet || !event.cancelable || event.deltaY === 0) return;
+	if (!viewport || !sheet || event.deltaY === 0) return;
 
-	event.preventDefault();
+	if (event.cancelable) event.preventDefault();
 
 	let remainingDelta = event.deltaY;
 	if (remainingDelta > 0) {
@@ -36,4 +38,13 @@ export const routeSheetWheel = (
 	const consumedBySheet = scrollBy(sheet, remainingDelta);
 	remainingDelta -= consumedBySheet;
 	if (remainingDelta < 0) scrollBy(viewport, remainingDelta);
+};
+
+export const attachSheetWheelRouter = (
+	node: HTMLElement,
+	getElements: SheetScrollElementsGetter
+) => {
+	const handleWheel = (event: WheelEvent) => routeSheetWheel(event, getElements());
+	node.addEventListener('wheel', handleWheel, { passive: false });
+	return () => node.removeEventListener('wheel', handleWheel);
 };

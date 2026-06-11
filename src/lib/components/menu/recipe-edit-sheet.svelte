@@ -5,7 +5,7 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 	import XIcon from '@lucide/svelte/icons/x';
-	import { routeSheetWheel } from '$lib/interaction/sheet-scroll';
+	import { attachSheetWheelRouter } from '$lib/interaction/sheet-scroll';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import type { RecipeIngredientItem, RecipeInstructionItem, RecipeMenuItem } from './menu-types';
 
@@ -277,13 +277,14 @@
 		}
 	};
 
-	const handleSheetWheel = (event: WheelEvent) => {
-		routeSheetWheel(event, {
+	$effect(() => {
+		if (!sheetElement) return;
+		return attachSheetWheelRouter(sheetElement, () => ({
 			viewport: sheetViewportElement,
 			sheet: sheetElement,
 			handoffScroll: sheetHandoffScroll
-		});
-	};
+		}));
+	});
 </script>
 
 <Dialog.Root bind:open>
@@ -310,7 +311,6 @@
 						class="pointer-events-auto w-full overflow-y-auto rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10"
 						style={`max-height: ${sheetMaxHeight}px;`}
 						onsubmit={saveRecipe}
-						onwheel={handleSheetWheel}
 					>
 						<div bind:this={sheetHeroElement} class="relative">
 							<Dialog.Close
