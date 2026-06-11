@@ -1,10 +1,10 @@
 <script lang="ts">
 	import * as Button from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import * as Sheet from '$lib/components/ui/sheet';
 	import { Input } from '$lib/components/ui/input';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
-	import XIcon from '@lucide/svelte/icons/x';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import type { RecipeIngredientItem, RecipeInstructionItem, RecipeMenuItem } from './menu-types';
 
@@ -115,14 +115,15 @@
 	});
 
 	$effect(() => {
-		if (!open || !sheetHeroElement) return;
+		const element = sheetHeroElement;
+		if (!open || !element) return;
 
 		const updateSheetMetrics = () => {
 			sheetViewportHeight = window.visualViewport?.height ?? window.innerHeight;
-			sheetHeroHeight = sheetHeroElement.offsetHeight;
+			sheetHeroHeight = element.offsetHeight;
 		};
 		const observer = new ResizeObserver(updateSheetMetrics);
-		observer.observe(sheetHeroElement);
+		observer.observe(element);
 		updateSheetMetrics();
 		window.visualViewport?.addEventListener('resize', updateSheetMetrics);
 		window.addEventListener('resize', updateSheetMetrics);
@@ -280,29 +281,13 @@
 			class="fixed inset-0 z-50 h-svh w-full [scrollbar-width:none] overflow-y-auto bg-transparent py-4 outline-none [&::-webkit-scrollbar]:hidden"
 		>
 			{#if recipe}
-				<button
-					type="button"
-					aria-label="Close recipe editor"
-					tabindex="-1"
-					class="fixed inset-0 z-0 cursor-default bg-transparent"
-					onclick={() => (open = false)}
-				></button>
-				<div
-					class="pointer-events-none relative z-10 mx-auto w-full max-w-[min(100vw-1rem,42rem)] px-2 sm:max-w-[42rem] sm:px-4"
-					style={`padding-top: ${sheetLeadIn}px;`}
+				<Sheet.Frame
+					leadIn={sheetLeadIn}
+					closeLabel="Close recipe editor"
+					onclose={() => (open = false)}
 				>
-					<form
-						class="pointer-events-auto w-full rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10"
-						onsubmit={saveRecipe}
-					>
-						<div bind:this={sheetHeroElement} class="relative">
-							<Dialog.Close
-								aria-label="Close recipe editor"
-								class="absolute top-3 right-3 z-20 inline-flex size-9 cursor-pointer items-center justify-center overflow-hidden rounded-md bg-black text-white shadow-lg transition after:absolute after:inset-0 after:bg-white/20 after:opacity-0 after:transition-opacity after:content-[''] hover:after:opacity-100 focus-visible:ring-2 focus-visible:ring-black/60 focus-visible:outline-none dark:bg-white dark:text-black dark:after:bg-black/20 dark:focus-visible:ring-white/60"
-							>
-								<XIcon class="relative z-10 size-5" />
-							</Dialog.Close>
-
+					<form class="contents" onsubmit={saveRecipe}>
+						<div bind:this={sheetHeroElement} class="relative overflow-hidden rounded-t-xl">
 							{#if image}
 								<img src={image} alt="" class="aspect-[2/1] w-full object-cover" />
 							{/if}
@@ -502,7 +487,7 @@
 							<Button.Root type="submit">Save recipe</Button.Root>
 						</div>
 					</form>
-				</div>
+				</Sheet.Frame>
 			{/if}
 		</DialogPrimitive.Content>
 	</Dialog.Portal>
