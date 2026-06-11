@@ -40,6 +40,8 @@ const applianceOptions = [
 ] as const;
 
 const weekStartDays = ['sunday', 'monday'] as const;
+const defaultLocale = 'en-US';
+const defaultTimezone = 'UTC';
 const maxHouseholdNameLength = 120;
 
 type Appliance = (typeof applianceOptions)[number];
@@ -64,6 +66,26 @@ const asWeekStartDay = (value: FormDataEntryValue | null): WeekStartDay => {
 
 const weekStartDay = (value?: number | null): WeekStartDay => (value === 0 ? 'sunday' : 'monday');
 const weekStartValue = (value: WeekStartDay): number => (value === 'sunday' ? 0 : 1);
+
+const localeFromForm = (value: FormDataEntryValue | null): string | undefined => {
+	if (typeof value !== 'string') return;
+	const locale = value.trim();
+	if (!locale) return defaultLocale;
+	try {
+		return new Intl.Locale(locale).toString();
+	} catch {
+		return;
+	}
+};
+
+const timezoneFromForm = (value: FormDataEntryValue | null): string | null | undefined => {
+	if (typeof value !== 'string') return;
+	const timezone = value.trim();
+	if (!timezone) return null;
+	if (timezone === defaultTimezone) return timezone;
+	if (Intl.supportedValuesOf('timeZone').includes(timezone)) return timezone;
+	return;
+};
 
 const numberFromForm = (value: FormDataEntryValue | null, fallback: number): number => {
 	if (typeof value !== 'string') return fallback;
@@ -166,6 +188,8 @@ export const load: PageServerLoad = async (event) => {
 			},
 			profile: {
 				defaultServings: 4,
+				locale: defaultLocale,
+				timezone: defaultTimezone,
 				weekStartsOn: 'monday' as const,
 				preferredMassUnit: 'g' as const,
 				preferredVolumeUnit: 'ml' as const,
@@ -215,6 +239,8 @@ export const load: PageServerLoad = async (event) => {
 
 	const profile = householdRows[0] ?? {
 		defaultPlannedYield: 1,
+		locale: defaultLocale,
+		timezone: defaultTimezone,
 		weekStartsOn: 1,
 		preferredDinnerTime: null
 	};
@@ -232,6 +258,8 @@ export const load: PageServerLoad = async (event) => {
 		},
 		profile: {
 			defaultServings: profile.defaultPlannedYield,
+			locale: profile.locale ?? defaultLocale,
+			timezone: profile.timezone ?? defaultTimezone,
 			weekStartsOn: weekStartDay(profile.weekStartsOn),
 			preferredMassUnit: 'g' as const,
 			preferredVolumeUnit: 'ml' as const,
@@ -261,6 +289,8 @@ export const actions: Actions = {
 		const form = await event.request.formData();
 		const profileUpdate: Partial<{
 			defaultPlannedYield: number;
+			locale: string;
+			timezone: string | null;
 			weekStartsOn: number;
 			preferredDinnerTime: string | null;
 		}> = {};
@@ -286,6 +316,16 @@ export const actions: Actions = {
 				Math.max(1, numberFromForm(form.get('defaultServings'), 1))
 			);
 		}
+		if (form.has('locale')) {
+			const locale = localeFromForm(form.get('locale'));
+			if (!locale) return fail(400, { message: 'Locale is invalid.' });
+			profileUpdate.locale = locale;
+		}
+		if (form.has('timezone')) {
+			const timezone = timezoneFromForm(form.get('timezone'));
+			if (timezone === undefined) return fail(400, { message: 'Timezone is invalid.' });
+			profileUpdate.timezone = timezone;
+		}
 		if (form.has('weekStartsOn')) {
 			profileUpdate.weekStartsOn = weekStartValue(asWeekStartDay(form.get('weekStartsOn')));
 		}
@@ -301,6 +341,8 @@ export const actions: Actions = {
 					.values({
 						householdId,
 						defaultPlannedYield: profileUpdate.defaultPlannedYield ?? 1,
+						locale: profileUpdate.locale ?? defaultLocale,
+						timezone: profileUpdate.timezone ?? defaultTimezone,
 						weekStartsOn: profileUpdate.weekStartsOn ?? 1,
 						preferredDinnerTime: profileUpdate.preferredDinnerTime ?? null
 					})

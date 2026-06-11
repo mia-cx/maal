@@ -12,6 +12,8 @@
 
 	let householdName = $state(untrack(() => data.household.name));
 	let defaultServings = $state(untrack(() => String(data.profile.defaultServings)));
+	let locale = $state(untrack(() => data.profile.locale));
+	let timezone = $state(untrack(() => data.profile.timezone ?? ''));
 	const overridesText = (overrides: Record<string, string>) =>
 		Object.entries(overrides)
 			.toSorted(([left], [right]) => left.localeCompare(right))
@@ -58,9 +60,25 @@
 		cup: 'cup',
 		'fl oz': 'oz'
 	};
+	const localeOptions = ['en-US', 'en-GB', 'nl-NL', 'fr-FR', 'de-DE', 'es-ES'];
+	const timezoneOptions = [
+		'UTC',
+		'Europe/Amsterdam',
+		'Europe/London',
+		'Europe/Paris',
+		'Europe/Berlin',
+		'America/New_York',
+		'America/Chicago',
+		'America/Denver',
+		'America/Los_Angeles',
+		'America/Toronto',
+		'America/Phoenix'
+	];
 
 	const householdNameChanged = $derived(householdName.trim() !== data.household.name);
 	const defaultServingsChanged = $derived(defaultServings !== String(data.profile.defaultServings));
+	const localeChanged = $derived(locale.trim() !== data.profile.locale);
+	const timezoneChanged = $derived(timezone.trim() !== (data.profile.timezone ?? ''));
 	const weekStartsOnChanged = $derived(weekStartsOn !== data.profile.weekStartsOn);
 	const preferredMassUnitChanged = $derived(preferredMassUnit !== data.profile.preferredMassUnit);
 	const preferredVolumeUnitChanged = $derived(
@@ -75,6 +93,8 @@
 	const householdSettingsChanged = $derived(
 		householdNameChanged ||
 			defaultServingsChanged ||
+			localeChanged ||
+			timezoneChanged ||
 			weekStartsOnChanged ||
 			preferredMassUnitChanged ||
 			preferredVolumeUnitChanged ||
@@ -131,6 +151,16 @@
 			{/if}
 
 			<section class="grid gap-3 border-t border-border pt-4">
+				<datalist id="household-locale-options">
+					{#each localeOptions as option (option)}
+						<option value={option}></option>
+					{/each}
+				</datalist>
+				<datalist id="household-timezone-options">
+					{#each timezoneOptions as option (option)}
+						<option value={option}></option>
+					{/each}
+				</datalist>
 				<form method="post" action="?/updateSettings" class="grid gap-3">
 					<div class="grid gap-3 md:grid-cols-2">
 						<label class="grid min-w-0 gap-1 text-xs font-medium">
@@ -152,6 +182,28 @@
 								max="24"
 								step="1"
 								bind:value={defaultServings}
+								readonly={fieldDisabled}
+								class="h-8 w-full"
+							/>
+						</label>
+						<label class="grid min-w-0 gap-1 text-xs font-medium">
+							Locale
+							<Input
+								name={localeChanged ? 'locale' : undefined}
+								bind:value={locale}
+								list="household-locale-options"
+								placeholder="en-US"
+								readonly={fieldDisabled}
+								class="h-8 w-full"
+							/>
+						</label>
+						<label class="grid min-w-0 gap-1 text-xs font-medium">
+							Timezone
+							<Input
+								name={timezoneChanged ? 'timezone' : undefined}
+								bind:value={timezone}
+								list="household-timezone-options"
+								placeholder="Europe/Amsterdam"
 								readonly={fieldDisabled}
 								class="h-8 w-full"
 							/>
