@@ -184,6 +184,9 @@ const persistScheduleMealChange = (change: ScheduleMealChange) => {
 			if (pendingPersistVersions.get(change.meal.id) === persistVersion) {
 				pendingPersistVersions.delete(change.meal.id);
 			}
+			// Keep the optimistic snapshot after success. A stale range-load response can still
+			// arrive after the PUT resolves; clear the snapshot only when hydration confirms
+			// the server has caught up to this exact meal state.
 		}
 	);
 };
