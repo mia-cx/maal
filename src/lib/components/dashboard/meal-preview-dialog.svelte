@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as Button from '$lib/components/ui/button';
 	import * as Calendar from '$lib/components/ui/calendar';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
@@ -471,20 +472,8 @@
 						<div
 							class="sticky bottom-0 z-20 flex items-center justify-between gap-3 rounded-b-xl border-t border-border bg-popover/95 px-5 py-3 shadow-[0_-12px_24px_-18px_rgba(0,0,0,0.45)] backdrop-blur"
 						>
-							<button
-								type="button"
-								class="rounded-md border border-destructive/40 px-4 py-2 text-sm font-semibold text-destructive transition hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-destructive/30 focus-visible:outline-none"
-								onclick={openDeleteConfirm}
-							>
-								Delete
-							</button>
-							<button
-								type="button"
-								class="rounded-md bg-foreground px-5 py-2 text-sm font-semibold text-background transition hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
-								onclick={saveMealDraft}
-							>
-								Save
-							</button>
+							<Button.Root variant="destructive" onclick={openDeleteConfirm}>Delete</Button.Root>
+							<Button.Root onclick={saveMealDraft}>Save meal</Button.Root>
 						</div>
 					</div>
 					{#if scheduleEditorOpen}
@@ -530,20 +519,10 @@
 			</Dialog.Description>
 		</Dialog.Header>
 		<div class="flex justify-end gap-2">
-			<button
-				type="button"
-				class="rounded-md px-4 py-2 text-sm font-semibold transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
-				onclick={() => (deleteConfirmOpen = false)}
+			<Button.Root variant="ghost" onclick={() => (deleteConfirmOpen = false)}
+				>Keep meal</Button.Root
 			>
-				Keep meal
-			</button>
-			<button
-				type="button"
-				class="rounded-md bg-destructive/10 px-4 py-2 text-sm font-semibold text-destructive transition hover:bg-destructive/20 focus-visible:ring-2 focus-visible:ring-destructive/30 focus-visible:outline-none"
-				onclick={deleteMeal}
-			>
-				Delete meal
-			</button>
+			<Button.Root variant="destructive" onclick={deleteMeal}>Delete meal</Button.Root>
 		</div>
 	</Dialog.Content>
 </Dialog.Root>
