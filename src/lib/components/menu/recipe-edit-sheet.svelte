@@ -545,7 +545,7 @@
 												oninput={(event) =>
 													updateInstructionText(instruction.draftId, event.currentTarget.value)}
 												aria-label={`Instruction ${instruction.position} text`}
-												class={textareaClass}
+												class={`${textareaClass} min-h-[5.75rem]`}
 											></textarea>
 											<div class="flex flex-wrap gap-1 sm:flex-col">
 												<Button.Root
@@ -611,7 +611,7 @@
 				</Button.Root>
 			</div>
 			<p
-				class="min-h-20 rounded-md border border-input bg-input/20 px-2 py-1.5 text-sm leading-relaxed"
+				class="min-h-[5.75rem] rounded-md border border-input bg-input/20 px-2 py-1.5 text-sm leading-relaxed"
 			>
 				{draggedInstruction.text}
 			</p>
