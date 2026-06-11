@@ -37,6 +37,12 @@
 	let recipeYield = $state('');
 	let ingredients = $state<DraftIngredient[]>([]);
 	let instructions = $state<DraftInstruction[]>([]);
+	let instructionListElement = $state<HTMLElement>();
+	let draggedInstruction = $state<DraftInstruction | null>(null);
+	let draggedInstructionPointerId = $state<number | null>(null);
+	let instructionDragX = $state(0);
+	let instructionDragY = $state(0);
+	let instructionDropIndex = $state(0);
 	let deleteConfirmOpen = $state(false);
 	let deleteBusy = $state(false);
 	let deleteError = $state<string | null>(null);
@@ -104,6 +110,12 @@
 	const sortedInstructions = $derived(
 		instructions.toSorted((left, right) => left.position - right.position)
 	);
+	const visibleInstructions = $derived.by(() => {
+		const dragged = draggedInstruction;
+		return dragged
+			? sortedInstructions.filter((instruction) => instruction.draftId !== dragged.draftId)
+			: sortedInstructions;
+	});
 
 	$effect(() => {
 		if (recipe?.id !== editingRecipeId) syncRecipe(recipe);
@@ -114,6 +126,11 @@
 		deleteConfirmOpen = false;
 		deleteBusy = false;
 		deleteError = null;
+		draggedInstruction = null;
+		draggedInstructionPointerId = null;
+		window.removeEventListener('pointermove', moveInstructionDrag);
+		window.removeEventListener('pointerup', stopInstructionDrag);
+		window.removeEventListener('pointercancel', stopInstructionDrag);
 	});
 
 	$effect(() => {
@@ -197,21 +214,18 @@
 		instructions = nextInstructions.toSorted((left, right) => left.position - right.position);
 	};
 
+	const reorderInstructions = (draftId: string, nextIndex: number) => {
+		const current = sortedInstructions.find((instruction) => instruction.draftId === draftId);
+		if (!current) return;
+		const remaining = sortedInstructions.filter((instruction) => instruction.draftId !== draftId);
+		remaining.splice(Math.max(0, Math.min(nextIndex, remaining.length)), 0, current);
+		instructions = remaining.map((instruction, index) => ({ ...instruction, position: index + 1 }));
+	};
+
 	const swapInstructionPosition = (draftId: string, direction: -1 | 1) => {
-		const orderedInstructions = sortedInstructions;
-		const index = orderedInstructions.findIndex((instruction) => instruction.draftId === draftId);
-		const neighbor = orderedInstructions[index + direction];
-		const current = orderedInstructions[index];
-		if (!current || !neighbor) return;
-		instructions = instructions.map((instruction) => {
-			if (instruction.draftId === current.draftId) {
-				return { ...instruction, position: neighbor.position };
-			}
-			if (instruction.draftId === neighbor.draftId) {
-				return { ...instruction, position: current.position };
-			}
-			return instruction;
-		});
+		const index = sortedInstructions.findIndex((instruction) => instruction.draftId === draftId);
+		if (index < 0) return;
+		reorderInstructions(draftId, index + direction);
 	};
 
 	const addInstruction = () => {
@@ -228,6 +242,55 @@
 		if (!instructions.length) {
 			instructions = [{ draftId: crypto.randomUUID(), position: 1, text: '' }];
 		}
+	};
+
+	const instructionRows = (): HTMLElement[] =>
+		Array.from(
+			instructionListElement?.querySelectorAll<HTMLElement>('[data-instruction-row]') ?? []
+		);
+
+	const instructionDropIndexFromPointer = (clientY: number): number => {
+		let index = 0;
+		for (const row of instructionRows()) {
+			const rect = row.getBoundingClientRect();
+			if (clientY < rect.top + rect.height / 2) return index;
+			index += 1;
+		}
+		return index;
+	};
+
+	const stopInstructionDrag = (event: PointerEvent) => {
+		if (draggedInstructionPointerId !== event.pointerId) return;
+		if (draggedInstruction) reorderInstructions(draggedInstruction.draftId, instructionDropIndex);
+		draggedInstruction = null;
+		draggedInstructionPointerId = null;
+		window.removeEventListener('pointermove', moveInstructionDrag);
+		window.removeEventListener('pointerup', stopInstructionDrag);
+		window.removeEventListener('pointercancel', stopInstructionDrag);
+	};
+
+	const moveInstructionDrag = (event: PointerEvent) => {
+		if (draggedInstructionPointerId !== event.pointerId) return;
+		instructionDragX = event.clientX;
+		instructionDragY = event.clientY;
+		instructionDropIndex = instructionDropIndexFromPointer(event.clientY);
+	};
+
+	const startInstructionDrag = (instruction: DraftInstruction, event: PointerEvent) => {
+		if (event.pointerType === 'mouse' && event.button !== 0) return;
+		const target = event.target as HTMLElement;
+		if (target.closest('button, input, textarea, a, [contenteditable="true"]')) return;
+		event.preventDefault();
+		draggedInstruction = instruction;
+		draggedInstructionPointerId = event.pointerId;
+		instructionDragX = event.clientX;
+		instructionDragY = event.clientY;
+		instructionDropIndex = sortedInstructions.findIndex(
+			(item) => item.draftId === instruction.draftId
+		);
+		window.addEventListener('pointermove', moveInstructionDrag);
+		window.addEventListener('pointerup', stopInstructionDrag);
+		window.addEventListener('pointercancel', stopInstructionDrag);
 	};
 
 	const savedInstructions = (): RecipeInstructionItem[] =>
@@ -429,16 +492,28 @@
 
 							<section class="grid gap-2">
 								<h3 class="text-xs font-medium text-foreground">Instructions</h3>
-								<div class="grid gap-3">
-									{#each sortedInstructions as instruction, index (instruction.draftId)}
-										<div class="grid gap-2 sm:grid-cols-[4.5rem_minmax(0,1fr)_auto] sm:items-start">
-											<div class="grid gap-1 text-xs font-medium">
+								<div bind:this={instructionListElement} role="list" class="grid gap-3">
+									{#if draggedInstruction && instructionDropIndex === 0}
+										<div
+											class="h-20 rounded-md border border-dashed border-primary/70 bg-primary/10"
+										></div>
+									{/if}
+									{#each visibleInstructions as instruction, index (instruction.draftId)}
+										<div
+											data-instruction-row
+											role="listitem"
+											class="grid gap-2 sm:grid-cols-[4.5rem_minmax(0,1fr)_auto] sm:items-center"
+											onpointerdown={(event) => startInstructionDrag(instruction, event)}
+										>
+											<div
+												class="grid cursor-grab touch-none gap-1 text-xs font-medium active:cursor-grabbing"
+											>
 												<Button.Root
 													type="button"
 													variant="ghost"
 													size="sm"
 													class="h-7 px-2"
-													disabled={index === 0}
+													disabled={instruction.position === 1}
 													aria-label="Move instruction up"
 													onclick={() => swapInstructionPosition(instruction.draftId, -1)}
 												>
@@ -460,7 +535,7 @@
 													variant="ghost"
 													size="sm"
 													class="h-7 px-2"
-													disabled={index === sortedInstructions.length - 1}
+													disabled={instruction.position === sortedInstructions.length}
 													aria-label="Move instruction down"
 													onclick={() => swapInstructionPosition(instruction.draftId, 1)}
 												>
@@ -471,7 +546,7 @@
 												value={instruction.text}
 												oninput={(event) =>
 													updateInstructionText(instruction.draftId, event.currentTarget.value)}
-												aria-label={`Instruction ${index + 1} text`}
+												aria-label={`Instruction ${instruction.position} text`}
 												class={textareaClass}
 											></textarea>
 											<div class="flex flex-wrap gap-1 sm:flex-col">
@@ -485,6 +560,11 @@
 												</Button.Root>
 											</div>
 										</div>
+										{#if draggedInstruction && instructionDropIndex === index + 1}
+											<div
+												class="h-20 rounded-md border border-dashed border-primary/70 bg-primary/10"
+											></div>
+										{/if}
 									{/each}
 								</div>
 								<div>
@@ -514,6 +594,32 @@
 		</DialogPrimitive.Content>
 	</Dialog.Portal>
 </Dialog.Root>
+
+{#if draggedInstruction}
+	<div
+		class="pointer-events-none fixed z-[90] w-[min(calc(100vw-2rem),36rem)] -translate-x-1/2 -translate-y-1/2 opacity-80 drop-shadow-xl"
+		style={`left: ${instructionDragX}px; top: ${instructionDragY}px;`}
+	>
+		<div
+			class="grid gap-2 rounded-md border border-border bg-popover p-2 sm:grid-cols-[4.5rem_minmax(0,1fr)] sm:items-center"
+		>
+			<div class="grid gap-1 text-xs font-medium">
+				<Button.Root type="button" variant="ghost" size="sm" class="h-7 px-2" disabled>
+					<ChevronUpIcon class="size-4" />
+				</Button.Root>
+				<Input type="text" value={String(draggedInstruction.position)} readonly />
+				<Button.Root type="button" variant="ghost" size="sm" class="h-7 px-2" disabled>
+					<ChevronDownIcon class="size-4" />
+				</Button.Root>
+			</div>
+			<p
+				class="min-h-20 rounded-md border border-input bg-input/20 px-2 py-1.5 text-sm leading-relaxed"
+			>
+				{draggedInstruction.text}
+			</p>
+		</div>
+	</div>
+{/if}
 
 <Dialog.Root bind:open={deleteConfirmOpen}>
 	<Dialog.Content showCloseButton={false} class="sm:max-w-[22rem]">
