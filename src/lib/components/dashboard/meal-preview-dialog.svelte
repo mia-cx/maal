@@ -8,7 +8,6 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import { parseDate, type DateValue } from '@internationalized/date';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
-	import { attachSheetWheelRouter } from '$lib/interaction/sheet-scroll';
 	import { scaleIngredientText } from '$lib/recipes/ingredient-text';
 	import { familiarityLabels } from './meal-labels';
 	import type { Meal, MealFamiliarity } from './schedule-types';
@@ -50,6 +49,7 @@
 	let heroElement = $state<HTMLElement>();
 	let previewViewportHeight = $state(0);
 	let heroHeight = $state(0);
+	let previewSheetPinned = $state(false);
 
 	const numericServings = (value: string): number => {
 		const servings = Number(value);
@@ -84,6 +84,12 @@
 	const previewHandoffScroll = $derived(Math.max(0, previewTopOffset - previewViewportGutter));
 	const previewMaxHeight = $derived(
 		Math.max(240, previewViewportHeight - previewViewportGutter * 2)
+	);
+	const previewSheetOverflowClass = $derived(
+		previewSheetPinned ? 'overflow-y-auto' : 'overflow-visible'
+	);
+	const previewSheetStyle = $derived(
+		`top: ${previewViewportGutter}px; ${previewSheetPinned ? `max-height: ${previewMaxHeight}px;` : ''}`
 	);
 
 	const dateFormatter = new Intl.DateTimeFormat('en-GB', {
@@ -247,15 +253,24 @@
 		descriptionDraft = meal?.description ?? '';
 		cookTimeDraft = String(meal?.cookTimeMinutes ?? fallbackDurationMinutes);
 		servingsDraft = String(Math.max(1, Math.round(meal?.servingsPlanned ?? 1)));
+		previewViewportElement?.scrollTo({ top: 0 });
+		previewSheetElement?.scrollTo({ top: 0 });
+		previewSheetPinned = false;
 	});
 
 	$effect(() => {
-		if (!previewSheetElement) return;
-		return attachSheetWheelRouter(previewSheetElement, () => ({
-			viewport: previewViewportElement,
-			sheet: previewSheetElement,
-			handoffScroll: previewHandoffScroll
-		}));
+		if (!open || !previewViewportElement) {
+			previewSheetPinned = false;
+			return;
+		}
+
+		const updatePreviewPin = () => {
+			previewSheetPinned = previewViewportElement.scrollTop >= previewHandoffScroll - 1;
+		};
+		updatePreviewPin();
+		previewViewportElement.addEventListener('scroll', updatePreviewPin, { passive: true });
+
+		return () => previewViewportElement?.removeEventListener('scroll', updatePreviewPin);
 	});
 
 	$effect(() => {
@@ -335,8 +350,8 @@
 				>
 					<div
 						bind:this={previewSheetElement}
-						class="pointer-events-auto relative overflow-y-auto rounded-xl border border-border bg-popover shadow-2xl ring-1 ring-foreground/10"
-						style={`max-height: ${previewMaxHeight}px;`}
+						class={`pointer-events-auto sticky rounded-xl border border-border bg-popover shadow-2xl ring-1 ring-foreground/10 ${previewSheetOverflowClass}`}
+						style={previewSheetStyle}
 					>
 						<div bind:this={heroElement} class="relative overflow-hidden rounded-t-xl">
 							<Dialog.Close

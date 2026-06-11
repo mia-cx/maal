@@ -5,7 +5,6 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 	import XIcon from '@lucide/svelte/icons/x';
-	import { attachSheetWheelRouter } from '$lib/interaction/sheet-scroll';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import type { RecipeIngredientItem, RecipeInstructionItem, RecipeMenuItem } from './menu-types';
 
@@ -46,6 +45,7 @@
 	let sheetHeroElement = $state<HTMLElement>();
 	let sheetViewportHeight = $state(0);
 	let sheetHeroHeight = $state(0);
+	let sheetPinned = $state(false);
 
 	const sheetViewportGutter = 16;
 	const sheetTopOffset = $derived(
@@ -53,6 +53,10 @@
 	);
 	const sheetHandoffScroll = $derived(Math.max(0, sheetTopOffset - sheetViewportGutter));
 	const sheetMaxHeight = $derived(Math.max(240, sheetViewportHeight - sheetViewportGutter * 2));
+	const sheetOverflowClass = $derived(sheetPinned ? 'overflow-y-auto' : 'overflow-visible');
+	const sheetStyle = $derived(
+		`top: ${sheetViewportGutter}px; ${sheetPinned ? `max-height: ${sheetMaxHeight}px;` : ''}`
+	);
 
 	const textareaClass =
 		'min-h-20 w-full rounded-md border border-input bg-input/20 px-2 py-1.5 text-sm transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 md:text-xs/relaxed';
@@ -109,7 +113,11 @@
 	);
 
 	$effect(() => {
-		if (recipe?.id !== editingRecipeId) syncRecipe(recipe);
+		if (recipe?.id === editingRecipeId) return;
+		syncRecipe(recipe);
+		sheetViewportElement?.scrollTo({ top: 0 });
+		sheetElement?.scrollTo({ top: 0 });
+		sheetPinned = false;
 	});
 
 	$effect(() => {
@@ -117,6 +125,21 @@
 		deleteConfirmOpen = false;
 		deleteBusy = false;
 		deleteError = null;
+	});
+
+	$effect(() => {
+		if (!open || !sheetViewportElement) {
+			sheetPinned = false;
+			return;
+		}
+
+		const updateSheetPin = () => {
+			sheetPinned = sheetViewportElement.scrollTop >= sheetHandoffScroll - 1;
+		};
+		updateSheetPin();
+		sheetViewportElement.addEventListener('scroll', updateSheetPin, { passive: true });
+
+		return () => sheetViewportElement?.removeEventListener('scroll', updateSheetPin);
 	});
 
 	$effect(() => {
@@ -276,15 +299,6 @@
 			deleteBusy = false;
 		}
 	};
-
-	$effect(() => {
-		if (!sheetElement) return;
-		return attachSheetWheelRouter(sheetElement, () => ({
-			viewport: sheetViewportElement,
-			sheet: sheetElement,
-			handoffScroll: sheetHandoffScroll
-		}));
-	});
 </script>
 
 <Dialog.Root bind:open>
@@ -308,8 +322,8 @@
 				>
 					<form
 						bind:this={sheetElement}
-						class="pointer-events-auto w-full overflow-y-auto rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10"
-						style={`max-height: ${sheetMaxHeight}px;`}
+						class={`pointer-events-auto sticky w-full rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10 ${sheetOverflowClass}`}
+						style={sheetStyle}
 						onsubmit={saveRecipe}
 					>
 						<div bind:this={sheetHeroElement} class="relative">
