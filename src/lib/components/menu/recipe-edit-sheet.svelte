@@ -381,7 +381,7 @@
 								<div class="grid gap-2">
 									{#each ingredients as ingredient, index (ingredient.draftId)}
 										<div
-											class="grid gap-2 sm:grid-cols-[4.5rem_6rem_minmax(0,1fr)_auto] sm:items-end"
+											class="grid gap-2 sm:grid-cols-[4.5rem_5rem_minmax(0,1fr)_auto] sm:items-end"
 										>
 											<label class="grid gap-1 text-xs font-medium">
 												Amt
