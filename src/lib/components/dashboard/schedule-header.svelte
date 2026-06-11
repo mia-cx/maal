@@ -31,7 +31,7 @@
 		<div class="flex w-9 shrink-0 items-center justify-center">
 			<Sidebar.Trigger />
 		</div>
-		<WordmarkLogo class="h-5 w-16" />
+		<WordmarkLogo class="hidden h-5 w-16 sm:block" />
 	</div>
 	<ButtonGroup.Root
 		aria-label="Meal plan view"
