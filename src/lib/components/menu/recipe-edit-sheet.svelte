@@ -46,6 +46,7 @@
 	let deleteConfirmOpen = $state(false);
 	let deleteBusy = $state(false);
 	let deleteError = $state<string | null>(null);
+	let wasOpen = $state(false);
 	let sheetHeroElement = $state<HTMLElement>();
 	let sheetViewportHeight = $state(0);
 	let sheetHeroHeight = $state(0);
@@ -119,6 +120,12 @@
 
 	$effect(() => {
 		if (recipe?.id !== editingRecipeId) syncRecipe(recipe);
+	});
+
+	$effect(() => {
+		if (open && !wasOpen) syncRecipe(recipe);
+		if (!open && wasOpen) syncRecipe(recipe);
+		wasOpen = open;
 	});
 
 	$effect(() => {

@@ -34,6 +34,7 @@
 
 	let lastMealId = $state<string | null>(null);
 	let lastMealSignature = $state('');
+	let wasOpen = $state(false);
 	let scheduledDate = $state('');
 	let scheduledDateValue = $state<DateValue | undefined>();
 	let startCookingTime = $state('');
@@ -217,6 +218,20 @@
 		open = false;
 	};
 
+	const syncMealDraft = () => {
+		const nextMealId = meal?.id ?? null;
+		if (nextMealId !== lastMealId) scheduleEditorOpen = false;
+		lastMealId = nextMealId;
+		scheduledDate = meal?.date ?? '';
+		syncScheduledDateValue(scheduledDate);
+		startEatingTime = meal?.time ? normalizeTimeToMinute(meal.time) : '';
+		startCookingTime = meal?.time ? timeOffset(meal.time, -adjustedCookTimeMinutes) : '';
+		titleDraft = meal?.title ?? '';
+		descriptionDraft = meal?.description ?? '';
+		cookTimeDraft = String(meal?.cookTimeMinutes ?? fallbackDurationMinutes);
+		servingsDraft = String(Math.max(1, Math.round(meal?.servingsPlanned ?? 1)));
+	};
+
 	$effect(() => {
 		const nextDate = scheduledDateValue?.toString() ?? '';
 		if (nextDate && nextDate !== scheduledDate) scheduledDate = nextDate;
@@ -229,17 +244,13 @@
 	$effect(() => {
 		if (mealSignature === lastMealSignature) return;
 		lastMealSignature = mealSignature;
-		const nextMealId = meal?.id ?? null;
-		if (nextMealId !== lastMealId) scheduleEditorOpen = false;
-		lastMealId = nextMealId;
-		scheduledDate = meal?.date ?? '';
-		syncScheduledDateValue(scheduledDate);
-		startEatingTime = meal?.time ? normalizeTimeToMinute(meal.time) : '';
-		startCookingTime = meal?.time ? timeOffset(meal.time, -adjustedCookTimeMinutes) : '';
-		titleDraft = meal?.title ?? '';
-		descriptionDraft = meal?.description ?? '';
-		cookTimeDraft = String(meal?.cookTimeMinutes ?? fallbackDurationMinutes);
-		servingsDraft = String(Math.max(1, Math.round(meal?.servingsPlanned ?? 1)));
+		syncMealDraft();
+	});
+
+	$effect(() => {
+		if (open && !wasOpen) syncMealDraft();
+		if (!open && wasOpen) syncMealDraft();
+		wasOpen = open;
 	});
 
 	$effect(() => {
