@@ -32,15 +32,17 @@
 		class="my-4 h-[calc(100svh-2rem)] [scrollbar-width:none] overflow-y-auto rounded-xl [&::-webkit-scrollbar]:hidden"
 	>
 		<div style={`padding-top: ${leadIn}px;`}>
-			<div
-				class={`pointer-events-auto relative bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10 ${footer ? 'rounded-t-xl border border-b-0 border-border' : 'rounded-xl border border-border'}`}
-			>
+			<div class="pointer-events-none sticky top-0 z-30 h-0">
 				<Dialog.Close
 					aria-label={closeLabel}
-					class="absolute top-3 right-3 z-20 inline-flex size-9 cursor-pointer items-center justify-center overflow-hidden rounded-md bg-black text-white shadow-lg transition after:absolute after:inset-0 after:bg-white/20 after:opacity-0 after:transition-opacity after:content-[''] hover:after:opacity-100 focus-visible:ring-2 focus-visible:ring-black/60 focus-visible:outline-none dark:bg-white dark:text-black dark:after:bg-black/20 dark:focus-visible:ring-white/60"
+					class="pointer-events-auto absolute top-3 right-3 inline-flex size-9 cursor-pointer items-center justify-center overflow-hidden rounded-md bg-black text-white shadow-lg transition after:absolute after:inset-0 after:bg-white/20 after:opacity-0 after:transition-opacity after:content-[''] hover:after:opacity-100 focus-visible:ring-2 focus-visible:ring-black/60 focus-visible:outline-none dark:bg-white dark:text-black dark:after:bg-black/20 dark:focus-visible:ring-white/60"
 				>
 					<XIcon class="relative z-10 size-5" />
 				</Dialog.Close>
+			</div>
+			<div
+				class={`pointer-events-auto relative bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10 ${footer ? 'rounded-t-xl border border-b-0 border-border' : 'rounded-xl border border-border'}`}
+			>
 				{@render children()}
 			</div>
 			{#if footer}
