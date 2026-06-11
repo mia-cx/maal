@@ -2,6 +2,7 @@ import type { MealFeedbackVerdict } from '$lib/components/dashboard/meal-labels'
 
 export type RecipeIngredientItem = {
 	amount: string;
+	unit?: string;
 	item: string;
 };
 

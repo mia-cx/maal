@@ -66,9 +66,11 @@
 
 	const defaultIngredients = (nextRecipe: RecipeMenuItem): DraftIngredient[] => {
 		const recipeIngredients = nextRecipe.ingredients ?? [];
-		if (!recipeIngredients.length) return [{ draftId: crypto.randomUUID(), amount: '', item: '' }];
+		if (!recipeIngredients.length)
+			return [{ draftId: crypto.randomUUID(), amount: '', unit: '', item: '' }];
 		return recipeIngredients.map((ingredient) => ({
 			...ingredient,
+			unit: ingredient.unit ?? '',
 			draftId: crypto.randomUUID()
 		}));
 	};
@@ -141,6 +143,12 @@
 		);
 	};
 
+	const updateIngredientUnit = (draftId: string, unit: string) => {
+		ingredients = ingredients.map((ingredient) =>
+			ingredient.draftId === draftId ? { ...ingredient, unit } : ingredient
+		);
+	};
+
 	const updateIngredientItem = (draftId: string, item: string) => {
 		ingredients = ingredients.map((ingredient) =>
 			ingredient.draftId === draftId ? { ...ingredient, item } : ingredient
@@ -148,12 +156,16 @@
 	};
 
 	const addIngredient = () => {
-		ingredients = [...ingredients, { draftId: crypto.randomUUID(), amount: '', item: '' }];
+		ingredients = [
+			...ingredients,
+			{ draftId: crypto.randomUUID(), amount: '', unit: '', item: '' }
+		];
 	};
 
 	const removeIngredient = (draftId: string) => {
 		ingredients = ingredients.filter((ingredient) => ingredient.draftId !== draftId);
-		if (!ingredients.length) ingredients = [{ draftId: crypto.randomUUID(), amount: '', item: '' }];
+		if (!ingredients.length)
+			ingredients = [{ draftId: crypto.randomUUID(), amount: '', unit: '', item: '' }];
 	};
 
 	const updateInstructionText = (draftId: string, text: string) => {
@@ -230,8 +242,12 @@
 		if (!recipe) return;
 
 		const savedIngredients = ingredients
-			.map(({ amount, item }) => ({ amount: amount.trim(), item: item.trim() }))
-			.filter((ingredient) => ingredient.amount || ingredient.item);
+			.map(({ amount, unit, item }) => ({
+				amount: amount.trim(),
+				unit: unit?.trim() || undefined,
+				item: item.trim()
+			}))
+			.filter((ingredient) => ingredient.amount || ingredient.unit || ingredient.item);
 		onsaved?.({
 			...recipe,
 			title: title.trim() || recipe.title,
@@ -364,15 +380,27 @@
 								<h3 class="text-xs font-medium text-foreground">Ingredients</h3>
 								<div class="grid gap-2">
 									{#each ingredients as ingredient, index (ingredient.draftId)}
-										<div class="grid gap-2 sm:grid-cols-[8rem_minmax(0,1fr)_auto] sm:items-end">
+										<div
+											class="grid gap-2 sm:grid-cols-[6rem_7rem_minmax(0,1fr)_auto] sm:items-end"
+										>
 											<label class="grid gap-1 text-xs font-medium">
-												Amount
+												Amt
 												<Input
 													value={ingredient.amount}
 													oninput={(event) =>
 														updateIngredientAmount(ingredient.draftId, event.currentTarget.value)}
 													aria-label={`Ingredient ${index + 1} amount`}
-													placeholder="2 tbsp"
+													placeholder="2"
+												/>
+											</label>
+											<label class="grid gap-1 text-xs font-medium">
+												Unit
+												<Input
+													value={ingredient.unit ?? ''}
+													oninput={(event) =>
+														updateIngredientUnit(ingredient.draftId, event.currentTarget.value)}
+													aria-label={`Ingredient ${index + 1} unit`}
+													placeholder="tbsp"
 												/>
 											</label>
 											<label class="grid gap-1 text-xs font-medium">

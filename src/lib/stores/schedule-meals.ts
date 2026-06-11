@@ -31,7 +31,10 @@ const normalizedServings = (servings: number | undefined): number => {
 
 const recipeIngredientText = (
 	ingredient: NonNullable<RecipeMenuItem['ingredients']>[number]
-): string => [ingredient.amount.trim(), ingredient.item.trim()].filter(Boolean).join(' ');
+): string =>
+	[ingredient.amount.trim(), ingredient.unit?.trim(), ingredient.item.trim()]
+		.filter(Boolean)
+		.join(' ');
 
 const mealFromRecipe = (
 	recipe: RecipeMenuItem,

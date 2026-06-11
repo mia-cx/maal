@@ -20,6 +20,7 @@ import type {
 	RecipeMenuItem
 } from '$lib/components/menu/menu-types';
 import {
+	canonicalIngredientUnit,
 	displayIngredientAmount,
 	parseIngredientAmount,
 	type UnitPreferences
@@ -77,8 +78,25 @@ const ingredientAmount = (
 const ingredientItem = (ingredient: UserRecipeIngredientRow): string =>
 	ingredient.sourceFoodLabel ?? ingredient.originalText;
 
+const ingredientAmountText = (ingredient: RecipeIngredientItem): string =>
+	[ingredient.amount.trim(), ingredient.unit?.trim()].filter(Boolean).join(' ');
+
 const fullIngredientText = (ingredient: RecipeIngredientItem): string =>
-	[ingredient.amount.trim(), ingredient.item.trim()].filter(Boolean).join(' ');
+	[ingredientAmountText(ingredient), ingredient.item.trim()].filter(Boolean).join(' ');
+
+const splitIngredientAmount = (
+	amount: string,
+	unitHint: string | null | undefined
+): Pick<RecipeIngredientItem, 'amount' | 'unit'> => {
+	const trimmed = amount.trim();
+	const hintedUnit = canonicalIngredientUnit(unitHint ?? undefined) ?? unitHint?.trim();
+	if (!trimmed) return hintedUnit ? { amount: '', unit: hintedUnit } : { amount: '' };
+	const match = /^(.*?)(?:\s+([^\s]+(?:\s+[^\s]+)?))?$/.exec(trimmed);
+	const candidateUnit = match?.[2]?.trim();
+	const unit = canonicalIngredientUnit(candidateUnit) ?? hintedUnit;
+	if (!unit || !candidateUnit) return { amount: trimmed, unit };
+	return { amount: match?.[1]?.trim() ?? trimmed, unit };
+};
 
 const reviewSummary = (
 	recipeId: string,
@@ -213,10 +231,16 @@ export const menuItemFromRecipe = (params: {
 		yield: servings(recipe),
 		ingredients: ingredients
 			.toSorted((left, right) => left.lineIndex - right.lineIndex)
-			.map((ingredient) => ({
-				amount: ingredientAmount(ingredient, unitPreferences),
-				item: ingredientItem(ingredient)
-			})),
+			.map((ingredient) => {
+				const amount = splitIngredientAmount(
+					ingredientAmount(ingredient, unitPreferences),
+					ingredient.sourceUnitLabel
+				);
+				return {
+					...amount,
+					item: ingredientItem(ingredient)
+				};
+			}),
 		instructions: instructions
 			.toSorted((left, right) => left.stepIndex - right.stepIndex)
 			.map((instruction) => ({ position: instruction.stepIndex + 1, text: instruction.text })),
@@ -483,14 +507,15 @@ export const updateRecipeIngredients = async (
 	if (!ingredients.length) return;
 
 	const rows = ingredients.map((ingredient, index) => {
-		const parsedAmount = parseIngredientAmount(ingredient.amount);
+		const amountText = ingredientAmountText(ingredient);
+		const parsedAmount = parseIngredientAmount(amountText);
 		return {
 			userRecipeId: recipeId,
 			lineIndex: index,
 			originalText: fullIngredientText(ingredient),
-			sourceAmountText: ingredient.amount.trim() || null,
+			sourceAmountText: amountText || null,
 			sourceQuantity: parsedAmount.quantity,
-			sourceUnitLabel: parsedAmount.unit,
+			sourceUnitLabel: parsedAmount.unit ?? (ingredient.unit?.trim() || null),
 			sourceFoodLabel: ingredient.item.trim() || ingredient.amount.trim() || 'Ingredient',
 			confidence: 1
 		};

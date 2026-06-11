@@ -8,6 +8,7 @@ export type UnitPreferences = {
 
 export type ParsedIngredientLine = {
 	amount: string;
+	unit?: string;
 	item: string;
 };
 
@@ -264,7 +265,7 @@ export const parseIngredientLine = (line: string): ParsedIngredientLine => {
 	const remainder = match[3].trim();
 	const unit = canonicalIngredientUnit(candidateUnit);
 	if (unit) {
-		return { amount: `${quantity} ${unit}`, item: remainder };
+		return { amount: quantity, unit, item: remainder };
 	}
 
 	return {
