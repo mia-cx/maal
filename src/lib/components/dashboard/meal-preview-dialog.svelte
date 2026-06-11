@@ -74,9 +74,12 @@
 			: 'border-border bg-muted/40 text-foreground'
 	);
 
-	const previewViewportGutter = 8;
+	const previewViewportGutter = 16;
 	const previewTopOffset = $derived(
 		Math.max(previewViewportGutter, (previewViewportHeight - heroHeight) / 2)
+	);
+	const previewMaxHeight = $derived(
+		Math.max(240, previewViewportHeight - previewTopOffset - previewViewportGutter)
 	);
 
 	const dateFormatter = new Intl.DateTimeFormat('en-GB', {
@@ -302,7 +305,7 @@
 	<Dialog.Portal>
 		<Dialog.Overlay />
 		<DialogPrimitive.Content
-			class="fixed inset-0 z-50 h-svh w-full [scrollbar-width:none] overflow-y-auto bg-transparent p-0 outline-none [&::-webkit-scrollbar]:hidden"
+			class="fixed inset-0 z-50 h-svh w-full overflow-hidden bg-transparent p-0 outline-none"
 		>
 			{#if meal}
 				<button
@@ -313,11 +316,12 @@
 					onclick={() => (open = false)}
 				></button>
 				<div
-					class="pointer-events-none relative z-10 mx-auto w-full max-w-[min(100vw-1rem,42rem)] px-2 pb-2 sm:max-w-2xl sm:px-4"
-					style={`padding-top: ${previewTopOffset}px;`}
+					class="pointer-events-none relative z-10 mx-auto w-full max-w-[min(100vw-1rem,42rem)] px-2 sm:max-w-[42rem] sm:px-4"
+					style={`padding-top: ${previewTopOffset}px; padding-bottom: ${previewViewportGutter}px;`}
 				>
 					<div
-						class="pointer-events-auto relative rounded-xl border border-border bg-popover shadow-2xl ring-1 ring-foreground/10"
+						class="pointer-events-auto relative overflow-y-auto rounded-xl border border-border bg-popover shadow-2xl ring-1 ring-foreground/10"
+						style={`max-height: ${previewMaxHeight}px;`}
 					>
 						<div bind:this={heroElement} class="relative overflow-hidden rounded-t-xl">
 							<Dialog.Close

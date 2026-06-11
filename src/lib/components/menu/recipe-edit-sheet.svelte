@@ -40,6 +40,17 @@
 	let deleteConfirmOpen = $state(false);
 	let deleteBusy = $state(false);
 	let deleteError = $state<string | null>(null);
+	let sheetHeroElement = $state<HTMLElement>();
+	let sheetViewportHeight = $state(0);
+	let sheetHeroHeight = $state(0);
+
+	const sheetViewportGutter = 16;
+	const sheetTopOffset = $derived(
+		Math.max(sheetViewportGutter, (sheetViewportHeight - sheetHeroHeight) / 2)
+	);
+	const sheetMaxHeight = $derived(
+		Math.max(240, sheetViewportHeight - sheetTopOffset - sheetViewportGutter)
+	);
 
 	const textareaClass =
 		'min-h-20 w-full rounded-md border border-input bg-input/20 px-2 py-1.5 text-sm transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 md:text-xs/relaxed';
@@ -104,6 +115,26 @@
 		deleteConfirmOpen = false;
 		deleteBusy = false;
 		deleteError = null;
+	});
+
+	$effect(() => {
+		if (!open || !sheetHeroElement) return;
+
+		const updateSheetMetrics = () => {
+			sheetViewportHeight = window.visualViewport?.height ?? window.innerHeight;
+			sheetHeroHeight = sheetHeroElement.offsetHeight;
+		};
+		const observer = new ResizeObserver(updateSheetMetrics);
+		observer.observe(sheetHeroElement);
+		updateSheetMetrics();
+		window.visualViewport?.addEventListener('resize', updateSheetMetrics);
+		window.addEventListener('resize', updateSheetMetrics);
+
+		return () => {
+			observer.disconnect();
+			window.visualViewport?.removeEventListener('resize', updateSheetMetrics);
+			window.removeEventListener('resize', updateSheetMetrics);
+		};
 	});
 
 	const updateIngredientAmount = (draftId: string, amount: string) => {
@@ -249,7 +280,7 @@
 	<Dialog.Portal>
 		<Dialog.Overlay />
 		<DialogPrimitive.Content
-			class="fixed inset-0 z-50 h-svh w-full [scrollbar-width:none] overflow-y-auto bg-transparent p-0 outline-none [&::-webkit-scrollbar]:hidden"
+			class="fixed inset-0 z-50 h-svh w-full overflow-hidden bg-transparent p-0 outline-none"
 		>
 			{#if recipe}
 				<button
@@ -260,13 +291,15 @@
 					onclick={() => (open = false)}
 				></button>
 				<div
-					class="pointer-events-none relative z-10 flex min-h-svh w-full items-center justify-center p-2 sm:p-4"
+					class="pointer-events-none relative z-10 mx-auto w-full max-w-[min(100vw-1rem,42rem)] px-2 sm:max-w-[42rem] sm:px-4"
+					style={`padding-top: ${sheetTopOffset}px; padding-bottom: ${sheetViewportGutter}px;`}
 				>
 					<form
-						class="pointer-events-auto max-h-[calc(100svh-1rem)] w-full max-w-[min(100vw-1rem,52rem)] overflow-y-auto rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10 sm:max-h-[calc(100svh-2rem)]"
+						class="pointer-events-auto w-full overflow-y-auto rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10"
+						style={`max-height: ${sheetMaxHeight}px;`}
 						onsubmit={saveRecipe}
 					>
-						<div class="relative">
+						<div bind:this={sheetHeroElement} class="relative">
 							<Dialog.Close
 								aria-label="Close recipe editor"
 								class="absolute top-3 right-3 z-20 inline-flex size-9 cursor-pointer items-center justify-center overflow-hidden rounded-md bg-black text-white shadow-lg transition after:absolute after:inset-0 after:bg-white/20 after:opacity-0 after:transition-opacity after:content-[''] hover:after:opacity-100 focus-visible:ring-2 focus-visible:ring-black/60 focus-visible:outline-none dark:bg-white dark:text-black dark:after:bg-black/20 dark:focus-visible:ring-white/60"
