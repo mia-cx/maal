@@ -506,11 +506,10 @@
 											onpointerdown={(event) => startInstructionDrag(instruction, event)}
 										>
 											<div
-												class="grid cursor-grab touch-none gap-1 rounded-md bg-muted/35 p-1 text-xs font-medium active:cursor-grabbing"
+												class="grid cursor-grab touch-none gap-1 text-xs font-medium active:cursor-grabbing"
 											>
 												<Button.Root
 													type="button"
-													variant="ghost"
 													size="sm"
 													class="h-7 px-2"
 													disabled={instruction.position === 1}
@@ -532,7 +531,6 @@
 												/>
 												<Button.Root
 													type="button"
-													variant="ghost"
 													size="sm"
 													class="h-7 px-2"
 													disabled={instruction.position === sortedInstructions.length}
@@ -603,12 +601,12 @@
 		<div
 			class="grid gap-2 rounded-md border border-border bg-popover p-2 sm:grid-cols-[4.5rem_minmax(0,1fr)] sm:items-center"
 		>
-			<div class="grid gap-1 rounded-md bg-muted/35 p-1 text-xs font-medium">
-				<Button.Root type="button" variant="ghost" size="sm" class="h-7 px-2" disabled>
+			<div class="grid gap-1 text-xs font-medium">
+				<Button.Root type="button" size="sm" class="h-7 px-2" disabled>
 					<ChevronUpIcon class="size-4" />
 				</Button.Root>
 				<Input type="text" value={String(draggedInstruction.position)} readonly />
-				<Button.Root type="button" variant="ghost" size="sm" class="h-7 px-2" disabled>
+				<Button.Root type="button" size="sm" class="h-7 px-2" disabled>
 					<ChevronDownIcon class="size-4" />
 				</Button.Root>
 			</div>
