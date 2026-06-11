@@ -4,6 +4,7 @@
 @import '@fontsource-variable/noto-sans';
 @import '@fontsource-variable/nunito-sans';
 @import '@fontsource-variable/inter';
+@import '@fontsource/lexend/700.css';
 
 @custom-variant dark (&:is(.dark *));
 @plugin '@tailwindcss/forms';
@@ -145,6 +146,13 @@
 		overflow: hidden;
 		overscroll-behavior: none;
 		@apply bg-background text-foreground;
+	}
+	h1,
+	h2,
+	h3,
+	h4 {
+		font-family: 'Lexend', sans-serif !important;
+		font-weight: 700 !important;
 	}
 	button:not(:disabled),
 	[role='button']:not([aria-disabled='true']) {

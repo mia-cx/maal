@@ -33,6 +33,9 @@ importers:
       '@fontsource-variable/nunito-sans':
         specifier: ^5.2.7
         version: 5.2.7
+      '@fontsource/lexend':
+        specifier: ^5.2.11
+        version: 5.2.11
       '@inlang/paraglide-js':
         specifier: ^2.18.2
         version: 2.18.2(typescript@6.0.3)
@@ -925,6 +928,9 @@ packages:
 
   '@fontsource-variable/nunito-sans@5.2.7':
     resolution: {integrity: sha512-rflH5HeAoNjIkwftStzQvxqCJhIS+usMr/lfslWg/RCa499B5qxyjo+74R/QMM0geQt4AY1URlG7wAR1iq6KPQ==}
+
+  '@fontsource/lexend@5.2.11':
+    resolution: {integrity: sha512-bShbQr2g2sWl7GJNyIxdllZST1faVbebXN6H7AEEDCRms/g4orDLxWnmTVodOtiErdZVUJURq4jpafZ34nIkTw==}
 
   '@hapi/hoek@9.3.0':
     resolution: {integrity: sha512-/c6rf4UJlmHlC9b5BaNvzAcFv7HZ2QHaV0D4/HNlBdvFnvQq8RI4kYdhyPCl7Xj+oWvTWQ8ujhqS53LIgAe6KQ==}
@@ -3620,6 +3626,8 @@ snapshots:
   '@fontsource-variable/noto-sans@5.2.10': {}
 
   '@fontsource-variable/nunito-sans@5.2.7': {}
+
+  '@fontsource/lexend@5.2.11': {}
 
   '@hapi/hoek@9.3.0':
     optional: true
