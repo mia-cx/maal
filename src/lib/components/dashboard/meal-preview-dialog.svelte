@@ -469,7 +469,7 @@
 						</div>
 
 						<div
-							class="sticky bottom-0 z-20 flex items-center justify-between gap-3 rounded-b-xl border-t border-border bg-popover/95 px-5 py-3 shadow-[0_-12px_24px_-18px_rgba(0,0,0,0.45)] backdrop-blur"
+							class="sticky bottom-4 z-20 flex items-center justify-between gap-3 rounded-b-xl border-t border-border bg-popover/95 px-5 py-3 shadow-[0_-12px_24px_-18px_rgba(0,0,0,0.45)] backdrop-blur"
 						>
 							<Button.Root variant="destructive" onclick={openDeleteConfirm}>Delete</Button.Root>
 							<Button.Root onclick={saveMealDraft}>Save meal</Button.Root>
