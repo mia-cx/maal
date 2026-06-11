@@ -220,7 +220,7 @@
 				<form method="post" action="?/updateSettings" class="grid gap-4">
 					<fieldset class="grid gap-3">
 						<legend class="sr-only">Household</legend>
-						<label class="grid min-w-0 gap-1 text-xs font-medium md:max-w-[calc(50%-0.375rem)]">
+						<label class="grid min-w-0 gap-1 text-xs font-medium">
 							Name
 							<Input
 								name={householdNameChanged ? 'name' : undefined}
@@ -366,7 +366,7 @@
 						<legend class="text-xs font-semibold text-muted-foreground">Units</legend>
 						<div class="grid gap-3 md:grid-cols-3">
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
-								Weight preset
+								Weight unit
 								{#if preferredMassUnitChanged}
 									<input type="hidden" name="preferredMassUnit" value={preferredMassUnit} />
 								{/if}
@@ -379,7 +379,7 @@
 								/>
 							</label>
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
-								Volume preset
+								Volume unit
 								{#if preferredVolumeUnitChanged}
 									<input type="hidden" name="preferredVolumeUnit" value={preferredVolumeUnit} />
 								{/if}
@@ -392,7 +392,7 @@
 								/>
 							</label>
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
-								Temperature preset
+								Temperature unit
 								{#if temperatureUnitChanged}
 									<input
 										type="hidden"
