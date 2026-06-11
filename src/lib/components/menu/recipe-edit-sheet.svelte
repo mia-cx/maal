@@ -434,9 +434,7 @@
 								<h3 class="text-xs font-medium text-foreground">Instructions</h3>
 								<div class="grid gap-3">
 									{#each sortedInstructions as instruction, index (instruction.draftId)}
-										<div
-											class="grid gap-2 rounded-md border border-border/70 p-2 sm:grid-cols-[4.5rem_minmax(0,1fr)_auto] sm:items-start"
-										>
+										<div class="grid gap-2 sm:grid-cols-[4.5rem_minmax(0,1fr)_auto] sm:items-start">
 											<div class="grid gap-1 text-xs font-medium">
 												<span>Position</span>
 												<Button.Root
