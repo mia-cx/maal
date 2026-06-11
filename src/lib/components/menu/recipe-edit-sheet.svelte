@@ -533,13 +533,13 @@
 										<div
 											data-instruction-row
 											role="listitem"
-											class="grid gap-2 sm:grid-cols-[6.25rem_minmax(0,1fr)_auto] sm:items-center"
+											class="grid gap-2 sm:grid-cols-[5.25rem_minmax(0,1fr)_auto] sm:items-center"
 										>
 											<div class="flex items-stretch gap-1 text-xs font-medium">
 												<button
 													type="button"
 													aria-label={`Drag instruction ${instruction.position}`}
-													class="flex w-6 cursor-grab touch-none items-center justify-center rounded-md border border-dashed border-border bg-background p-0 text-muted-foreground active:cursor-grabbing"
+													class="flex w-4 cursor-grab touch-none items-center justify-center p-0 text-muted-foreground active:cursor-grabbing"
 													onpointerdown={(event) => startInstructionDrag(instruction, event)}
 												>
 													<GripVerticalIcon class="size-4" />
@@ -547,8 +547,9 @@
 												<div class="grid flex-1 gap-1">
 													<Button.Root
 														type="button"
+														variant="outline"
 														size="sm"
-														class="h-7 px-2"
+														class="h-7 px-1"
 														disabled={instruction.position === 1}
 														aria-label="Move instruction up"
 														onclick={() => swapInstructionPosition(instruction.draftId, -1)}
@@ -569,11 +570,13 @@
 														onkeydown={(event) =>
 															handleInstructionPositionKeydown(instruction.draftId, event)}
 														aria-label="Instruction position"
+														class="px-1 text-center"
 													/>
 													<Button.Root
 														type="button"
+														variant="outline"
 														size="sm"
-														class="h-7 px-2"
+														class="h-7 px-1"
 														disabled={instruction.position === sortedInstructions.length}
 														aria-label="Move instruction down"
 														onclick={() => swapInstructionPosition(instruction.draftId, 1)}
@@ -589,7 +592,7 @@
 												aria-label={`Instruction ${instruction.position} text`}
 												class={`${textareaClass} min-h-[5.75rem]`}
 											></textarea>
-											<div class="flex flex-wrap gap-1 sm:flex-col">
+											<div class="flex flex-wrap gap-1 sm:flex-col sm:self-start">
 												<Button.Root
 													type="button"
 													variant="ghost"
@@ -641,20 +644,23 @@
 		style={`left: ${instructionDragX}px; top: ${instructionDragY}px;`}
 	>
 		<div
-			class="grid gap-2 rounded-md border border-border bg-popover p-2 sm:grid-cols-[6.25rem_minmax(0,1fr)] sm:items-center"
+			class="grid gap-2 rounded-md border border-border bg-popover p-2 sm:grid-cols-[5.25rem_minmax(0,1fr)] sm:items-center"
 		>
 			<div class="flex items-stretch gap-1 text-xs font-medium">
-				<span
-					class="flex w-6 items-center justify-center rounded-md border border-dashed border-border bg-background text-muted-foreground"
-				>
+				<span class="flex w-4 items-center justify-center text-muted-foreground">
 					<GripVerticalIcon class="size-4" />
 				</span>
 				<div class="grid flex-1 gap-1">
-					<Button.Root type="button" size="sm" class="h-7 px-2" disabled>
+					<Button.Root type="button" variant="outline" size="sm" class="h-7 px-1" disabled>
 						<ChevronUpIcon class="size-4" />
 					</Button.Root>
-					<Input type="text" value={String(draggedInstruction.position)} readonly />
-					<Button.Root type="button" size="sm" class="h-7 px-2" disabled>
+					<Input
+						type="text"
+						value={String(draggedInstruction.position)}
+						readonly
+						class="px-1 text-center"
+					/>
+					<Button.Root type="button" variant="outline" size="sm" class="h-7 px-1" disabled>
 						<ChevronDownIcon class="size-4" />
 					</Button.Root>
 				</div>
