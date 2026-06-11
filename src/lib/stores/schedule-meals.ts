@@ -244,6 +244,21 @@ const scheduleFieldsChanged = (left: Meal, right: Meal): boolean =>
 	(left.sortOrder ?? 0) !== (right.sortOrder ?? 0) ||
 	(left.servingsPlanned ?? 1) !== (right.servingsPlanned ?? 1);
 
+const emitChangedScheduleMealChanges = (
+	meals: Meal[],
+	previousMeals: Meal[],
+	source: ScheduleMealChangeSource,
+	ignoredMealIds = new Set<string>()
+) => {
+	const previousMealsById = new Map(previousMeals.map((meal) => [meal.id, meal]));
+	for (const meal of meals) {
+		if (ignoredMealIds.has(meal.id)) continue;
+		const previousMeal = previousMealsById.get(meal.id);
+		if (!previousMeal || !scheduleFieldsChanged(previousMeal, meal)) continue;
+		emitScheduleMealChange({ source, meal, previousMeal, meals });
+	}
+};
+
 const persistNewScheduleMeal = (meal: Meal, previousMealId = meal.id) => {
 	if (!browser) return;
 	pendingCreateMealIds.add(previousMealId);
@@ -364,9 +379,10 @@ export const moveScheduleMealToDropTarget = (
 ) => {
 	const currentMeals = scheduleMealStore.get();
 	const previousMeal = currentMeals.find((meal) => meal.id === draggedMeal.id);
+	const mealToMove = previousMeal ?? draggedMeal;
 	if (target.kind === 'date' && previousMeal && isRecipePoolTemplate(previousMeal)) {
 		const scheduledMeal = {
-			...cloneMeal(draggedMeal),
+			...cloneMeal(mealToMove),
 			id: newLocalMealId(),
 			date: target.date,
 			day: weekdayName(dateFromKey(target.date)),
@@ -378,9 +394,11 @@ export const moveScheduleMealToDropTarget = (
 		const meals = moveMealToDropTarget(mealsWithScheduledMeal, scheduledMeal, target);
 		scheduleMealStore.set(cloneMeals(meals));
 		persistNewScheduleMeal(meals.find((meal) => meal.id === scheduledMeal.id) ?? scheduledMeal);
+		emitChangedScheduleMealChanges(meals, currentMeals, 'drag', new Set([scheduledMeal.id]));
 		return;
 	}
 
-	const meals = moveMealToDropTarget(currentMeals, draggedMeal, target);
-	setScheduleMeals(meals, 'drag', draggedMeal.id, previousMeal);
+	const meals = moveMealToDropTarget(currentMeals, mealToMove, target);
+	setScheduleMeals(meals, 'drag');
+	emitChangedScheduleMealChanges(meals, currentMeals, 'drag');
 };
