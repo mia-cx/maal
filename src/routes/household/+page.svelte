@@ -176,7 +176,7 @@
 						</label>
 					</fieldset>
 
-					<fieldset class="grid gap-3 border-t border-border/60 pt-3">
+					<fieldset class="grid gap-3">
 						<legend class="sr-only">Locale and calendar</legend>
 						<div class="grid gap-3 md:grid-cols-3">
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
@@ -222,7 +222,7 @@
 						</div>
 					</fieldset>
 
-					<fieldset class="grid gap-3 border-t border-border/60 pt-3">
+					<fieldset class="grid gap-3">
 						<legend class="sr-only">Meal defaults</legend>
 						<div class="grid gap-3 md:grid-cols-2">
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
@@ -251,7 +251,7 @@
 						</div>
 					</fieldset>
 
-					<fieldset class="grid gap-3 border-t border-border/60 pt-3">
+					<fieldset class="grid gap-3">
 						<legend class="sr-only">Unit defaults</legend>
 						<div class="grid gap-3 md:grid-cols-2">
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
