@@ -233,12 +233,23 @@ export const loadMenuRecipes = async (
 	db: Db,
 	workosUserId: string,
 	householdId?: string | null,
-	options: { limit?: number; offset?: number; unitPreferences?: UnitPreferences } = {}
+	options: {
+		limit?: number;
+		offset?: number;
+		unitPreferences?: UnitPreferences;
+		recipeIds?: string[];
+	} = {}
 ) => {
 	const recipeQuery = db
 		.select()
 		.from(userRecipes)
-		.where(and(eq(userRecipes.workosUserId, workosUserId), isNull(userRecipes.deletedAt)))
+		.where(
+			and(
+				eq(userRecipes.workosUserId, workosUserId),
+				isNull(userRecipes.deletedAt),
+				options.recipeIds?.length ? inArray(userRecipes.id, options.recipeIds) : undefined
+			)
+		)
 		.orderBy(userRecipes.createdAt);
 	const recipes = options.limit
 		? await recipeQuery.limit(options.limit).offset(options.offset ?? 0)
@@ -467,19 +478,22 @@ export const updateRecipeIngredients = async (
 	ingredients: RecipeIngredientItem[]
 ) => {
 	await db.delete(userRecipeIngredients).where(eq(userRecipeIngredients.userRecipeId, recipeId));
-	for (const [index, ingredient] of ingredients.entries()) {
-		const parsedAmount = parseIngredientAmount(ingredient.amount);
-		await db.insert(userRecipeIngredients).values({
-			userRecipeId: recipeId,
-			lineIndex: index,
-			originalText: fullIngredientText(ingredient),
-			sourceAmountText: ingredient.amount.trim() || null,
-			sourceQuantity: parsedAmount.quantity,
-			sourceUnitLabel: parsedAmount.unit,
-			sourceFoodLabel: ingredient.item.trim() || ingredient.amount.trim() || 'Ingredient',
-			confidence: 1
-		});
-	}
+	if (!ingredients.length) return;
+	await db.insert(userRecipeIngredients).values(
+		ingredients.map((ingredient, index) => {
+			const parsedAmount = parseIngredientAmount(ingredient.amount);
+			return {
+				userRecipeId: recipeId,
+				lineIndex: index,
+				originalText: fullIngredientText(ingredient),
+				sourceAmountText: ingredient.amount.trim() || null,
+				sourceQuantity: parsedAmount.quantity,
+				sourceUnitLabel: parsedAmount.unit,
+				sourceFoodLabel: ingredient.item.trim() || ingredient.amount.trim() || 'Ingredient',
+				confidence: 1
+			};
+		})
+	);
 };
 
 export const updateRecipeInstructions = async (
@@ -488,12 +502,13 @@ export const updateRecipeInstructions = async (
 	instructions: RecipeInstructionItem[]
 ) => {
 	await db.delete(userRecipeInstructions).where(eq(userRecipeInstructions.userRecipeId, recipeId));
-	for (const [index, instruction] of instructions.entries()) {
-		await db.insert(userRecipeInstructions).values({
+	if (!instructions.length) return;
+	await db.insert(userRecipeInstructions).values(
+		instructions.map((instruction, index) => ({
 			userRecipeId: recipeId,
 			stepIndex: index,
 			text: instruction.text,
 			confidence: 1
-		});
-	}
+		}))
+	);
 };

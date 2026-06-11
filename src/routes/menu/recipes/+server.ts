@@ -1,4 +1,5 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
+import { and, eq, isNull } from 'drizzle-orm';
 import { resolveActiveHouseholdId } from '$lib/server/auth/household';
 import { getDb } from '$lib/server/db';
 import {
@@ -33,6 +34,13 @@ type CreateRecipeBody = {
 	title?: string;
 	url?: string;
 	recipe?: RecipeMenuItem;
+};
+
+type RecipeIdentity = {
+	id: string;
+	title: string;
+	sourceUrl?: string | null;
+	sourceIsBasedOnUrl?: string | null;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -355,16 +363,17 @@ const saveRecipeClassifications = async (
 			schemaOrgValue: value
 		}))
 	];
-	for (const entry of entries) {
-		await db.insert(userRecipeClassifications).values({
+	if (!entries.length) return;
+	await db.insert(userRecipeClassifications).values(
+		entries.map((entry) => ({
 			userRecipeId,
 			kind: entry.kind,
 			value: entry.value,
 			normalizedValue: normalizedValue(entry.value),
 			schemaOrgValue: 'schemaOrgValue' in entry ? entry.schemaOrgValue : null,
 			confidence: 1
-		});
-	}
+		}))
+	);
 };
 
 const mediaRecord = (value: unknown): RecipeJson | undefined => {
@@ -385,22 +394,20 @@ const saveRecipeMedia = async (
 		const video = mediaRecord(item);
 		return video ? [video] : [];
 	});
-	for (const [position, image] of images.entries()) {
-		await db.insert(userRecipeMedia).values({
+	const media = [
+		...images.map((image, position) => ({
 			userRecipeId,
-			kind: 'image',
+			kind: 'image' as const,
 			position,
 			url: firstString(image.url, image['@id']),
 			contentUrl: firstString(image.contentUrl),
 			thumbnailUrl: firstString(image.thumbnailUrl),
 			name: firstString(image.name),
 			caption: firstString(image.caption)
-		});
-	}
-	for (const [position, video] of videos.entries()) {
-		await db.insert(userRecipeMedia).values({
+		})),
+		...videos.map((video, position) => ({
 			userRecipeId,
-			kind: 'video',
+			kind: 'video' as const,
 			position,
 			url: firstString(video.url, video['@id']),
 			contentUrl: firstString(video.contentUrl),
@@ -408,8 +415,9 @@ const saveRecipeMedia = async (
 			thumbnailUrl: firstString(video.thumbnailUrl),
 			name: firstString(video.name),
 			caption: firstString(video.description, video.caption)
-		});
-	}
+		}))
+	];
+	if (media.length) await db.insert(userRecipeMedia).values(media);
 };
 
 const nutritionProperties = {
@@ -439,21 +447,25 @@ const saveRecipeNutritionFacts = async (
 	userRecipeId: string,
 	recipe: RecipeJson
 ) => {
-	if (!isRecord(recipe.nutrition)) return;
-	for (const [schemaOrgProperty, nutrient] of Object.entries(nutritionProperties)) {
-		const originalText = firstString(recipe.nutrition[schemaOrgProperty]);
-		if (!originalText) continue;
+	const nutrition = recipe.nutrition;
+	if (!isRecord(nutrition)) return;
+	const facts = Object.entries(nutritionProperties).flatMap(([schemaOrgProperty, nutrient]) => {
+		const originalText = firstString(nutrition[schemaOrgProperty]);
+		if (!originalText) return [];
 		const parsed = parseNutritionAmount(originalText);
-		await db.insert(userRecipeNutritionFacts).values({
-			userRecipeId,
-			nutrient,
-			schemaOrgProperty,
-			originalText,
-			amount: parsed.amount,
-			baseAmount: parsed.amount,
-			confidence: parsed.amount === undefined ? 0.4 : 0.8
-		});
-	}
+		return [
+			{
+				userRecipeId,
+				nutrient,
+				schemaOrgProperty,
+				originalText,
+				amount: parsed.amount,
+				baseAmount: parsed.amount,
+				confidence: parsed.amount === undefined ? 0.4 : 0.8
+			}
+		];
+	});
+	if (facts.length) await db.insert(userRecipeNutritionFacts).values(facts);
 };
 
 const saveRecipeSidecars = async (
@@ -473,7 +485,7 @@ const recipeBody = (value: unknown): RecipeMenuItem | undefined => {
 	return value as RecipeMenuItem;
 };
 
-const urlKeys = (value?: string): string[] => {
+const urlKeys = (value?: string | null): string[] => {
 	const trimmed = value?.trim();
 	if (!trimmed) return [];
 	try {
@@ -496,11 +508,11 @@ const urlKeys = (value?: string): string[] => {
 	}
 };
 
-const addUrlKeys = (keys: Set<string>, value?: string) => {
+const addUrlKeys = (keys: Set<string>, value?: string | null) => {
 	for (const key of urlKeys(value)) keys.add(key);
 };
 
-const recipeUrlKeys = (recipe: RecipeMenuItem): Set<string> => {
+const recipeUrlKeys = (recipe: RecipeIdentity): Set<string> => {
 	const keys = new Set<string>();
 	addUrlKeys(keys, recipe.sourceUrl);
 	addUrlKeys(keys, recipe.sourceIsBasedOnUrl);
@@ -517,6 +529,31 @@ const loadHouseholdUnitPreferences = async (): Promise<UnitPreferences> => ({
 	preferredVolumeUnit: 'ml',
 	ingredientUnitOverrides: {}
 });
+
+const loadRecipeIdentities = async (db: ReturnType<typeof getDb>, workosUserId: string) =>
+	db
+		.select({
+			id: userRecipes.id,
+			title: userRecipes.title,
+			sourceUrl: userRecipes.sourceUrl,
+			sourceIsBasedOnUrl: userRecipes.sourceIsBasedOnUrl
+		})
+		.from(userRecipes)
+		.where(and(eq(userRecipes.workosUserId, workosUserId), isNull(userRecipes.deletedAt)));
+
+const loadSingleMenuRecipe = async (
+	db: ReturnType<typeof getDb>,
+	workosUserId: string,
+	householdId: string | null,
+	unitPreferences: UnitPreferences,
+	recipeId: string
+) =>
+	(
+		await loadMenuRecipes(db, workosUserId, householdId, {
+			unitPreferences,
+			recipeIds: [recipeId]
+		})
+	)[0];
 
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
 	const session = locals.session;
@@ -556,7 +593,7 @@ const readBody = async (request: Request): Promise<CreateRecipeBody> => {
 };
 
 const matchingExistingRecipe = (
-	recipes: RecipeMenuItem[],
+	recipes: RecipeIdentity[],
 	body: CreateRecipeBody,
 	extraUrls: string[] = []
 ) => {
@@ -598,16 +635,24 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 
 	const db = getDb(platform.env.DB);
 	const unitPreferences = await loadHouseholdUnitPreferences();
-	const existingRecipe = matchingExistingRecipe(
-		await loadMenuRecipes(db, session.user.id, householdId, { unitPreferences }),
-		body
-	);
-	if (existingRecipe) return json({ recipe: existingRecipe });
+	const recipeIdentities = await loadRecipeIdentities(db, session.user.id);
+	const existingRecipe = matchingExistingRecipe(recipeIdentities, body);
+	if (existingRecipe) {
+		return json({
+			recipe: await loadSingleMenuRecipe(
+				db,
+				session.user.id,
+				householdId,
+				unitPreferences,
+				existingRecipe.id
+			)
+		});
+	}
 
 	const imported = body.url ? await fetchRecipeFromUrl(body.url) : undefined;
 	const importedMatch = imported
 		? matchingExistingRecipe(
-				await loadMenuRecipes(db, session.user.id, householdId, { unitPreferences }),
+				recipeIdentities,
 				{ ...body, url: imported.sourceUrl },
 				[
 					firstString(imported.recipe.url),
@@ -616,7 +661,17 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 				].filter((value): value is string => Boolean(value))
 			)
 		: undefined;
-	if (importedMatch) return json({ recipe: importedMatch });
+	if (importedMatch) {
+		return json({
+			recipe: await loadSingleMenuRecipe(
+				db,
+				session.user.id,
+				householdId,
+				unitPreferences,
+				importedMatch.id
+			)
+		});
+	}
 
 	const recipeJson =
 		imported?.recipe ??
@@ -666,9 +721,13 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	);
 	await saveRecipeSidecars(db, recipeId, recipeJson);
 
-	const recipe = (
-		await loadMenuRecipes(db, session.user.id, householdId, { unitPreferences })
-	).find((candidate) => candidate.id === recipeId);
+	const recipe = await loadSingleMenuRecipe(
+		db,
+		session.user.id,
+		householdId,
+		unitPreferences,
+		recipeId
+	);
 	if (!recipe) error(500, { message: 'Recipe was created but could not be loaded.' });
 	return json({ recipe }, { status: 201 });
 };
