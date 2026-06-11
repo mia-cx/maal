@@ -144,6 +144,13 @@ const persistDeletedScheduleMeal = (mealId: string, onFailure?: (error: unknown)
 		);
 };
 
+const mealWithoutSidecars = (meal: Meal): Meal => {
+	const nextMeal = { ...meal };
+	delete nextMeal.ingredients;
+	delete nextMeal.instructions;
+	return nextMeal;
+};
+
 const persistExistingScheduleMeal = (
 	meal: Meal,
 	onFailure?: (error: unknown) => void,
@@ -172,7 +179,7 @@ const persistScheduleMealChange = (change: ScheduleMealChange) => {
 	pendingPersistVersions.set(change.meal.id, persistVersion);
 	optimisticMealSnapshots.set(change.meal.id, cloneMeal(change.meal));
 	persistExistingScheduleMeal(
-		change.meal,
+		change.source === 'drag' ? mealWithoutSidecars(change.meal) : change.meal,
 		(error: unknown) => {
 			console.error('Failed to persist schedule meal', error);
 			if (pendingPersistVersions.get(change.meal.id) !== persistVersion) return;

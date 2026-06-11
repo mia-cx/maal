@@ -337,8 +337,12 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 			.update(householdMeals)
 			.set(plannedMealUpdate(meal, defaultMealServings))
 			.where(eq(householdMeals.id, existingMeal.id));
-		await replaceMealIngredientsFromMeal(db, existingMeal.id, meal.ingredients);
-		await replaceMealInstructionsFromMeal(db, existingMeal.id, meal.instructions);
+		if (meal.ingredients !== undefined) {
+			await replaceMealIngredientsFromMeal(db, existingMeal.id, meal.ingredients);
+		}
+		if (meal.instructions !== undefined) {
+			await replaceMealInstructionsFromMeal(db, existingMeal.id, meal.instructions);
+		}
 
 		const [updatedMeal, ingredients, instructions] = await Promise.all([
 			db.select().from(householdMeals).where(eq(householdMeals.id, existingMeal.id)).get(),
