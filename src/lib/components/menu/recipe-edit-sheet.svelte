@@ -37,6 +37,7 @@
 	let recipeYield = $state('');
 	let ingredients = $state<DraftIngredient[]>([]);
 	let instructions = $state<DraftInstruction[]>([]);
+	let instructionPositionDrafts = $state<Record<string, string>>({});
 	let instructionListElement = $state<HTMLElement>();
 	let draggedInstruction = $state<DraftInstruction | null>(null);
 	let draggedInstructionPointerId = $state<number | null>(null);
@@ -91,7 +92,14 @@
 			.map((instruction) => ({ ...instruction, draftId: crypto.randomUUID() }));
 	};
 
+	const syncInstructionPositionDrafts = (nextInstructions: DraftInstruction[]) => {
+		instructionPositionDrafts = Object.fromEntries(
+			nextInstructions.map((instruction) => [instruction.draftId, String(instruction.position)])
+		);
+	};
+
 	const syncRecipe = (nextRecipe: RecipeMenuItem | null) => {
+		const nextInstructions = nextRecipe ? defaultInstructions(nextRecipe) : [];
 		editingRecipeId = nextRecipe?.id ?? null;
 		title = nextRecipe?.title ?? '';
 		sourceUrl = nextRecipe?.sourceUrl ?? '';
@@ -105,7 +113,8 @@
 		cookTimeMinutes = numberText(nextRecipe?.cookTimeMinutes);
 		recipeYield = numberText(nextRecipe?.yield);
 		ingredients = nextRecipe ? defaultIngredients(nextRecipe) : [];
-		instructions = nextRecipe ? defaultInstructions(nextRecipe) : [];
+		instructions = nextInstructions;
+		syncInstructionPositionDrafts(nextInstructions);
 	};
 
 	const sortedInstructions = $derived(
@@ -198,27 +207,35 @@
 		);
 	};
 
-	const updateInstructionPosition = (draftId: string, value: string) => {
-		const parsedPosition = Math.max(1, Math.round(Number(value.replace(/\D/g, '')) || 1));
-		const nextInstructions = instructions.map((instruction) => ({ ...instruction }));
-		const movingInstruction = nextInstructions.find(
-			(instruction) => instruction.draftId === draftId
-		);
-		if (!movingInstruction) return;
-		movingInstruction.position = parsedPosition;
+	const updateInstructionPositionDraft = (draftId: string, value: string) => {
+		instructionPositionDrafts = {
+			...instructionPositionDrafts,
+			[draftId]: value.replace(/\D/g, '')
+		};
+	};
 
-		let conflictingPosition = parsedPosition;
-		while (true) {
-			const conflictingInstruction = nextInstructions.find(
-				(instruction) =>
-					instruction.draftId !== draftId && instruction.position === conflictingPosition
-			);
-			if (!conflictingInstruction) break;
-			conflictingInstruction.position += 1;
-			conflictingPosition = conflictingInstruction.position;
+	const commitInstructionPosition = (draftId: string) => {
+		const index = sortedInstructions.findIndex((instruction) => instruction.draftId === draftId);
+		if (index < 0) return;
+		const draft = instructionPositionDrafts[draftId] ?? '';
+		const parsedPosition = Number(draft);
+		if (!Number.isFinite(parsedPosition) || parsedPosition < 1) {
+			syncInstructionPositionDrafts(instructions);
+			return;
 		}
+		reorderInstructions(draftId, Math.round(parsedPosition) - 1);
+	};
 
-		instructions = nextInstructions.toSorted((left, right) => left.position - right.position);
+	const handleInstructionPositionKeydown = (draftId: string, event: KeyboardEvent) => {
+		if (event.key === 'Enter') {
+			event.preventDefault();
+			commitInstructionPosition(draftId);
+			(event.currentTarget as HTMLInputElement).blur();
+		}
+		if (event.key === 'Escape') {
+			syncInstructionPositionDrafts(instructions);
+			(event.currentTarget as HTMLInputElement).blur();
+		}
 	};
 
 	const reorderInstructions = (draftId: string, nextIndex: number) => {
@@ -226,7 +243,12 @@
 		if (!current) return;
 		const remaining = sortedInstructions.filter((instruction) => instruction.draftId !== draftId);
 		remaining.splice(Math.max(0, Math.min(nextIndex, remaining.length)), 0, current);
-		instructions = remaining.map((instruction, index) => ({ ...instruction, position: index + 1 }));
+		const nextInstructions = remaining.map((instruction, index) => ({
+			...instruction,
+			position: index + 1
+		}));
+		instructions = nextInstructions;
+		syncInstructionPositionDrafts(nextInstructions);
 	};
 
 	const swapInstructionPosition = (draftId: string, direction: -1 | 1) => {
@@ -238,17 +260,20 @@
 	const addInstruction = () => {
 		const nextPosition =
 			Math.max(0, ...instructions.map((instruction) => instruction.position)) + 1;
-		instructions = [
+		const nextInstructions = [
 			...instructions,
 			{ draftId: crypto.randomUUID(), position: nextPosition, text: '' }
 		];
+		instructions = nextInstructions;
+		syncInstructionPositionDrafts(nextInstructions);
 	};
 
 	const removeInstruction = (draftId: string) => {
-		instructions = instructions.filter((instruction) => instruction.draftId !== draftId);
-		if (!instructions.length) {
-			instructions = [{ draftId: crypto.randomUUID(), position: 1, text: '' }];
-		}
+		const nextInstructions = instructions.filter((instruction) => instruction.draftId !== draftId);
+		instructions = nextInstructions.length
+			? nextInstructions.map((instruction, index) => ({ ...instruction, position: index + 1 }))
+			: [{ draftId: crypto.randomUUID(), position: 1, text: '' }];
+		syncInstructionPositionDrafts(instructions);
 	};
 
 	const instructionRows = (): HTMLElement[] =>
@@ -528,12 +553,16 @@
 												<Input
 													type="text"
 													inputmode="numeric"
-													value={String(instruction.position)}
+													value={instructionPositionDrafts[instruction.draftId] ??
+														String(instruction.position)}
 													oninput={(event) =>
-														updateInstructionPosition(
+														updateInstructionPositionDraft(
 															instruction.draftId,
 															event.currentTarget.value
 														)}
+													onchange={() => commitInstructionPosition(instruction.draftId)}
+													onkeydown={(event) =>
+														handleInstructionPositionKeydown(instruction.draftId, event)}
 													aria-label="Instruction position"
 												/>
 												<Button.Root
