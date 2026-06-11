@@ -64,10 +64,29 @@ const changeHooks = new Set<ScheduleMealChangeHook>();
 const pendingCreateMealIds = new Set<string>();
 const deletedMealIds = new Set<string>();
 const pendingPersistVersions = new Map<string, number>();
+const optimisticMealSnapshots = new Map<string, Meal>();
 let nextPersistVersion = 0;
 
 const isRecipePoolTemplate = (meal: Meal): boolean =>
 	isMealInPool(meal) && Boolean(meal.userRecipeId) && meal.id === meal.userRecipeId;
+
+const arraysMatch = (left: string[] = [], right: string[] = []): boolean =>
+	left.length === right.length && left.every((value, index) => value === right[index]);
+
+const mealsMatch = (left: Meal, right: Meal): boolean =>
+	left.id === right.id &&
+	(left.userRecipeId ?? '') === (right.userRecipeId ?? '') &&
+	left.title === right.title &&
+	(left.date ?? '') === (right.date ?? '') &&
+	(left.time ?? '') === (right.time ?? '') &&
+	(left.sortOrder ?? 0) === (right.sortOrder ?? 0) &&
+	(left.cookTimeMinutes ?? 0) === (right.cookTimeMinutes ?? 0) &&
+	(left.servingsPlanned ?? 1) === (right.servingsPlanned ?? 1) &&
+	(left.baseServings ?? 1) === (right.baseServings ?? 1) &&
+	(left.image ?? '') === (right.image ?? '') &&
+	(left.description ?? '') === (right.description ?? '') &&
+	arraysMatch(left.ingredients, right.ingredients) &&
+	arraysMatch(left.instructions, right.instructions);
 
 export const scheduleMealStore = atom<Meal[]>([]);
 export const selectedMealIdStore = atom<string | null>(null);
@@ -151,12 +170,14 @@ const persistScheduleMealChange = (change: ScheduleMealChange) => {
 
 	const persistVersion = ++nextPersistVersion;
 	pendingPersistVersions.set(change.meal.id, persistVersion);
+	optimisticMealSnapshots.set(change.meal.id, cloneMeal(change.meal));
 	persistExistingScheduleMeal(
 		change.meal,
 		(error: unknown) => {
 			console.error('Failed to persist schedule meal', error);
 			if (pendingPersistVersions.get(change.meal.id) !== persistVersion) return;
 			pendingPersistVersions.delete(change.meal.id);
+			optimisticMealSnapshots.delete(change.meal.id);
 			if (change.previousMeal) replaceMeal(change.previousMeal, change.meal.id);
 		},
 		() => {
@@ -185,15 +206,32 @@ export const hydrateScheduleMeals = (meals: Meal[]) => {
 };
 
 export const mergeHydratedScheduleMeals = (meals: Meal[], startDate: string, endDate: string) => {
+	const currentMeals = scheduleMealStore.get();
 	const incomingMeals = cloneMeals(meals);
+	const incomingById = new Map(incomingMeals.map((meal) => [meal.id, meal]));
+	const optimisticIdsToKeep = new Set<string>();
+
+	for (const currentMeal of currentMeals) {
+		const optimisticSnapshot = optimisticMealSnapshots.get(currentMeal.id);
+		if (!optimisticSnapshot) continue;
+		const incomingMeal = incomingById.get(currentMeal.id);
+		if (incomingMeal && mealsMatch(incomingMeal, optimisticSnapshot)) {
+			optimisticMealSnapshots.delete(currentMeal.id);
+			continue;
+		}
+		optimisticIdsToKeep.add(currentMeal.id);
+	}
+
 	const incomingIds = new Set(incomingMeals.map((meal) => meal.id));
-	const outsideRangeOrPending = scheduleMealStore.get().filter((meal) => {
+	const outsideRangeOrPending = currentMeals.filter((meal) => {
+		if (optimisticIdsToKeep.has(meal.id)) return true;
 		if (incomingIds.has(meal.id)) return false;
 		if (pendingCreateMealIds.has(meal.id)) return true;
 		if (!meal.date) return false;
 		return meal.date < startDate || meal.date > endDate;
 	});
-	setScheduleMeals([...outsideRangeOrPending, ...incomingMeals], 'hydrate');
+	const incomingToMerge = incomingMeals.filter((meal) => !optimisticIdsToKeep.has(meal.id));
+	setScheduleMeals([...outsideRangeOrPending, ...incomingToMerge], 'hydrate');
 };
 
 export const selectScheduleMeal = (mealId: string | null) => {
