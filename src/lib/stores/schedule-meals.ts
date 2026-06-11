@@ -63,6 +63,8 @@ const newLocalMealId = (): string =>
 const changeHooks = new Set<ScheduleMealChangeHook>();
 const pendingCreateMealIds = new Set<string>();
 const deletedMealIds = new Set<string>();
+const pendingPersistVersions = new Map<string, number>();
+let nextPersistVersion = 0;
 
 const isRecipePoolTemplate = (meal: Meal): boolean =>
 	isMealInPool(meal) && Boolean(meal.userRecipeId) && meal.id === meal.userRecipeId;
@@ -125,8 +127,8 @@ const persistDeletedScheduleMeal = (mealId: string, onFailure?: (error: unknown)
 
 const persistExistingScheduleMeal = (
 	meal: Meal,
-	previousMealId = meal.id,
-	onFailure?: (error: unknown) => void
+	onFailure?: (error: unknown) => void,
+	onSuccess?: () => void
 ) => {
 	if (!browser) return;
 	fetch('/plan/meals', {
@@ -136,8 +138,7 @@ const persistExistingScheduleMeal = (
 	})
 		.then(async (response) => {
 			if (!response.ok) throw new Error(await response.text());
-			const body = (await response.json()) as { meal: Meal };
-			replaceMeal(body.meal, previousMealId);
+			onSuccess?.();
 		})
 		.catch(
 			onFailure ?? ((error: unknown) => console.error('Failed to persist schedule meal', error))
@@ -148,10 +149,22 @@ const persistScheduleMealChange = (change: ScheduleMealChange) => {
 	if (!browser || change.source === 'hydrate' || change.source === 'external') return;
 	if (pendingCreateMealIds.has(change.meal.id)) return;
 
-	persistExistingScheduleMeal(change.meal, change.meal.id, (error: unknown) => {
-		console.error('Failed to persist schedule meal', error);
-		if (change.previousMeal) replaceMeal(change.previousMeal, change.meal.id);
-	});
+	const persistVersion = ++nextPersistVersion;
+	pendingPersistVersions.set(change.meal.id, persistVersion);
+	persistExistingScheduleMeal(
+		change.meal,
+		(error: unknown) => {
+			console.error('Failed to persist schedule meal', error);
+			if (pendingPersistVersions.get(change.meal.id) !== persistVersion) return;
+			pendingPersistVersions.delete(change.meal.id);
+			if (change.previousMeal) replaceMeal(change.previousMeal, change.meal.id);
+		},
+		() => {
+			if (pendingPersistVersions.get(change.meal.id) === persistVersion) {
+				pendingPersistVersions.delete(change.meal.id);
+			}
+		}
+	);
 };
 
 const setScheduleMeals = (
