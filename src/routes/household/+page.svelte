@@ -160,14 +160,10 @@
 				</p>
 			{/if}
 
-			<section
-				class="grid gap-3 border-t border-border pt-4"
-				aria-labelledby="basic-settings-title"
-			>
-				<h2 id="basic-settings-title" class="text-sm font-medium">Basic settings</h2>
+			<section class="grid gap-3 border-t border-border pt-4" aria-label="Basic settings">
 				<form method="post" action="?/updateSettings" class="grid gap-4">
 					<fieldset class="grid gap-3">
-						<legend class="text-xs font-semibold text-muted-foreground">Household</legend>
+						<legend class="sr-only">Household</legend>
 						<label class="grid min-w-0 gap-1 text-xs font-medium md:max-w-[calc(50%-0.375rem)]">
 							Name
 							<Input
@@ -180,11 +176,8 @@
 						</label>
 					</fieldset>
 
-					<fieldset class="grid gap-3">
-						<legend class="text-xs font-semibold text-muted-foreground">Locale and calendar</legend>
-						<p class="text-xs text-muted-foreground">
-							Locale controls formatting and alias fallback; timezone controls meal timing.
-						</p>
+					<fieldset class="grid gap-3 border-t border-border/60 pt-3">
+						<legend class="sr-only">Locale and calendar</legend>
 						<div class="grid gap-3 md:grid-cols-3">
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
 								Locale
@@ -229,8 +222,8 @@
 						</div>
 					</fieldset>
 
-					<fieldset class="grid gap-3">
-						<legend class="text-xs font-semibold text-muted-foreground">Meal defaults</legend>
+					<fieldset class="grid gap-3 border-t border-border/60 pt-3">
+						<legend class="sr-only">Meal defaults</legend>
 						<div class="grid gap-3 md:grid-cols-2">
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
 								Default yield
@@ -258,8 +251,8 @@
 						</div>
 					</fieldset>
 
-					<fieldset class="grid gap-3">
-						<legend class="text-xs font-semibold text-muted-foreground">Unit defaults</legend>
+					<fieldset class="grid gap-3 border-t border-border/60 pt-3">
+						<legend class="sr-only">Unit defaults</legend>
 						<div class="grid gap-3 md:grid-cols-2">
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
 								Weight
