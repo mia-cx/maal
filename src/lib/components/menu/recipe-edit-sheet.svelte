@@ -5,6 +5,7 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 	import XIcon from '@lucide/svelte/icons/x';
+	import { routeSheetWheel } from '$lib/interaction/sheet-scroll';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import type { RecipeIngredientItem, RecipeInstructionItem, RecipeMenuItem } from './menu-types';
 
@@ -40,6 +41,8 @@
 	let deleteConfirmOpen = $state(false);
 	let deleteBusy = $state(false);
 	let deleteError = $state<string | null>(null);
+	let sheetViewportElement = $state<HTMLElement>();
+	let sheetElement = $state<HTMLElement>();
 	let sheetHeroElement = $state<HTMLElement>();
 	let sheetViewportHeight = $state(0);
 	let sheetHeroHeight = $state(0);
@@ -48,9 +51,8 @@
 	const sheetTopOffset = $derived(
 		Math.max(sheetViewportGutter, (sheetViewportHeight - sheetHeroHeight) / 2)
 	);
-	const sheetMaxHeight = $derived(
-		Math.max(240, sheetViewportHeight - sheetTopOffset - sheetViewportGutter)
-	);
+	const sheetHandoffScroll = $derived(Math.max(0, sheetTopOffset - sheetViewportGutter));
+	const sheetMaxHeight = $derived(Math.max(240, sheetViewportHeight - sheetViewportGutter * 2));
 
 	const textareaClass =
 		'min-h-20 w-full rounded-md border border-input bg-input/20 px-2 py-1.5 text-sm transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 md:text-xs/relaxed';
@@ -274,13 +276,22 @@
 			deleteBusy = false;
 		}
 	};
+
+	const handleSheetWheel = (event: WheelEvent) => {
+		routeSheetWheel(event, {
+			viewport: sheetViewportElement,
+			sheet: sheetElement,
+			handoffScroll: sheetHandoffScroll
+		});
+	};
 </script>
 
 <Dialog.Root bind:open>
 	<Dialog.Portal>
 		<Dialog.Overlay />
 		<DialogPrimitive.Content
-			class="fixed inset-0 z-50 h-svh w-full overflow-hidden bg-transparent p-0 outline-none"
+			bind:this={sheetViewportElement}
+			class="fixed inset-0 z-50 h-svh w-full [scrollbar-width:none] overflow-y-auto bg-transparent p-0 outline-none [&::-webkit-scrollbar]:hidden"
 		>
 			{#if recipe}
 				<button
@@ -295,9 +306,11 @@
 					style={`padding-top: ${sheetTopOffset}px; padding-bottom: ${sheetViewportGutter}px;`}
 				>
 					<form
+						bind:this={sheetElement}
 						class="pointer-events-auto w-full overflow-y-auto rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10"
 						style={`max-height: ${sheetMaxHeight}px;`}
 						onsubmit={saveRecipe}
+						onwheel={handleSheetWheel}
 					>
 						<div bind:this={sheetHeroElement} class="relative">
 							<Dialog.Close

@@ -8,6 +8,7 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import { parseDate, type DateValue } from '@internationalized/date';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
+	import { routeSheetWheel } from '$lib/interaction/sheet-scroll';
 	import { scaleIngredientText } from '$lib/recipes/ingredient-text';
 	import { familiarityLabels } from './meal-labels';
 	import type { Meal, MealFamiliarity } from './schedule-types';
@@ -44,6 +45,8 @@
 	let servingsDraft = $state('1');
 	let scheduleEditorOpen = $state(false);
 	let deleteConfirmOpen = $state(false);
+	let previewViewportElement = $state<HTMLElement>();
+	let previewSheetElement = $state<HTMLElement>();
 	let heroElement = $state<HTMLElement>();
 	let previewViewportHeight = $state(0);
 	let heroHeight = $state(0);
@@ -78,8 +81,9 @@
 	const previewTopOffset = $derived(
 		Math.max(previewViewportGutter, (previewViewportHeight - heroHeight) / 2)
 	);
+	const previewHandoffScroll = $derived(Math.max(0, previewTopOffset - previewViewportGutter));
 	const previewMaxHeight = $derived(
-		Math.max(240, previewViewportHeight - previewTopOffset - previewViewportGutter)
+		Math.max(240, previewViewportHeight - previewViewportGutter * 2)
 	);
 
 	const dateFormatter = new Intl.DateTimeFormat('en-GB', {
@@ -220,6 +224,14 @@
 		open = false;
 	};
 
+	const handleSheetWheel = (event: WheelEvent) => {
+		routeSheetWheel(event, {
+			viewport: previewViewportElement,
+			sheet: previewSheetElement,
+			handoffScroll: previewHandoffScroll
+		});
+	};
+
 	$effect(() => {
 		const nextDate = scheduledDateValue?.toString() ?? '';
 		if (nextDate && nextDate !== scheduledDate) scheduledDate = nextDate;
@@ -305,7 +317,8 @@
 	<Dialog.Portal>
 		<Dialog.Overlay />
 		<DialogPrimitive.Content
-			class="fixed inset-0 z-50 h-svh w-full overflow-hidden bg-transparent p-0 outline-none"
+			bind:this={previewViewportElement}
+			class="fixed inset-0 z-50 h-svh w-full [scrollbar-width:none] overflow-y-auto bg-transparent p-0 outline-none [&::-webkit-scrollbar]:hidden"
 		>
 			{#if meal}
 				<button
@@ -320,8 +333,10 @@
 					style={`padding-top: ${previewTopOffset}px; padding-bottom: ${previewViewportGutter}px;`}
 				>
 					<div
+						bind:this={previewSheetElement}
 						class="pointer-events-auto relative overflow-y-auto rounded-xl border border-border bg-popover shadow-2xl ring-1 ring-foreground/10"
 						style={`max-height: ${previewMaxHeight}px;`}
+						onwheel={handleSheetWheel}
 					>
 						<div bind:this={heroElement} class="relative overflow-hidden rounded-t-xl">
 							<Dialog.Close
