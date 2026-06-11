@@ -160,10 +160,15 @@
 				</p>
 			{/if}
 
-			<section class="grid gap-3 border-t border-border pt-4">
-				<form method="post" action="?/updateSettings" class="grid gap-3">
-					<div class="grid gap-3 md:grid-cols-2">
-						<label class="grid min-w-0 gap-1 text-xs font-medium">
+			<section
+				class="grid gap-3 border-t border-border pt-4"
+				aria-labelledby="basic-settings-title"
+			>
+				<h2 id="basic-settings-title" class="text-sm font-medium">Basic settings</h2>
+				<form method="post" action="?/updateSettings" class="grid gap-4">
+					<fieldset class="grid gap-3">
+						<legend class="text-xs font-semibold text-muted-foreground">Household</legend>
+						<label class="grid min-w-0 gap-1 text-xs font-medium md:max-w-[calc(50%-0.375rem)]">
 							Name
 							<Input
 								name={householdNameChanged ? 'name' : undefined}
@@ -173,112 +178,138 @@
 								class="h-8 w-full"
 							/>
 						</label>
-						<label class="grid min-w-0 gap-1 text-xs font-medium">
-							Default yield
-							<Input
-								name={defaultServingsChanged ? 'defaultServings' : undefined}
-								type="number"
-								min="1"
-								max="24"
-								step="1"
-								bind:value={defaultServings}
+					</fieldset>
+
+					<fieldset class="grid gap-3">
+						<legend class="text-xs font-semibold text-muted-foreground">Locale and calendar</legend>
+						<p class="text-xs text-muted-foreground">
+							Locale controls formatting and alias fallback; timezone controls meal timing.
+						</p>
+						<div class="grid gap-3 md:grid-cols-3">
+							<label class="grid min-w-0 gap-1 text-xs font-medium">
+								Locale
+								<SearchCombobox
+									name={localeChanged ? 'locale' : undefined}
+									bind:value={locale}
+									options={localeOptions}
+									disabled={fieldDisabled}
+									placeholder="Select locale"
+									searchPlaceholder="Search or type a BCP 47 locale..."
+									allowCustom
+									customOptionLabel={(input) => `Use custom locale “${input}”`}
+								/>
+							</label>
+							<label class="grid min-w-0 gap-1 text-xs font-medium">
+								Timezone
+								<SearchCombobox
+									name={timezoneChanged ? 'timezone' : undefined}
+									bind:value={timezone}
+									options={timezoneOptions}
+									disabled={fieldDisabled}
+									placeholder="Select timezone"
+									searchPlaceholder="Search timezones..."
+								/>
+							</label>
+							<label class="grid min-w-0 gap-1 text-xs font-medium">
+								Start of week
+								{#if weekStartsOnChanged}
+									<input type="hidden" name="weekStartsOn" value={weekStartsOn} />
+								{/if}
+								<Select.Root type="single" bind:value={weekStartsOn} disabled={fieldDisabled}>
+									<Select.Trigger class="!h-8 w-full">
+										{weekStartLabels[weekStartsOn]}
+									</Select.Trigger>
+									<Select.Content>
+										{#each Object.entries(weekStartLabels) as [value, label] (value)}
+											<Select.Item {value}>{label}</Select.Item>
+										{/each}
+									</Select.Content>
+								</Select.Root>
+							</label>
+						</div>
+					</fieldset>
+
+					<fieldset class="grid gap-3">
+						<legend class="text-xs font-semibold text-muted-foreground">Meal defaults</legend>
+						<div class="grid gap-3 md:grid-cols-2">
+							<label class="grid min-w-0 gap-1 text-xs font-medium">
+								Default yield
+								<Input
+									name={defaultServingsChanged ? 'defaultServings' : undefined}
+									type="number"
+									min="1"
+									max="24"
+									step="1"
+									bind:value={defaultServings}
+									readonly={fieldDisabled}
+									class="h-8 w-full"
+								/>
+							</label>
+							<label class="grid min-w-0 gap-1 text-xs font-medium">
+								Preferred dinner time
+								<Input
+									name={preferredDinnerTimeChanged ? 'preferredDinnerTime' : undefined}
+									type="time"
+									bind:value={preferredDinnerTime}
+									readonly={fieldDisabled}
+									class="h-8 w-full"
+								/>
+							</label>
+						</div>
+					</fieldset>
+
+					<fieldset class="grid gap-3">
+						<legend class="text-xs font-semibold text-muted-foreground">Unit defaults</legend>
+						<div class="grid gap-3 md:grid-cols-2">
+							<label class="grid min-w-0 gap-1 text-xs font-medium">
+								Weight
+								{#if preferredMassUnitChanged}
+									<input type="hidden" name="preferredMassUnit" value={preferredMassUnit} />
+								{/if}
+								<Select.Root type="single" bind:value={preferredMassUnit} disabled={fieldDisabled}>
+									<Select.Trigger class="!h-8 w-full">
+										{massUnitLabels[preferredMassUnit]}
+									</Select.Trigger>
+									<Select.Content>
+										{#each Object.entries(massUnitLabels) as [value, label] (value)}
+											<Select.Item {value}>{label}</Select.Item>
+										{/each}
+									</Select.Content>
+								</Select.Root>
+							</label>
+							<label class="grid min-w-0 gap-1 text-xs font-medium">
+								Volume
+								{#if preferredVolumeUnitChanged}
+									<input type="hidden" name="preferredVolumeUnit" value={preferredVolumeUnit} />
+								{/if}
+								<Select.Root
+									type="single"
+									bind:value={preferredVolumeUnit}
+									disabled={fieldDisabled}
+								>
+									<Select.Trigger class="!h-8 w-full">
+										{volumeUnitLabels[preferredVolumeUnit]}
+									</Select.Trigger>
+									<Select.Content>
+										{#each Object.entries(volumeUnitLabels) as [value, label] (value)}
+											<Select.Item {value}>{label}</Select.Item>
+										{/each}
+									</Select.Content>
+								</Select.Root>
+							</label>
+						</div>
+						<label class="grid gap-1 text-xs font-medium">
+							Ingredient units
+							<Textarea
+								name={ingredientUnitOverridesChanged ? 'ingredientUnitOverrides' : undefined}
+								bind:value={ingredientUnitOverrides}
 								readonly={fieldDisabled}
-								class="h-8 w-full"
+								placeholder="olive oil: tbsp&#10;water: ml"
+								class="min-h-20"
 							/>
 						</label>
-						<label class="grid min-w-0 gap-1 text-xs font-medium">
-							Locale
-							<SearchCombobox
-								name={localeChanged ? 'locale' : undefined}
-								bind:value={locale}
-								options={localeOptions}
-								disabled={fieldDisabled}
-								placeholder="Select locale"
-								searchPlaceholder="Search or type a BCP 47 locale..."
-								allowCustom
-								customOptionLabel={(input) => `Use custom locale “${input}”`}
-							/>
-						</label>
-						<label class="grid min-w-0 gap-1 text-xs font-medium">
-							Timezone
-							<SearchCombobox
-								name={timezoneChanged ? 'timezone' : undefined}
-								bind:value={timezone}
-								options={timezoneOptions}
-								disabled={fieldDisabled}
-								placeholder="Select timezone"
-								searchPlaceholder="Search timezones..."
-							/>
-						</label>
-						<label class="grid min-w-0 gap-1 text-xs font-medium">
-							Start of week
-							{#if weekStartsOnChanged}
-								<input type="hidden" name="weekStartsOn" value={weekStartsOn} />
-							{/if}
-							<Select.Root type="single" bind:value={weekStartsOn} disabled={fieldDisabled}>
-								<Select.Trigger class="!h-8 w-full">
-									{weekStartLabels[weekStartsOn]}
-								</Select.Trigger>
-								<Select.Content>
-									{#each Object.entries(weekStartLabels) as [value, label] (value)}
-										<Select.Item {value}>{label}</Select.Item>
-									{/each}
-								</Select.Content>
-							</Select.Root>
-						</label>
-						<label class="grid min-w-0 gap-1 text-xs font-medium">
-							Weight
-							{#if preferredMassUnitChanged}
-								<input type="hidden" name="preferredMassUnit" value={preferredMassUnit} />
-							{/if}
-							<Select.Root type="single" bind:value={preferredMassUnit} disabled={fieldDisabled}>
-								<Select.Trigger class="!h-8 w-full">
-									{massUnitLabels[preferredMassUnit]}
-								</Select.Trigger>
-								<Select.Content>
-									{#each Object.entries(massUnitLabels) as [value, label] (value)}
-										<Select.Item {value}>{label}</Select.Item>
-									{/each}
-								</Select.Content>
-							</Select.Root>
-						</label>
-						<label class="grid min-w-0 gap-1 text-xs font-medium">
-							Volume
-							{#if preferredVolumeUnitChanged}
-								<input type="hidden" name="preferredVolumeUnit" value={preferredVolumeUnit} />
-							{/if}
-							<Select.Root type="single" bind:value={preferredVolumeUnit} disabled={fieldDisabled}>
-								<Select.Trigger class="!h-8 w-full">
-									{volumeUnitLabels[preferredVolumeUnit]}
-								</Select.Trigger>
-								<Select.Content>
-									{#each Object.entries(volumeUnitLabels) as [value, label] (value)}
-										<Select.Item {value}>{label}</Select.Item>
-									{/each}
-								</Select.Content>
-							</Select.Root>
-						</label>
-						<label class="grid min-w-0 gap-1 text-xs font-medium">
-							Preferred dinner time
-							<Input
-								name={preferredDinnerTimeChanged ? 'preferredDinnerTime' : undefined}
-								type="time"
-								bind:value={preferredDinnerTime}
-								readonly={fieldDisabled}
-								class="h-8 w-full"
-							/>
-						</label>
-					</div>
-					<label class="grid gap-1 text-xs font-medium">
-						Ingredient units
-						<Textarea
-							name={ingredientUnitOverridesChanged ? 'ingredientUnitOverrides' : undefined}
-							bind:value={ingredientUnitOverrides}
-							readonly={fieldDisabled}
-							placeholder="olive oil: tbsp&#10;water: ml"
-							class="min-h-20"
-						/>
-					</label>
+					</fieldset>
+
 					{#if canManageHousehold}
 						<div>
 							<Button type="submit" disabled={!householdSettingsChanged}>Save household</Button>
