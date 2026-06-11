@@ -292,6 +292,10 @@ export const deleteScheduleMeal = (meal: Meal) => {
 	deletedMealIds.add(meal.id);
 	removeMeal(meal.id);
 	if (!browser || pendingCreateMealIds.has(meal.id)) return;
+	if (isRecipePoolTemplate(meal)) {
+		deletedMealIds.delete(meal.id);
+		return;
+	}
 	persistDeletedScheduleMeal(meal.id, (error: unknown) => {
 		console.error('Failed to delete schedule meal', error);
 		deletedMealIds.delete(meal.id);

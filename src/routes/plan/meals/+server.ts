@@ -309,7 +309,7 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 		.from(householdMeals)
 		.where(and(eq(householdMeals.id, mealId), eq(householdMeals.householdId, householdId)))
 		.get();
-	if (!existingMeal) error(404, { message: 'Meal not found.' });
+	if (!existingMeal) return json({ ok: true });
 
 	await db.delete(householdMeals).where(eq(householdMeals.id, existingMeal.id));
 	return json({ ok: true });
