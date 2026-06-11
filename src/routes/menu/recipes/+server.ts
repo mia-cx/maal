@@ -264,15 +264,25 @@ const fetchRecipeFromUrl = async (url: string) => {
 		error(400, { message: 'Enter a valid recipe URL.' });
 	}
 
-	const response = await fetch(parsedUrl, {
-		headers: {
-			accept: 'text/html,application/xhtml+xml',
-			'user-agent': 'Maal recipe importer/0.1'
-		}
-	});
+	let response: Response;
+	try {
+		response = await fetch(parsedUrl, {
+			headers: {
+				accept: 'text/html,application/xhtml+xml',
+				'user-agent': 'Maal recipe importer/0.1'
+			}
+		});
+	} catch {
+		error(502, { message: 'Could not fetch that recipe page.' });
+	}
 	if (!response.ok) error(502, { message: 'Could not fetch that recipe page.' });
 
-	const html = (await response.text()).slice(0, maxImportBytes);
+	let html: string;
+	try {
+		html = (await response.text()).slice(0, maxImportBytes);
+	} catch {
+		error(502, { message: 'Could not read that recipe page.' });
+	}
 	const imported = recipeFromJsonLd(html, url);
 	if (!imported) error(422, { message: 'No schema.org Recipe data found on that page.' });
 
