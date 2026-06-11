@@ -28,6 +28,7 @@
 /playwright-report/
 /blob-report/
 /debug/
+/.tmp/
 
 # Generated files
 /worker-configuration.d.ts
@@ -38,6 +39,8 @@
 *.db
 *.db-journal
 *.sqlite
+*.sqlite-wal
+*.sqlite-shm
 *.sqlite3
 
 # Logs
@@ -57,6 +60,7 @@ pnpm-debug.log*
 .idea/
 *.swp
 *.swo
+*~lock~
 
 # OS
 .DS_Store
