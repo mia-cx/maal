@@ -225,8 +225,8 @@
 			.toSorted((left, right) => left.position - right.position)
 			.map((instruction, index) => ({ ...instruction, position: index + 1 }));
 
-	const saveRecipe = (event: SubmitEvent) => {
-		event.preventDefault();
+	const saveRecipe = (event?: SubmitEvent) => {
+		event?.preventDefault();
 		if (!recipe) return;
 
 		const savedIngredients = ingredients
@@ -475,9 +475,11 @@
 								</div>
 							</section>
 						</div>
+					</form>
 
+					{#snippet footer()}
 						<div
-							class="sticky bottom-0 z-10 flex items-center justify-between gap-2 border-t border-border bg-popover/95 p-3 backdrop-blur"
+							class="flex items-center justify-between gap-2 rounded-b-xl border-t border-border bg-popover/95 p-3 backdrop-blur"
 						>
 							<div>
 								{#if ondeleted}
@@ -485,9 +487,9 @@
 									>
 								{/if}
 							</div>
-							<Button.Root type="submit">Save recipe</Button.Root>
+							<Button.Root type="button" onclick={() => saveRecipe()}>Save recipe</Button.Root>
 						</div>
-					</form>
+					{/snippet}
 				</Sheet.Frame>
 			{/if}
 		</DialogPrimitive.Content>

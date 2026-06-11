@@ -8,64 +8,75 @@
 		gutter = 16,
 		closeLabel = 'Close sheet',
 		onclose,
-		children
+		children,
+		footer
 	}: {
 		leadIn?: number;
 		gutter?: number;
 		closeLabel?: string;
 		onclose: () => void;
 		children: Snippet;
+		footer?: Snippet;
 	} = $props();
 
+	let trackElement = $state<HTMLElement>();
 	let shellElement = $state<HTMLElement>();
-	let scrollElement = $state<HTMLElement>();
+	let bodyElement = $state<HTMLElement>();
+	let footerElement = $state<HTMLElement>();
+	let viewportHeight = $state(0);
+	let bodyHeight = $state(0);
+	let footerHeight = $state(0);
+	let contentOffset = $state(0);
 	let pinned = $state(false);
-	let trackHeight = $state(0);
 
-	const pinnedHeight = $derived(`calc(100svh - ${gutter * 2}px)`);
-	const shellStyle = $derived(`top: ${gutter}px; ${pinned ? `max-height: ${pinnedHeight};` : ''}`);
-	const scrollStyle = $derived(pinned ? `max-height: ${pinnedHeight};` : '');
-	const shellClipClass = $derived(pinned ? 'overflow-hidden' : 'overflow-visible');
-	const scrollClass = $derived(
-		pinned
-			? 'overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
-			: 'overflow-visible'
+	const contentHeight = $derived(bodyHeight + footerHeight);
+	const maxShellHeight = $derived(Math.max(240, viewportHeight - gutter * 2));
+	const shellHeight = $derived(Math.min(contentHeight || maxShellHeight, maxShellHeight));
+	const bodyMaskHeight = $derived(Math.max(0, shellHeight - footerHeight));
+	const maxContentOffset = $derived(Math.max(0, bodyHeight - bodyMaskHeight));
+	const trackStyle = $derived(contentHeight > 0 ? `min-height: ${contentHeight}px;` : '');
+	const shellStyle = $derived(
+		`top: ${gutter}px; ${pinned ? `height: ${shellHeight}px; overflow: hidden;` : ''}`
 	);
-	const trackStyle = $derived(trackHeight > 0 ? `min-height: ${trackHeight}px;` : '');
+	const bodyMaskStyle = $derived(pinned ? `height: ${bodyMaskHeight}px; overflow: hidden;` : '');
+	const bodyStyle = $derived(pinned ? `transform: translate3d(0, -${contentOffset}px, 0);` : '');
+
+	const clamp = (value: number, minimum: number, maximum: number) =>
+		Math.min(maximum, Math.max(minimum, value));
 
 	$effect(() => {
-		const content = scrollElement;
-		if (!content) return;
-
-		const updateTrackHeight = () => {
-			trackHeight = content.scrollHeight;
-		};
-		const observer = new ResizeObserver(updateTrackHeight);
-		observer.observe(content);
-		updateTrackHeight();
-
-		return () => observer.disconnect();
-	});
-
-	$effect(() => {
+		const track = trackElement;
 		const shell = shellElement;
+		const body = bodyElement;
 		const viewport = shell?.closest('[data-sheet-viewport]');
-		if (!shell || !(viewport instanceof HTMLElement)) return;
+		if (!track || !shell || !body || !(viewport instanceof HTMLElement)) return;
 
-		const updatePinned = () => {
+		const updateMetrics = () => {
+			viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+			bodyHeight = body.scrollHeight;
+			footerHeight = footerElement?.offsetHeight ?? 0;
+
 			const viewportTop = viewport.getBoundingClientRect().top;
-			pinned = shell.getBoundingClientRect().top <= viewportTop + gutter + 0.5;
+			const trackTop = track.getBoundingClientRect().top - viewportTop + viewport.scrollTop;
+			const pinStart = trackTop - gutter;
+			const rawOffset = viewport.scrollTop - pinStart;
+			pinned = rawOffset >= 0;
+			contentOffset = pinned ? clamp(rawOffset, 0, maxContentOffset) : 0;
 		};
 
-		updatePinned();
-		viewport.addEventListener('scroll', updatePinned, { passive: true });
-		window.visualViewport?.addEventListener('resize', updatePinned);
-		window.addEventListener('resize', updatePinned);
+		const observer = new ResizeObserver(updateMetrics);
+		observer.observe(body);
+		if (footerElement) observer.observe(footerElement);
+		updateMetrics();
+		viewport.addEventListener('scroll', updateMetrics, { passive: true });
+		window.visualViewport?.addEventListener('resize', updateMetrics);
+		window.addEventListener('resize', updateMetrics);
 
 		return () => {
-			viewport.removeEventListener('scroll', updatePinned);
-			window.visualViewport?.removeEventListener('resize', updatePinned);
-			window.removeEventListener('resize', updatePinned);
+			observer.disconnect();
+			viewport.removeEventListener('scroll', updateMetrics);
+			window.visualViewport?.removeEventListener('resize', updateMetrics);
+			window.removeEventListener('resize', updateMetrics);
 		};
 	});
 </script>
@@ -81,10 +92,10 @@
 	class="pointer-events-none relative z-10 mx-auto w-full max-w-[min(100vw-1rem,42rem)] px-2 sm:max-w-[42rem] sm:px-4"
 	style={`padding-top: ${leadIn}px;`}
 >
-	<div style={trackStyle}>
+	<div bind:this={trackElement} style={trackStyle}>
 		<div
 			bind:this={shellElement}
-			class={`pointer-events-auto sticky rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10 ${shellClipClass}`}
+			class="pointer-events-auto sticky flex flex-col overflow-visible rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/10"
 			style={shellStyle}
 		>
 			<Dialog.Close
@@ -93,9 +104,16 @@
 			>
 				<XIcon class="relative z-10 size-5" />
 			</Dialog.Close>
-			<div bind:this={scrollElement} class={scrollClass} style={scrollStyle}>
-				{@render children()}
+			<div style={bodyMaskStyle}>
+				<div bind:this={bodyElement} style={bodyStyle}>
+					{@render children()}
+				</div>
 			</div>
+			{#if footer}
+				<div bind:this={footerElement} class="shrink-0">
+					{@render footer()}
+				</div>
+			{/if}
 		</div>
 	</div>
 </div>
