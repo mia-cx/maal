@@ -490,7 +490,7 @@
 						</div>
 
 						<div
-							class="sticky bottom-4 z-10 flex items-center justify-between gap-2 border-t border-border bg-popover/95 p-3 backdrop-blur"
+							class="sticky bottom-0 z-10 flex items-center justify-between gap-2 border-t border-border bg-popover/95 px-3 pt-3 pb-7 backdrop-blur"
 						>
 							<div>
 								{#if ondeleted}
