@@ -5,4 +5,8 @@
 	let { data }: { data: PageData } = $props();
 </script>
 
-<MyMenuDashboard recipes={data.recipes} nextRecipeOffset={data.nextRecipeOffset} />
+<MyMenuDashboard
+	recipes={data.recipes}
+	archivedRecipes={data.archivedRecipes}
+	nextRecipeOffset={data.nextRecipeOffset}
+/>

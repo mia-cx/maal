@@ -23,6 +23,7 @@ export type RecipeMenuItem = {
 	sourceUrl?: string;
 	sourceImportedAt?: string;
 	sourceClaimedMinutes?: number;
+	archivedAt?: string;
 	averageActualMinutes?: number;
 	parseConfidence?: number;
 	ingredientConfidence?: number;

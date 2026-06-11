@@ -1,12 +1,20 @@
 <script lang="ts">
+	import * as Accordion from '$lib/components/ui/accordion';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Sidebar from '$lib/components/ui/sidebar';
+	import { Button } from '$lib/components/ui/button';
+	import AddMealDialog from '$lib/components/dashboard/add-meal-dialog.svelte';
 	import { resolve } from '$app/paths';
 	import type { Pathname } from '$app/types';
 	import {
 		appendMenuRecipes,
+		archivedMenuRecipesStore,
+		createMenuRecipe,
 		deleteMenuRecipe,
 		hydrateMenuRecipes,
 		menuRecipesStore,
+		permanentlyDeleteMenuRecipe,
+		restoreMenuRecipe,
 		selectMenuRecipe,
 		selectedMenuRecipeStore,
 		updateMenuRecipe
@@ -17,10 +25,22 @@
 
 	let {
 		recipes: initialRecipes = [],
+		archivedRecipes: initialArchivedRecipes = [],
 		nextRecipeOffset: initialNextRecipeOffset = null
-	}: { recipes?: RecipeMenuItem[]; nextRecipeOffset?: number | null } = $props();
+	}: {
+		recipes?: RecipeMenuItem[];
+		archivedRecipes?: RecipeMenuItem[];
+		nextRecipeOffset?: number | null;
+	} = $props();
 
 	let sheetOpen = $state(false);
+	let addRecipeOpen = $state(false);
+	let addRecipeBusy = $state(false);
+	let addRecipeError = $state<string | null>(null);
+	let archiveActionError = $state<string | null>(null);
+	let archiveActionRecipeId = $state<string | null>(null);
+	let permanentDeleteRecipe = $state<RecipeMenuItem | null>(null);
+	let permanentDeleteOpen = $state(false);
 	let hydratedRecipesSignature = $state('');
 	let nextRecipeOffset = $state<number | null>(null);
 	let recipesLoading = $state(false);
@@ -28,14 +48,18 @@
 	let loadMoreElement = $state<HTMLElement>();
 
 	const recipes = $derived($menuRecipesStore);
+	const archivedRecipes = $derived($archivedMenuRecipesStore);
 	const selectedRecipe = $derived($selectedMenuRecipeStore);
 
 	$effect(() => {
-		const signature = initialRecipes.map((recipe) => recipe.id).join('|');
+		const signature = [
+			initialRecipes.map((recipe) => recipe.id).join('|'),
+			initialArchivedRecipes.map((recipe) => recipe.id).join('|')
+		].join('::');
 		if (signature === hydratedRecipesSignature) return;
 		hydratedRecipesSignature = signature;
 		nextRecipeOffset = initialNextRecipeOffset;
-		hydrateMenuRecipes(initialRecipes);
+		hydrateMenuRecipes(initialRecipes, initialArchivedRecipes);
 	});
 
 	const loadMoreRecipes = async () => {
@@ -74,6 +98,65 @@
 		selectMenuRecipe(recipe.id);
 		sheetOpen = true;
 	};
+
+	const archivedDate = (archivedAt?: string): string => archivedAt?.slice(0, 10) ?? '';
+
+	const readAddRecipeError = (error: unknown): string => {
+		if (error instanceof Error) return error.message;
+		return 'Could not add that recipe.';
+	};
+
+	const openAddRecipe = () => {
+		addRecipeError = null;
+		addRecipeOpen = true;
+	};
+
+	const saveAddedRecipe = async (input: { title?: string; url?: string }) => {
+		addRecipeBusy = true;
+		addRecipeError = null;
+		try {
+			const recipe = await createMenuRecipe(input);
+			addRecipeOpen = false;
+			openRecipe(recipe);
+		} catch (error) {
+			addRecipeError = readAddRecipeError(error);
+		} finally {
+			addRecipeBusy = false;
+		}
+	};
+
+	const restoreArchivedRecipe = async (recipe: RecipeMenuItem) => {
+		archiveActionRecipeId = recipe.id;
+		archiveActionError = null;
+		try {
+			await restoreMenuRecipe(recipe);
+		} catch (error) {
+			archiveActionError = readAddRecipeError(error);
+		} finally {
+			archiveActionRecipeId = null;
+		}
+	};
+
+	const confirmPermanentDelete = (recipe: RecipeMenuItem) => {
+		permanentDeleteRecipe = recipe;
+		archiveActionError = null;
+		permanentDeleteOpen = true;
+	};
+
+	const permanentlyDeleteArchivedRecipe = async () => {
+		if (!permanentDeleteRecipe) return;
+		archiveActionRecipeId = permanentDeleteRecipe.id;
+		archiveActionError = null;
+		try {
+			await permanentlyDeleteMenuRecipe(permanentDeleteRecipe);
+			permanentDeleteOpen = false;
+			permanentDeleteRecipe = null;
+		} catch (error) {
+			archiveActionError = readAddRecipeError(error);
+		} finally {
+			archiveActionRecipeId = null;
+		}
+	};
 </script>
 
 <svelte:head>
@@ -82,13 +165,14 @@
 
 <section class="flex h-svh min-w-0 flex-col overflow-hidden bg-background text-foreground">
 	<header
-		class="sticky top-0 z-40 flex h-[52px] shrink-0 items-center border-b border-border bg-background px-2"
+		class="sticky top-0 z-40 flex h-[52px] shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-2"
 	>
 		<div class="flex shrink-0 items-center gap-2 text-foreground">
 			<div class="flex w-9 shrink-0 items-center justify-center">
 				<Sidebar.Trigger />
 			</div>
 		</div>
+		<Button variant="outline" size="sm" onclick={openAddRecipe}>Add recipe</Button>
 	</header>
 
 	<div class="@container/my-menu-main min-h-0 flex-1 overflow-auto p-3 md:p-4">
@@ -112,8 +196,101 @@
 				</button>
 			{/if}
 		</div>
+
+		<Accordion.Root type="multiple" class="border-border bg-background">
+			<Accordion.Item value="archive">
+				<Accordion.Trigger level={2} class="px-3 py-2">
+					<span>Archive ({archivedRecipes.length})</span>
+				</Accordion.Trigger>
+				<Accordion.Content class="px-3 pb-3">
+					{#if archiveActionError}
+						<p class="mb-2 text-xs text-destructive">{archiveActionError}</p>
+					{/if}
+					{#if archivedRecipes.length}
+						<div class="grid gap-2">
+							{#each archivedRecipes as recipe (recipe.id)}
+								<div
+									class="flex flex-col gap-2 rounded-md border border-border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between"
+								>
+									<div class="min-w-0">
+										<p class="truncate text-sm font-medium">{recipe.title}</p>
+										<p class="text-xs text-muted-foreground">
+											Archived{recipe.archivedAt ? ` ${archivedDate(recipe.archivedAt)}` : ''}
+											{#if recipe.plannedCount}
+												· {recipe.plannedCount} linked meal{recipe.plannedCount === 1 ? '' : 's'}
+											{/if}
+										</p>
+									</div>
+									<div class="flex shrink-0 gap-2">
+										<Button
+											variant="outline"
+											size="sm"
+											disabled={archiveActionRecipeId === recipe.id}
+											onclick={() => restoreArchivedRecipe(recipe)}
+										>
+											Restore
+										</Button>
+										<Button
+											variant="destructive"
+											size="sm"
+											disabled={archiveActionRecipeId === recipe.id}
+											onclick={() => confirmPermanentDelete(recipe)}
+										>
+											Delete forever
+										</Button>
+									</div>
+								</div>
+							{/each}
+						</div>
+					{:else}
+						<p class="text-xs text-muted-foreground">Archived recipes will show up here.</p>
+					{/if}
+				</Accordion.Content>
+			</Accordion.Item>
+		</Accordion.Root>
 	</div>
 </section>
+
+<AddMealDialog
+	bind:open={addRecipeOpen}
+	{recipes}
+	busy={addRecipeBusy}
+	error={addRecipeError}
+	onexisting={openRecipe}
+	onnewrecipe={(title) => saveAddedRecipe({ title })}
+	onurl={(url) => saveAddedRecipe({ url })}
+/>
+
+<Dialog.Root bind:open={permanentDeleteOpen}>
+	<Dialog.Content showCloseButton={false} class="sm:max-w-[24rem]">
+		<Dialog.Header>
+			<Dialog.Title>Permanently delete recipe?</Dialog.Title>
+			<Dialog.Description>
+				This cannot be undone. All meals linked to “{permanentDeleteRecipe?.title ?? 'this recipe'}”
+				will also be deleted.
+			</Dialog.Description>
+		</Dialog.Header>
+		{#if archiveActionError}
+			<p class="text-xs text-destructive">{archiveActionError}</p>
+		{/if}
+		<div class="flex justify-end gap-2">
+			<Button
+				variant="ghost"
+				disabled={Boolean(archiveActionRecipeId)}
+				onclick={() => (permanentDeleteOpen = false)}
+			>
+				Cancel
+			</Button>
+			<Button
+				variant="destructive"
+				disabled={Boolean(archiveActionRecipeId)}
+				onclick={permanentlyDeleteArchivedRecipe}
+			>
+				Delete recipe and meals
+			</Button>
+		</div>
+	</Dialog.Content>
+</Dialog.Root>
 
 <MyMenuRecipeSheet
 	bind:open={sheetOpen}

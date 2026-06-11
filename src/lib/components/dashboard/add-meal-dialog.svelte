@@ -21,7 +21,7 @@
 	}: {
 		open?: boolean;
 		date?: string;
-		recipes: RecipeMenuItem[];
+		recipes: readonly RecipeMenuItem[];
 		busy?: boolean;
 		error?: string | null;
 		onexisting?: (recipe: RecipeMenuItem) => void;

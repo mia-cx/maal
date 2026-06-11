@@ -29,13 +29,20 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 		householdId,
 		locale: profileRows[0]?.locale ?? 'en-US'
 	});
-	const recipes = await loadMenuRecipes(db, session.user.id, householdId, {
-		limit: initialRecipeLimit + 1,
-		unitPreferences: taxonomyPreferences.unitPreferences
-	});
+	const [recipes, archivedRecipes] = await Promise.all([
+		loadMenuRecipes(db, session.user.id, householdId, {
+			limit: initialRecipeLimit + 1,
+			unitPreferences: taxonomyPreferences.unitPreferences
+		}),
+		loadMenuRecipes(db, session.user.id, householdId, {
+			archive: 'archived',
+			unitPreferences: taxonomyPreferences.unitPreferences
+		})
+	]);
 	const hasMoreRecipes = recipes.length > initialRecipeLimit;
 	return {
 		recipes: recipes.slice(0, initialRecipeLimit),
+		archivedRecipes,
 		nextRecipeOffset: hasMoreRecipes ? initialRecipeLimit : null
 	};
 };

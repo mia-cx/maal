@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNull, lte, or } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNotNull, isNull, lte, or } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import type * as schema from '$lib/server/db/schema';
 import {
@@ -224,6 +224,7 @@ export const menuItemFromRecipe = (params: {
 		sourceIsBasedOnUrl: recipe.sourceIsBasedOnUrl ?? undefined,
 		sourceImportedAt: recipe.sourceImportedAt,
 		sourceClaimedMinutes: recipe.sourceClaimedMinutes ?? undefined,
+		archivedAt: recipe.deletedAt ?? undefined,
 		averageActualMinutes: params.averageActualMinutes,
 		parseConfidence: recipe.parseConfidence ?? undefined,
 		ingredientConfidence: recipe.ingredientConfidence ?? undefined,
@@ -272,15 +273,22 @@ export const loadMenuRecipes = async (
 		offset?: number;
 		unitPreferences?: UnitPreferences;
 		recipeIds?: string[];
+		archive?: 'active' | 'archived' | 'all';
 	} = {}
 ) => {
+	const archiveFilter =
+		options.archive === 'archived'
+			? isNotNull(userRecipes.deletedAt)
+			: options.archive === 'all'
+				? undefined
+				: isNull(userRecipes.deletedAt);
 	const recipeQuery = db
 		.select()
 		.from(userRecipes)
 		.where(
 			and(
 				eq(userRecipes.workosUserId, workosUserId),
-				isNull(userRecipes.deletedAt),
+				archiveFilter,
 				options.recipeIds?.length ? inArray(userRecipes.id, options.recipeIds) : undefined
 			)
 		)

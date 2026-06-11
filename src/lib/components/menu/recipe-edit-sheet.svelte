@@ -387,12 +387,12 @@
 		open = false;
 	};
 
-	const openDeleteConfirm = () => {
+	const openArchiveConfirm = () => {
 		deleteError = null;
 		deleteConfirmOpen = true;
 	};
 
-	const deleteRecipe = async () => {
+	const archiveRecipe = async () => {
 		if (!recipe || !ondeleted) return;
 		deleteBusy = true;
 		deleteError = null;
@@ -401,7 +401,7 @@
 			deleteConfirmOpen = false;
 			open = false;
 		} catch (error) {
-			deleteError = error instanceof Error ? error.message : 'Could not delete recipe.';
+			deleteError = error instanceof Error ? error.message : 'Could not archive recipe.';
 		} finally {
 			deleteBusy = false;
 		}
@@ -649,7 +649,8 @@
 						>
 							<div>
 								{#if ondeleted}
-									<Button.Root variant="destructive" onclick={openDeleteConfirm}>Delete</Button.Root
+									<Button.Root variant="destructive" onclick={openArchiveConfirm}
+										>Archive</Button.Root
 									>
 								{/if}
 							</div>
@@ -701,7 +702,7 @@
 <Dialog.Root bind:open={deleteConfirmOpen}>
 	<Dialog.Content showCloseButton={false} class="sm:max-w-[22rem]">
 		<Dialog.Header>
-			<Dialog.Title>Are you sure you want to delete?</Dialog.Title>
+			<Dialog.Title>Archive this recipe?</Dialog.Title>
 			<Dialog.Description>
 				This removes the recipe from My Menu. Planned meals keep their saved recipe snapshot.
 			</Dialog.Description>
@@ -717,8 +718,8 @@
 			>
 				Keep recipe
 			</Button.Root>
-			<Button.Root variant="destructive" disabled={deleteBusy} onclick={deleteRecipe}>
-				{deleteBusy ? 'Deleting…' : 'Delete recipe'}
+			<Button.Root variant="destructive" disabled={deleteBusy} onclick={archiveRecipe}>
+				{deleteBusy ? 'Archiving…' : 'Archive recipe'}
 			</Button.Root>
 		</div>
 	</Dialog.Content>
