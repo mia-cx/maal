@@ -5,6 +5,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
+	import GripVerticalIcon from '@lucide/svelte/icons/grip-vertical';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import type { RecipeIngredientItem, RecipeInstructionItem, RecipeMenuItem } from './menu-types';
 
@@ -310,8 +311,6 @@
 
 	const startInstructionDrag = (instruction: DraftInstruction, event: PointerEvent) => {
 		if (event.pointerType === 'mouse' && event.button !== 0) return;
-		const target = event.target as HTMLElement;
-		if (target.closest('button, input, textarea, a, [contenteditable="true"]')) return;
 		event.preventDefault();
 		draggedInstruction = instruction;
 		draggedInstructionPointerId = event.pointerId;
@@ -534,47 +533,54 @@
 										<div
 											data-instruction-row
 											role="listitem"
-											class="grid gap-2 sm:grid-cols-[4.5rem_minmax(0,1fr)_auto] sm:items-center"
-											onpointerdown={(event) => startInstructionDrag(instruction, event)}
+											class="grid gap-2 sm:grid-cols-[6.25rem_minmax(0,1fr)_auto] sm:items-center"
 										>
-											<div
-												class="grid cursor-grab touch-none gap-1 text-xs font-medium active:cursor-grabbing"
-											>
-												<Button.Root
+											<div class="flex items-stretch gap-1 text-xs font-medium">
+												<button
 													type="button"
-													size="sm"
-													class="h-7 px-2"
-													disabled={instruction.position === 1}
-													aria-label="Move instruction up"
-													onclick={() => swapInstructionPosition(instruction.draftId, -1)}
+													aria-label={`Drag instruction ${instruction.position}`}
+													class="flex w-6 cursor-grab touch-none items-center justify-center rounded-md border border-dashed border-border bg-background p-0 text-muted-foreground active:cursor-grabbing"
+													onpointerdown={(event) => startInstructionDrag(instruction, event)}
 												>
-													<ChevronUpIcon class="size-4" />
-												</Button.Root>
-												<Input
-													type="text"
-													inputmode="numeric"
-													value={instructionPositionDrafts[instruction.draftId] ??
-														String(instruction.position)}
-													oninput={(event) =>
-														updateInstructionPositionDraft(
-															instruction.draftId,
-															event.currentTarget.value
-														)}
-													onchange={() => commitInstructionPosition(instruction.draftId)}
-													onkeydown={(event) =>
-														handleInstructionPositionKeydown(instruction.draftId, event)}
-													aria-label="Instruction position"
-												/>
-												<Button.Root
-													type="button"
-													size="sm"
-													class="h-7 px-2"
-													disabled={instruction.position === sortedInstructions.length}
-													aria-label="Move instruction down"
-													onclick={() => swapInstructionPosition(instruction.draftId, 1)}
-												>
-													<ChevronDownIcon class="size-4" />
-												</Button.Root>
+													<GripVerticalIcon class="size-4" />
+												</button>
+												<div class="grid flex-1 gap-1">
+													<Button.Root
+														type="button"
+														size="sm"
+														class="h-7 px-2"
+														disabled={instruction.position === 1}
+														aria-label="Move instruction up"
+														onclick={() => swapInstructionPosition(instruction.draftId, -1)}
+													>
+														<ChevronUpIcon class="size-4" />
+													</Button.Root>
+													<Input
+														type="text"
+														inputmode="numeric"
+														value={instructionPositionDrafts[instruction.draftId] ??
+															String(instruction.position)}
+														oninput={(event) =>
+															updateInstructionPositionDraft(
+																instruction.draftId,
+																event.currentTarget.value
+															)}
+														onchange={() => commitInstructionPosition(instruction.draftId)}
+														onkeydown={(event) =>
+															handleInstructionPositionKeydown(instruction.draftId, event)}
+														aria-label="Instruction position"
+													/>
+													<Button.Root
+														type="button"
+														size="sm"
+														class="h-7 px-2"
+														disabled={instruction.position === sortedInstructions.length}
+														aria-label="Move instruction down"
+														onclick={() => swapInstructionPosition(instruction.draftId, 1)}
+													>
+														<ChevronDownIcon class="size-4" />
+													</Button.Root>
+												</div>
 											</div>
 											<textarea
 												value={instruction.text}
@@ -635,16 +641,23 @@
 		style={`left: ${instructionDragX}px; top: ${instructionDragY}px;`}
 	>
 		<div
-			class="grid gap-2 rounded-md border border-border bg-popover p-2 sm:grid-cols-[4.5rem_minmax(0,1fr)] sm:items-center"
+			class="grid gap-2 rounded-md border border-border bg-popover p-2 sm:grid-cols-[6.25rem_minmax(0,1fr)] sm:items-center"
 		>
-			<div class="grid gap-1 text-xs font-medium">
-				<Button.Root type="button" size="sm" class="h-7 px-2" disabled>
-					<ChevronUpIcon class="size-4" />
-				</Button.Root>
-				<Input type="text" value={String(draggedInstruction.position)} readonly />
-				<Button.Root type="button" size="sm" class="h-7 px-2" disabled>
-					<ChevronDownIcon class="size-4" />
-				</Button.Root>
+			<div class="flex items-stretch gap-1 text-xs font-medium">
+				<span
+					class="flex w-6 items-center justify-center rounded-md border border-dashed border-border bg-background text-muted-foreground"
+				>
+					<GripVerticalIcon class="size-4" />
+				</span>
+				<div class="grid flex-1 gap-1">
+					<Button.Root type="button" size="sm" class="h-7 px-2" disabled>
+						<ChevronUpIcon class="size-4" />
+					</Button.Root>
+					<Input type="text" value={String(draggedInstruction.position)} readonly />
+					<Button.Root type="button" size="sm" class="h-7 px-2" disabled>
+						<ChevronDownIcon class="size-4" />
+					</Button.Root>
+				</div>
 			</div>
 			<p
 				class="min-h-[5.75rem] rounded-md border border-input bg-input/20 px-2 py-1.5 text-sm leading-relaxed"
