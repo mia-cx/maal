@@ -3,6 +3,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { Button } from '$lib/components/ui/button';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { resolve } from '$app/paths';
 	import type { Pathname } from '$app/types';
 	import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
@@ -37,8 +38,11 @@
 	let draftRecipe = $state<RecipeMenuItem | null>(null);
 	let archiveActionError = $state<string | null>(null);
 	let archiveActionRecipeId = $state<string | null>(null);
-	let permanentDeleteRecipe = $state<RecipeMenuItem | null>(null);
+	let selectedRecipeIds = $state<string[]>([]);
+	let selectedArchivedRecipeIds = $state<string[]>([]);
+	let permanentDeleteRecipes = $state<RecipeMenuItem[]>([]);
 	let permanentDeleteOpen = $state(false);
+	let permanentDeleteButton = $state<HTMLButtonElement | null>(null);
 	let hydratedRecipesSignature = $state('');
 	let nextRecipeOffset = $state<number | null>(null);
 	let recipesLoading = $state(false);
@@ -48,6 +52,12 @@
 	const recipes = $derived($menuRecipesStore);
 	const archivedRecipes = $derived($archivedMenuRecipesStore);
 	const selectedRecipe = $derived(draftRecipe ?? $selectedMenuRecipeStore);
+	const selectedRecipes = $derived(
+		recipes.filter((recipe) => selectedRecipeIds.includes(recipe.id))
+	);
+	const selectedArchivedRecipes = $derived(
+		archivedRecipes.filter((recipe) => selectedArchivedRecipeIds.includes(recipe.id))
+	);
 
 	$effect(() => {
 		const signature = [
@@ -79,6 +89,36 @@
 		appendMenuRecipes(body.recipes);
 		nextRecipeOffset = body.nextRecipeOffset;
 	};
+
+	const idsMatch = (left: string[], right: string[]): boolean =>
+		left.length === right.length && left.every((id) => right.includes(id));
+
+	$effect(() => {
+		const nextSelectedRecipeIds = selectedRecipeIds.filter((id) =>
+			recipes.some((recipe) => recipe.id === id)
+		);
+		if (!idsMatch(selectedRecipeIds, nextSelectedRecipeIds))
+			selectedRecipeIds = nextSelectedRecipeIds;
+	});
+
+	$effect(() => {
+		const nextSelectedArchivedRecipeIds = selectedArchivedRecipeIds.filter((id) =>
+			archivedRecipes.some((recipe) => recipe.id === id)
+		);
+		if (!idsMatch(selectedArchivedRecipeIds, nextSelectedArchivedRecipeIds)) {
+			selectedArchivedRecipeIds = nextSelectedArchivedRecipeIds;
+		}
+	});
+
+	$effect(() => {
+		if (!permanentDeleteOpen || !permanentDeleteButton) return;
+		setTimeout(() => permanentDeleteButton?.focus());
+	});
+
+	$effect(() => {
+		if (permanentDeleteOpen) return;
+		permanentDeleteRecipes = [];
+	});
 
 	$effect(() => {
 		if (!loadMoreElement || nextRecipeOffset === null) return;
@@ -160,6 +200,50 @@
 		openRecipe(savedRecipe);
 	};
 
+	const toggleRecipeSelection = (recipe: RecipeMenuItem, selected: boolean) => {
+		selectedRecipeIds = selected
+			? selectedRecipeIds.includes(recipe.id)
+				? selectedRecipeIds
+				: [...selectedRecipeIds, recipe.id]
+			: selectedRecipeIds.filter((id) => id !== recipe.id);
+	};
+
+	const toggleArchivedRecipeSelection = (recipe: RecipeMenuItem, selected: boolean) => {
+		selectedArchivedRecipeIds = selected
+			? selectedArchivedRecipeIds.includes(recipe.id)
+				? selectedArchivedRecipeIds
+				: [...selectedArchivedRecipeIds, recipe.id]
+			: selectedArchivedRecipeIds.filter((id) => id !== recipe.id);
+	};
+
+	const archiveSelectedRecipes = async () => {
+		if (!selectedRecipes.length) return;
+		archiveActionRecipeId = 'bulk-archive';
+		archiveActionError = null;
+		try {
+			for (const recipe of selectedRecipes) await deleteMenuRecipe(recipe);
+			selectedRecipeIds = [];
+		} catch (error) {
+			archiveActionError = readAddRecipeError(error);
+		} finally {
+			archiveActionRecipeId = null;
+		}
+	};
+
+	const restoreSelectedArchivedRecipes = async () => {
+		if (!selectedArchivedRecipes.length) return;
+		archiveActionRecipeId = 'bulk-restore';
+		archiveActionError = null;
+		try {
+			for (const recipe of selectedArchivedRecipes) await restoreMenuRecipe(recipe);
+			selectedArchivedRecipeIds = [];
+		} catch (error) {
+			archiveActionError = readAddRecipeError(error);
+		} finally {
+			archiveActionRecipeId = null;
+		}
+	};
+
 	const restoreArchivedRecipe = async (recipe: RecipeMenuItem) => {
 		archiveActionRecipeId = recipe.id;
 		archiveActionError = null;
@@ -172,20 +256,21 @@
 		}
 	};
 
-	const confirmPermanentDelete = (recipe: RecipeMenuItem) => {
-		permanentDeleteRecipe = recipe;
+	const confirmPermanentDelete = (recipes: RecipeMenuItem | RecipeMenuItem[]) => {
+		permanentDeleteRecipes = Array.isArray(recipes) ? recipes : [recipes];
 		archiveActionError = null;
 		permanentDeleteOpen = true;
 	};
 
 	const permanentlyDeleteArchivedRecipe = async () => {
-		if (!permanentDeleteRecipe) return;
-		archiveActionRecipeId = permanentDeleteRecipe.id;
+		if (!permanentDeleteRecipes.length) return;
+		archiveActionRecipeId = 'permanent-delete';
 		archiveActionError = null;
 		try {
-			await permanentlyDeleteMenuRecipe(permanentDeleteRecipe);
+			for (const recipe of permanentDeleteRecipes) await permanentlyDeleteMenuRecipe(recipe);
+			selectedArchivedRecipeIds = [];
 			permanentDeleteOpen = false;
-			permanentDeleteRecipe = null;
+			permanentDeleteRecipes = [];
 		} catch (error) {
 			archiveActionError = readAddRecipeError(error);
 		} finally {
@@ -211,11 +296,39 @@
 	</header>
 
 	<div class="@container/my-menu-main min-h-0 flex-1 overflow-auto p-3 md:p-4">
+		{#if selectedRecipes.length}
+			<div
+				class="mb-3 flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3 sm:flex-row sm:items-center sm:justify-between"
+			>
+				<p class="text-sm font-medium">
+					{selectedRecipes.length} recipe{selectedRecipes.length === 1 ? '' : 's'} selected
+				</p>
+				<div class="flex gap-2">
+					<Button variant="outline" size="sm" onclick={() => (selectedRecipeIds = [])}>
+						Deselect all
+					</Button>
+					<Button
+						variant="destructive"
+						size="sm"
+						disabled={Boolean(archiveActionRecipeId)}
+						onclick={archiveSelectedRecipes}
+					>
+						Archive selected
+					</Button>
+				</div>
+			</div>
+		{/if}
+
 		<div
 			class="grid grid-cols-1 gap-3 md:gap-4 @min-[42rem]/my-menu-main:grid-cols-2 @min-[64rem]/my-menu-main:grid-cols-3 @min-[86rem]/my-menu-main:grid-cols-4"
 		>
 			{#each recipes as recipe (recipe.id)}
-				<RecipeMenuCard {recipe} onselect={openRecipe} />
+				<RecipeMenuCard
+					{recipe}
+					selected={selectedRecipeIds.includes(recipe.id)}
+					onselect={openRecipe}
+					onselectionchange={toggleRecipeSelection}
+				/>
 			{/each}
 		</div>
 		<div bind:this={loadMoreElement} class="flex min-h-10 items-center justify-center py-4">
@@ -241,20 +354,68 @@
 					{#if archiveActionError}
 						<p class="mb-2 text-xs text-destructive">{archiveActionError}</p>
 					{/if}
+					{#if selectedArchivedRecipes.length}
+						<div
+							class="mb-3 flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3 sm:flex-row sm:items-center sm:justify-between"
+						>
+							<p class="text-sm font-medium">
+								{selectedArchivedRecipes.length} archived recipe{selectedArchivedRecipes.length ===
+								1
+									? ''
+									: 's'} selected
+							</p>
+							<div class="flex flex-wrap gap-2">
+								<Button
+									variant="outline"
+									size="sm"
+									onclick={() => (selectedArchivedRecipeIds = [])}
+								>
+									Deselect all
+								</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									disabled={Boolean(archiveActionRecipeId)}
+									onclick={restoreSelectedArchivedRecipes}
+								>
+									Restore selected
+								</Button>
+								<Button
+									variant="destructive"
+									size="sm"
+									disabled={Boolean(archiveActionRecipeId)}
+									onclick={() => confirmPermanentDelete(selectedArchivedRecipes)}
+								>
+									Delete selected forever
+								</Button>
+							</div>
+						</div>
+					{/if}
 					{#if archivedRecipes.length}
 						<div class="grid gap-2">
 							{#each archivedRecipes as recipe (recipe.id)}
 								<div
 									class="flex flex-col gap-2 rounded-md border border-border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between"
 								>
-									<div class="min-w-0">
-										<p class="truncate text-sm font-medium">{recipe.title}</p>
-										<p class="text-xs text-muted-foreground">
-											Archived{recipe.archivedAt ? ` ${archivedDate(recipe.archivedAt)}` : ''}
-											{#if recipe.plannedCount}
-												· {recipe.plannedCount} linked meal{recipe.plannedCount === 1 ? '' : 's'}
-											{/if}
-										</p>
+									<div class="flex min-w-0 gap-3">
+										<Checkbox
+											checked={selectedArchivedRecipeIds.includes(recipe.id)}
+											aria-label={`Select ${recipe.title}`}
+											onclick={() =>
+												toggleArchivedRecipeSelection(
+													recipe,
+													!selectedArchivedRecipeIds.includes(recipe.id)
+												)}
+										/>
+										<div class="min-w-0">
+											<p class="truncate text-sm font-medium">{recipe.title}</p>
+											<p class="text-xs text-muted-foreground">
+												Archived{recipe.archivedAt ? ` ${archivedDate(recipe.archivedAt)}` : ''}
+												{#if recipe.plannedCount}
+													· {recipe.plannedCount} linked meal{recipe.plannedCount === 1 ? '' : 's'}
+												{/if}
+											</p>
+										</div>
 									</div>
 									<div class="flex shrink-0 gap-2">
 										<Button
@@ -289,10 +450,13 @@
 <Dialog.Root bind:open={permanentDeleteOpen}>
 	<Dialog.Content showCloseButton={false} class="sm:max-w-[24rem]">
 		<Dialog.Header>
-			<Dialog.Title>Permanently delete recipe?</Dialog.Title>
+			<Dialog.Title>
+				Permanently delete recipe{permanentDeleteRecipes.length === 1 ? '' : 's'}?
+			</Dialog.Title>
 			<Dialog.Description>
-				This cannot be undone. All meals linked to “{permanentDeleteRecipe?.title ?? 'this recipe'}”
-				will also be deleted.
+				This cannot be undone. All meals linked to {permanentDeleteRecipes.length === 1
+					? `“${permanentDeleteRecipes[0]?.title ?? 'this recipe'}”`
+					: `${permanentDeleteRecipes.length} recipes`} will also be deleted.
 			</Dialog.Description>
 		</Dialog.Header>
 		{#if archiveActionError}
@@ -307,11 +471,12 @@
 				Cancel
 			</Button>
 			<Button
+				bind:ref={permanentDeleteButton}
 				variant="destructive"
 				disabled={Boolean(archiveActionRecipeId)}
 				onclick={permanentlyDeleteArchivedRecipe}
 			>
-				Delete recipe and meals
+				Delete recipe{permanentDeleteRecipes.length === 1 ? '' : 's'} and meals
 			</Button>
 		</div>
 	</Dialog.Content>

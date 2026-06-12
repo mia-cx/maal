@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { mealFeedbackVerdictLabels } from '$lib/components/dashboard/meal-labels';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Card from '$lib/components/ui/card';
 	import { cn } from '$lib/utils';
 	import MessageSquareTextIcon from '@lucide/svelte/icons/message-square-text';
@@ -19,8 +20,15 @@
 
 	let {
 		recipe,
-		onselect
-	}: { recipe: RecipeMenuItem; onselect?: (recipe: RecipeMenuItem) => void } = $props();
+		selected = false,
+		onselect,
+		onselectionchange
+	}: {
+		recipe: RecipeMenuItem;
+		selected?: boolean;
+		onselect?: (recipe: RecipeMenuItem) => void;
+		onselectionchange?: (recipe: RecipeMenuItem, selected: boolean) => void;
+	} = $props();
 
 	const primaryMetadata = $derived(recipePrimaryMetadata(recipe));
 	const totalReviews = $derived(recipeReviewCount(recipe));
@@ -34,20 +42,29 @@
 	]);
 
 	const selectRecipe = () => onselect?.(recipe);
+	const toggleSelected = (event: MouseEvent) => {
+		event.stopPropagation();
+		onselectionchange?.(recipe, !selected);
+	};
 </script>
 
-<button
-	type="button"
-	aria-label={`Open ${recipe.title}`}
-	class="group h-full min-w-0 appearance-none border-0 bg-transparent p-0 text-left text-inherit"
-	onclick={selectRecipe}
+<Card.Root
+	size="sm"
+	class={cn(
+		"group relative h-full min-w-0 gap-0 overflow-hidden bg-card/50 py-0 text-left shadow-sm ring-1 ring-border/70 transition-colors after:absolute after:inset-y-0 after:left-0 after:w-1 after:content-[''] hover:ring-foreground/25 data-[size=sm]:py-0",
+		selected ? 'ring-primary/70' : '',
+		menuLoadAccentClasses[mealLoad]
+	)}
 >
-	<Card.Root
-		size="sm"
-		class={cn(
-			"relative h-full min-w-0 gap-0 overflow-hidden bg-card/50 py-0 shadow-sm ring-1 ring-border/70 transition-colors after:absolute after:inset-y-0 after:left-0 after:w-1 after:content-[''] hover:ring-foreground/25 data-[size=sm]:py-0",
-			menuLoadAccentClasses[mealLoad]
-		)}
+	<div class="absolute top-2 left-2 z-10 rounded-md bg-background/80 p-1 shadow-sm backdrop-blur">
+		<Checkbox checked={selected} aria-label={`Select ${recipe.title}`} onclick={toggleSelected} />
+	</div>
+
+	<button
+		type="button"
+		aria-label={`Open ${recipe.title}`}
+		class="h-full w-full min-w-0 appearance-none border-0 bg-transparent p-0 text-left text-inherit"
+		onclick={selectRecipe}
 	>
 		{#if recipe.image}
 			<img src={recipe.image} alt="" loading="lazy" class="aspect-[2/1] w-full object-cover" />
@@ -124,5 +141,5 @@
 				</p>
 			{/if}
 		</Card.Content>
-	</Card.Root>
-</button>
+	</button>
+</Card.Root>
