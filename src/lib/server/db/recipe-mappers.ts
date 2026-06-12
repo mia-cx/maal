@@ -440,23 +440,7 @@ export const loadMealPlanMeals = async (
 	}
 ) => {
 	const includeMealPool = params.includeMealPool ?? true;
-	const menuRecipes = includeMealPool
-		? (params.menuRecipes ?? (await loadMenuRecipes(db, params.workosUserId, params.householdId)))
-		: [];
-	const defaultMealServings = Math.max(1, Math.round(params.defaultMealServings ?? 1));
 	const unitPreferences = params.unitPreferences ?? {};
-	const poolMeals = includeMealPool
-		? menuRecipes
-				.filter((recipe) => recipe.plannedCount === 0)
-				.map((recipe, index) =>
-					mealFromMenuRecipe(recipe, {
-						userRecipeId: recipe.id,
-						servingsPlanned: defaultMealServings,
-						baseServings: recipe.yield ?? defaultMealServings,
-						sortOrder: (index + 1) * 1000
-					})
-				)
-		: [];
 
 	const dateRangeFilter =
 		params.startDate && params.endDate
@@ -506,7 +490,7 @@ export const loadMealPlanMeals = async (
 		)
 	);
 
-	return [...poolMeals, ...scheduledMeals];
+	return scheduledMeals;
 };
 
 export const updateRecipeIngredients = async (
