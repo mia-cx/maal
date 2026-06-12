@@ -253,8 +253,7 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 			defaultMealServings: await countActiveHouseholdMembers(platform, householdId),
 			startDate,
 			endDate,
-			unitPreferences,
-			includeMealPool: false
+			unitPreferences
 		})
 	});
 };

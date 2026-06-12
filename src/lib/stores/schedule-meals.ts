@@ -310,20 +310,14 @@ export const addScheduleMealFromRecipe = (
 	date?: string,
 	defaultServings = 1
 ) => {
-	const existingPoolMeal = scheduleMealStore.get().find((meal) => meal.id === recipe.id);
-	if (!date && existingPoolMeal) {
-		selectedMealIdStore.set(existingPoolMeal.id);
-		return existingPoolMeal;
-	}
-
 	const meal = mealFromRecipe(recipe, defaultServings, {
-		id: date ? newLocalMealId() : recipe.id,
+		id: newLocalMealId(),
 		date,
 		day: date ? weekdayName(dateFromKey(date)) : undefined
 	});
 	scheduleMealStore.set([...scheduleMealStore.get(), cloneMeal(meal)]);
 	selectedMealIdStore.set(meal.id);
-	if (date) persistNewScheduleMeal(meal);
+	persistNewScheduleMeal(meal);
 	return meal;
 };
 
