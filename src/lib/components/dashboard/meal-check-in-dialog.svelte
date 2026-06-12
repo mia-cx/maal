@@ -96,7 +96,7 @@
 
 		<div class="grid gap-3">
 			<div class="grid gap-1.5">
-				<p class="text-xs font-medium">Did you cook this meal?</p>
+				<p class="text-xs font-medium">Was this meal cooked and eaten?</p>
 				<div class="grid grid-cols-2 gap-1">
 					<Button.Root
 						type="button"
@@ -104,7 +104,7 @@
 						class="h-auto min-h-8 px-1.5 text-center whitespace-normal"
 						onclick={() => (cooked = true)}
 					>
-						Yes
+						Cooked/eaten
 					</Button.Root>
 					<Button.Root
 						type="button"
@@ -112,7 +112,7 @@
 						class="h-auto min-h-8 px-1.5 text-center whitespace-normal"
 						onclick={() => (cooked = false)}
 					>
-						No
+						Skipped
 					</Button.Root>
 				</div>
 			</div>
