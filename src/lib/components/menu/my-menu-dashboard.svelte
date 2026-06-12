@@ -230,9 +230,10 @@
 	};
 
 	const toggleRecipeSelection = (recipe: RecipeMenuItem, selected: boolean, range = false) => {
+		const useRange = range && selectedRecipeIds.length > 0;
 		selectedRecipeIds = applySelection(
 			selectedRecipeIds,
-			range ? rangeIds(recipes, lastSelectedRecipeId, recipe.id) : [recipe.id],
+			useRange ? rangeIds(recipes, lastSelectedRecipeId, recipe.id) : [recipe.id],
 			selected
 		);
 		lastSelectedRecipeId = recipe.id;
@@ -243,9 +244,10 @@
 		selected: boolean,
 		range = false
 	) => {
+		const useRange = range && selectedArchivedRecipeIds.length > 0;
 		selectedArchivedRecipeIds = applySelection(
 			selectedArchivedRecipeIds,
-			range ? rangeIds(archivedRecipes, lastSelectedArchivedRecipeId, recipe.id) : [recipe.id],
+			useRange ? rangeIds(archivedRecipes, lastSelectedArchivedRecipeId, recipe.id) : [recipe.id],
 			selected
 		);
 		lastSelectedArchivedRecipeId = recipe.id;
@@ -258,6 +260,7 @@
 		try {
 			for (const recipe of selectedRecipes) await deleteMenuRecipe(recipe);
 			selectedRecipeIds = [];
+			lastSelectedRecipeId = null;
 		} catch (error) {
 			archiveActionError = readAddRecipeError(error);
 		} finally {
@@ -272,6 +275,7 @@
 		try {
 			for (const recipe of selectedArchivedRecipes) await restoreMenuRecipe(recipe);
 			selectedArchivedRecipeIds = [];
+			lastSelectedArchivedRecipeId = null;
 		} catch (error) {
 			archiveActionError = readAddRecipeError(error);
 		} finally {
@@ -304,6 +308,7 @@
 		try {
 			for (const recipe of permanentDeleteRecipes) await permanentlyDeleteMenuRecipe(recipe);
 			selectedArchivedRecipeIds = [];
+			lastSelectedArchivedRecipeId = null;
 			permanentDeleteOpen = false;
 			permanentDeleteRecipes = [];
 		} catch (error) {
@@ -341,7 +346,10 @@
 					variant="outline"
 					size="sm"
 					disabled={!selectedRecipes.length}
-					onclick={() => (selectedRecipeIds = [])}
+					onclick={() => {
+						selectedRecipeIds = [];
+						lastSelectedRecipeId = null;
+					}}
 				>
 					Deselect all
 				</Button>
@@ -422,7 +430,10 @@
 								variant="outline"
 								size="sm"
 								disabled={!selectedArchivedRecipes.length}
-								onclick={() => (selectedArchivedRecipeIds = [])}
+								onclick={() => {
+									selectedArchivedRecipeIds = [];
+									lastSelectedArchivedRecipeId = null;
+								}}
 							>
 								Deselect all
 							</Button>
