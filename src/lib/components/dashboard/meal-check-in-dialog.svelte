@@ -9,6 +9,7 @@
 
 	export type MealCheckInPayload = {
 		meal: Meal;
+		cooked: boolean;
 		verdict: MealFeedbackVerdict;
 		cookTime?: number;
 		reason?: string;
@@ -24,6 +25,7 @@
 		onsubmit?: (payload: MealCheckInPayload) => void | Promise<void>;
 	} = $props();
 
+	let cooked = $state(true);
 	let verdict = $state<MealFeedbackVerdict>('repeat');
 	let cookTime = $state('');
 	let reason = $state('');
@@ -34,6 +36,7 @@
 	const verdicts: MealFeedbackVerdict[] = ['repeat', 'neutral', 'avoid'];
 
 	const reset = () => {
+		cooked = meal?.latestCheckIn ? meal.status === 'cooked' : true;
 		verdict = meal?.latestCheckIn?.verdict ?? 'repeat';
 		cookTime = String(meal?.latestCheckIn?.cookTime ?? meal?.cookTimeMinutes ?? '');
 		reason = meal?.latestCheckIn?.reason ?? '';
@@ -53,8 +56,9 @@
 		try {
 			await onsubmit({
 				meal,
+				cooked,
 				verdict,
-				cookTime: parsedCookTime(),
+				cookTime: cooked ? parsedCookTime() : undefined,
 				reason: reason.trim() || undefined
 			});
 			open = false;
@@ -92,6 +96,28 @@
 
 		<div class="grid gap-3">
 			<div class="grid gap-1.5">
+				<p class="text-xs font-medium">Did you cook this meal?</p>
+				<div class="grid grid-cols-2 gap-1">
+					<Button.Root
+						type="button"
+						variant={cooked ? 'default' : 'outline'}
+						class="h-auto min-h-8 px-1.5 text-center whitespace-normal"
+						onclick={() => (cooked = true)}
+					>
+						Yes
+					</Button.Root>
+					<Button.Root
+						type="button"
+						variant={!cooked ? 'default' : 'outline'}
+						class="h-auto min-h-8 px-1.5 text-center whitespace-normal"
+						onclick={() => (cooked = false)}
+					>
+						No
+					</Button.Root>
+				</div>
+			</div>
+
+			<div class="grid gap-1.5">
 				<p class="text-xs font-medium">Verdict</p>
 				<div class="grid grid-cols-3 gap-1">
 					{#each verdicts as option (option)}
@@ -109,7 +135,13 @@
 
 			<label class="grid gap-1.5 text-xs font-medium">
 				Cook time, if you cooked
-				<Input bind:value={cookTime} type="text" inputmode="numeric" placeholder="30" />
+				<Input
+					bind:value={cookTime}
+					type="text"
+					inputmode="numeric"
+					placeholder="30"
+					disabled={!cooked}
+				/>
 			</label>
 
 			<label class="grid gap-1.5 text-xs font-medium">

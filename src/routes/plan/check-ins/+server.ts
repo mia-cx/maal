@@ -47,7 +47,8 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	if (!existingMeal) error(404, { message: 'Meal not found.' });
 
 	const reason = isRecord(body) && typeof body.reason === 'string' ? body.reason.trim() : '';
-	const cookTime = positiveInteger(isRecord(body) ? body.cookTime : undefined);
+	const cooked = !isRecord(body) || body.cooked !== false;
+	const cookTime = cooked ? positiveInteger(isRecord(body) ? body.cookTime : undefined) : null;
 	const updatedAt = new Date().toISOString();
 
 	await db
@@ -73,7 +74,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	await db
 		.update(householdMeals)
 		.set({
-			status: 'cooked',
+			status: cooked ? 'cooked' : 'planned',
 			updatedAt
 		})
 		.where(eq(householdMeals.id, mealId));

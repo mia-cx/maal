@@ -3,6 +3,7 @@ export type ScheduleMode = 'daily' | 'multi-day' | 'monthly';
 import type { MealFeedbackVerdict } from './meal-labels';
 
 export type MealFamiliarity = 'safe' | 'exploration' | 'wildcard';
+export type MealStatus = 'planned' | 'cooked';
 
 export type MealCheckIn = {
 	verdict: MealFeedbackVerdict;
@@ -25,6 +26,7 @@ export type Meal = {
 	date?: string;
 	time?: string;
 	sortOrder?: number;
+	status?: MealStatus;
 	cookTimeMinutes?: number;
 	adjustedCookTimeMinutes?: number;
 	servingsPlanned?: number;

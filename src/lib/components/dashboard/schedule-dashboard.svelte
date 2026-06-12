@@ -301,16 +301,23 @@
 		checkInOpen = true;
 	};
 
-	const saveMealCheckIn = async ({ meal, verdict, cookTime, reason }: MealCheckInPayload) => {
+	const saveMealCheckIn = async ({
+		meal,
+		cooked,
+		verdict,
+		cookTime,
+		reason
+	}: MealCheckInPayload) => {
 		const response = await fetch('/plan/check-ins', {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ mealId: meal.id, verdict, cookTime, reason })
+			body: JSON.stringify({ mealId: meal.id, cooked, verdict, cookTime, reason })
 		});
 		if (!response.ok) throw new Error(await response.text());
 		updateScheduleMealSchedule(
 			{
 				...meal,
+				status: cooked ? 'cooked' : 'planned',
 				latestVerdict: verdict,
 				latestCheckIn: { verdict, cookTime, reason: reason?.trim() || undefined }
 			},
