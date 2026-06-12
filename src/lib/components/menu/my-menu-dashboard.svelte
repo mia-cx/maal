@@ -6,6 +6,7 @@
 	import AddMealDialog from '$lib/components/dashboard/add-meal-dialog.svelte';
 	import { resolve } from '$app/paths';
 	import type { Pathname } from '$app/types';
+	import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
 	import {
 		appendMenuRecipes,
 		archivedMenuRecipesStore,
@@ -67,7 +68,7 @@
 		recipesLoading = true;
 		recipesLoadError = null;
 		const response = await fetch(
-			resolve(`/menu/recipes?offset=${nextRecipeOffset}&limit=24` as Pathname)
+			resolve(`/menu/recipes?offset=${nextRecipeOffset}&limit=${MENU_RECIPE_PAGE_SIZE}` as Pathname)
 		);
 		recipesLoading = false;
 		if (!response.ok) {

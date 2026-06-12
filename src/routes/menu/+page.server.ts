@@ -5,9 +5,8 @@ import { getDb } from '$lib/server/db';
 import { loadMenuRecipes } from '$lib/server/db/recipe-mappers';
 import { households } from '$lib/server/db/schema';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
+import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
 import type { PageServerLoad } from './$types';
-
-const initialRecipeLimit = 24;
 
 export const load: PageServerLoad = async ({ cookies, locals, parent, platform, url }) => {
 	const session = locals.session;
@@ -31,7 +30,7 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 	});
 	const [recipes, archivedRecipes] = await Promise.all([
 		loadMenuRecipes(db, session.user.id, householdId, {
-			limit: initialRecipeLimit + 1,
+			limit: MENU_RECIPE_PAGE_SIZE + 1,
 			unitPreferences: taxonomyPreferences.unitPreferences
 		}),
 		loadMenuRecipes(db, session.user.id, householdId, {
@@ -39,10 +38,10 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 			unitPreferences: taxonomyPreferences.unitPreferences
 		})
 	]);
-	const hasMoreRecipes = recipes.length > initialRecipeLimit;
+	const hasMoreRecipes = recipes.length > MENU_RECIPE_PAGE_SIZE;
 	return {
-		recipes: recipes.slice(0, initialRecipeLimit),
+		recipes: recipes.slice(0, MENU_RECIPE_PAGE_SIZE),
 		archivedRecipes,
-		nextRecipeOffset: hasMoreRecipes ? initialRecipeLimit : null
+		nextRecipeOffset: hasMoreRecipes ? MENU_RECIPE_PAGE_SIZE : null
 	};
 };

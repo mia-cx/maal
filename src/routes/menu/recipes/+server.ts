@@ -21,13 +21,14 @@ import type {
 	RecipeMenuItem
 } from '$lib/components/menu/menu-types';
 import { parseIngredientLine, type UnitPreferences } from '$lib/recipes/ingredient-text';
+import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 
 const fallbackTitle = 'Untitled recipe';
 const maxTitleLength = 160;
 const maxUrlLength = 2048;
 const maxImportBytes = 1_500_000;
-const defaultRecipePageSize = 24;
+const defaultRecipePageSize = MENU_RECIPE_PAGE_SIZE;
 const maxRecipePageSize = 60;
 const maxClassificationRowsPerInsert = 12;
 const maxMediaRowsPerInsert = 10;
