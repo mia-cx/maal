@@ -29,7 +29,10 @@
 	<div
 		class="h-svh [scrollbar-width:none] overflow-y-auto rounded-none sm:my-4 sm:h-[calc(100svh-2rem)] sm:rounded-xl [&::-webkit-scrollbar]:hidden"
 	>
-		<div class="pt-0 sm:pt-[var(--sheet-lead-in)]" style={`--sheet-lead-in: ${leadIn}px;`}>
+		<div
+			class="pt-0 sm:pt-[var(--sheet-lead-in)]"
+			style={`--sheet-lead-in: min(${leadIn}px, 33svh);`}
+		>
 			<div class="pointer-events-none sticky top-0 z-30 h-0">
 				<Dialog.Close
 					aria-label={closeLabel}
