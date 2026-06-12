@@ -55,7 +55,7 @@
 	)}
 >
 	<Checkbox
-		class="absolute top-3 left-3 z-10 border-foreground bg-background opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 data-checked:border-foreground data-checked:bg-foreground data-checked:text-background data-checked:opacity-100"
+		class="absolute top-3 left-3 z-10 border-black bg-white text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 dark:border-white dark:bg-black dark:text-black data-checked:border-black data-checked:bg-black data-checked:text-white data-checked:opacity-100 dark:data-checked:border-white dark:data-checked:bg-white dark:data-checked:text-black"
 		checked={selected}
 		aria-label={`Select ${recipe.title}`}
 		onpointerdown={(event) => (rangeSelection = event.shiftKey)}
