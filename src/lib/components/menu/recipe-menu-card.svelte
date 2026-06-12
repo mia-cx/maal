@@ -55,7 +55,7 @@
 	)}
 >
 	<Checkbox
-		class="absolute top-3 left-3 z-10 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 data-checked:opacity-100"
+		class="absolute top-3 left-3 z-10 bg-background opacity-0 shadow-sm transition-opacity group-hover:opacity-100 focus-visible:opacity-100 data-checked:opacity-100"
 		checked={selected}
 		aria-label={`Select ${recipe.title}`}
 		onpointerdown={(event) => (rangeSelection = event.shiftKey)}
