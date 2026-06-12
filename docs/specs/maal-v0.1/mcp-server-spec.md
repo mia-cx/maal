@@ -18,11 +18,11 @@ The MCP server must call existing Maal server/service functions. Route handlers 
 
 ## Authentication
 
-MCP clients authenticate with a user-owned API key.
+MCP clients authenticate with a user-owned MCP access key. These are API keys in the technical sense, but user-facing copy should call them MCP keys.
 
-### API key requirements
+### MCP key requirements
 
-- API keys are owned by a WorkOS user.
+- MCP keys are owned by a WorkOS user.
 - Each key grants a maximum API capability set, similar to Vesta/Erato's global `scopes` array.
 - Each key also has a household allow-list:
   - one household
@@ -41,9 +41,20 @@ MCP clients authenticate with a user-owned API key.
 - Store only a hash of the secret token.
 - Return the raw secret exactly once at creation.
 
+### User settings creation flow
+
+Add an MCP keys section to user settings before exposing the MCP server. The flow should let a signed-in user:
+
+1. Create a key with a required label, household scope, and coarse scopes.
+2. Pick one household, multiple households, or all current/future households.
+3. Start from presets such as read-only planner, meal planner, and full access rather than forcing users to understand every scope.
+4. See the raw key exactly once with a copy button and clear “store this now” warning.
+5. List existing keys with label, household scope, scopes/preset, created at, last used at, expiry, and revoked state.
+6. Revoke a key without exposing its raw secret again.
+
 ### Storage proposal
 
-Use Cloudflare KV for API key lookup/provisioning.
+Use Cloudflare KV for MCP key lookup/provisioning.
 
 Suggested shape:
 
@@ -59,7 +70,7 @@ type MaalApiScope =
 	| 'food_profile:read'
 	| 'food_profile:write';
 
-type ApiKeyRecord = {
+type McpKeyRecord = {
 	id: string;
 	userId: string;
 	secretHash: string;
@@ -73,24 +84,24 @@ type ApiKeyRecord = {
 };
 ```
 
-Lookup options:
+Lookup:
 
-- key by token prefix: `api_key_prefix:<prefix> -> key id`
-- key by id: `api_key:<id> -> ApiKeyRecord`
+- Store the full key hash directly: `mk:<sha256(rawKey)> -> McpKeyRecord`
+- Do not maintain a prefix index unless lookup performance or UX later proves it is needed.
 
 Token format suggestion:
 
 ```txt
-maal_sk_live_<keyIdPrefix>_<secret>
+mk_<randomSecret>
 ```
 
 Server flow:
 
 1. Read bearer token from `Authorization: Bearer ...`.
-2. Parse prefix/id hint.
-3. Load key record from KV.
-4. Hash presented secret and constant-time compare.
-5. Reject revoked keys.
+2. Require it to start with `mk_`.
+3. Hash the presented key.
+4. Load `mk:<sha256(rawKey)>` from KV.
+5. Reject missing or revoked keys.
 6. Resolve key household allow-list.
 7. For each tool call, require the requested household to be in the key's household allow-list.
 8. Require the key's global scopes to include the tool's API scope.
@@ -100,35 +111,37 @@ If the key is scoped to more than one household or all households, expose `list_
 
 ## Household scoping and effective permissions
 
-Every tool that reads or writes household data must accept `householdId` unless the API key has exactly one household in scope.
+Every tool that reads or writes household data must accept `householdId` unless the MCP key has exactly one household in scope.
 
 Authorization is the intersection of three checks:
 
-1. **API key household allow-list**: the requested household is allowed by the key.
-2. **API key scope**: the key grants the tool's coarse API scope, e.g. `meals:read` or `meals:write`.
+1. **MCP key household allow-list**: the requested household is allowed by the key.
+2. **MCP key scope**: the key grants the tool's coarse API scope, e.g. `meals:read` or `meals:write`.
 3. **WorkOS household role permission**: the key owner is still an active member of that household organization and their WorkOS role grants the mapped Maal permission.
 
 This lets a user mint a narrowly scoped key, and also lets household role changes immediately reduce API access without rotating every key. For example, a child role can grant `meals:read` while withholding `meals:write`, so their key can list meals but cannot create or edit them even if the key's own scopes are broader.
 
 Suggested permission mapping:
 
-| MCP/API action               | API key scope        | WorkOS role permission         |
-| ---------------------------- | -------------------- | ------------------------------ |
-| List households              | `households:read`    | active organization membership |
-| List/get recipes             | `recipes:read`       | `recipes:read`                 |
-| Create/update/delete recipes | `recipes:write`      | `recipes:write`                |
-| List/get meal plan           | `meals:read`         | `meals:read`                   |
-| Create/update/delete meals   | `meals:write`        | `meals:write`                  |
-| List check-ins               | `check_ins:read`     | `check_ins:read`               |
-| Create/update check-ins      | `check_ins:write`    | `check_ins:write`              |
-| Read diet/food profile       | `food_profile:read`  | `food_profile:read`            |
-| Update diet/food profile     | `food_profile:write` | `food_profile:write`           |
+| MCP/API action                              | MCP key scope        | WorkOS role permission         |
+| ------------------------------------------- | -------------------- | ------------------------------ |
+| List households                             | `households:read`    | active organization membership |
+| List/get recipes                            | `recipes:read`       | `recipes:read`                 |
+| Create/update/delete recipes                | `recipes:write`      | `recipes:write`                |
+| List/get meal plan                          | `meals:read`         | `meals:read`                   |
+| Create/update/delete meals                  | `meals:write`        | `meals:write`                  |
+| List/get check-ins                          | `check_ins:read`     | `check_ins:read`               |
+| Create/update/delete check-ins              | `check_ins:write`    | `check_ins:write`              |
+| List/get diet/food profile                  | `food_profile:read`  | `food_profile:read`            |
+| Create/update/delete diet/food profile data | `food_profile:write` | `food_profile:write`           |
+
+Tool shape and permission scopes are intentionally different levels of granularity. MCP should expose explicit operation tools where useful — list, get/read, create, update, delete/archive — while scopes stay coarse. `*:read` covers list and get/read tools. `*:write` covers create, update, delete, archive, skip, restore, and other mutating tools.
 
 Errors must be explicit:
 
 - `household_required`: key has multiple households; pass `householdId`.
 - `household_forbidden`: key is not scoped to that household or the owner is no longer an active member.
-- `insufficient_scope`: key lacks the required API key scope.
+- `insufficient_scope`: key lacks the required MCP key scope.
 - `insufficient_role_permission`: key owner lacks the required WorkOS role permission in that household.
 - `not_found`: resource is absent or outside scope.
 
@@ -170,7 +183,7 @@ Check-in cook-time entry should remain limited to the planned cook.
 
 ### `maal_list_user_households`
 
-Only exposed/needed when API key can access more than one household.
+Only exposed/needed when the MCP key can access more than one household.
 
 Inputs: none.
 
@@ -517,8 +530,8 @@ Before implementing MCP tools, extract route logic into modules:
   - validate household membership/scope
 - `src/lib/server/services/food-profile.ts`
   - household diet/food profile reads
-- `src/lib/server/auth/api-keys.ts`
-  - create/revoke/verify API keys
+- `src/lib/server/auth/mcp-keys.ts`
+  - create/revoke/verify MCP keys
   - KV integration
 
 SvelteKit routes and MCP tools should both depend on these modules.
@@ -529,7 +542,7 @@ Recommended first implementation:
 
 - Cloudflare-hosted Streamable HTTP MCP endpoint.
 - Stateless JSON responses.
-- Bearer API key auth.
+- Bearer MCP key auth.
 
 Possible endpoint:
 
@@ -553,17 +566,17 @@ type ToolError = {
 
 Examples:
 
-- `household_required`: “This API key can access multiple households. Pass householdId.”
+- `household_required`: “This MCP key can access multiple households. Pass householdId.”
 - `planned_cook_required`: “Only the planned cook can report cook time. Omit cookTimeMinutes or change plannedCookUserId.”
 - `recipe_not_found`: “Recipe was not found in this user’s menu.”
 - `date_range_too_large`: “Use a date range of 180 days or less.”
 
 ## Open questions for review
 
-1. Should API keys have read/write scopes, or is household scope enough for v1?
+1. Should MCP key write scopes stay coarse for all mutations, or should any destructive operations require extra confirmation/scope?
 2. Should `skipped` require a check-in row, or can meal status be set directly?
 3. Should `verdict` be required for cooked check-ins?
 4. Should assistants be able to permanently delete recipes/meals, or only archive/remove from plan?
 5. What is the persisted source of truth for household diet/allergy constraints?
-6. Do API keys inherit newly joined households when scoped to `all`, or only households visible at key creation time?
+6. Do MCP keys inherit newly joined households when scoped to `all`, or only households visible at key creation time?
 7. Should `list_user_recipes` expose raw ingredients/instructions by default, or require `includeDetails`?
