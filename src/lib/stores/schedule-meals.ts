@@ -237,7 +237,7 @@ export const mergeHydratedScheduleMeals = (meals: Meal[], startDate: string, end
 		if (optimisticIdsToKeep.has(meal.id)) return true;
 		if (incomingIds.has(meal.id)) return false;
 		if (pendingCreateMealIds.has(meal.id)) return true;
-		if (!meal.date) return false;
+		if (!meal.date) return true;
 		return meal.date < startDate || meal.date > endDate;
 	});
 	const incomingToMerge = incomingMeals.filter((meal) => !optimisticIdsToKeep.has(meal.id));

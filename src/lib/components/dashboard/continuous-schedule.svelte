@@ -26,7 +26,8 @@
 		onpick,
 		onselect,
 		oncheckin,
-		onscrollstatechange
+		onscrollstatechange,
+		onloadedrangechange
 	}: {
 		mealPool: Meal[];
 		plannedMeals: Meal[];
@@ -43,6 +44,7 @@
 		onselect?: (meal: Meal) => void;
 		oncheckin?: MealCheckInHandler;
 		onscrollstatechange?: (scrollState: DailyScrollState) => void;
+		onloadedrangechange?: (range: { start: string; end: string }) => void;
 	} = $props();
 
 	let days = $state<Date[]>([]);
@@ -212,6 +214,11 @@
 			keyboardNavigation ? 'smooth' : 'auto',
 			keyboardNavigation ? 0 : (dailyScroll?.offset ?? 0)
 		);
+	});
+
+	$effect(() => {
+		if (!days.length) return;
+		onloadedrangechange?.({ start: dateKey(days[0]), end: dateKey(days.at(-1)!) });
 	});
 
 	$effect(() => {

@@ -25,7 +25,7 @@
 	import type { Meal, MealCheckInHandler, MealDropTarget } from './schedule-types';
 	import { scheduleDaysFor } from './schedule-types';
 
-	const pageSizeWeeks = 12;
+	const pageSizeWeeks = 6;
 	const visibleWeekCount = 6;
 	const trackpadInputActiveMs = 360;
 	const trackpadTailSnapIdleMs = 96;
@@ -59,7 +59,8 @@
 		onselect,
 		oncheckin,
 		onselectdate,
-		onanchordatechange
+		onanchordatechange,
+		onloadedrangechange
 	}: {
 		mealPool: Meal[];
 		plannedMeals: Meal[];
@@ -75,6 +76,7 @@
 		oncheckin?: MealCheckInHandler;
 		onselectdate?: (date: Date) => void;
 		onanchordatechange?: (date: Date) => void;
+		onloadedrangechange?: (range: { start: string; end: string }) => void;
 	} = $props();
 
 	let weeks = $state<Date[]>([]);
@@ -631,6 +633,14 @@
 			reflowingLayout = false;
 			void scrollToWeek(stableDate);
 		}, 180);
+	});
+
+	$effect(() => {
+		if (!weeks.length) return;
+		onloadedrangechange?.({
+			start: dateKey(weeks[0]),
+			end: dateKey(addDays(weeks.at(-1)!, 6))
+		});
 	});
 
 	$effect(() => {

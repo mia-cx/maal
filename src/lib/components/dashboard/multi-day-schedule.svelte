@@ -61,7 +61,8 @@
 		onselect,
 		oncheckin,
 		onanchordatechange,
-		onvisibledaycountchange
+		onvisibledaycountchange,
+		onloadedrangechange
 	}: {
 		mealPool: Meal[];
 		plannedMeals: Meal[];
@@ -78,6 +79,7 @@
 		oncheckin?: MealCheckInHandler;
 		onanchordatechange?: (date: Date) => void;
 		onvisibledaycountchange?: (dayCount: number) => void;
+		onloadedrangechange?: (range: { start: string; end: string }) => void;
 	} = $props();
 
 	let days = $state<Date[]>([]);
@@ -699,6 +701,11 @@
 			reflowingLayout = false;
 			void scrollToDate(stableLeftDate);
 		}, 180);
+	});
+
+	$effect(() => {
+		if (!days.length) return;
+		onloadedrangechange?.({ start: dateKey(days[0]), end: dateKey(days.at(-1)!) });
 	});
 
 	$effect(() => {

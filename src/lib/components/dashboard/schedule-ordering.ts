@@ -17,6 +17,7 @@ export const compareScheduledMealOrder = (left: Meal, right: Meal): number => {
 	return compareMealPoolOrder(left, right);
 };
 
-export const sortMealPool = (meals: Meal[]): Meal[] => [...meals].sort(compareMealPoolOrder);
-export const sortScheduledMeals = (meals: Meal[]): Meal[] =>
+export const sortMealPool = (meals: readonly Meal[]): Meal[] =>
+	[...meals].sort(compareMealPoolOrder);
+export const sortScheduledMeals = (meals: readonly Meal[]): Meal[] =>
 	[...meals].sort(compareScheduledMealOrder);

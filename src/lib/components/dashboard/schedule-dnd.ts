@@ -33,7 +33,7 @@ const cardIndexAtPointer = (
 	return index === -1 ? cards.length : index;
 };
 
-const timedInsertionIndex = (meals: Meal[], draggedMeal: Meal, date: string): number => {
+const timedInsertionIndex = (meals: readonly Meal[], draggedMeal: Meal, date: string): number => {
 	if (!draggedMeal.time) return -1;
 	const nextDraggedMeal = { ...draggedMeal, date };
 	const sortedTargetMeals = sortScheduledMeals([
@@ -44,7 +44,7 @@ const timedInsertionIndex = (meals: Meal[], draggedMeal: Meal, date: string): nu
 };
 
 const untimedInsertionIndex = (
-	meals: Meal[],
+	meals: readonly Meal[],
 	draggedMeal: Meal,
 	date: string,
 	pointerIndex: number
@@ -58,7 +58,7 @@ const untimedInsertionIndex = (
 export const dropTargetFromPointer = (
 	event: PointerEvent,
 	draggedMeal: Meal,
-	meals: Meal[]
+	meals: readonly Meal[]
 ): MealDropTarget | null => {
 	const target = document
 		.elementFromPoint(event.clientX, event.clientY)
@@ -87,7 +87,7 @@ const assignSortOrders = (nextMeals: Meal[], orderedIds: string[]): Meal[] => {
 };
 
 const moveToPool = (
-	meals: Meal[],
+	meals: readonly Meal[],
 	draggedMeal: Meal,
 	target: Extract<MealDropTarget, { kind: 'pool' }>
 ): Meal[] => {
@@ -106,7 +106,7 @@ const moveToPool = (
 };
 
 const moveToDate = (
-	meals: Meal[],
+	meals: readonly Meal[],
 	draggedMeal: Meal,
 	target: Extract<MealDropTarget, { kind: 'date' }>
 ): Meal[] => {
@@ -135,7 +135,7 @@ const moveToDate = (
 };
 
 export const moveMealToDropTarget = (
-	meals: Meal[],
+	meals: readonly Meal[],
 	draggedMeal: Meal,
 	target: MealDropTarget
 ): Meal[] =>

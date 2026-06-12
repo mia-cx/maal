@@ -74,6 +74,7 @@
 	let hydratedRecipesSignature = $state('');
 	let loadedMealRanges = $state<{ start: string; end: string }[]>([]);
 	let loadingMealRangeKey = $state('');
+	let renderedMealRange = $state<{ start: string; end: string } | null>(null);
 
 	const mealPool = $derived(sortMealPool($scheduleMealStore.filter(isMealInPool)));
 	const plannedMeals = $derived($scheduleMealStore.filter((meal) => !isMealInPool(meal)));
@@ -102,18 +103,34 @@
 		'm'
 	].map((key) => ({ key, meta: false, ctrl: false, alt: false }));
 
-	const mealLoadRangeFor = (date: Date) => {
-		const start = dateKey(addDays(date, -45));
-		const end = dateKey(addDays(date, 90));
-		return { start, end, key: `${start}:${end}` };
-	};
-
 	const hasLoadedMealRange = (start: string, end: string): boolean =>
 		loadedMealRanges.some((range) => range.start <= start && range.end >= end);
 
-	const loadMealRange = async (range: { start: string; end: string; key: string }) => {
-		if (hasLoadedMealRange(range.start, range.end) || loadingMealRangeKey === range.key) return;
-		loadingMealRangeKey = range.key;
+	const nextDateKey = (key: string): string => dateKey(addDays(dateFromKey(key), 1));
+	const previousDateKey = (key: string): string => dateKey(addDays(dateFromKey(key), -1));
+
+	const missingMealRanges = (range: { start: string; end: string }) => {
+		let cursor = range.start;
+		const missing: { start: string; end: string }[] = [];
+		const overlappingRanges = loadedMealRanges
+			.filter((loadedRange) => loadedRange.end >= range.start && loadedRange.start <= range.end)
+			.toSorted((left, right) => left.start.localeCompare(right.start));
+
+		for (const loadedRange of overlappingRanges) {
+			if (loadedRange.start > cursor) {
+				missing.push({ start: cursor, end: previousDateKey(loadedRange.start) });
+			}
+			if (loadedRange.end >= cursor) cursor = nextDateKey(loadedRange.end);
+			if (cursor > range.end) break;
+		}
+		if (cursor <= range.end) missing.push({ start: cursor, end: range.end });
+		return missing;
+	};
+
+	const loadMealRangeSegment = async (range: { start: string; end: string }) => {
+		const key = `${range.start}:${range.end}`;
+		if (loadingMealRangeKey === key) return;
+		loadingMealRangeKey = key;
 		try {
 			const response = await fetch(`/plan/meals?start=${range.start}&end=${range.end}`);
 			if (!response.ok) throw new Error(await response.text());
@@ -123,8 +140,20 @@
 		} catch (error) {
 			console.error('Failed to load meal range', error);
 		} finally {
-			if (loadingMealRangeKey === range.key) loadingMealRangeKey = '';
+			if (loadingMealRangeKey === key) loadingMealRangeKey = '';
 		}
+	};
+
+	const loadMealRange = async (range: { start: string; end: string }) => {
+		if (hasLoadedMealRange(range.start, range.end) || loadingMealRangeKey) return;
+		for (const missingRange of missingMealRanges(range)) {
+			await loadMealRangeSegment(missingRange);
+		}
+	};
+
+	const updateRenderedMealRange = (range: { start: string; end: string }) => {
+		if (renderedMealRange?.start === range.start && renderedMealRange.end === range.end) return;
+		renderedMealRange = range;
 	};
 
 	const visibleMealCards = (): HTMLElement[] =>
@@ -431,8 +460,8 @@
 	});
 
 	$effect(() => {
-		const range = mealLoadRangeFor(anchorDate);
-		void loadMealRange(range);
+		if (!renderedMealRange) return;
+		void loadMealRange(renderedMealRange);
 	});
 
 	$effect(() => {
@@ -492,6 +521,7 @@
 				onselect={previewMeal}
 				oncheckin={openMealCheckIn}
 				onscrollstatechange={updateDailyScroll}
+				onloadedrangechange={updateRenderedMealRange}
 			/>
 		{:else if mode === 'multi-day'}
 			<MultiDaySchedule
@@ -510,6 +540,7 @@
 				onselect={previewMeal}
 				oncheckin={openMealCheckIn}
 				onanchordatechange={updateVisibleAnchor}
+				onloadedrangechange={updateRenderedMealRange}
 			/>
 		{:else}
 			<MonthSchedule
@@ -527,6 +558,7 @@
 				oncheckin={openMealCheckIn}
 				onselectdate={openDay}
 				onanchordatechange={updateVisibleAnchor}
+				onloadedrangechange={updateRenderedMealRange}
 			/>
 		{/if}
 	</div>
