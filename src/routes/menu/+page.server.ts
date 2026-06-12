@@ -6,6 +6,7 @@ import { loadMenuRecipes } from '$lib/server/db/recipe-mappers';
 import { households } from '$lib/server/db/schema';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
+import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ cookies, locals, parent, platform, url }) => {
@@ -30,7 +31,6 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 	});
 	const [recipes, archivedRecipes] = await Promise.all([
 		loadMenuRecipes(db, session.user.id, householdId, {
-			limit: MENU_RECIPE_PAGE_SIZE + 1,
 			unitPreferences: taxonomyPreferences.unitPreferences
 		}),
 		loadMenuRecipes(db, session.user.id, householdId, {
@@ -38,10 +38,10 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 			unitPreferences: taxonomyPreferences.unitPreferences
 		})
 	]);
-	const hasMoreRecipes = recipes.length > MENU_RECIPE_PAGE_SIZE;
+	const rankedRecipes = rankRecipesByRelevance(recipes);
 	return {
-		recipes: recipes.slice(0, MENU_RECIPE_PAGE_SIZE),
-		archivedRecipes,
-		nextRecipeOffset: hasMoreRecipes ? MENU_RECIPE_PAGE_SIZE : null
+		recipes: rankedRecipes.slice(0, MENU_RECIPE_PAGE_SIZE),
+		archivedRecipes: rankRecipesByRelevance(archivedRecipes),
+		nextRecipeOffset: rankedRecipes.length > MENU_RECIPE_PAGE_SIZE ? MENU_RECIPE_PAGE_SIZE : null
 	};
 };
