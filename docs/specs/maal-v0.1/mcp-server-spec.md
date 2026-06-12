@@ -23,15 +23,18 @@ MCP clients authenticate with a user-owned API key.
 ### API key requirements
 
 - API keys are owned by a WorkOS user.
-- Each key has a scope over households:
+- Each key grants a maximum API capability set, similar to Vesta/Erato's global `scopes` array.
+- Each key also has a household allow-list:
   - one household
   - multiple explicit households
   - all current/future households for that user
+- The key's scopes are not the final authorization decision. Every tool call must also verify the owning user's active WorkOS organization membership and role permissions for the requested household.
 - Keys can be revoked.
 - Keys should have metadata:
   - key id
   - user id
   - household scope
+  - maximum API scopes
   - created at
   - last used at
   - optional label, e.g. `Poke on Mia's laptop`
@@ -45,13 +48,26 @@ Use Cloudflare KV for API key lookup/provisioning.
 Suggested shape:
 
 ```ts
+type MaalApiScope =
+	| 'households:read'
+	| 'recipes:read'
+	| 'recipes:write'
+	| 'meals:read'
+	| 'meals:write'
+	| 'check_ins:read'
+	| 'check_ins:write'
+	| 'food_profile:read'
+	| 'food_profile:write';
+
 type ApiKeyRecord = {
 	id: string;
 	userId: string;
 	secretHash: string;
 	householdScope: { kind: 'all' } | { kind: 'households'; householdIds: string[] };
+	scopes: MaalApiScope[];
 	label?: string;
 	createdAt: string;
+	expiresAt?: string;
 	revokedAt?: string;
 	lastUsedAt?: string;
 };
@@ -75,19 +91,45 @@ Server flow:
 3. Load key record from KV.
 4. Hash presented secret and constant-time compare.
 5. Reject revoked keys.
-6. Resolve allowed household ids.
-7. For each tool call, require the requested household to be in scope.
+6. Resolve key household allow-list.
+7. For each tool call, require the requested household to be in the key's household allow-list.
+8. Require the key's global scopes to include the tool's API scope.
+9. Load the user's active WorkOS organization membership/role for the requested household and require the corresponding role permission.
 
 If the key is scoped to more than one household or all households, expose `list_user_households`. If scoped to exactly one household, tools may default to that household when `householdId` is omitted.
 
-## Household scoping
+## Household scoping and effective permissions
 
 Every tool that reads or writes household data must accept `householdId` unless the API key has exactly one household in scope.
+
+Authorization is the intersection of three checks:
+
+1. **API key household allow-list**: the requested household is allowed by the key.
+2. **API key scope**: the key grants the tool's coarse API scope, e.g. `meals:read` or `meals:write`.
+3. **WorkOS household role permission**: the key owner is still an active member of that household organization and their WorkOS role grants the mapped Maal permission.
+
+This lets a user mint a narrowly scoped key, and also lets household role changes immediately reduce API access without rotating every key. For example, a child role can grant `meals:read` while withholding `meals:write`, so their key can list meals but cannot create or edit them even if the key's own scopes are broader.
+
+Suggested permission mapping:
+
+| MCP/API action               | API key scope        | WorkOS role permission         |
+| ---------------------------- | -------------------- | ------------------------------ |
+| List households              | `households:read`    | active organization membership |
+| List/get recipes             | `recipes:read`       | `recipes:read`                 |
+| Create/update/delete recipes | `recipes:write`      | `recipes:write`                |
+| List/get meal plan           | `meals:read`         | `meals:read`                   |
+| Create/update/delete meals   | `meals:write`        | `meals:write`                  |
+| List check-ins               | `check_ins:read`     | `check_ins:read`               |
+| Create/update check-ins      | `check_ins:write`    | `check_ins:write`              |
+| Read diet/food profile       | `food_profile:read`  | `food_profile:read`            |
+| Update diet/food profile     | `food_profile:write` | `food_profile:write`           |
 
 Errors must be explicit:
 
 - `household_required`: key has multiple households; pass `householdId`.
-- `household_forbidden`: key is not scoped to that household.
+- `household_forbidden`: key is not scoped to that household or the owner is no longer an active member.
+- `insufficient_scope`: key lacks the required API key scope.
+- `insufficient_role_permission`: key owner lacks the required WorkOS role permission in that household.
 - `not_found`: resource is absent or outside scope.
 
 ## Data model adjustments before MCP v1
