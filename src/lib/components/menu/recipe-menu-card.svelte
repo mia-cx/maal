@@ -52,15 +52,12 @@
 		menuLoadAccentClasses[mealLoad]
 	)}
 >
-	<div
-		class="absolute top-2 left-2 z-10 rounded-md bg-background/80 p-1 opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100 focus-within:opacity-100"
-	>
-		<Checkbox
-			checked={selected}
-			aria-label={`Select ${recipe.title}`}
-			onCheckedChange={(checked) => onselectionchange?.(recipe, checked)}
-		/>
-	</div>
+	<Checkbox
+		class="absolute top-3 left-3 z-10 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 data-checked:opacity-100"
+		checked={selected}
+		aria-label={`Select ${recipe.title}`}
+		onCheckedChange={(checked) => onselectionchange?.(recipe, checked)}
+	/>
 
 	<button
 		type="button"
