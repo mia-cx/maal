@@ -365,11 +365,12 @@
 			.map((instruction, index) => ({ ...instruction, position: index + 1 }));
 
 	const importSourceUrl = async () => {
-		if (!onimporturl || !sourceUrlCanImport || importBusy) return;
+		if (!recipe || !onimporturl || !sourceUrlCanImport || importBusy) return;
 		importBusy = true;
 		importError = null;
 		try {
-			syncRecipe(await onimporturl(sourceUrl.trim()));
+			const importedRecipe = await onimporturl(sourceUrl.trim());
+			syncRecipe({ ...recipe, ...importedRecipe, id: recipe.id });
 		} catch (error) {
 			importError = error instanceof Error ? error.message : 'Could not import that recipe.';
 		} finally {

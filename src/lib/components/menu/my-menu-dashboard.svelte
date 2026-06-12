@@ -201,7 +201,6 @@
 		if (!response.ok)
 			throw new Error(await readResponseError(response, 'Could not import recipe.'));
 		const body = (await response.json()) as { recipe: RecipeMenuItem };
-		draftRecipe = body.recipe;
 		return body.recipe;
 	};
 
