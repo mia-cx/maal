@@ -1,8 +1,8 @@
 <script lang="ts">
 	import * as Accordion from '$lib/components/ui/accordion';
 	import * as Card from '$lib/components/ui/card';
-	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Sidebar from '$lib/components/ui/sidebar';
+	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { resolve } from '$app/paths';
@@ -47,7 +47,6 @@
 	let archivedRangeSelection = false;
 	let permanentDeleteRecipes = $state<RecipeMenuItem[]>([]);
 	let permanentDeleteOpen = $state(false);
-	let permanentDeleteButton = $state<HTMLButtonElement | null>(null);
 	let hydratedRecipesSignature = $state('');
 	let nextRecipeOffset = $state<number | null>(null);
 	let recipesLoading = $state(false);
@@ -123,11 +122,6 @@
 		) {
 			lastSelectedArchivedRecipeId = null;
 		}
-	});
-
-	$effect(() => {
-		if (!permanentDeleteOpen || !permanentDeleteButton) return;
-		setTimeout(() => permanentDeleteButton?.focus());
 	});
 
 	$effect(() => {
@@ -219,7 +213,11 @@
 		return [...selectedIds, ...ids.filter((id) => !selectedIds.includes(id))];
 	};
 
-	const rangeIds = (items: RecipeMenuItem[], fromId: string | null, toId: string): string[] => {
+	const rangeIds = (
+		items: readonly RecipeMenuItem[],
+		fromId: string | null,
+		toId: string
+	): string[] => {
 		const toIndex = items.findIndex((item) => item.id === toId);
 		const fromIndex = fromId ? items.findIndex((item) => item.id === fromId) : -1;
 		if (fromIndex < 0 || toIndex < 0) return [toId];
@@ -515,40 +513,18 @@
 	</div>
 </section>
 
-<Dialog.Root bind:open={permanentDeleteOpen}>
-	<Dialog.Content showCloseButton={false} class="sm:max-w-[24rem]">
-		<Dialog.Header>
-			<Dialog.Title>
-				Permanently delete recipe{permanentDeleteRecipes.length === 1 ? '' : 's'}?
-			</Dialog.Title>
-			<Dialog.Description>
-				This cannot be undone. All meals linked to {permanentDeleteRecipes.length === 1
-					? `“${permanentDeleteRecipes[0]?.title ?? 'this recipe'}”`
-					: `${permanentDeleteRecipes.length} recipes`} will also be deleted.
-			</Dialog.Description>
-		</Dialog.Header>
-		{#if archiveActionError}
-			<p class="text-xs text-destructive">{archiveActionError}</p>
-		{/if}
-		<div class="flex justify-end gap-2">
-			<Button
-				variant="ghost"
-				disabled={Boolean(archiveActionRecipeId)}
-				onclick={() => (permanentDeleteOpen = false)}
-			>
-				Cancel
-			</Button>
-			<Button
-				bind:ref={permanentDeleteButton}
-				variant="destructive"
-				disabled={Boolean(archiveActionRecipeId)}
-				onclick={permanentlyDeleteArchivedRecipe}
-			>
-				Delete recipe{permanentDeleteRecipes.length === 1 ? '' : 's'} and meals
-			</Button>
-		</div>
-	</Dialog.Content>
-</Dialog.Root>
+<DeleteConfirmDialog
+	bind:open={permanentDeleteOpen}
+	contentClass="sm:max-w-[24rem]"
+	title="Permanently delete recipe{permanentDeleteRecipes.length === 1 ? '' : 's'}?"
+	description="This cannot be undone. All meals linked to {permanentDeleteRecipes.length === 1
+		? `“${permanentDeleteRecipes[0]?.title ?? 'this recipe'}”`
+		: `${permanentDeleteRecipes.length} recipes`} will also be deleted."
+	confirmLabel="Delete recipe{permanentDeleteRecipes.length === 1 ? '' : 's'} and meals"
+	busy={Boolean(archiveActionRecipeId)}
+	error={archiveActionError}
+	onconfirm={permanentlyDeleteArchivedRecipe}
+/>
 
 <MyMenuRecipeSheet
 	bind:open={sheetOpen}

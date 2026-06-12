@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import type { Pathname } from '$app/types';
 	import { Button } from '$lib/components/ui/button';
+	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
 	import * as InputOTP from '$lib/components/ui/input-otp';
@@ -73,6 +74,8 @@
 	let mfaFactorsLoaded = $state(false);
 	let mfaFactorsBusy = $state(false);
 	let deletingMfaFactorId = $state<string | null>(null);
+	let mfaDeleteOpen = $state(false);
+	let mfaFactorToDelete = $state<MfaFactor | null>(null);
 	let securityMessage = $state<string | null>(null);
 	let securityError = $state<string | null>(null);
 
@@ -338,8 +341,9 @@
 		securityMessage = 'Two-factor authentication is set up.';
 	};
 
-	const deleteMfaFactor = async (factor: MfaFactor) => {
-		if (!confirm('Remove this authenticator app?')) return;
+	const deleteMfaFactor = async () => {
+		const factor = mfaFactorToDelete;
+		if (!factor) return;
 		deletingMfaFactorId = factor.id;
 		securityMessage = null;
 		securityError = null;
@@ -358,8 +362,20 @@
 
 		const body = (await response.json()) as { factors: MfaFactor[] };
 		mfaFactors = body.factors;
+		mfaDeleteOpen = false;
+		mfaFactorToDelete = null;
 		securityMessage = 'Authenticator app removed.';
 	};
+
+	const confirmDeleteMfaFactor = (factor: MfaFactor) => {
+		mfaFactorToDelete = factor;
+		mfaDeleteOpen = true;
+	};
+
+	$effect(() => {
+		if (mfaDeleteOpen || deletingMfaFactorId) return;
+		mfaFactorToDelete = null;
+	});
 
 	const openPasswordChange = () => {
 		currentPassword = '';
@@ -538,7 +554,7 @@
 												variant="outline"
 												size="sm"
 												disabled={deletingMfaFactorId === factor.id}
-												onclick={() => void deleteMfaFactor(factor)}
+												onclick={() => confirmDeleteMfaFactor(factor)}
 											>
 												{deletingMfaFactorId === factor.id ? 'Removing…' : 'Remove'}
 											</Button>
@@ -623,6 +639,18 @@
 		</div>
 	</Dialog.Content>
 </Dialog.Root>
+
+<DeleteConfirmDialog
+	bind:open={mfaDeleteOpen}
+	title="Remove authenticator app?"
+	description="You will need another sign-in method to use two-factor authentication."
+	confirmLabel="Remove"
+	confirmingLabel="Removing…"
+	cancelLabel="Keep app"
+	busy={Boolean(deletingMfaFactorId)}
+	error={securityError}
+	onconfirm={deleteMfaFactor}
+/>
 
 <Dialog.Root bind:open={mfaSetupOpen}>
 	<Dialog.Content class="sm:max-w-[26rem]">

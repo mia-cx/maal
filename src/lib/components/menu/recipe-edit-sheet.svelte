@@ -2,6 +2,7 @@
 	import * as Button from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Sheet from '$lib/components/ui/sheet';
+	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
@@ -743,28 +744,14 @@
 	</div>
 {/if}
 
-<Dialog.Root bind:open={deleteConfirmOpen}>
-	<Dialog.Content showCloseButton={false} class="sm:max-w-[22rem]">
-		<Dialog.Header>
-			<Dialog.Title>Archive this recipe?</Dialog.Title>
-			<Dialog.Description>
-				This removes the recipe from My Menu. Planned meals keep their saved recipe snapshot.
-			</Dialog.Description>
-		</Dialog.Header>
-		{#if deleteError}
-			<p class="text-xs text-destructive">{deleteError}</p>
-		{/if}
-		<div class="flex justify-end gap-2">
-			<Button.Root
-				variant="ghost"
-				disabled={deleteBusy}
-				onclick={() => (deleteConfirmOpen = false)}
-			>
-				Keep recipe
-			</Button.Root>
-			<Button.Root variant="destructive" disabled={deleteBusy} onclick={archiveRecipe}>
-				{deleteBusy ? 'Archiving…' : 'Archive recipe'}
-			</Button.Root>
-		</div>
-	</Dialog.Content>
-</Dialog.Root>
+<DeleteConfirmDialog
+	bind:open={deleteConfirmOpen}
+	title="Archive this recipe?"
+	description="This removes the recipe from My Menu. Planned meals keep their saved recipe snapshot."
+	confirmLabel="Archive recipe"
+	confirmingLabel="Archiving…"
+	cancelLabel="Keep recipe"
+	busy={deleteBusy}
+	error={deleteError}
+	onconfirm={archiveRecipe}
+/>

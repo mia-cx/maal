@@ -1,6 +1,6 @@
 <script lang="ts">
-	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Button } from '$lib/components/ui/button';
+	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import * as Select from '$lib/components/ui/select';
 	import SearchCombobox from '$lib/components/ui/search-combobox.svelte';
@@ -596,65 +596,31 @@
 	</main>
 </div>
 
-<AlertDialog.Root bind:open={removeMemberDialogOpen}>
-	<AlertDialog.Content>
-		<AlertDialog.Header>
-			<AlertDialog.Title>Remove member?</AlertDialog.Title>
-			<AlertDialog.Description>
-				Remove {memberToRemove?.name ?? 'this member'} from this household.
-			</AlertDialog.Description>
-		</AlertDialog.Header>
-		<AlertDialog.Footer>
-			<AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
-			{#if memberToRemove}
-				<form method="post" action="?/removeMember">
-					<input type="hidden" name="membershipId" value={memberToRemove.id} />
-					<input type="hidden" name="userId" value={memberToRemove.userId} />
-					<Button type="submit" variant="destructive">Remove</Button>
-				</form>
-			{/if}
-		</AlertDialog.Footer>
-	</AlertDialog.Content>
-</AlertDialog.Root>
+<DeleteConfirmDialog
+	bind:open={removeMemberDialogOpen}
+	title="Remove member?"
+	description="Remove {memberToRemove?.name ?? 'this member'} from this household."
+	confirmLabel="Remove"
+	formAction="?/removeMember"
+	hiddenInputs={{ membershipId: memberToRemove?.id, userId: memberToRemove?.userId }}
+/>
 
-<AlertDialog.Root bind:open={deleteHouseholdFirstOpen}>
-	<AlertDialog.Content>
-		<AlertDialog.Header>
-			<AlertDialog.Title>Delete household?</AlertDialog.Title>
-			<AlertDialog.Description>
-				This deletes the WorkOS organization and Maal household data for {data.household.name}.
-			</AlertDialog.Description>
-		</AlertDialog.Header>
-		<AlertDialog.Footer>
-			<AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
-			<Button
-				type="button"
-				variant="destructive"
-				onclick={() => {
-					deleteHouseholdFirstOpen = false;
-					deleteHouseholdSecondOpen = true;
-				}}
-			>
-				Continue
-			</Button>
-		</AlertDialog.Footer>
-	</AlertDialog.Content>
-</AlertDialog.Root>
+<DeleteConfirmDialog
+	bind:open={deleteHouseholdFirstOpen}
+	title="Delete household?"
+	description="This deletes the WorkOS organization and Maal household data for {data.household
+		.name}."
+	confirmLabel="Continue"
+	onconfirm={() => {
+		deleteHouseholdFirstOpen = false;
+		deleteHouseholdSecondOpen = true;
+	}}
+/>
 
-<AlertDialog.Root bind:open={deleteHouseholdSecondOpen}>
-	<AlertDialog.Content>
-		<AlertDialog.Header>
-			<AlertDialog.Title>Really delete household?</AlertDialog.Title>
-			<AlertDialog.Description>
-				This cannot be undone. Recipes saved to your menu stay, but household settings and planned
-				meals are deleted.
-			</AlertDialog.Description>
-		</AlertDialog.Header>
-		<AlertDialog.Footer>
-			<AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
-			<form method="post" action="?/deleteHousehold">
-				<Button type="submit" variant="destructive">Delete household</Button>
-			</form>
-		</AlertDialog.Footer>
-	</AlertDialog.Content>
-</AlertDialog.Root>
+<DeleteConfirmDialog
+	bind:open={deleteHouseholdSecondOpen}
+	title="Really delete household?"
+	description="This cannot be undone. Recipes saved to your menu stay, but household settings and planned meals are deleted."
+	confirmLabel="Delete household"
+	formAction="?/deleteHousehold"
+/>

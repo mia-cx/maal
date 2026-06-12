@@ -3,6 +3,7 @@
 	import * as Calendar from '$lib/components/ui/calendar';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Sheet from '$lib/components/ui/sheet';
+	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import * as Popover from '$lib/components/ui/popover';
 	import { Separator } from '$lib/components/ui/separator';
@@ -507,19 +508,11 @@
 	</Dialog.Portal>
 </Dialog.Root>
 
-<Dialog.Root bind:open={deleteConfirmOpen}>
-	<Dialog.Content showCloseButton={false} class="sm:max-w-[22rem]">
-		<Dialog.Header>
-			<Dialog.Title>Are you sure you want to delete?</Dialog.Title>
-			<Dialog.Description>
-				This removes the meal from your plan. It does not delete the recipe from My Menu.
-			</Dialog.Description>
-		</Dialog.Header>
-		<div class="flex justify-end gap-2">
-			<Button.Root variant="ghost" onclick={() => (deleteConfirmOpen = false)}
-				>Keep meal</Button.Root
-			>
-			<Button.Root variant="destructive" onclick={deleteMeal}>Delete meal</Button.Root>
-		</div>
-	</Dialog.Content>
-</Dialog.Root>
+<DeleteConfirmDialog
+	bind:open={deleteConfirmOpen}
+	title="Are you sure you want to delete?"
+	description="This removes the meal from your plan. It does not delete the recipe from My Menu."
+	confirmLabel="Delete meal"
+	cancelLabel="Keep meal"
+	onconfirm={deleteMeal}
+/>
