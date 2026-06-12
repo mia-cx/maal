@@ -42,10 +42,6 @@
 	]);
 
 	const selectRecipe = () => onselect?.(recipe);
-	const toggleSelected = (event: MouseEvent) => {
-		event.stopPropagation();
-		onselectionchange?.(recipe, !selected);
-	};
 </script>
 
 <Card.Root
@@ -56,8 +52,14 @@
 		menuLoadAccentClasses[mealLoad]
 	)}
 >
-	<div class="absolute top-2 left-2 z-10 rounded-md bg-background/80 p-1 shadow-sm backdrop-blur">
-		<Checkbox checked={selected} aria-label={`Select ${recipe.title}`} onclick={toggleSelected} />
+	<div
+		class="absolute top-2 left-2 z-10 rounded-md bg-background/80 p-1 opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+	>
+		<Checkbox
+			checked={selected}
+			aria-label={`Select ${recipe.title}`}
+			onCheckedChange={(checked) => onselectionchange?.(recipe, checked)}
+		/>
 	</div>
 
 	<button

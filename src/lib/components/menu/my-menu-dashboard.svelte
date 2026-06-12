@@ -401,11 +401,7 @@
 										<Checkbox
 											checked={selectedArchivedRecipeIds.includes(recipe.id)}
 											aria-label={`Select ${recipe.title}`}
-											onclick={() =>
-												toggleArchivedRecipeSelection(
-													recipe,
-													!selectedArchivedRecipeIds.includes(recipe.id)
-												)}
+											onCheckedChange={(checked) => toggleArchivedRecipeSelection(recipe, checked)}
 										/>
 										<div class="min-w-0">
 											<p class="truncate text-sm font-medium">{recipe.title}</p>
