@@ -447,8 +447,8 @@
 				class={cn(
 					'mb-1 ml-4 w-[calc(100%-1.625rem)]',
 					hasCheckIn
-						? 'bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground'
-						: 'border-transparent bg-foreground text-background hover:bg-foreground/90 hover:text-background'
+						? 'bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground dark:bg-muted/40'
+						: 'border-transparent bg-foreground text-background hover:bg-foreground/90 hover:text-background dark:bg-foreground dark:hover:bg-foreground/90'
 				)}
 				onpointerdown={(event) => event.stopPropagation()}
 				onclick={checkIn}
