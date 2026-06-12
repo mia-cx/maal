@@ -476,6 +476,7 @@ export type WheelGestureClassifierOptions = {
 	continuousMedianPx?: number;
 	continuousTinyRatio?: number;
 	continuousCrossAxisRatio?: number;
+	earlyTinyEventCount?: number;
 	settleWindowSize?: number;
 	settleDeltaPx?: number;
 	settleMedianDeltaPx?: number;
@@ -500,6 +501,9 @@ const wheelDominantAxis = (event: WheelEvent): ScrollAxis =>
 export const wheelDominantDelta = (event: WheelEvent): number =>
 	wheelDominantAxis(event) === 'x' ? event.deltaX : event.deltaY;
 
+const hasTinyNonZeroWheelDelta = (event: WheelEvent, threshold: number): boolean =>
+	[event.deltaX, event.deltaY].some((delta) => Math.abs(delta) > 0 && Math.abs(delta) < threshold);
+
 export const createWheelGestureClassifier = ({
 	gestureGapMs = 180,
 	continuousGestureGapMs = 520,
@@ -513,6 +517,7 @@ export const createWheelGestureClassifier = ({
 	continuousMedianPx = 12,
 	continuousTinyRatio = 0.4,
 	continuousCrossAxisRatio = 0.15,
+	earlyTinyEventCount = 3,
 	settleWindowSize = 4,
 	settleDeltaPx = 4,
 	settleMedianDeltaPx = 6,
@@ -645,7 +650,7 @@ export const createWheelGestureClassifier = ({
 			return classification('shift-wheel');
 		}
 
-		if (absDelta < tinyStartDeltaPx) {
+		if (events <= earlyTinyEventCount && hasTinyNonZeroWheelDelta(event, tinyStartDeltaPx)) {
 			kind = 'continuous';
 			return classification('tiny-start-delta');
 		}
