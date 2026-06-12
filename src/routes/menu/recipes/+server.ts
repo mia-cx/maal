@@ -147,7 +147,7 @@ const compactValue = (value: unknown, limit = 24): string | string[] | undefined
 
 const parseJsonLdScripts = (html: string): unknown[] => {
 	const scripts = html.matchAll(
-		/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+		/<script\b(?=[^>]*\btype=["'][^"']*application\/ld\+json[^"']*["'])[^>]*>([\s\S]*?)<\/script>/gi
 	);
 	const values: unknown[] = [];
 	for (const script of scripts) {
@@ -270,8 +270,10 @@ const fetchRecipeFromUrl = async (url: string) => {
 	try {
 		response = await fetch(parsedUrl, {
 			headers: {
-				accept: 'text/html,application/xhtml+xml',
-				'user-agent': 'Maal recipe importer/0.1'
+				accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+				'accept-language': 'nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
+				'user-agent':
+					'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36'
 			}
 		});
 	} catch {
