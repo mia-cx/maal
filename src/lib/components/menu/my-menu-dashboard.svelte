@@ -296,28 +296,31 @@
 	</header>
 
 	<div class="@container/my-menu-main min-h-0 flex-1 overflow-auto p-3 md:p-4">
-		{#if selectedRecipes.length}
-			<div
-				class="mb-3 flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3 sm:flex-row sm:items-center sm:justify-between"
-			>
-				<p class="text-sm font-medium">
-					{selectedRecipes.length} recipe{selectedRecipes.length === 1 ? '' : 's'} selected
-				</p>
-				<div class="flex gap-2">
-					<Button variant="outline" size="sm" onclick={() => (selectedRecipeIds = [])}>
-						Deselect all
-					</Button>
-					<Button
-						variant="destructive"
-						size="sm"
-						disabled={Boolean(archiveActionRecipeId)}
-						onclick={archiveSelectedRecipes}
-					>
-						Archive selected
-					</Button>
-				</div>
+		<div
+			class="mb-3 flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3 sm:flex-row sm:items-center sm:justify-between"
+		>
+			<p class="text-sm font-medium">
+				{selectedRecipes.length} recipe{selectedRecipes.length === 1 ? '' : 's'} selected
+			</p>
+			<div class="flex gap-2">
+				<Button
+					variant="outline"
+					size="sm"
+					disabled={!selectedRecipes.length}
+					onclick={() => (selectedRecipeIds = [])}
+				>
+					Deselect all
+				</Button>
+				<Button
+					variant="destructive"
+					size="sm"
+					disabled={!selectedRecipes.length || Boolean(archiveActionRecipeId)}
+					onclick={archiveSelectedRecipes}
+				>
+					Archive selected
+				</Button>
 			</div>
-		{/if}
+		</div>
 
 		<div
 			class="grid grid-cols-1 gap-3 md:gap-4 @min-[42rem]/my-menu-main:grid-cols-2 @min-[64rem]/my-menu-main:grid-cols-3 @min-[86rem]/my-menu-main:grid-cols-4"
@@ -354,43 +357,41 @@
 					{#if archiveActionError}
 						<p class="mb-2 text-xs text-destructive">{archiveActionError}</p>
 					{/if}
-					{#if selectedArchivedRecipes.length}
-						<div
-							class="mb-3 flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3 sm:flex-row sm:items-center sm:justify-between"
-						>
-							<p class="text-sm font-medium">
-								{selectedArchivedRecipes.length} archived recipe{selectedArchivedRecipes.length ===
-								1
-									? ''
-									: 's'} selected
-							</p>
-							<div class="flex flex-wrap gap-2">
-								<Button
-									variant="outline"
-									size="sm"
-									onclick={() => (selectedArchivedRecipeIds = [])}
-								>
-									Deselect all
-								</Button>
-								<Button
-									variant="outline"
-									size="sm"
-									disabled={Boolean(archiveActionRecipeId)}
-									onclick={restoreSelectedArchivedRecipes}
-								>
-									Restore selected
-								</Button>
-								<Button
-									variant="destructive"
-									size="sm"
-									disabled={Boolean(archiveActionRecipeId)}
-									onclick={() => confirmPermanentDelete(selectedArchivedRecipes)}
-								>
-									Delete selected forever
-								</Button>
-							</div>
+					<div
+						class="mb-3 flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3 sm:flex-row sm:items-center sm:justify-between"
+					>
+						<p class="text-sm font-medium">
+							{selectedArchivedRecipes.length} archived recipe{selectedArchivedRecipes.length === 1
+								? ''
+								: 's'} selected
+						</p>
+						<div class="flex flex-wrap gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={!selectedArchivedRecipes.length}
+								onclick={() => (selectedArchivedRecipeIds = [])}
+							>
+								Deselect all
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								disabled={!selectedArchivedRecipes.length || Boolean(archiveActionRecipeId)}
+								onclick={restoreSelectedArchivedRecipes}
+							>
+								Restore selected
+							</Button>
+							<Button
+								variant="destructive"
+								size="sm"
+								disabled={!selectedArchivedRecipes.length || Boolean(archiveActionRecipeId)}
+								onclick={() => confirmPermanentDelete(selectedArchivedRecipes)}
+							>
+								Delete selected forever
+							</Button>
 						</div>
-					{/if}
+					</div>
 					{#if archivedRecipes.length}
 						<div class="grid gap-2">
 							{#each archivedRecipes as recipe (recipe.id)}
