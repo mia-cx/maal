@@ -13,6 +13,7 @@
 		open = $bindable(false),
 		date,
 		recipes,
+		showExistingRecipes = true,
 		busy = false,
 		error,
 		onexisting,
@@ -22,6 +23,7 @@
 		open?: boolean;
 		date?: string;
 		recipes: readonly RecipeMenuItem[];
+		showExistingRecipes?: boolean;
 		busy?: boolean;
 		error?: string | null;
 		onexisting?: (recipe: RecipeMenuItem) => void;
@@ -56,15 +58,17 @@
 	};
 
 	const matches = $derived(
-		recipes
-			.map((recipe) => ({ recipe, score: wordScore(recipe, normalizedSearch) }))
-			.filter((candidate) => candidate.score > 0)
-			.sort(
-				(left, right) =>
-					right.score - left.score || left.recipe.title.localeCompare(right.recipe.title)
-			)
-			.slice(0, 8)
-			.map((candidate) => candidate.recipe)
+		showExistingRecipes
+			? recipes
+					.map((recipe) => ({ recipe, score: wordScore(recipe, normalizedSearch) }))
+					.filter((candidate) => candidate.score > 0)
+					.sort(
+						(left, right) =>
+							right.score - left.score || left.recipe.title.localeCompare(right.recipe.title)
+					)
+					.slice(0, 8)
+					.map((candidate) => candidate.recipe)
+			: []
 	);
 
 	const options = $derived.by((): PickerOption[] => {
@@ -180,7 +184,7 @@
 				role="listbox"
 				aria-label="Recipe options"
 			>
-				{#if !isUrl && matches.length === 0}
+				{#if showExistingRecipes && !isUrl && matches.length === 0}
 					<p class="px-3 py-2 text-sm text-muted-foreground">No saved recipes match.</p>
 				{/if}
 				{#each options as option, index (option.id)}

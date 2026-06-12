@@ -255,6 +255,7 @@
 <AddMealDialog
 	bind:open={addRecipeOpen}
 	{recipes}
+	showExistingRecipes={false}
 	busy={addRecipeBusy}
 	error={addRecipeError}
 	onexisting={openRecipe}
