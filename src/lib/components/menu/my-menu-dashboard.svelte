@@ -40,6 +40,9 @@
 	let archiveActionRecipeId = $state<string | null>(null);
 	let selectedRecipeIds = $state<string[]>([]);
 	let selectedArchivedRecipeIds = $state<string[]>([]);
+	let lastSelectedRecipeId = $state<string | null>(null);
+	let lastSelectedArchivedRecipeId = $state<string | null>(null);
+	let archivedRangeSelection = false;
 	let permanentDeleteRecipes = $state<RecipeMenuItem[]>([]);
 	let permanentDeleteOpen = $state(false);
 	let permanentDeleteButton = $state<HTMLButtonElement | null>(null);
@@ -97,8 +100,12 @@
 		const nextSelectedRecipeIds = selectedRecipeIds.filter((id) =>
 			recipes.some((recipe) => recipe.id === id)
 		);
-		if (!idsMatch(selectedRecipeIds, nextSelectedRecipeIds))
+		if (!idsMatch(selectedRecipeIds, nextSelectedRecipeIds)) {
 			selectedRecipeIds = nextSelectedRecipeIds;
+		}
+		if (lastSelectedRecipeId && !recipes.some((recipe) => recipe.id === lastSelectedRecipeId)) {
+			lastSelectedRecipeId = null;
+		}
 	});
 
 	$effect(() => {
@@ -107,6 +114,12 @@
 		);
 		if (!idsMatch(selectedArchivedRecipeIds, nextSelectedArchivedRecipeIds)) {
 			selectedArchivedRecipeIds = nextSelectedArchivedRecipeIds;
+		}
+		if (
+			lastSelectedArchivedRecipeId &&
+			!archivedRecipes.some((recipe) => recipe.id === lastSelectedArchivedRecipeId)
+		) {
+			lastSelectedArchivedRecipeId = null;
 		}
 	});
 
@@ -200,20 +213,40 @@
 		selectMenuRecipe(null);
 	};
 
-	const toggleRecipeSelection = (recipe: RecipeMenuItem, selected: boolean) => {
-		selectedRecipeIds = selected
-			? selectedRecipeIds.includes(recipe.id)
-				? selectedRecipeIds
-				: [...selectedRecipeIds, recipe.id]
-			: selectedRecipeIds.filter((id) => id !== recipe.id);
+	const applySelection = (selectedIds: string[], ids: string[], selected: boolean): string[] => {
+		if (!selected) return selectedIds.filter((id) => !ids.includes(id));
+		return [...selectedIds, ...ids.filter((id) => !selectedIds.includes(id))];
 	};
 
-	const toggleArchivedRecipeSelection = (recipe: RecipeMenuItem, selected: boolean) => {
-		selectedArchivedRecipeIds = selected
-			? selectedArchivedRecipeIds.includes(recipe.id)
-				? selectedArchivedRecipeIds
-				: [...selectedArchivedRecipeIds, recipe.id]
-			: selectedArchivedRecipeIds.filter((id) => id !== recipe.id);
+	const rangeIds = (items: RecipeMenuItem[], fromId: string | null, toId: string): string[] => {
+		const toIndex = items.findIndex((item) => item.id === toId);
+		const fromIndex = fromId ? items.findIndex((item) => item.id === fromId) : -1;
+		if (fromIndex < 0 || toIndex < 0) return [toId];
+		const start = Math.min(fromIndex, toIndex);
+		const end = Math.max(fromIndex, toIndex);
+		return items.slice(start, end + 1).map((item) => item.id);
+	};
+
+	const toggleRecipeSelection = (recipe: RecipeMenuItem, selected: boolean, range = false) => {
+		selectedRecipeIds = applySelection(
+			selectedRecipeIds,
+			range ? rangeIds(recipes, lastSelectedRecipeId, recipe.id) : [recipe.id],
+			selected
+		);
+		lastSelectedRecipeId = recipe.id;
+	};
+
+	const toggleArchivedRecipeSelection = (
+		recipe: RecipeMenuItem,
+		selected: boolean,
+		range = false
+	) => {
+		selectedArchivedRecipeIds = applySelection(
+			selectedArchivedRecipeIds,
+			range ? rangeIds(archivedRecipes, lastSelectedArchivedRecipeId, recipe.id) : [recipe.id],
+			selected
+		);
+		lastSelectedArchivedRecipeId = recipe.id;
 	};
 
 	const archiveSelectedRecipes = async () => {
@@ -402,7 +435,16 @@
 										<Checkbox
 											checked={selectedArchivedRecipeIds.includes(recipe.id)}
 											aria-label={`Select ${recipe.title}`}
-											onCheckedChange={(checked) => toggleArchivedRecipeSelection(recipe, checked)}
+											onpointerdown={(event) => (archivedRangeSelection = event.shiftKey)}
+											onkeydown={(event) => {
+												if (event.key === ' ' || event.key === 'Enter') {
+													archivedRangeSelection = event.shiftKey;
+												}
+											}}
+											onCheckedChange={(checked) => {
+												toggleArchivedRecipeSelection(recipe, checked, archivedRangeSelection);
+												archivedRangeSelection = false;
+											}}
 										/>
 										<div class="min-w-0">
 											<p class="truncate text-sm font-medium">{recipe.title}</p>

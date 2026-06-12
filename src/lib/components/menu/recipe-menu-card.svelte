@@ -27,8 +27,10 @@
 		recipe: RecipeMenuItem;
 		selected?: boolean;
 		onselect?: (recipe: RecipeMenuItem) => void;
-		onselectionchange?: (recipe: RecipeMenuItem, selected: boolean) => void;
+		onselectionchange?: (recipe: RecipeMenuItem, selected: boolean, range: boolean) => void;
 	} = $props();
+
+	let rangeSelection = false;
 
 	const primaryMetadata = $derived(recipePrimaryMetadata(recipe));
 	const totalReviews = $derived(recipeReviewCount(recipe));
@@ -56,7 +58,14 @@
 		class="absolute top-3 left-3 z-10 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 data-checked:opacity-100"
 		checked={selected}
 		aria-label={`Select ${recipe.title}`}
-		onCheckedChange={(checked) => onselectionchange?.(recipe, checked)}
+		onpointerdown={(event) => (rangeSelection = event.shiftKey)}
+		onkeydown={(event) => {
+			if (event.key === ' ' || event.key === 'Enter') rangeSelection = event.shiftKey;
+		}}
+		onCheckedChange={(checked) => {
+			onselectionchange?.(recipe, checked, rangeSelection);
+			rangeSelection = false;
+		}}
 	/>
 
 	<button
