@@ -11,7 +11,8 @@ unit_aliases
 - id                  // index-friendly primary key
 - unitId              // references units.id, e.g. tablespoons
 - baseUnitId          // denormalized from units.baseUnitId for display lookup/constraints
-- alias               // actual alias text, e.g. tbsp, tablespoon, eetlepel
+- alias               // singular/default alias text, e.g. tbsp, tablespoon, eetlepel
+- pluralAlias?        // display plural for count-sensitive aliases, e.g. tablespoons, eetlepels
 - locale              // BCP 47 locale, e.g. en-US, en-GB, nl-NL
 - sourceDomain?       // optional source-site-specific alias context
 - defaultForLocale    // true when this is the default display alias for baseUnitId+locale
@@ -61,7 +62,7 @@ unit_aliases.baseUnitId == units[unit_aliases.unitId].baseUnitId
 
 ### `alias`
 
-The actual alias string.
+The singular/default alias string.
 
 Examples:
 
@@ -77,6 +78,19 @@ Examples:
 - `fahrenheit`
 
 No separate `normalizedAlias` column in the conceptual model. Normalization is an application lookup/write concern. If lookup performance requires it later, add a generated/indexed search column deliberately.
+
+### `pluralAlias`
+
+Optional display plural for aliases whose plural cannot be derived mechanically or should preserve locale-specific wording.
+
+Examples:
+
+- `alias=eetlepel`, `pluralAlias=eetlepels`
+- `alias=teentje`, `pluralAlias=teentjes`
+- `alias=teen`, `pluralAlias=tenen`
+- `alias=clove`, `pluralAlias=cloves`
+
+Parsing still treats aliases as lookup rows; `pluralAlias` is for rendering selected display aliases.
 
 ### `locale`
 

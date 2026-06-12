@@ -82,19 +82,35 @@ const bestByKey = <T extends { locale: string; scopeRank: number }, K>(
 	return result;
 };
 
-const aliasFrom = (
+type UnitAliasLabel = { alias: string; pluralAlias?: string };
+
+type AliasMaps = {
+	unitGlobal: Map<string, UnitAliasLabel>;
+	unitHousehold: Map<string, UnitAliasLabel>;
+	unitUser: Map<string, UnitAliasLabel>;
+	foodGlobal: Map<string, string>;
+	foodHousehold: Map<string, string>;
+	foodUser: Map<string, string>;
+};
+
+function aliasFrom(
 	scope: string | null,
 	id: string | null,
-	aliases: {
-		unitGlobal: Map<string, string>;
-		unitHousehold: Map<string, string>;
-		unitUser: Map<string, string>;
-		foodGlobal: Map<string, string>;
-		foodHousehold: Map<string, string>;
-		foodUser: Map<string, string>;
-	},
+	aliases: AliasMaps,
+	kind: 'unit'
+): UnitAliasLabel | undefined;
+function aliasFrom(
+	scope: string | null,
+	id: string | null,
+	aliases: AliasMaps,
+	kind: 'food'
+): string | undefined;
+function aliasFrom(
+	scope: string | null,
+	id: string | null,
+	aliases: AliasMaps,
 	kind: 'unit' | 'food'
-): string | undefined => {
+): UnitAliasLabel | string | undefined {
 	if (!id) return;
 	if (kind === 'unit') {
 		if (scope === 'user') return aliases.unitUser.get(id);
@@ -104,7 +120,7 @@ const aliasFrom = (
 	if (scope === 'user') return aliases.foodUser.get(id);
 	if (scope === 'household') return aliases.foodHousehold.get(id);
 	return aliases.foodGlobal.get(id);
-};
+}
 
 export const loadEffectiveTaxonomyPreferences = async (
 	db: Db,
@@ -182,10 +198,16 @@ export const loadEffectiveTaxonomyPreferences = async (
 		db.select().from(units)
 	]);
 
+	const unitAliasLabel = (alias: { alias: string; pluralAlias?: string | null }) => ({
+		alias: alias.alias,
+		pluralAlias: alias.pluralAlias ?? undefined
+	});
 	const aliases = {
-		unitGlobal: new Map(globalUnitAliases.map((alias) => [alias.id, alias.alias])),
-		unitHousehold: new Map(householdScopedUnitAliases.map((alias) => [alias.id, alias.alias])),
-		unitUser: new Map(userScopedUnitAliases.map((alias) => [alias.id, alias.alias])),
+		unitGlobal: new Map(globalUnitAliases.map((alias) => [alias.id, unitAliasLabel(alias)])),
+		unitHousehold: new Map(
+			householdScopedUnitAliases.map((alias) => [alias.id, unitAliasLabel(alias)])
+		),
+		unitUser: new Map(userScopedUnitAliases.map((alias) => [alias.id, unitAliasLabel(alias)])),
 		foodGlobal: new Map(globalFoodAliases.map((alias) => [alias.id, alias.alias])),
 		foodHousehold: new Map(householdScopedFoodAliases.map((alias) => [alias.id, alias.alias])),
 		foodUser: new Map(userScopedFoodAliases.map((alias) => [alias.id, alias.alias]))
@@ -211,6 +233,7 @@ export const loadEffectiveTaxonomyPreferences = async (
 	const unitPreferences: UnitPreferences = {
 		ingredientUnitOverrides: {},
 		ingredientUnitLabelOverrides: {},
+		ingredientUnitPluralLabelOverrides: {},
 		ingredientNameOverrides: {}
 	};
 	const unitDisplay: EffectiveTaxonomyPreferences['unitDisplay'] = {};
@@ -220,7 +243,8 @@ export const loadEffectiveTaxonomyPreferences = async (
 		const alias = aliasFrom(row.preferredUnitAliasScope, row.preferredUnitAliasId, aliases, 'unit');
 		if (baseUnitId === 'grams' && canonical && ['g', 'kg', 'oz', 'lb'].includes(canonical)) {
 			unitPreferences.preferredMassUnit = canonical as UnitPreferences['preferredMassUnit'];
-			unitPreferences.preferredMassUnitLabel = alias;
+			unitPreferences.preferredMassUnitLabel = alias?.alias;
+			unitPreferences.preferredMassUnitPluralLabel = alias?.pluralAlias;
 		}
 		if (
 			baseUnitId === 'milliliters' &&
@@ -228,9 +252,14 @@ export const loadEffectiveTaxonomyPreferences = async (
 			['ml', 'l', 'tsp', 'tbsp', 'cup', 'fl oz'].includes(canonical)
 		) {
 			unitPreferences.preferredVolumeUnit = canonical as UnitPreferences['preferredVolumeUnit'];
-			unitPreferences.preferredVolumeUnitLabel = alias;
+			unitPreferences.preferredVolumeUnitLabel = alias?.alias;
+			unitPreferences.preferredVolumeUnitPluralLabel = alias?.pluralAlias;
 		}
-		unitDisplay[baseUnitId] = { unitId, alias: alias ?? canonical ?? unitId };
+		unitDisplay[baseUnitId] = {
+			unitId,
+			alias: alias?.alias ?? canonical ?? unitId,
+			pluralAlias: alias?.pluralAlias
+		};
 	}
 
 	const foodDisplay: EffectiveTaxonomyPreferences['foodDisplay'] = {};
@@ -248,6 +277,9 @@ export const loadEffectiveTaxonomyPreferences = async (
 			const canonical = unitIdToIngredientUnit[measureUnitId];
 			if (canonical) unitPreferences.ingredientUnitOverrides![foodId] = canonical;
 			if (measureAlias) unitPreferences.ingredientUnitLabelOverrides![foodId] = measureAlias;
+			const measurePluralAlias = unitDisplay[measureUnit?.baseUnitId ?? '']?.pluralAlias;
+			if (measurePluralAlias)
+				unitPreferences.ingredientUnitPluralLabelOverrides![foodId] = measurePluralAlias;
 		}
 		foodDisplay[foodId] = {
 			alias,

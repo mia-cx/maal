@@ -3,10 +3,13 @@ export type VolumeUnit = 'ml' | 'l' | 'tsp' | 'tbsp' | 'cup' | 'fl oz';
 export type UnitPreferences = {
 	preferredMassUnit?: MassUnit;
 	preferredMassUnitLabel?: string;
+	preferredMassUnitPluralLabel?: string;
 	preferredVolumeUnit?: VolumeUnit;
 	preferredVolumeUnitLabel?: string;
+	preferredVolumeUnitPluralLabel?: string;
 	ingredientUnitOverrides?: Record<string, string>;
 	ingredientUnitLabelOverrides?: Record<string, string>;
+	ingredientUnitPluralLabelOverrides?: Record<string, string>;
 	ingredientNameOverrides?: Record<string, string>;
 };
 
@@ -289,7 +292,7 @@ const preferredUnitFor = (
 	preferences: UnitPreferences,
 	ingredientName?: string,
 	ingredientId?: string | null
-): { unit: string; label?: string } => {
+): { unit: string; label?: string; pluralLabel?: string } => {
 	const kind = unitKind(unit);
 	const override = ingredientOverrideFor(
 		preferences.ingredientUnitOverrides,
@@ -301,17 +304,30 @@ const preferredUnitFor = (
 		ingredientName,
 		ingredientId
 	);
+	const pluralLabelOverride = ingredientOverrideFor(
+		preferences.ingredientUnitPluralLabelOverrides,
+		ingredientName,
+		ingredientId
+	);
 	if (kind === 'mass') {
 		const target = override === 'oz' ? 'oz' : canonicalIngredientUnit(override);
 		const preferred =
 			target && massUnits.has(target) ? target : (preferences.preferredMassUnit ?? 'g');
-		return { unit: preferred, label: labelOverride ?? preferences.preferredMassUnitLabel };
+		return {
+			unit: preferred,
+			label: labelOverride ?? preferences.preferredMassUnitLabel,
+			pluralLabel: pluralLabelOverride ?? preferences.preferredMassUnitPluralLabel
+		};
 	}
 	if (kind === 'volume') {
 		const target = override === 'oz' ? 'fl oz' : canonicalIngredientUnit(override);
 		const preferred =
 			target && volumeUnits.has(target) ? target : (preferences.preferredVolumeUnit ?? 'ml');
-		return { unit: preferred, label: labelOverride ?? preferences.preferredVolumeUnitLabel };
+		return {
+			unit: preferred,
+			label: labelOverride ?? preferences.preferredVolumeUnitLabel,
+			pluralLabel: pluralLabelOverride ?? preferences.preferredVolumeUnitPluralLabel
+		};
 	}
 	return { unit };
 };
@@ -372,6 +388,11 @@ const formatDecimal = (quantity: number): string => {
 		? String(rounded)
 		: rounded.toFixed(2).replace(/0+$/g, '').replace(/\.$/, '');
 };
+
+const isSingularQuantity = (quantity: number): boolean => Math.abs(quantity - 1) < 0.0001;
+
+const displayUnitLabel = (quantity: number, singular: string, plural?: string): string =>
+	isSingularQuantity(quantity) ? singular : (plural ?? singular);
 
 export const parseIngredientLine = (
 	line: string,
@@ -438,12 +459,12 @@ export const displayIngredientAmount = (
 	const target = preferredUnitFor(canonicalUnit, preferences, ingredientName, ingredientId);
 	if (canonicalUnit === 'g' && massUnits.has(target.unit)) {
 		const targetQuantity = quantity / unitDefinitions[target.unit].toMetric;
-		return `${formatDecimal(targetQuantity)} ${target.label ?? target.unit}`;
+		return `${formatDecimal(targetQuantity)} ${displayUnitLabel(targetQuantity, target.label ?? target.unit, target.pluralLabel)}`;
 	}
 	if (canonicalUnit === 'ml' && volumeUnits.has(target.unit)) {
 		const targetQuantity = quantity / unitDefinitions[target.unit].toMetric;
 		const label = target.label ?? (target.unit === 'fl oz' ? 'fl oz' : target.unit);
-		return `${formatQuantity(targetQuantity)} ${label}`;
+		return `${formatQuantity(targetQuantity)} ${displayUnitLabel(targetQuantity, label, target.pluralLabel)}`;
 	}
 	return [formatQuantity(quantity), canonicalUnit].filter(Boolean).join(' ');
 };

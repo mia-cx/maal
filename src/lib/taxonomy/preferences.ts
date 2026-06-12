@@ -4,7 +4,7 @@ export type EffectiveTaxonomyPreferences = {
 	locale: string;
 	localeFallbacks: string[];
 	unitPreferences: UnitPreferences;
-	unitDisplay: Record<string, { unitId: string; alias: string }>;
+	unitDisplay: Record<string, { unitId: string; alias: string; pluralAlias?: string }>;
 	foodDisplay: Record<
 		string,
 		{ alias?: string; preferredMeasureUnitId?: string; preferredMeasureAlias?: string }

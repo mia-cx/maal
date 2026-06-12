@@ -12,7 +12,8 @@ unit_household_aliases
 - householdId         // WorkOS organization id
 - unitId              // references units.id
 - baseUnitId          // denormalized from units.baseUnitId for display lookup/constraints
-- alias               // actual alias text
+- alias               // singular/default alias text
+- pluralAlias?        // optional display plural for count-sensitive aliases
 - locale              // BCP 47 locale, e.g. en-US, en-GB, nl-NL
 - sourceDomain?       // optional source-site-specific alias context
 - adoptionStatus      // pending_review | accepted | rejected

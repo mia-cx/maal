@@ -40,6 +40,7 @@ export const unitAliases = sqliteTable(
 		unitId: text('unit_id').notNull(),
 		baseUnitId: text('base_unit_id').notNull(),
 		alias: text('alias').notNull(),
+		pluralAlias: text('plural_alias'),
 		locale: text('locale').notNull(),
 		sourceDomain: text('source_domain'),
 		defaultForLocale: integer('default_for_locale', { mode: 'boolean' }).notNull().default(false),
@@ -70,6 +71,7 @@ const scopedUnitAliasColumns = () => ({
 	unitId: text('unit_id').notNull(),
 	baseUnitId: text('base_unit_id').notNull(),
 	alias: text('alias').notNull(),
+	pluralAlias: text('plural_alias'),
 	locale: text('locale').notNull(),
 	sourceDomain: text('source_domain'),
 	adoptionStatus: text('adoption_status', { enum: adoptionStatusValues })
