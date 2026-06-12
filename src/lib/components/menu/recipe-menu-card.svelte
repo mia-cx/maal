@@ -71,7 +71,7 @@
 	<button
 		type="button"
 		aria-label={`Open ${recipe.title}`}
-		class="h-full w-full min-w-0 appearance-none border-0 bg-transparent p-0 text-left text-inherit"
+		class="flex h-full w-full min-w-0 appearance-none flex-col items-stretch justify-start border-0 bg-transparent p-0 text-left text-inherit"
 		onclick={selectRecipe}
 	>
 		{#if recipe.image}
@@ -140,12 +140,6 @@
 			{#if supportingTags.length}
 				<p class="line-clamp-1 text-[0.6875rem] text-muted-foreground">
 					{supportingTags.join(' · ')}
-				</p>
-			{/if}
-
-			{#if recipe.reviewSummary.notes[0]}
-				<p class="line-clamp-2 text-xs leading-5 text-muted-foreground/90">
-					“{recipe.reviewSummary.notes[0]}”
 				</p>
 			{/if}
 		</Card.Content>
