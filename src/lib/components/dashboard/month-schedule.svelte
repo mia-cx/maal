@@ -522,6 +522,8 @@
 			return;
 		}
 
+		if (wheel.kind === 'pending') return;
+
 		event.preventDefault();
 		event.stopPropagation();
 		if (draggingScroller || reflowingLayout) return;

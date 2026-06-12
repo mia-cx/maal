@@ -568,6 +568,8 @@
 			return;
 		}
 
+		if (wheel.kind === 'pending' && delta) return;
+
 		if (!delta) {
 			if (!event.deltaY) return;
 			const lockedScrollLeft = scroller.scrollLeft;

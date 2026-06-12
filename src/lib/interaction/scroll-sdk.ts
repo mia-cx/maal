@@ -650,6 +650,11 @@ export const createWheelGestureClassifier = ({
 			return classification('shift-wheel');
 		}
 
+		if (absDelta >= discreteMaxPx) {
+			kind = 'discrete';
+			return classification('discrete-ramp');
+		}
+
 		if (events <= earlyTinyEventCount && hasTinyNonZeroWheelDelta(event, tinyStartDeltaPx)) {
 			kind = 'continuous';
 			return classification('tiny-start-delta');
