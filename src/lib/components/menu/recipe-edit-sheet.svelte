@@ -61,13 +61,10 @@
 	let sheetHeroHeight = $state(0);
 
 	const sheetViewportGutter = 16;
-	const maxSheetLeadIn = 24;
 	const sheetTopOffset = $derived(
 		Math.max(sheetViewportGutter, (sheetViewportHeight - sheetHeroHeight) / 2)
 	);
-	const sheetLeadIn = $derived(
-		Math.min(maxSheetLeadIn, Math.max(0, sheetTopOffset - sheetViewportGutter))
-	);
+	const sheetLeadIn = $derived(Math.max(0, sheetTopOffset - sheetViewportGutter));
 	const isDraftRecipe = $derived(Boolean(recipe?.id.startsWith('draft-recipe-')));
 	const textareaClass =
 		'min-h-20 w-full rounded-md border border-input bg-input/20 px-2 py-1.5 text-sm transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 md:text-xs/relaxed';

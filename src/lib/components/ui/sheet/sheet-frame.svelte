@@ -31,7 +31,7 @@
 	>
 		<div
 			class="pt-0 sm:pt-[var(--sheet-lead-in)]"
-			style={`--sheet-lead-in: min(${leadIn}px, 33svh);`}
+			style={`--sheet-lead-in: min(33svh, max(12svh, ${leadIn}px));`}
 		>
 			<div class="pointer-events-none sticky top-0 z-30 h-0">
 				<Dialog.Close
