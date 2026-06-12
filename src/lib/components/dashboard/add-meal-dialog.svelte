@@ -13,7 +13,7 @@
 		open = $bindable(false),
 		date,
 		recipes,
-		showExistingRecipes = true,
+		showExistingRecipes,
 		busy = false,
 		error,
 		onexisting,
@@ -38,11 +38,12 @@
 	const normalizedQuery = $derived(query.trim());
 	const isUrl = $derived(/^https?:\/\//i.test(normalizedQuery));
 	const normalizedSearch = $derived(normalizedQuery.toLowerCase());
+	const showExistingRecipeOptions = $derived(showExistingRecipes ?? Boolean(date));
 	const dialogTitle = $derived(date ? 'Add meal' : 'Add recipe');
 	const dialogDescription = $derived(
-		date
+		showExistingRecipeOptions
 			? 'Choose a saved recipe, import one from a URL, or start a new recipe for this day.'
-			: 'Choose a saved recipe, import one from a URL, or start a new recipe for your menu.'
+			: 'Import one from a URL or start a new recipe for your menu.'
 	);
 
 	const wordScore = (recipe: RecipeMenuItem, search: string): number => {
@@ -58,7 +59,7 @@
 	};
 
 	const matches = $derived(
-		showExistingRecipes
+		showExistingRecipeOptions
 			? recipes
 					.map((recipe) => ({ recipe, score: wordScore(recipe, normalizedSearch) }))
 					.filter((candidate) => candidate.score > 0)
@@ -184,7 +185,7 @@
 				role="listbox"
 				aria-label="Recipe options"
 			>
-				{#if showExistingRecipes && !isUrl && matches.length === 0}
+				{#if showExistingRecipeOptions && !isUrl && matches.length === 0}
 					<p class="px-3 py-2 text-sm text-muted-foreground">No saved recipes match.</p>
 				{/if}
 				{#each options as option, index (option.id)}
