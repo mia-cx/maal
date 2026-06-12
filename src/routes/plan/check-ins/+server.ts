@@ -48,7 +48,11 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 
 	const reason = isRecord(body) && typeof body.reason === 'string' ? body.reason.trim() : '';
 	const cooked = !isRecord(body) || body.cooked !== false;
-	const cookTime = cooked ? positiveInteger(isRecord(body) ? body.cookTime : undefined) : null;
+	const canReportCookTime = existingMeal.plannedCookWorkosUserId === session.user.id;
+	const cookTime =
+		cooked && canReportCookTime
+			? positiveInteger(isRecord(body) ? body.cookTime : undefined)
+			: null;
 	const updatedAt = new Date().toISOString();
 
 	await db

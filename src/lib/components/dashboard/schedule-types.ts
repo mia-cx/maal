@@ -27,6 +27,7 @@ export type Meal = {
 	time?: string;
 	sortOrder?: number;
 	status?: MealStatus;
+	plannedCookWorkosUserId?: string;
 	cookTimeMinutes?: number;
 	adjustedCookTimeMinutes?: number;
 	servingsPlanned?: number;

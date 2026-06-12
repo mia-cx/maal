@@ -15,4 +15,5 @@
 	defaultMealServings={data.defaultMealServings}
 	weekStartsOn={data.weekStartsOn}
 	initialMealRange={data.initialMealRange}
+	currentUserId={data.session?.user.id}
 />

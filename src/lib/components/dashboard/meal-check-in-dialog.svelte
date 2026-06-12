@@ -18,10 +18,12 @@
 	let {
 		open = $bindable(false),
 		meal,
+		currentUserId,
 		onsubmit
 	}: {
 		open?: boolean;
 		meal: Meal | null;
+		currentUserId?: string;
 		onsubmit?: (payload: MealCheckInPayload) => void | Promise<void>;
 	} = $props();
 
@@ -34,6 +36,9 @@
 	let lastMealId = $state<string | null>(null);
 
 	const verdicts: MealFeedbackVerdict[] = ['repeat', 'neutral', 'avoid'];
+	const canReportCookTime = $derived(
+		Boolean(meal?.plannedCookWorkosUserId && currentUserId === meal.plannedCookWorkosUserId)
+	);
 
 	const reset = () => {
 		cooked = meal?.latestCheckIn ? meal.status === 'cooked' : true;
@@ -58,7 +63,7 @@
 				meal,
 				cooked,
 				verdict,
-				cookTime: cooked ? parsedCookTime() : undefined,
+				cookTime: cooked && canReportCookTime ? parsedCookTime() : undefined,
 				reason: reason.trim() || undefined
 			});
 			open = false;
@@ -133,16 +138,18 @@
 				</div>
 			</div>
 
-			<label class="grid gap-1.5 text-xs font-medium">
-				Cook time, if you cooked
-				<Input
-					bind:value={cookTime}
-					type="text"
-					inputmode="numeric"
-					placeholder="30"
-					disabled={!cooked}
-				/>
-			</label>
+			{#if canReportCookTime}
+				<label class="grid gap-1.5 text-xs font-medium">
+					How long did it take to cook this meal?
+					<Input
+						bind:value={cookTime}
+						type="text"
+						inputmode="numeric"
+						placeholder="30"
+						disabled={!cooked}
+					/>
+				</label>
+			{/if}
 
 			<label class="grid gap-1.5 text-xs font-medium">
 				Notes

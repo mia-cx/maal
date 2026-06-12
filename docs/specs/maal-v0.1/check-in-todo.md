@@ -32,3 +32,5 @@ Add a lightweight post-meal check-in system for planned meals.
 - Use check-ins to update derived recipe history: times cooked, latest verdict, last cooked date, average actual minutes.
 - Keep the UI low-friction; users should be able to skip optional details.
 - Defer complex analytics/reasons until after the basic yes/no + verdict flow works.
+- Add a way to reassign the planned cook for a meal; until then, `planned_cook_workos_user_id` remains the user who first planned/created the meal.
+- Consider adding an explicit skipped status instead of representing skipped plans by leaving `household_meals.status = planned`.

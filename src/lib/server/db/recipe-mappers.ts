@@ -422,6 +422,7 @@ export const mealFromHouseholdMeal = (
 		time: meal.time ?? undefined,
 		sortOrder: meal.sortOrder ?? undefined,
 		status: meal.status,
+		plannedCookWorkosUserId: meal.plannedCookWorkosUserId ?? undefined,
 		cookTimeMinutes: meal.cookTimeMinutes ?? undefined,
 		servingsPlanned: meal.plannedYield ?? meal.yield ?? 1,
 		baseServings: meal.yield ?? meal.plannedYield ?? 1,

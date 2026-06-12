@@ -33,13 +33,15 @@
 		recipes: initialRecipes = [],
 		defaultMealServings = 1,
 		weekStartsOn = 'monday',
-		initialMealRange
+		initialMealRange,
+		currentUserId
 	}: {
 		meals?: Meal[];
 		recipes?: RecipeMenuItem[];
 		defaultMealServings?: number;
 		weekStartsOn?: 'sunday' | 'monday';
 		initialMealRange?: { start: string; end: string };
+		currentUserId?: string;
 	} = $props();
 
 	const initialUiState = uiState.get();
@@ -596,5 +598,10 @@
 		onmealchange={updateScheduleMealSchedule}
 		onmealdelete={deleteScheduleMeal}
 	/>
-	<MealCheckInDialog bind:open={checkInOpen} meal={checkInMeal} onsubmit={saveMealCheckIn} />
+	<MealCheckInDialog
+		bind:open={checkInOpen}
+		meal={checkInMeal}
+		{currentUserId}
+		onsubmit={saveMealCheckIn}
+	/>
 </section>
