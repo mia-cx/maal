@@ -80,6 +80,8 @@ const mealsMatch = (left: Meal, right: Meal): boolean =>
 	(left.date ?? '') === (right.date ?? '') &&
 	(left.time ?? '') === (right.time ?? '') &&
 	(left.sortOrder ?? 0) === (right.sortOrder ?? 0) &&
+	(left.status ?? '') === (right.status ?? '') &&
+	(left.plannedCookWorkosUserId ?? '') === (right.plannedCookWorkosUserId ?? '') &&
 	(left.cookTimeMinutes ?? 0) === (right.cookTimeMinutes ?? 0) &&
 	(left.servingsPlanned ?? 1) === (right.servingsPlanned ?? 1) &&
 	(left.baseServings ?? 1) === (right.baseServings ?? 1) &&

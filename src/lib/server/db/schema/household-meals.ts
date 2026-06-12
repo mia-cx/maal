@@ -60,7 +60,7 @@ export const householdMeals = sqliteTable(
 		imageUrl: text('image_url'),
 		date: text('date'),
 		time: text('time'),
-		status: text('status', { enum: ['planned', 'cooked'] })
+		status: text('status', { enum: ['planned', 'cooked', 'skipped'] })
 			.notNull()
 			.default('planned'),
 		prepTimeMinutes: integer('prep_time_minutes'),

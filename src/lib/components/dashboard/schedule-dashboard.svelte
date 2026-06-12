@@ -26,7 +26,7 @@
 	import { dropTargetFromPointer } from './schedule-dnd';
 	import { isMealInPool, sortMealPool } from './schedule-ordering';
 	import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
-	import type { Meal, MealDropTarget, ScheduleMode } from './schedule-types';
+	import type { HouseholdMember, Meal, MealDropTarget, ScheduleMode } from './schedule-types';
 
 	let {
 		meals: initialMeals = [],
@@ -34,7 +34,8 @@
 		defaultMealServings = 1,
 		weekStartsOn = 'monday',
 		initialMealRange,
-		currentUserId
+		currentUserId,
+		householdMembers = []
 	}: {
 		meals?: Meal[];
 		recipes?: RecipeMenuItem[];
@@ -42,6 +43,7 @@
 		weekStartsOn?: 'sunday' | 'monday';
 		initialMealRange?: { start: string; end: string };
 		currentUserId?: string;
+		householdMembers?: HouseholdMember[];
 	} = $props();
 
 	const initialUiState = uiState.get();
@@ -319,7 +321,7 @@
 		updateScheduleMealSchedule(
 			{
 				...meal,
-				status: cooked ? 'cooked' : 'planned',
+				status: cooked ? 'cooked' : 'skipped',
 				latestVerdict: verdict,
 				latestCheckIn: { verdict, cookTime, reason: reason?.trim() || undefined }
 			},
@@ -595,6 +597,7 @@
 	<MealPreviewDialog
 		bind:open={previewOpen}
 		meal={selectedMeal}
+		{householdMembers}
 		onmealchange={updateScheduleMealSchedule}
 		onmealdelete={deleteScheduleMeal}
 	/>

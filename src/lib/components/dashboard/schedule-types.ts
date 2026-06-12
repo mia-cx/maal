@@ -3,7 +3,7 @@ export type ScheduleMode = 'daily' | 'multi-day' | 'monthly';
 import type { MealFeedbackVerdict } from './meal-labels';
 
 export type MealFamiliarity = 'safe' | 'exploration' | 'wildcard';
-export type MealStatus = 'planned' | 'cooked';
+export type MealStatus = 'planned' | 'cooked' | 'skipped';
 
 export type MealCheckIn = {
 	verdict: MealFeedbackVerdict;
@@ -17,6 +17,14 @@ export type MealPickHandler = (meal: Meal, event: PointerEvent) => void;
 export type MealSelectHandler = (meal: Meal) => void;
 export type MealCheckInHandler = (meal: Meal) => void;
 export type MealAddHandler = (date?: string) => void;
+
+export type HouseholdMember = {
+	id: string;
+	userId: string;
+	name: string;
+	email: string;
+	role: string;
+};
 
 export type Meal = {
 	id: string;

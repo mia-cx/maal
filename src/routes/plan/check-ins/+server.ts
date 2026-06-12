@@ -78,7 +78,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	await db
 		.update(householdMeals)
 		.set({
-			status: cooked ? 'cooked' : 'planned',
+			status: cooked ? 'cooked' : 'skipped',
 			updatedAt
 		})
 		.where(eq(householdMeals.id, mealId));

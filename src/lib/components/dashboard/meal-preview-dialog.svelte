@@ -11,7 +11,7 @@
 	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import { scaleIngredientText } from '$lib/recipes/ingredient-text';
 	import { familiarityLabels } from './meal-labels';
-	import type { Meal, MealFamiliarity } from './schedule-types';
+	import type { HouseholdMember, Meal, MealFamiliarity } from './schedule-types';
 
 	const fallbackDurationMinutes = 30;
 
@@ -24,11 +24,13 @@
 	let {
 		meal,
 		open = $bindable(false),
+		householdMembers = [],
 		onmealchange,
 		onmealdelete
 	}: {
 		meal: Meal | null;
 		open?: boolean;
+		householdMembers?: HouseholdMember[];
 		onmealchange?: (meal: Meal) => void;
 		onmealdelete?: (meal: Meal) => void;
 	} = $props();
@@ -44,6 +46,7 @@
 	let descriptionDraft = $state('');
 	let cookTimeDraft = $state('30');
 	let servingsDraft = $state('1');
+	let plannedCookDraft = $state('');
 	let scheduleEditorOpen = $state(false);
 	let deleteConfirmOpen = $state(false);
 	let heroElement = $state<HTMLElement>();
@@ -74,6 +77,10 @@
 		meal?.familiarity
 			? familiarityTone[meal.familiarity]
 			: 'border-border bg-muted/40 text-foreground'
+	);
+	const plannedCookName = $derived(
+		householdMembers.find((member) => member.userId === plannedCookDraft)?.name ??
+			(plannedCookDraft ? 'Unknown cook' : 'Unassigned')
 	);
 
 	const previewViewportGutter = 16;
@@ -164,9 +171,10 @@
 		if (!isMinuteTime(startCookingTime) || !isMinuteTime(startEatingTime)) return formattedDate;
 		return `${formattedDate}, ${startCookingTime}-${startEatingTime}`;
 	});
+	const cookSummary = $derived(`Cook: ${plannedCookName}`);
 
 	const mealSignature = $derived(
-		`${meal?.id ?? ''}|${meal?.date ?? ''}|${meal?.time ?? ''}|${meal?.title ?? ''}|${meal?.description ?? ''}|${meal?.cookTimeMinutes ?? ''}|${meal?.servingsPlanned ?? ''}`
+		`${meal?.id ?? ''}|${meal?.date ?? ''}|${meal?.time ?? ''}|${meal?.title ?? ''}|${meal?.description ?? ''}|${meal?.cookTimeMinutes ?? ''}|${meal?.servingsPlanned ?? ''}|${meal?.plannedCookWorkosUserId ?? ''}`
 	);
 
 	const editedTime = $derived.by(() => {
@@ -197,7 +205,8 @@
 				customMeal && Number.isFinite(cookTime)
 					? Math.max(0, Math.round(cookTime))
 					: meal.cookTimeMinutes,
-			servingsPlanned: normalizedServings()
+			servingsPlanned: normalizedServings(),
+			plannedCookWorkosUserId: plannedCookDraft || undefined
 		};
 	};
 
@@ -231,6 +240,7 @@
 		descriptionDraft = meal?.description ?? '';
 		cookTimeDraft = String(meal?.cookTimeMinutes ?? fallbackDurationMinutes);
 		servingsDraft = String(Math.max(1, Math.round(meal?.servingsPlanned ?? 1)));
+		plannedCookDraft = meal?.plannedCookWorkosUserId ?? '';
 	};
 
 	$effect(() => {
@@ -308,6 +318,18 @@
 				class="h-9 px-3 tabular-nums"
 			/>
 		</label>
+		<label class="grid gap-1 sm:col-span-2">
+			<span class="text-xs font-medium text-muted-foreground">Cook</span>
+			<select
+				bind:value={plannedCookDraft}
+				class="h-9 w-full rounded-md border border-input bg-input/20 px-3 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 md:text-xs/relaxed dark:bg-input/30"
+			>
+				<option value="">Unassigned</option>
+				{#each householdMembers as member (member.userId)}
+					<option value={member.userId}>{member.name}</option>
+				{/each}
+			</select>
+		</label>
 	</div>
 {/snippet}
 
@@ -384,14 +406,14 @@
 											class="w-full rounded-md border border-border bg-muted/20 px-3 py-2 text-left text-sm font-medium tabular-nums hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none sm:hidden"
 											onclick={() => (scheduleEditorOpen = true)}
 										>
-											{scheduleSummary}
+											{scheduleSummary} · {cookSummary}
 										</button>
 
 										<Popover.Root bind:open={scheduleEditorOpen}>
 											<Popover.Trigger
 												class="hidden w-full rounded-md border border-border bg-muted/20 px-3 py-2 text-left text-sm font-medium tabular-nums hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none sm:block"
 											>
-												{scheduleSummary}
+												{scheduleSummary} · {cookSummary}
 											</Popover.Trigger>
 											<Popover.Content
 												align="center"
@@ -490,7 +512,9 @@
 						<div class="mb-3 flex items-center justify-between gap-3">
 							<div class="min-w-0">
 								<h3 class="text-sm font-semibold">Schedule meal</h3>
-								<p class="truncate text-xs text-muted-foreground">{scheduleSummary}</p>
+								<p class="truncate text-xs text-muted-foreground">
+									{scheduleSummary} · {cookSummary}
+								</p>
 							</div>
 							<button
 								type="button"

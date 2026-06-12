@@ -1,6 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
-import { commitHouseholdCookie, countActiveHouseholdMembers } from '$lib/server/auth/household';
+import { commitHouseholdCookie, listHouseholdMembers } from '$lib/server/auth/household';
 import { getDb } from '$lib/server/db';
 import { loadMealPlanMeals, loadMenuRecipes } from '$lib/server/db/recipe-mappers';
 import { households } from '$lib/server/db/schema';
@@ -30,8 +30,8 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 	const initialDate = new Date();
 	const initialStartDate = dateKey(addDays(initialDate, -45));
 	const initialEndDate = dateKey(addDays(initialDate, 90));
-	const [activeMemberCount, profileRows] = await Promise.all([
-		countActiveHouseholdMembers(platform, householdId),
+	const [householdMembers, profileRows] = await Promise.all([
+		listHouseholdMembers(platform, householdId),
 		db
 			.select({
 				defaultPlannedYield: households.defaultPlannedYield,
@@ -43,7 +43,8 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 			.limit(1)
 	]);
 	const householdProfile = profileRows[0];
-	const defaultMealServings = householdProfile?.defaultPlannedYield ?? activeMemberCount;
+	const defaultMealServings =
+		householdProfile?.defaultPlannedYield ?? Math.max(1, householdMembers.length);
 	const taxonomyPreferences = await loadEffectiveTaxonomyPreferences(db, {
 		workosUserId: session.user.id,
 		householdId,
@@ -55,6 +56,7 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 		recipes,
 		defaultMealServings,
 		weekStartsOn: weekStartsOnName(householdProfile?.weekStartsOn),
+		householdMembers,
 		unitPreferences,
 		initialMealRange: { start: initialStartDate, end: initialEndDate },
 		meals: await loadMealPlanMeals(db, {

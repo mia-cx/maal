@@ -1,7 +1,11 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq } from 'drizzle-orm';
 import type { Meal } from '$lib/components/dashboard/schedule-types';
-import { countActiveHouseholdMembers, resolveActiveHouseholdId } from '$lib/server/auth/household';
+import {
+	countActiveHouseholdMembers,
+	listHouseholdMembers,
+	resolveActiveHouseholdId
+} from '$lib/server/auth/household';
 import { getDb } from '$lib/server/db';
 import {
 	householdMealClassifications,
@@ -97,7 +101,8 @@ const plannedMealUpdate = (meal: Meal, defaultServings: number) => ({
 	date: meal.date ?? null,
 	time: meal.time ?? null,
 	sortOrder: meal.sortOrder ?? null,
-	status: 'planned' as const,
+	status: meal.status ?? ('planned' as const),
+	plannedCookWorkosUserId: meal.plannedCookWorkosUserId ?? null,
 	updatedAt: new Date().toISOString()
 });
 
@@ -268,6 +273,11 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 
 	const meal = await readMeal(request);
 	const db = getDb(platform.env.DB);
+	const plannedCookWorkosUserId = meal.plannedCookWorkosUserId ?? session.user.id;
+	const householdMembers = await listHouseholdMembers(platform, householdId);
+	if (!householdMembers.some((member) => member.userId === plannedCookWorkosUserId)) {
+		error(400, { message: 'Choose an active household member as the cook.' });
+	}
 	const unitPreferences = await loadUnitPreferences(db, session.user.id, householdId);
 	const userRecipeId = meal.userRecipeId;
 	const recipe = userRecipeId ? await ownedRecipe(db, userRecipeId, session.user.id) : undefined;
@@ -284,11 +294,11 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		cookTimeMinutes: recipe?.cookTimeMinutes ?? meal.cookTimeMinutes ?? null,
 		yield: recipe?.yield ?? meal.baseServings ?? defaultMealServings,
 		plannedYield: servingsPlanned(meal, defaultMealServings),
-		plannedCookWorkosUserId: session.user.id,
+		plannedCookWorkosUserId,
 		date: meal.date ?? null,
 		time: meal.time ?? null,
 		sortOrder: meal.sortOrder ?? null,
-		status: 'planned'
+		status: meal.status ?? 'planned'
 	});
 
 	if (recipe) {
@@ -366,6 +376,14 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 		.get();
 
 	if (existingMeal) {
+		meal.plannedCookWorkosUserId ??= existingMeal.plannedCookWorkosUserId ?? undefined;
+		meal.status ??= existingMeal.status;
+		if (meal.plannedCookWorkosUserId) {
+			const householdMembers = await listHouseholdMembers(platform, householdId);
+			if (!householdMembers.some((member) => member.userId === meal.plannedCookWorkosUserId)) {
+				error(400, { message: 'Choose an active household member as the cook.' });
+			}
+		}
 		await db
 			.update(householdMeals)
 			.set(plannedMealUpdate(meal, defaultMealServings))

@@ -70,6 +70,15 @@ export const canManageActiveHousehold = async (
 };
 
 export type UserHousehold = { id: string; name: string };
+export type HouseholdMember = {
+	id: string;
+	userId: string;
+	name: string;
+	email: string;
+	role: string;
+	directoryManaged: boolean;
+	createdAt: string;
+};
 
 export const listUserHouseholds = async (
 	platform: App.Platform | undefined,
@@ -93,19 +102,90 @@ export const listUserHouseholds = async (
 export const listUserHouseholdIds = async (platform: App.Platform | undefined, userId: string) =>
 	(await listUserHouseholds(platform, userId)).map((household) => household.id);
 
-export const countActiveHouseholdMembers = async (
+export const listHouseholdMembers = async (
 	platform: App.Platform | undefined,
 	householdId: string
-): Promise<number> => {
-	if (smokeAuthEnabled(platform) && householdId === SMOKE_HOUSEHOLD_ID) return 4;
+): Promise<HouseholdMember[]> => {
+	if (smokeAuthEnabled(platform) && householdId === SMOKE_HOUSEHOLD_ID) {
+		return [
+			{
+				id: 'membership_smoke_maal',
+				userId: SMOKE_USER_ID,
+				name: 'Smoke User',
+				email: 'smoke@example.com',
+				role: 'admin',
+				directoryManaged: false,
+				createdAt: new Date(0).toISOString()
+			},
+			{
+				id: 'membership_smoke_sam',
+				userId: 'user_smoke_sam',
+				name: 'Sam Smoke',
+				email: 'sam@example.com',
+				role: 'member',
+				directoryManaged: false,
+				createdAt: new Date(0).toISOString()
+			},
+			{
+				id: 'membership_smoke_jo',
+				userId: 'user_smoke_jo',
+				name: 'Jo Smoke',
+				email: 'jo@example.com',
+				role: 'member',
+				directoryManaged: false,
+				createdAt: new Date(0).toISOString()
+			},
+			{
+				id: 'membership_smoke_lee',
+				userId: 'user_smoke_lee',
+				name: 'Lee Smoke',
+				email: 'lee@example.com',
+				role: 'member',
+				directoryManaged: false,
+				createdAt: new Date(0).toISOString()
+			}
+		];
+	}
+
 	const runtime = createAuthRuntime(platform);
 	const memberships = await runtime.workos.userManagement.listOrganizationMemberships({
 		organizationId: householdId,
 		statuses: ['active'],
 		limit: 100
 	});
-	return Math.max(1, memberships.data.length);
+
+	return Promise.all(
+		memberships.data.map(async (membership) => {
+			try {
+				const user = await runtime.workos.userManagement.getUser(membership.userId);
+				return {
+					id: membership.id,
+					userId: membership.userId,
+					name: user.name ?? user.email,
+					email: user.email,
+					role: membership.role.slug,
+					directoryManaged: membership.directoryManaged,
+					createdAt: membership.createdAt
+				};
+			} catch {
+				return {
+					id: membership.id,
+					userId: membership.userId,
+					name: membership.userId,
+					email: '',
+					role: membership.role.slug,
+					directoryManaged: membership.directoryManaged,
+					createdAt: membership.createdAt
+				};
+			}
+		})
+	);
 };
+
+export const countActiveHouseholdMembers = async (
+	platform: App.Platform | undefined,
+	householdId: string
+): Promise<number> => Math.max(1, (await listHouseholdMembers(platform, householdId)).length);
 
 export const resolveActiveHouseholdId = async (input: {
 	platform: App.Platform | undefined;
