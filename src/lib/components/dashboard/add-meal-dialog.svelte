@@ -38,37 +38,28 @@
 	const normalizedQuery = $derived(query.trim());
 	const isUrl = $derived(/^https?:\/\//i.test(normalizedQuery));
 	const normalizedSearch = $derived(normalizedQuery.toLowerCase());
-	const showExistingRecipeOptions = $derived(showExistingRecipes ?? Boolean(date));
-	const dialogTitle = $derived(date ? 'Add meal' : 'Add recipe');
+	let fetchedRecipes = $state<RecipeMenuItem[]>([]);
+	let fetchRecipesError = $state<string | null>(null);
+	let fetchRecipesBusy = $state(false);
+	let fetchedRecipeQuery = $state<string | null>(null);
+
+	const showExistingRecipeOptions = $derived(showExistingRecipes ?? true);
+	const shouldFetchFuzzyRecipes = $derived(normalizedSearch.length > 3);
+	const recipeFetchQuery = $derived(shouldFetchFuzzyRecipes ? normalizedSearch : '');
+	const dialogTitle = 'Add meal';
 	const dialogDescription = $derived(
 		showExistingRecipeOptions
-			? 'Choose a saved recipe, import one from a URL, or start a new recipe for this day.'
+			? date
+				? 'Choose a saved recipe, import one from a URL, or start a new recipe for this day.'
+				: 'Choose a saved recipe, import one from a URL, or start a new meal-pool recipe.'
 			: 'Import one from a URL or start a new recipe for your menu.'
 	);
 
-	const wordScore = (recipe: RecipeMenuItem, search: string): number => {
-		if (!search) return 1;
-		const title = recipe.title.toLowerCase();
-		if (title === search) return 100;
-		if (title.startsWith(search)) return 80;
-		if (title.includes(search)) return 60;
-		const words = search.split(/\s+/).filter(Boolean);
-		const matchedWords = words.filter((word) => title.includes(word)).length;
-		if (!matchedWords) return 0;
-		return 20 + matchedWords * 10;
-	};
-
 	const matches = $derived(
 		showExistingRecipeOptions
-			? recipes
-					.map((recipe) => ({ recipe, score: wordScore(recipe, normalizedSearch) }))
-					.filter((candidate) => candidate.score > 0)
-					.sort(
-						(left, right) =>
-							right.score - left.score || left.recipe.title.localeCompare(right.recipe.title)
-					)
-					.slice(0, 8)
-					.map((candidate) => candidate.recipe)
+			? fetchedRecipeQuery === recipeFetchQuery
+				? fetchedRecipes
+				: recipes.slice(0, 10)
 			: []
 	);
 
@@ -91,10 +82,24 @@
 			activeIndex === index ? 'bg-muted text-foreground' : 'hover:bg-muted'
 		}`;
 
+	const readRecipeFetchError = async (response: Response): Promise<string> => {
+		try {
+			const body = (await response.json()) as { message?: unknown };
+			if (typeof body.message === 'string' && body.message.trim()) return body.message;
+		} catch {
+			// Fall through to the generic message.
+		}
+		return 'Could not load recipes.';
+	};
+
 	const reset = () => {
 		query = '';
 		activeIndex = 0;
 		activeQuery = '';
+		fetchedRecipes = [];
+		fetchRecipesError = null;
+		fetchRecipesBusy = false;
+		fetchedRecipeQuery = null;
 	};
 
 	const chooseExisting = (recipe: RecipeMenuItem) => {
@@ -145,6 +150,45 @@
 	};
 
 	$effect(() => {
+		if (!open || !showExistingRecipeOptions || isUrl) {
+			fetchRecipesBusy = false;
+			return;
+		}
+		const query = recipeFetchQuery;
+		if (fetchedRecipeQuery === query) return;
+
+		const controller = new AbortController();
+		const timeout = setTimeout(
+			() => {
+				fetchRecipesBusy = true;
+				fetchRecipesError = null;
+				fetch(`/menu/recipes?picker=meal&limit=10&q=${encodeURIComponent(query)}`, {
+					signal: controller.signal
+				})
+					.then(async (response) => {
+						if (!response.ok) throw new Error(await readRecipeFetchError(response));
+						const body = (await response.json()) as { recipes: RecipeMenuItem[] };
+						fetchedRecipes = body.recipes;
+						fetchedRecipeQuery = query;
+					})
+					.catch((error: unknown) => {
+						if (error instanceof DOMException && error.name === 'AbortError') return;
+						fetchRecipesError = error instanceof Error ? error.message : 'Could not load recipes.';
+					})
+					.finally(() => {
+						if (!controller.signal.aborted) fetchRecipesBusy = false;
+					});
+			},
+			shouldFetchFuzzyRecipes ? 250 : 0
+		);
+
+		return () => {
+			clearTimeout(timeout);
+			controller.abort();
+		};
+	});
+
+	$effect(() => {
 		if (!open) {
 			reset();
 			return;
@@ -185,7 +229,9 @@
 				role="listbox"
 				aria-label="Recipe options"
 			>
-				{#if showExistingRecipeOptions && !isUrl && matches.length === 0}
+				{#if showExistingRecipeOptions && !isUrl && fetchRecipesBusy}
+					<p class="px-3 py-2 text-sm text-muted-foreground">Loading recipes…</p>
+				{:else if showExistingRecipeOptions && !isUrl && matches.length === 0}
 					<p class="px-3 py-2 text-sm text-muted-foreground">No saved recipes match.</p>
 				{/if}
 				{#each options as option, index (option.id)}
@@ -237,6 +283,9 @@
 				{/each}
 			</div>
 
+			{#if fetchRecipesError}
+				<p class="text-xs text-destructive">{fetchRecipesError}</p>
+			{/if}
 			{#if error}
 				<p class="text-xs text-destructive">{error}</p>
 			{/if}

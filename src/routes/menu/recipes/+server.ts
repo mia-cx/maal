@@ -560,6 +560,62 @@ const integerParam = (url: URL, key: string, fallback: number): number => {
 	return Number.isInteger(value) && value >= 0 ? value : fallback;
 };
 
+const recipeFrecencyScore = (recipe: RecipeMenuItem): number => {
+	const lastCookedAt = recipe.lastCookedAt ? Date.parse(recipe.lastCookedAt) : Number.NaN;
+	const daysSinceCooked = Number.isFinite(lastCookedAt)
+		? Math.max(0, (Date.now() - lastCookedAt) / 86_400_000)
+		: Number.POSITIVE_INFINITY;
+	const recencyScore = Number.isFinite(daysSinceCooked) ? 20 / (1 + daysSinceCooked / 14) : 0;
+	return recipe.timesCooked * 10 + recipe.plannedCount * 3 + recencyScore;
+};
+
+const fuzzyRecipeScore = (recipe: RecipeMenuItem, search: string): number => {
+	if (!search) return 1;
+	const title = recipe.title.toLowerCase();
+	if (title === search) return 120;
+	if (title.startsWith(search)) return 100;
+	if (title.includes(search)) return 80;
+
+	let searchIndex = 0;
+	let gaps = 0;
+	for (const character of title) {
+		if (character === search[searchIndex]) {
+			searchIndex += 1;
+			if (searchIndex === search.length) break;
+		} else if (searchIndex > 0) {
+			gaps += 1;
+		}
+	}
+	if (searchIndex === search.length) return Math.max(10, 60 - gaps);
+
+	const words = search.split(/\s+/).filter(Boolean);
+	const matchedWords = words.filter((word) => title.includes(word)).length;
+	return matchedWords ? 20 + matchedWords * 10 : 0;
+};
+
+const pickerRecipes = (
+	recipes: RecipeMenuItem[],
+	query: string,
+	limit: number
+): RecipeMenuItem[] => {
+	const search = query.toLowerCase().trim();
+	return recipes
+		.map((recipe) => ({
+			recipe,
+			frecencyScore: recipeFrecencyScore(recipe),
+			fuzzyScore: search ? fuzzyRecipeScore(recipe, search) : 1
+		}))
+		.filter((candidate) => !search || candidate.fuzzyScore > 0)
+		.sort(
+			(left, right) =>
+				right.fuzzyScore - left.fuzzyScore ||
+				right.frecencyScore - left.frecencyScore ||
+				left.recipe.title.localeCompare(right.recipe.title)
+		)
+		.slice(0, limit)
+		.map((candidate) => candidate.recipe);
+};
+
 const loadHouseholdUnitPreferences = async (
 	db: ReturnType<typeof getDb>,
 	workosUserId: string,
@@ -657,10 +713,18 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 	const offset = integerParam(url, 'offset', 0);
 	const limit = Math.min(integerParam(url, 'limit', defaultRecipePageSize), maxRecipePageSize);
 	const db = getDb(platform.env.DB);
+	const unitPreferences = await loadHouseholdUnitPreferences(db, session.user.id, householdId);
+	if (url.searchParams.get('picker') === 'meal') {
+		const recipes = await loadMenuRecipes(db, session.user.id, householdId, { unitPreferences });
+		return json({
+			recipes: pickerRecipes(recipes, url.searchParams.get('q') ?? '', limit),
+			nextRecipeOffset: null
+		});
+	}
 	const recipes = await loadMenuRecipes(db, session.user.id, householdId, {
 		limit: limit + 1,
 		offset,
-		unitPreferences: await loadHouseholdUnitPreferences(db, session.user.id, householdId)
+		unitPreferences
 	});
 	const hasMoreRecipes = recipes.length > limit;
 	return json({
