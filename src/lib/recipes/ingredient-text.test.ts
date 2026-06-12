@@ -22,4 +22,22 @@ describe('ingredient text units', () => {
 			item: 'chicken'
 		});
 	});
+
+	it('parses Dutch recipe unit aliases from ingredient lines', () => {
+		expect(parseIngredientLine('2 el olijfolie')).toEqual({
+			amount: '2',
+			unit: 'tbsp',
+			item: 'olijfolie'
+		});
+		expect(parseIngredientLine('1 tl komijn')).toEqual({
+			amount: '1',
+			unit: 'tsp',
+			item: 'komijn'
+		});
+		expect(parseIngredientLine('3 teentjes knoflook')).toEqual({
+			amount: '3',
+			unit: 'clove',
+			item: 'knoflook'
+		});
+	});
 });
