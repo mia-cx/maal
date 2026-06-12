@@ -14,7 +14,7 @@ The MCP server must call existing Maal server/service functions. Route handlers 
 - No cross-user recipe discovery outside authorized household/user scope.
 - No MCP-only persistence paths.
 - No model-specific prompts that hide tool behavior.
-- No grocery/pantry tools in the first slice unless the core CRUD surface is stable.
+- No grocery or pantry tools in this spec; Maal does not have grocery rollups or pantry persistence yet.
 
 ## Authentication
 
@@ -46,16 +46,14 @@ Suggested shape:
 
 ```ts
 type ApiKeyRecord = {
-  id: string;
-  userId: string;
-  secretHash: string;
-  householdScope:
-    | { kind: 'all' }
-    | { kind: 'households'; householdIds: string[] };
-  label?: string;
-  createdAt: string;
-  revokedAt?: string;
-  lastUsedAt?: string;
+	id: string;
+	userId: string;
+	secretHash: string;
+	householdScope: { kind: 'all' } | { kind: 'households'; householdIds: string[] };
+	label?: string;
+	createdAt: string;
+	revokedAt?: string;
+	lastUsedAt?: string;
 };
 ```
 
@@ -138,8 +136,8 @@ Returns:
 
 ```ts
 type HouseholdSummary = {
-  id: string;
-  name: string;
+	id: string;
+	name: string;
 };
 ```
 
@@ -151,25 +149,25 @@ Inputs:
 
 ```ts
 type ListUserRecipesInput = {
-  householdId?: string;
-  query?: string;
-  familiarity?: {
-    minTimesCooked?: number;
-    maxTimesCooked?: number;
-    lastCookedAfter?: string;
-    lastCookedBefore?: string;
-  };
-  rating?: {
-    verdicts?: Array<'repeat' | 'neutral' | 'avoid'>;
-    minReviews?: number;
-    maxReviews?: number;
-  };
-  cookTimeMinutes?: { min?: number; max?: number };
-  tags?: string[];
-  includeArchived?: boolean;
-  includeDetails?: boolean;
-  limit?: number;
-  cursor?: string;
+	householdId?: string;
+	query?: string;
+	familiarity?: {
+		minTimesCooked?: number;
+		maxTimesCooked?: number;
+		lastCookedAfter?: string;
+		lastCookedBefore?: string;
+	};
+	rating?: {
+		verdicts?: Array<'repeat' | 'neutral' | 'avoid'>;
+		minReviews?: number;
+		maxReviews?: number;
+	};
+	cookTimeMinutes?: { min?: number; max?: number };
+	tags?: string[];
+	includeArchived?: boolean;
+	includeDetails?: boolean;
+	limit?: number;
+	cursor?: string;
 };
 ```
 
@@ -186,17 +184,17 @@ Inputs:
 
 ```ts
 type CreateUserRecipeInput = {
-  householdId?: string;
-  sourceUrl?: string;
-  recipe?: {
-    title: string;
-    description?: string;
-    imageUrl?: string;
-    cookTimeMinutes?: number;
-    yield?: number;
-    ingredients?: string[];
-    instructions?: string[];
-  };
+	householdId?: string;
+	sourceUrl?: string;
+	recipe?: {
+		title: string;
+		description?: string;
+		imageUrl?: string;
+		cookTimeMinutes?: number;
+		yield?: number;
+		ingredients?: string[];
+		instructions?: string[];
+	};
 };
 ```
 
@@ -208,8 +206,8 @@ Inputs:
 
 ```ts
 type GetUserRecipeInput = {
-  householdId?: string;
-  recipeId: string;
+	householdId?: string;
+	recipeId: string;
 };
 ```
 
@@ -221,17 +219,17 @@ Inputs:
 
 ```ts
 type UpdateUserRecipeInput = {
-  householdId?: string;
-  recipeId: string;
-  patch: Partial<{
-    title: string;
-    description: string;
-    imageUrl: string;
-    cookTimeMinutes: number;
-    yield: number;
-    ingredients: string[];
-    instructions: string[];
-  }>;
+	householdId?: string;
+	recipeId: string;
+	patch: Partial<{
+		title: string;
+		description: string;
+		imageUrl: string;
+		cookTimeMinutes: number;
+		yield: number;
+		ingredients: string[];
+		instructions: string[];
+	}>;
 };
 ```
 
@@ -243,9 +241,9 @@ Inputs:
 
 ```ts
 type DeleteUserRecipeInput = {
-  householdId?: string;
-  recipeId: string;
-  mode: 'archive' | 'permanent';
+	householdId?: string;
+	recipeId: string;
+	mode: 'archive' | 'permanent';
 };
 ```
 
@@ -259,15 +257,15 @@ Inputs:
 
 ```ts
 type ListHouseholdPlanInput = {
-  householdId?: string;
-  startDate: string; // YYYY-MM-DD
-  endDate: string;   // YYYY-MM-DD
-  cookUserId?: string;
-  status?: Array<'planned' | 'cooked' | 'skipped'>;
-  includeFloating?: boolean; // undated meal pool; default true
-  includeDetails?: boolean;
-  limit?: number;
-  cursor?: string;
+	householdId?: string;
+	startDate: string; // YYYY-MM-DD
+	endDate: string; // YYYY-MM-DD
+	cookUserId?: string;
+	status?: Array<'planned' | 'cooked' | 'skipped'>;
+	includeFloating?: boolean; // undated meal pool; default true
+	includeDetails?: boolean;
+	limit?: number;
+	cursor?: string;
 };
 ```
 
@@ -281,21 +279,21 @@ Inputs:
 
 ```ts
 type CreateHouseholdMealInput = {
-  householdId?: string;
-  userRecipeId?: string;
-  date?: string;
-  time?: string;
-  sortOrder?: number;
-  plannedCookUserId?: string;
-  servingsPlanned?: number;
-  customMeal?: {
-    title: string;
-    description?: string;
-    imageUrl?: string;
-    cookTimeMinutes?: number;
-    ingredients?: string[];
-    instructions?: string[];
-  };
+	householdId?: string;
+	userRecipeId?: string;
+	date?: string;
+	time?: string;
+	sortOrder?: number;
+	plannedCookUserId?: string;
+	servingsPlanned?: number;
+	customMeal?: {
+		title: string;
+		description?: string;
+		imageUrl?: string;
+		cookTimeMinutes?: number;
+		ingredients?: string[];
+		instructions?: string[];
+	};
 };
 ```
 
@@ -312,8 +310,8 @@ Inputs:
 
 ```ts
 type GetHouseholdMealInput = {
-  householdId?: string;
-  mealId: string;
+	householdId?: string;
+	mealId: string;
 };
 ```
 
@@ -325,21 +323,21 @@ Inputs:
 
 ```ts
 type UpdateHouseholdMealInput = {
-  householdId?: string;
-  mealId: string;
-  patch: Partial<{
-    date: string | null;
-    time: string | null;
-    sortOrder: number | null;
-    plannedCookUserId: string | null;
-    servingsPlanned: number;
-    status: 'planned' | 'cooked' | 'skipped';
-    title: string;
-    description: string;
-    cookTimeMinutes: number;
-    ingredients: string[];
-    instructions: string[];
-  }>;
+	householdId?: string;
+	mealId: string;
+	patch: Partial<{
+		date: string | null;
+		time: string | null;
+		sortOrder: number | null;
+		plannedCookUserId: string | null;
+		servingsPlanned: number;
+		status: 'planned' | 'cooked' | 'skipped';
+		title: string;
+		description: string;
+		cookTimeMinutes: number;
+		ingredients: string[];
+		instructions: string[];
+	}>;
 };
 ```
 
@@ -351,8 +349,8 @@ Inputs:
 
 ```ts
 type DeleteHouseholdMealInput = {
-  householdId?: string;
-  mealId: string;
+	householdId?: string;
+	mealId: string;
 };
 ```
 
@@ -366,12 +364,12 @@ Inputs:
 
 ```ts
 type CreateMealCheckInInput = {
-  householdId?: string;
-  mealId: string;
-  status: 'cooked' | 'skipped';
-  verdict?: 'repeat' | 'neutral' | 'avoid';
-  cookTimeMinutes?: number;
-  notes?: string;
+	householdId?: string;
+	mealId: string;
+	status: 'cooked' | 'skipped';
+	verdict?: 'repeat' | 'neutral' | 'avoid';
+	cookTimeMinutes?: number;
+	notes?: string;
 };
 ```
 
@@ -390,14 +388,14 @@ Inputs:
 
 ```ts
 type UpdateMealCheckInInput = {
-  householdId?: string;
-  checkInId: string;
-  patch: Partial<{
-    status: 'cooked' | 'skipped';
-    verdict: 'repeat' | 'neutral' | 'avoid';
-    cookTimeMinutes: number | null;
-    notes: string | null;
-  }>;
+	householdId?: string;
+	checkInId: string;
+	patch: Partial<{
+		status: 'cooked' | 'skipped';
+		verdict: 'repeat' | 'neutral' | 'avoid';
+		cookTimeMinutes: number | null;
+		notes: string | null;
+	}>;
 };
 ```
 
@@ -409,8 +407,8 @@ Inputs:
 
 ```ts
 type DeleteMealCheckInInput = {
-  householdId?: string;
-  checkInId: string;
+	householdId?: string;
+	checkInId: string;
 };
 ```
 
@@ -430,7 +428,7 @@ Inputs:
 
 ```ts
 type GetHouseholdFoodProfileInput = {
-  householdId?: string;
+	householdId?: string;
 };
 ```
 
@@ -438,22 +436,22 @@ Returns:
 
 ```ts
 type HouseholdFoodProfile = {
-  allergies: string[];
-  dietaryConstraints: string[];
-  dislikedIngredients: string[];
-  preferredIngredients: string[];
-  ingredientDisplayOverrides: Array<{
-    foodId: string;
-    alias?: string;
-    preferredMeasureUnitId?: string;
-    preferredMeasureAlias?: string;
-  }>;
-  unitDisplayOverrides: Array<{
-    baseUnitId: string;
-    unitId: string;
-    alias: string;
-    pluralAlias?: string;
-  }>;
+	allergies: string[];
+	dietaryConstraints: string[];
+	dislikedIngredients: string[];
+	preferredIngredients: string[];
+	ingredientDisplayOverrides: Array<{
+		foodId: string;
+		alias?: string;
+		preferredMeasureUnitId?: string;
+		preferredMeasureAlias?: string;
+	}>;
+	unitDisplayOverrides: Array<{
+		baseUnitId: string;
+		unitId: string;
+		alias: string;
+		pluralAlias?: string;
+	}>;
 };
 ```
 
@@ -505,9 +503,9 @@ Every tool error should include:
 
 ```ts
 type ToolError = {
-  code: string;
-  message: string;
-  suggestion?: string;
+	code: string;
+	message: string;
+	suggestion?: string;
 };
 ```
 
