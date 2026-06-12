@@ -1,10 +1,12 @@
 <script lang="ts">
 	import * as Accordion from '$lib/components/ui/accordion';
+	import * as Card from '$lib/components/ui/card';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { resolve } from '$app/paths';
+	import PlusIcon from '@lucide/svelte/icons/plus';
 	import type { Pathname } from '$app/types';
 	import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
 	import {
@@ -318,21 +320,20 @@
 
 <section class="flex h-svh min-w-0 flex-col overflow-hidden bg-background text-foreground">
 	<header
-		class="sticky top-0 z-40 flex h-[52px] shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-2"
+		class="sticky top-0 z-40 flex h-[52px] shrink-0 items-center gap-2 border-b border-border bg-background px-2"
 	>
 		<div class="flex shrink-0 items-center gap-2 text-foreground">
 			<div class="flex w-9 shrink-0 items-center justify-center">
 				<Sidebar.Trigger />
 			</div>
 		</div>
-		<Button variant="outline" size="sm" onclick={openAddRecipe}>Add recipe</Button>
 	</header>
 
 	<div class="@container/my-menu-main min-h-0 flex-1 overflow-auto p-3 md:p-4">
 		<div
-			class="mb-3 flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3 sm:flex-row sm:items-center sm:justify-between"
+			class="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 p-3"
 		>
-			<p class="text-sm font-medium">
+			<p class="mr-2 text-sm font-medium">
 				{selectedRecipes.length} recipe{selectedRecipes.length === 1 ? '' : 's'} selected
 			</p>
 			<div class="flex gap-2">
@@ -358,6 +359,24 @@
 		<div
 			class="grid grid-cols-1 gap-3 md:gap-4 @min-[42rem]/my-menu-main:grid-cols-2 @min-[64rem]/my-menu-main:grid-cols-3 @min-[86rem]/my-menu-main:grid-cols-4"
 		>
+			<Card.Root
+				size="sm"
+				class="h-full min-w-0 gap-0 overflow-hidden border-dashed bg-card/30 py-0 text-left shadow-sm ring-1 ring-border/70 transition-colors hover:bg-card/60 hover:ring-foreground/25 data-[size=sm]:py-0"
+			>
+				<button
+					type="button"
+					class="flex h-full min-h-40 w-full flex-col items-center justify-center gap-3 p-4 text-center text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
+					onclick={openAddRecipe}
+				>
+					<span
+						class="flex size-10 items-center justify-center rounded-full border border-border bg-background"
+					>
+						<PlusIcon class="size-5" />
+					</span>
+					<span class="text-sm font-semibold text-foreground">Add recipe</span>
+					<span class="max-w-40 text-xs leading-5">Create a recipe or import from a URL.</span>
+				</button>
+			</Card.Root>
 			{#each recipes as recipe (recipe.id)}
 				<RecipeMenuCard
 					{recipe}
@@ -391,9 +410,9 @@
 						<p class="mb-2 text-xs text-destructive">{archiveActionError}</p>
 					{/if}
 					<div
-						class="mb-3 flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3 sm:flex-row sm:items-center sm:justify-between"
+						class="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 p-3"
 					>
-						<p class="text-sm font-medium">
+						<p class="mr-2 text-sm font-medium">
 							{selectedArchivedRecipes.length} archived recipe{selectedArchivedRecipes.length === 1
 								? ''
 								: 's'} selected
