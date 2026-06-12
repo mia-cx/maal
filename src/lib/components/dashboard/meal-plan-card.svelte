@@ -133,11 +133,11 @@
 	const sideImageClass = $derived(
 		imageAspect === 'portrait'
 			? cn(
-					'pointer-events-none h-full w-14 shrink-0 self-stretch object-cover select-none [-webkit-user-drag:none] @min-[14rem]:w-16 @min-[18rem]:w-20 @min-[24rem]:w-24',
+					'pointer-events-none min-h-full w-14 shrink-0 self-stretch object-cover select-none [-webkit-user-drag:none] @min-[14rem]:w-16 @min-[18rem]:w-20 @min-[24rem]:w-24',
 					showAdaptiveImage || showCompactSideImage ? 'block' : 'hidden @min-[14rem]:block'
 				)
 			: cn(
-					'pointer-events-none h-full w-16 shrink-0 self-stretch object-cover select-none [-webkit-user-drag:none] @min-[14rem]:w-20 @min-[24rem]:w-24 @min-[32rem]:w-28',
+					'pointer-events-none min-h-full w-16 shrink-0 self-stretch object-cover select-none [-webkit-user-drag:none] @min-[14rem]:w-20 @min-[24rem]:w-24 @min-[32rem]:w-28',
 					showAdaptiveImage || showCompactSideImage ? 'block' : 'hidden @min-[18rem]:block'
 				)
 	);
@@ -371,7 +371,7 @@
 			class={cn(
 				'min-w-0 py-0 pr-2.5 pl-3.5',
 				showTopImage && 'pt-1',
-				showSideImage && 'h-full',
+				showSideImage && 'flex-1',
 				showSideImage && sideLayoutClass
 			)}
 		>
