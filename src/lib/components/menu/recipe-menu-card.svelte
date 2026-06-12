@@ -78,7 +78,7 @@
 			<img src={recipe.image} alt="" loading="lazy" class="aspect-[2/1] w-full object-cover" />
 		{/if}
 
-		<Card.Header class="space-y-1.5 p-3 pb-2 pl-5">
+		<Card.Header class="space-y-1.5 p-3 pb-2 pl-4">
 			<div class="flex items-start gap-3">
 				<div class="min-w-0 flex-1">
 					<Card.Title class="line-clamp-2 text-sm leading-tight font-semibold">
@@ -102,7 +102,7 @@
 			<p class="line-clamp-2 text-xs leading-5 text-muted-foreground">{recipe.description}</p>
 		</Card.Header>
 
-		<Card.Content class="space-y-2.5 p-3 pt-0 pl-5">
+		<Card.Content class="space-y-2.5 p-3 pt-0 pl-4">
 			<div
 				class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[0.6875rem] leading-tight text-muted-foreground"
 			>

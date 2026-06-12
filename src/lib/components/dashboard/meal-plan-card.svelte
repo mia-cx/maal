@@ -369,7 +369,7 @@
 
 		<div
 			class={cn(
-				'min-w-0 py-0 pr-2.5 pl-4',
+				'min-w-0 py-0 pr-2.5 pl-3.5',
 				showTopImage && 'pt-1',
 				showSideImage && 'h-full',
 				showSideImage && sideLayoutClass
@@ -425,6 +425,24 @@
 						{meal.description}
 					</p>
 				{/if}
+
+				{#if showCheckIn && showSideImage}
+					<Button.Root
+						type="button"
+						variant="outline"
+						size={density === 'title' ? 'xs' : 'sm'}
+						class={cn(
+							'mt-2 w-full',
+							hasCheckIn
+								? 'bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground dark:bg-muted/40'
+								: 'border-transparent bg-foreground text-background hover:bg-foreground/90 hover:text-background dark:bg-foreground dark:hover:bg-foreground/90'
+						)}
+						onpointerdown={(event) => event.stopPropagation()}
+						onclick={checkIn}
+					>
+						{hasCheckIn ? 'Edit check-in' : 'Check in'}
+					</Button.Root>
+				{/if}
 			</div>
 
 			{#if showSideImage}
@@ -439,13 +457,13 @@
 			{/if}
 		</div>
 
-		{#if showCheckIn}
+		{#if showCheckIn && !showSideImage}
 			<Button.Root
 				type="button"
 				variant="outline"
 				size={density === 'title' ? 'xs' : 'sm'}
 				class={cn(
-					'mb-1 ml-4 w-[calc(100%-1.625rem)]',
+					'mb-1 ml-3.5 w-[calc(100%-1.5rem)]',
 					hasCheckIn
 						? 'bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground dark:bg-muted/40'
 						: 'border-transparent bg-foreground text-background hover:bg-foreground/90 hover:text-background dark:bg-foreground dark:hover:bg-foreground/90'
