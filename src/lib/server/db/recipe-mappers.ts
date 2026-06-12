@@ -21,10 +21,10 @@ import type {
 } from '$lib/components/menu/menu-types';
 import {
 	canonicalIngredientUnit,
-	displayIngredientAmount,
 	parseIngredientAmount,
 	type UnitPreferences
 } from '$lib/recipes/ingredient-text';
+import { displayIngredient, displayIngredientText } from '$lib/taxonomy/display';
 
 type Db = DrizzleD1Database<typeof schema>;
 type UserRecipeRow = typeof userRecipes.$inferSelect;
@@ -62,29 +62,17 @@ const ingredientAmount = (
 	ingredient: UserRecipeIngredientRow,
 	unitPreferences: UnitPreferences = {}
 ): string => {
-	const item = ingredientItem(ingredient, unitPreferences);
-	const amount = displayIngredientAmount(
-		ingredient.baseQuantity,
-		ingredient.baseUnitId,
-		unitPreferences,
-		item,
-		ingredient.baseFoodId
-	);
-	if (amount) return amount;
-	return item && ingredient.originalText.endsWith(item)
-		? ingredient.originalText.slice(0, -item.length).trim()
+	const rendered = displayIngredient(ingredient, unitPreferences);
+	if (rendered.amount) return rendered.amount;
+	return rendered.item && ingredient.originalText.endsWith(rendered.item)
+		? ingredient.originalText.slice(0, -rendered.item.length).trim()
 		: '';
 };
 
 const ingredientItem = (
 	ingredient: UserRecipeIngredientRow,
 	unitPreferences: UnitPreferences = {}
-): string =>
-	(ingredient.baseFoodId
-		? unitPreferences.ingredientNameOverrides?.[ingredient.baseFoodId]
-		: undefined) ??
-	ingredient.sourceFoodLabel ??
-	ingredient.originalText;
+): string => displayIngredient(ingredient, unitPreferences).item;
 
 const ingredientAmountText = (ingredient: RecipeIngredientItem): string =>
 	[ingredient.amount.trim(), ingredient.unit?.trim()].filter(Boolean).join(' ');
@@ -247,7 +235,7 @@ export const menuItemFromRecipe = (params: {
 				);
 				return {
 					...amount,
-					item: ingredientItem(ingredient)
+					item: ingredientItem(ingredient, unitPreferences)
 				};
 			}),
 		instructions: instructions
@@ -393,30 +381,10 @@ export const mealFromMenuRecipe = (
 	...overrides
 });
 
-const mealIngredientItem = (
-	ingredient: HouseholdMealIngredientRow | UserRecipeIngredientRow,
-	unitPreferences: UnitPreferences = {}
-): string =>
-	(ingredient.baseFoodId
-		? unitPreferences.ingredientNameOverrides?.[ingredient.baseFoodId]
-		: undefined) ??
-	ingredient.sourceFoodLabel ??
-	ingredient.originalText;
-
 const mealIngredientText = (
 	ingredient: HouseholdMealIngredientRow | UserRecipeIngredientRow,
 	unitPreferences: UnitPreferences = {}
-): string => {
-	const item = mealIngredientItem(ingredient, unitPreferences);
-	const amount = displayIngredientAmount(
-		ingredient.baseQuantity,
-		ingredient.baseUnitId,
-		unitPreferences,
-		item,
-		ingredient.baseFoodId
-	);
-	return [amount, item].filter(Boolean).join(' ') || ingredient.originalText;
-};
+): string => displayIngredientText(ingredient, unitPreferences);
 
 export const mealFromHouseholdMeal = (
 	meal: HouseholdMealRow,
@@ -468,29 +436,39 @@ export const loadMealPlanMeals = async (
 		endDate?: string;
 		menuRecipes?: RecipeMenuItem[];
 		unitPreferences?: UnitPreferences;
+		includeMealPool?: boolean;
 	}
 ) => {
-	const menuRecipes =
-		params.menuRecipes ?? (await loadMenuRecipes(db, params.workosUserId, params.householdId));
+	const includeMealPool = params.includeMealPool ?? true;
+	const menuRecipes = includeMealPool
+		? (params.menuRecipes ?? (await loadMenuRecipes(db, params.workosUserId, params.householdId)))
+		: [];
 	const defaultMealServings = Math.max(1, Math.round(params.defaultMealServings ?? 1));
 	const unitPreferences = params.unitPreferences ?? {};
-	const poolMeals = menuRecipes
-		.filter((recipe) => recipe.plannedCount === 0)
-		.map((recipe, index) =>
-			mealFromMenuRecipe(recipe, {
-				userRecipeId: recipe.id,
-				servingsPlanned: defaultMealServings,
-				baseServings: recipe.yield ?? defaultMealServings,
-				sortOrder: (index + 1) * 1000
-			})
-		);
+	const poolMeals = includeMealPool
+		? menuRecipes
+				.filter((recipe) => recipe.plannedCount === 0)
+				.map((recipe, index) =>
+					mealFromMenuRecipe(recipe, {
+						userRecipeId: recipe.id,
+						servingsPlanned: defaultMealServings,
+						baseServings: recipe.yield ?? defaultMealServings,
+						sortOrder: (index + 1) * 1000
+					})
+				)
+		: [];
 
 	const dateRangeFilter =
 		params.startDate && params.endDate
-			? or(
-					isNull(householdMeals.date),
-					and(gte(householdMeals.date, params.startDate), lte(householdMeals.date, params.endDate))
-				)
+			? includeMealPool
+				? or(
+						isNull(householdMeals.date),
+						and(
+							gte(householdMeals.date, params.startDate),
+							lte(householdMeals.date, params.endDate)
+						)
+					)
+				: and(gte(householdMeals.date, params.startDate), lte(householdMeals.date, params.endDate))
 			: undefined;
 	const householdMealRows = await db
 		.select()

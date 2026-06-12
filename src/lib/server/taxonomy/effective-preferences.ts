@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import type { UnitPreferences } from '$lib/recipes/ingredient-text';
+import type { EffectiveTaxonomyPreferences } from '$lib/taxonomy/preferences';
 import {
 	foodAliases,
 	foodHouseholdAliases,
@@ -25,17 +26,6 @@ type UnitDisplayOverride =
 type FoodDisplayOverride =
 	| (typeof userFoodDisplayOverrides.$inferSelect & { scopeRank: 0 })
 	| (typeof householdFoodDisplayOverrides.$inferSelect & { scopeRank: 1 });
-
-export type EffectiveTaxonomyPreferences = {
-	locale: string;
-	localeFallbacks: string[];
-	unitPreferences: UnitPreferences;
-	unitDisplay: Record<string, { unitId: string; alias: string }>;
-	foodDisplay: Record<
-		string,
-		{ alias?: string; preferredMeasureUnitId?: string; preferredMeasureAlias?: string }
-	>;
-};
 
 const defaultLocale = 'en-US';
 

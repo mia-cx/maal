@@ -6,6 +6,7 @@
 	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
 	import type { DashboardNavItem } from '$lib/components/dashboard/dashboard-nav';
 	import * as Sidebar from '$lib/components/ui/sidebar';
+	import { hydrateTaxonomyPreferences } from '$lib/stores/taxonomy-preferences';
 	import { uiState, updateUiState } from '$lib/stores/ui-state';
 	import { ModeWatcher } from 'mode-watcher';
 	import type { Snippet } from 'svelte';
@@ -60,6 +61,10 @@
 		if (!showDashboardShell) return;
 		sidebarOpen = !sidebarOpen;
 	};
+
+	$effect(() => {
+		hydrateTaxonomyPreferences(data.taxonomyPreferences);
+	});
 
 	$effect(() => {
 		updateUiState({ activeNav, sidebarOpen, sidebarWidth });
