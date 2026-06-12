@@ -54,18 +54,27 @@
 	const imageLayout = $derived(columnHeight >= multiDayTopImageMinHeight ? 'top' : 'side-compact');
 
 	const addMealOnBlankTarget = (event: MouseEvent) => {
-		if (event.target instanceof Element && event.target.closest('[data-meal-card-id]')) return;
+		if (
+			event.target instanceof Element &&
+			event.target.closest(
+				'button, a, input, textarea, select, [contenteditable=""], [contenteditable="true"], [data-meal-card-id]'
+			)
+		)
+			return;
+		event.stopPropagation();
 		onaddmeal?.(dayKey);
 	};
 </script>
 
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <section
 	bind:clientHeight={columnHeight}
 	data-day-key={dayKey}
 	data-meal-drop-kind="date"
 	data-meal-drop-date={dayKey}
-	class="min-h-full min-w-0 border-border"
+	class="flex min-h-full min-w-0 flex-col border-border"
 	class:border-l={index > 0}
+	ondblclick={addMealOnBlankTarget}
 >
 	<div
 		class="sticky top-0 z-20 border-b border-border bg-background/95 px-4 py-1 text-xs font-medium backdrop-blur"
@@ -85,8 +94,7 @@
 		role="button"
 		tabindex="-1"
 		aria-label={`Add meal on ${dayKey}`}
-		class="space-y-1 p-1"
-		ondblclick={addMealOnBlankTarget}
+		class="min-h-0 flex-1 space-y-1 p-1"
 	>
 		<ScheduledMealList
 			meals={previewMeals}

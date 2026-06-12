@@ -71,8 +71,14 @@
 	);
 
 	const addMealOnBlankTarget = (event: MouseEvent) => {
-		if (event.target instanceof Element && event.target.closest('button, [data-meal-card-id]'))
+		if (
+			event.target instanceof Element &&
+			event.target.closest(
+				'button, a, input, textarea, select, [contenteditable=""], [contenteditable="true"], [data-meal-card-id]'
+			)
+		)
 			return;
+		event.stopPropagation();
 		onaddmeal?.(dayKey);
 	};
 
@@ -105,6 +111,7 @@
 	});
 </script>
 
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <section
 	bind:this={sectionElement}
 	data-meal-drop-kind="date"
@@ -115,6 +122,7 @@
 	)}
 	class:border-l={index % 7 !== 0}
 	class:border-b={true}
+	ondblclick={addMealOnBlankTarget}
 >
 	<button
 		type="button"
@@ -134,7 +142,6 @@
 		tabindex="-1"
 		aria-label={`Add meal on ${dayKey}`}
 		class="min-h-0 flex-1 space-y-1 overflow-hidden"
-		ondblclick={addMealOnBlankTarget}
 	>
 		<ScheduledMealList
 			meals={monthVisibleMeals}

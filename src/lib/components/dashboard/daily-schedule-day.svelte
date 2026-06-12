@@ -43,17 +43,26 @@
 	);
 
 	const addMealOnBlankTarget = (event: MouseEvent) => {
-		if (event.target instanceof Element && event.target.closest('[data-meal-card-id]')) return;
+		if (
+			event.target instanceof Element &&
+			event.target.closest(
+				'button, a, input, textarea, select, [contenteditable=""], [contenteditable="true"], [data-meal-card-id]'
+			)
+		)
+			return;
+		event.stopPropagation();
 		onaddmeal?.(dayKey);
 	};
 </script>
 
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <section
 	class="border-b border-border"
 	data-day-key={dayKey}
 	data-meal-drop-kind="date"
 	data-meal-drop-date={dayKey}
 	data-today={isToday(day) ? 'daily' : undefined}
+	ondblclick={addMealOnBlankTarget}
 >
 	<div
 		data-daily-date
@@ -68,13 +77,7 @@
 			{formatDayHeading(day)}
 		</span>
 	</div>
-	<div
-		role="button"
-		tabindex="-1"
-		aria-label={`Add meal on ${dayKey}`}
-		class="space-y-1 px-1 py-1"
-		ondblclick={addMealOnBlankTarget}
-	>
+	<div role="button" tabindex="-1" aria-label={`Add meal on ${dayKey}`} class="space-y-1 px-1 py-1">
 		<ScheduledMealList
 			meals={previewMeals}
 			{previewIndex}
