@@ -187,7 +187,7 @@
 	};
 
 	const showCheckIn = $derived(Boolean(oncheckin && mealCanCheckIn(meal, currentDate)));
-	const hasCheckIn = $derived(Boolean(meal.latestVerdict));
+	const hasCheckIn = $derived(Boolean(meal.latestCheckIn));
 
 	const clearLongPress = () => {
 		if (!longPressTimeout) return;

@@ -4,6 +4,12 @@ import type { MealFeedbackVerdict } from './meal-labels';
 
 export type MealFamiliarity = 'safe' | 'exploration' | 'wildcard';
 
+export type MealCheckIn = {
+	verdict: MealFeedbackVerdict;
+	cookTime?: number;
+	reason?: string;
+};
+
 export type MealCardDensity = 'title' | 'summary' | 'detail';
 
 export type MealPickHandler = (meal: Meal, event: PointerEvent) => void;
@@ -29,6 +35,7 @@ export type Meal = {
 	ingredients?: string[];
 	instructions?: string[];
 	latestVerdict?: MealFeedbackVerdict;
+	latestCheckIn?: MealCheckIn;
 };
 
 export type MealDropTarget =

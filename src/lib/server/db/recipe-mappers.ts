@@ -141,6 +141,24 @@ const latestVerdict = (
 		.toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))
 		.at(-1)?.verdict;
 
+const latestUserMealCheckIn = (
+	mealId: string,
+	workosUserId: string,
+	checkInsByMealId: Map<string, (typeof mealCheckIns.$inferSelect)[]>
+): Meal['latestCheckIn'] | undefined => {
+	const checkIn = checkInsByMealId
+		.get(mealId)
+		?.filter((candidate) => candidate.workosUserId === workosUserId)
+		.toSorted((left, right) => left.updatedAt.localeCompare(right.updatedAt))
+		.at(-1);
+	if (!checkIn) return;
+	return {
+		verdict: checkIn.verdict,
+		cookTime: checkIn.cookTime ?? undefined,
+		reason: checkIn.reason ?? undefined
+	};
+};
+
 const groupByRecipeId = <T extends { userRecipeId: string }>(rows: T[]): Map<string, T[]> => {
 	const grouped = new Map<string, T[]>();
 	for (const row of rows) {
@@ -392,7 +410,8 @@ export const mealFromHouseholdMeal = (
 	instructions: Array<HouseholdMealInstructionRow | UserRecipeInstructionRow> = [],
 	userRecipeId?: string,
 	unitPreferences: UnitPreferences = {},
-	latestVerdict?: Meal['latestVerdict']
+	latestVerdict?: Meal['latestVerdict'],
+	latestCheckIn?: Meal['latestCheckIn']
 ): Meal => {
 	const date = meal.date ?? undefined;
 	return {
@@ -413,7 +432,8 @@ export const mealFromHouseholdMeal = (
 		instructions: instructions
 			.toSorted((left, right) => left.stepIndex - right.stepIndex)
 			.map((instruction) => instruction.text),
-		latestVerdict
+		latestVerdict,
+		latestCheckIn
 	};
 };
 
@@ -487,16 +507,18 @@ export const loadMealPlanMeals = async (
 		mealLinks.map((link) => [link.householdMealId, link.userRecipeId])
 	);
 	const checkInsByMealId = groupByMealId(checkIns);
-	const scheduledMeals = householdMealRows.map((meal) =>
-		mealFromHouseholdMeal(
+	const scheduledMeals = householdMealRows.map((meal) => {
+		const latestCheckIn = latestUserMealCheckIn(meal.id, params.workosUserId, checkInsByMealId);
+		return mealFromHouseholdMeal(
 			meal,
 			ingredientsByMealId.get(meal.id) ?? [],
 			instructionsByMealId.get(meal.id) ?? [],
 			recipeIdByMealId.get(meal.id),
 			unitPreferences,
-			latestVerdict(meal.id, checkInsByMealId)
-		)
-	);
+			latestCheckIn?.verdict,
+			latestCheckIn
+		);
+	});
 
 	return scheduledMeals;
 };

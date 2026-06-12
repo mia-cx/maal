@@ -308,7 +308,14 @@
 			body: JSON.stringify({ mealId: meal.id, verdict, cookTime, reason })
 		});
 		if (!response.ok) throw new Error(await response.text());
-		updateScheduleMealSchedule({ ...meal, latestVerdict: verdict }, 'external');
+		updateScheduleMealSchedule(
+			{
+				...meal,
+				latestVerdict: verdict,
+				latestCheckIn: { verdict, cookTime, reason: reason?.trim() || undefined }
+			},
+			'external'
+		);
 	};
 
 	const createMeal = (date?: string) => {

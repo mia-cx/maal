@@ -34,9 +34,9 @@
 	const verdicts: MealFeedbackVerdict[] = ['repeat', 'neutral', 'avoid'];
 
 	const reset = () => {
-		verdict = 'repeat';
-		cookTime = meal?.cookTimeMinutes ? String(meal.cookTimeMinutes) : '';
-		reason = '';
+		verdict = meal?.latestCheckIn?.verdict ?? 'repeat';
+		cookTime = String(meal?.latestCheckIn?.cookTime ?? meal?.cookTimeMinutes ?? '');
+		reason = meal?.latestCheckIn?.reason ?? '';
 		busy = false;
 		error = null;
 	};
