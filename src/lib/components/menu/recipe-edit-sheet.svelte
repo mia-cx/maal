@@ -74,13 +74,14 @@
 	);
 
 	const numberText = (value?: number): string => (value === undefined ? '' : String(value));
-	const optionalNumber = (value: string): number | undefined => {
-		const trimmed = value.trim();
+	const optionalNumber = (value: string | number | null | undefined): number | undefined => {
+		if (value === null || value === undefined) return;
+		const trimmed = String(value).trim();
 		if (!trimmed) return;
 		const number = Number(trimmed);
 		return Number.isFinite(number) ? number : undefined;
 	};
-	const optionalWholeNumber = (value: string): number | undefined => {
+	const optionalWholeNumber = (value: string | number | null | undefined): number | undefined => {
 		const number = optionalNumber(value);
 		return number === undefined ? undefined : Math.max(1, Math.round(number));
 	};
