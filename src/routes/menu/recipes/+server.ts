@@ -605,12 +605,54 @@ const loadSingleMenuRecipe = async (
 		})
 	)[0];
 
+const draftRecipeFromImport = (
+	imported: Awaited<ReturnType<typeof fetchRecipeFromUrl>>
+): RecipeMenuItem => {
+	const recipe = imported.recipe;
+	const ingredients = ingredientsFromRecipe(recipe);
+	return {
+		id: `draft-recipe-${crypto.randomUUID()}`,
+		title: firstString(recipe.name, recipe.headline) ?? fallbackTitle,
+		description: stringValue(recipe.description) ?? '',
+		image: firstString(recipe.image),
+		sourceUrl: imported.sourceUrl,
+		sourceSiteName: imported.sourceSiteName,
+		sourceAuthorName: imported.sourceAuthorName,
+		sourcePublisherName: imported.sourcePublisherName,
+		sourceIsBasedOnUrl: imported.sourceIsBasedOnUrl,
+		sourceClaimedMinutes: cookMinutesFromRecipe(recipe),
+		parseConfidence: 1,
+		ingredientConfidence: 1,
+		instructionConfidence: 1,
+		prepTimeMinutes: durationMinutes(recipe.prepTime),
+		cookTimeMinutes: cookMinutesFromRecipe(recipe),
+		totalTimeMinutes: durationMinutes(recipe.totalTime),
+		yield: firstNumber(recipe.recipeYield, recipe.yield),
+		ingredients,
+		ingredientCount: ingredients.length,
+		instructions: instructionsFromRecipe(recipe),
+		appliances: [],
+		timesCooked: 0,
+		plannedCount: 0,
+		reviewSummary: {
+			worthRepeating: 0,
+			neutral: 0,
+			neverAgain: 0,
+			notes: []
+		}
+	};
+};
+
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
 	const session = locals.session;
 	if (!session) error(401, { message: 'Sign in required.' });
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) error(400, { message: 'Household is required.' });
+
+	const importUrl = url.searchParams.get('importUrl')?.trim();
+	if (importUrl)
+		return json({ recipe: draftRecipeFromImport(await fetchRecipeFromUrl(importUrl)) });
 
 	const offset = integerParam(url, 'offset', 0);
 	const limit = Math.min(integerParam(url, 'limit', defaultRecipePageSize), maxRecipePageSize);

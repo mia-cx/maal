@@ -16,12 +16,14 @@
 		open = $bindable(false),
 		recipe,
 		onsaved,
-		ondeleted
+		ondeleted,
+		onimporturl
 	}: {
 		open?: boolean;
 		recipe: RecipeMenuItem | null;
 		onsaved?: (recipe: RecipeMenuItem) => void;
 		ondeleted?: (recipe: RecipeMenuItem) => void | Promise<void>;
+		onimporturl?: (url: string) => Promise<RecipeMenuItem>;
 	} = $props();
 
 	let editingRecipeId = $state<string | null>(null);
@@ -51,6 +53,8 @@
 	let deleteConfirmOpen = $state(false);
 	let deleteBusy = $state(false);
 	let deleteError = $state<string | null>(null);
+	let importBusy = $state(false);
+	let importError = $state<string | null>(null);
 	let wasOpen = $state(false);
 	let sheetHeroElement = $state<HTMLElement>();
 	let sheetViewportHeight = $state(0);
@@ -63,6 +67,9 @@
 	const sheetLeadIn = $derived(Math.max(0, sheetTopOffset - sheetViewportGutter));
 	const textareaClass =
 		'min-h-20 w-full rounded-md border border-input bg-input/20 px-2 py-1.5 text-sm transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 md:text-xs/relaxed';
+	const sourceUrlCanImport = $derived(
+		Boolean(onimporturl && /^https?:\/\//i.test(sourceUrl.trim()))
+	);
 
 	const numberText = (value?: number): string => (value === undefined ? '' : String(value));
 	const optionalNumber = (value: string): number | undefined => {
@@ -146,6 +153,8 @@
 		deleteConfirmOpen = false;
 		deleteBusy = false;
 		deleteError = null;
+		importBusy = false;
+		importError = null;
 		draggedInstruction = null;
 		draggedInstructionPointerId = null;
 		window.removeEventListener('pointermove', moveInstructionDrag);
@@ -355,6 +364,19 @@
 			.toSorted((left, right) => left.position - right.position)
 			.map((instruction, index) => ({ ...instruction, position: index + 1 }));
 
+	const importSourceUrl = async () => {
+		if (!onimporturl || !sourceUrlCanImport || importBusy) return;
+		importBusy = true;
+		importError = null;
+		try {
+			syncRecipe(await onimporturl(sourceUrl.trim()));
+		} catch (error) {
+			importError = error instanceof Error ? error.message : 'Could not import that recipe.';
+		} finally {
+			importBusy = false;
+		}
+	};
+
 	const saveRecipe = (event?: SubmitEvent) => {
 		event?.preventDefault();
 		if (!recipe) return;
@@ -446,7 +468,27 @@
 
 								<label class="grid gap-1 text-xs font-medium">
 									Source URL
-									<Input bind:value={sourceUrl} />
+									<div class="flex gap-2">
+										<Input bind:value={sourceUrl} />
+										{#if onimporturl}
+											<Button.Root
+												type="button"
+												variant="outline"
+												disabled={!sourceUrlCanImport || importBusy}
+												onclick={importSourceUrl}
+											>
+												{importBusy ? 'Importing…' : 'Import'}
+											</Button.Root>
+										{/if}
+									</div>
+									{#if onimporturl && sourceUrlCanImport}
+										<span class="text-muted-foreground">
+											Import will fill this sheet from schema.org recipe data before you save.
+										</span>
+									{/if}
+									{#if importError}
+										<span class="text-destructive">{importError}</span>
+									{/if}
 								</label>
 
 								<div class="grid gap-3 sm:grid-cols-2">

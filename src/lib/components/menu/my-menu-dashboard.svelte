@@ -3,7 +3,6 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { Button } from '$lib/components/ui/button';
-	import AddMealDialog from '$lib/components/dashboard/add-meal-dialog.svelte';
 	import { resolve } from '$app/paths';
 	import type { Pathname } from '$app/types';
 	import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
@@ -35,9 +34,7 @@
 	} = $props();
 
 	let sheetOpen = $state(false);
-	let addRecipeOpen = $state(false);
-	let addRecipeBusy = $state(false);
-	let addRecipeError = $state<string | null>(null);
+	let draftRecipe = $state<RecipeMenuItem | null>(null);
 	let archiveActionError = $state<string | null>(null);
 	let archiveActionRecipeId = $state<string | null>(null);
 	let permanentDeleteRecipe = $state<RecipeMenuItem | null>(null);
@@ -50,7 +47,7 @@
 
 	const recipes = $derived($menuRecipesStore);
 	const archivedRecipes = $derived($archivedMenuRecipesStore);
-	const selectedRecipe = $derived($selectedMenuRecipeStore);
+	const selectedRecipe = $derived(draftRecipe ?? $selectedMenuRecipeStore);
 
 	$effect(() => {
 		const signature = [
@@ -96,6 +93,7 @@
 	});
 
 	const openRecipe = (recipe: RecipeMenuItem) => {
+		draftRecipe = null;
 		selectMenuRecipe(recipe.id);
 		sheetOpen = true;
 	};
@@ -107,23 +105,59 @@
 		return 'Could not add that recipe.';
 	};
 
-	const openAddRecipe = () => {
-		addRecipeError = null;
-		addRecipeOpen = true;
+	const readResponseError = async (response: Response, fallback: string): Promise<string> => {
+		try {
+			const body = (await response.json()) as { message?: unknown };
+			if (typeof body.message === 'string' && body.message.trim()) return body.message;
+		} catch {
+			// Fall through to fallback.
+		}
+		return fallback;
 	};
 
-	const saveAddedRecipe = async (input: { title?: string; url?: string }) => {
-		addRecipeBusy = true;
-		addRecipeError = null;
-		try {
-			const recipe = await createMenuRecipe(input);
-			addRecipeOpen = false;
-			openRecipe(recipe);
-		} catch (error) {
-			addRecipeError = readAddRecipeError(error);
-		} finally {
-			addRecipeBusy = false;
+	const draftRecipeFromTitle = (title = 'New recipe'): RecipeMenuItem => ({
+		id: `draft-recipe-${crypto.randomUUID()}`,
+		title,
+		description: '',
+		ingredientCount: 0,
+		appliances: [],
+		timesCooked: 0,
+		plannedCount: 0,
+		reviewSummary: {
+			worthRepeating: 0,
+			neutral: 0,
+			neverAgain: 0,
+			notes: []
+		},
+		ingredients: [{ amount: '', item: '' }],
+		instructions: [{ position: 1, text: '' }]
+	});
+
+	const openAddRecipe = () => {
+		selectMenuRecipe(null);
+		draftRecipe = draftRecipeFromTitle();
+		sheetOpen = true;
+	};
+
+	const loadRecipeDraftFromUrl = async (url: string): Promise<RecipeMenuItem> => {
+		const response = await fetch(
+			resolve(`/menu/recipes?importUrl=${encodeURIComponent(url)}` as Pathname)
+		);
+		if (!response.ok)
+			throw new Error(await readResponseError(response, 'Could not import recipe.'));
+		const body = (await response.json()) as { recipe: RecipeMenuItem };
+		draftRecipe = body.recipe;
+		return body.recipe;
+	};
+
+	const saveRecipeFromSheet = async (recipe: RecipeMenuItem) => {
+		if (!recipe.id.startsWith('draft-recipe-')) {
+			updateMenuRecipe(recipe);
+			return;
 		}
+		const savedRecipe = await createMenuRecipe({ recipe });
+		draftRecipe = null;
+		openRecipe(savedRecipe);
 	};
 
 	const restoreArchivedRecipe = async (recipe: RecipeMenuItem) => {
@@ -252,17 +286,6 @@
 	</div>
 </section>
 
-<AddMealDialog
-	bind:open={addRecipeOpen}
-	{recipes}
-	showExistingRecipes={false}
-	busy={addRecipeBusy}
-	error={addRecipeError}
-	onexisting={openRecipe}
-	onnewrecipe={(title) => saveAddedRecipe({ title })}
-	onurl={(url) => saveAddedRecipe({ url })}
-/>
-
 <Dialog.Root bind:open={permanentDeleteOpen}>
 	<Dialog.Content showCloseButton={false} class="sm:max-w-[24rem]">
 		<Dialog.Header>
@@ -297,6 +320,7 @@
 <MyMenuRecipeSheet
 	bind:open={sheetOpen}
 	recipe={selectedRecipe}
-	onsaved={updateMenuRecipe}
+	onsaved={saveRecipeFromSheet}
 	ondeleted={deleteMenuRecipe}
+	onimporturl={loadRecipeDraftFromUrl}
 />
