@@ -5,6 +5,7 @@ import { getDb } from '$lib/server/db';
 import {
 	userRecipeClassifications,
 	households,
+	unitAliases,
 	userRecipeMedia,
 	userRecipeNutritionFacts,
 	userRecipes
@@ -20,7 +21,12 @@ import type {
 	RecipeInstructionItem,
 	RecipeMenuItem
 } from '$lib/components/menu/menu-types';
-import { parseIngredientLine, type UnitPreferences } from '$lib/recipes/ingredient-text';
+import {
+	canonicalIngredientUnit,
+	parseIngredientLine,
+	type IngredientUnitAliases,
+	type UnitPreferences
+} from '$lib/recipes/ingredient-text';
 import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
 import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
@@ -355,11 +361,14 @@ const instructionText = (value: unknown): string[] => {
 	return [firstString(value.text, value.name)].filter((text): text is string => Boolean(text));
 };
 
-const ingredientsFromRecipe = (recipe: RecipeJson): RecipeIngredientItem[] =>
+const ingredientsFromRecipe = (
+	recipe: RecipeJson,
+	unitAliasMap: IngredientUnitAliases = {}
+): RecipeIngredientItem[] =>
 	arrayValue(recipe.recipeIngredient)
 		.map((ingredient) => String(ingredient).trim())
 		.filter(Boolean)
-		.map(parseIngredientLine);
+		.map((ingredient) => parseIngredientLine(ingredient, unitAliasMap));
 
 const instructionsFromRecipe = (recipe: RecipeJson): RecipeInstructionItem[] =>
 	instructionText(recipe.recipeInstructions).map((text, index) => ({ position: index + 1, text }));
@@ -583,6 +592,25 @@ const loadHouseholdUnitPreferences = async (
 	).unitPreferences;
 };
 
+const normalizedUnitAliasKey = (value: string): string =>
+	value
+		.trim()
+		.toLowerCase()
+		.replace(/[.,]+$/g, '');
+
+const loadIngredientUnitAliases = async (
+	db: ReturnType<typeof getDb>
+): Promise<IngredientUnitAliases> => {
+	const aliases = await db.select().from(unitAliases).where(isNull(unitAliases.sourceDomain));
+	return Object.fromEntries(
+		aliases.flatMap((alias) => {
+			const canonicalUnit =
+				canonicalIngredientUnit(alias.unitId) ?? canonicalIngredientUnit(alias.alias);
+			return canonicalUnit ? [[normalizedUnitAliasKey(alias.alias), canonicalUnit]] : [];
+		})
+	);
+};
+
 const loadRecipeIdentities = async (db: ReturnType<typeof getDb>, workosUserId: string) =>
 	db
 		.select({
@@ -609,10 +637,11 @@ const loadSingleMenuRecipe = async (
 	)[0];
 
 const draftRecipeFromImport = (
-	imported: Awaited<ReturnType<typeof fetchRecipeFromUrl>>
+	imported: Awaited<ReturnType<typeof fetchRecipeFromUrl>>,
+	unitAliasMap: IngredientUnitAliases = {}
 ): RecipeMenuItem => {
 	const recipe = imported.recipe;
-	const ingredients = ingredientsFromRecipe(recipe);
+	const ingredients = ingredientsFromRecipe(recipe, unitAliasMap);
 	return {
 		id: `draft-recipe-${crypto.randomUUID()}`,
 		title: firstString(recipe.name, recipe.headline) ?? fallbackTitle,
@@ -653,13 +682,17 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) error(400, { message: 'Household is required.' });
 
+	const db = getDb(platform.env.DB);
 	const importUrl = url.searchParams.get('importUrl')?.trim();
-	if (importUrl)
-		return json({ recipe: draftRecipeFromImport(await fetchRecipeFromUrl(importUrl)) });
+	if (importUrl) {
+		const unitAliasMap = await loadIngredientUnitAliases(db);
+		return json({
+			recipe: draftRecipeFromImport(await fetchRecipeFromUrl(importUrl), unitAliasMap)
+		});
+	}
 
 	const offset = integerParam(url, 'offset', 0);
 	const limit = Math.min(integerParam(url, 'limit', defaultRecipePageSize), maxRecipePageSize);
-	const db = getDb(platform.env.DB);
 	const unitPreferences = await loadHouseholdUnitPreferences(db, session.user.id, householdId);
 	const recipes = await loadMenuRecipes(db, session.user.id, householdId, { unitPreferences });
 	const rankedRecipes = rankRecipesByRelevance(recipes, url.searchParams.get('q') ?? '');
@@ -733,8 +766,11 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	}
 
 	const db = getDb(platform.env.DB);
-	const unitPreferences = await loadHouseholdUnitPreferences(db, session.user.id, householdId);
-	const recipeIdentities = await loadRecipeIdentities(db, session.user.id);
+	const [unitPreferences, unitAliasMap, recipeIdentities] = await Promise.all([
+		loadHouseholdUnitPreferences(db, session.user.id, householdId),
+		loadIngredientUnitAliases(db),
+		loadRecipeIdentities(db, session.user.id)
+	]);
 	const existingRecipe = matchingExistingRecipe(recipeIdentities, body);
 	if (existingRecipe) {
 		return json({
@@ -810,7 +846,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	await updateRecipeIngredients(
 		db,
 		recipeId,
-		body.recipe?.ingredients ?? ingredientsFromRecipe(recipeJson)
+		body.recipe?.ingredients ?? ingredientsFromRecipe(recipeJson, unitAliasMap)
 	);
 	await updateRecipeInstructions(
 		db,

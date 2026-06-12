@@ -321,6 +321,17 @@ export const canonicalIngredientUnit = (value: string | undefined): string | und
 	return canonicalUnits.get(normalizedUnit(value));
 };
 
+export type IngredientUnitAliases = Record<string, string>;
+
+const canonicalIngredientUnitFromAliases = (
+	value: string | undefined,
+	unitAliases: IngredientUnitAliases = {}
+): string | undefined => {
+	if (!value) return;
+	const normalized = normalizedUnit(value);
+	return canonicalUnits.get(normalized) ?? unitAliases[normalized];
+};
+
 export const parseQuantity = (value: string): number | null => {
 	const trimmed = value.trim();
 	const mixedFraction = /^(\d+)\s+(\d+)\/(\d+)$/.exec(trimmed);
@@ -362,7 +373,10 @@ const formatDecimal = (quantity: number): string => {
 		: rounded.toFixed(2).replace(/0+$/g, '').replace(/\.$/, '');
 };
 
-export const parseIngredientLine = (line: string): ParsedIngredientLine => {
+export const parseIngredientLine = (
+	line: string,
+	unitAliases: IngredientUnitAliases = {}
+): ParsedIngredientLine => {
 	const trimmed = line.trim();
 	if (!trimmed) return { amount: '', item: '' };
 
@@ -372,7 +386,7 @@ export const parseIngredientLine = (line: string): ParsedIngredientLine => {
 	const quantity = match[1].trim();
 	const candidateUnit = match[2]?.trim();
 	const remainder = match[3].trim();
-	const unit = canonicalIngredientUnit(candidateUnit);
+	const unit = canonicalIngredientUnitFromAliases(candidateUnit, unitAliases);
 	if (unit) {
 		return { amount: quantity, unit, item: remainder };
 	}
