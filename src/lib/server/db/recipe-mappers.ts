@@ -391,7 +391,8 @@ export const mealFromHouseholdMeal = (
 	ingredients: Array<HouseholdMealIngredientRow | UserRecipeIngredientRow> = [],
 	instructions: Array<HouseholdMealInstructionRow | UserRecipeInstructionRow> = [],
 	userRecipeId?: string,
-	unitPreferences: UnitPreferences = {}
+	unitPreferences: UnitPreferences = {},
+	latestVerdict?: Meal['latestVerdict']
 ): Meal => {
 	const date = meal.date ?? undefined;
 	return {
@@ -411,7 +412,8 @@ export const mealFromHouseholdMeal = (
 			.map((ingredient) => mealIngredientText(ingredient, unitPreferences)),
 		instructions: instructions
 			.toSorted((left, right) => left.stepIndex - right.stepIndex)
-			.map((instruction) => instruction.text)
+			.map((instruction) => instruction.text),
+		latestVerdict
 	};
 };
 
@@ -459,7 +461,7 @@ export const loadMealPlanMeals = async (
 		.from(householdMeals)
 		.where(and(eq(householdMeals.householdId, params.householdId), dateRangeFilter));
 	const householdMealIds = householdMealRows.map((meal) => meal.id);
-	const [mealIngredientRows, mealInstructionRows, mealLinks] = householdMealIds.length
+	const [mealIngredientRows, mealInstructionRows, mealLinks, checkIns] = householdMealIds.length
 		? await Promise.all([
 				db
 					.select()
@@ -472,21 +474,27 @@ export const loadMealPlanMeals = async (
 				db
 					.select()
 					.from(householdMealUserRecipes)
-					.where(inArray(householdMealUserRecipes.householdMealId, householdMealIds))
+					.where(inArray(householdMealUserRecipes.householdMealId, householdMealIds)),
+				db
+					.select()
+					.from(mealCheckIns)
+					.where(inArray(mealCheckIns.householdMealId, householdMealIds))
 			])
-		: [[], [], []];
+		: [[], [], [], []];
 	const ingredientsByMealId = groupByMealId(mealIngredientRows);
 	const instructionsByMealId = groupByMealId(mealInstructionRows);
 	const recipeIdByMealId = new Map(
 		mealLinks.map((link) => [link.householdMealId, link.userRecipeId])
 	);
+	const checkInsByMealId = groupByMealId(checkIns);
 	const scheduledMeals = householdMealRows.map((meal) =>
 		mealFromHouseholdMeal(
 			meal,
 			ingredientsByMealId.get(meal.id) ?? [],
 			instructionsByMealId.get(meal.id) ?? [],
 			recipeIdByMealId.get(meal.id),
-			unitPreferences
+			unitPreferences,
+			latestVerdict(meal.id, checkInsByMealId)
 		)
 	);
 

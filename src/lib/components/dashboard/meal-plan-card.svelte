@@ -187,6 +187,7 @@
 	};
 
 	const showCheckIn = $derived(Boolean(oncheckin && mealCanCheckIn(meal, currentDate)));
+	const hasCheckIn = $derived(Boolean(meal.latestVerdict));
 
 	const clearLongPress = () => {
 		if (!longPressTimeout) return;
@@ -368,7 +369,7 @@
 
 		<div
 			class={cn(
-				'min-w-0 px-2.5 py-0',
+				'min-w-0 py-0 pr-2.5 pl-4',
 				showTopImage && 'pt-1',
 				showSideImage && 'h-full',
 				showSideImage && sideLayoutClass
@@ -443,11 +444,16 @@
 				type="button"
 				variant="outline"
 				size={density === 'title' ? 'xs' : 'sm'}
-				class="mx-2 mb-1 w-[calc(100%-1rem)]"
+				class={cn(
+					'mb-1 ml-4 w-[calc(100%-1.625rem)]',
+					hasCheckIn
+						? 'bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground'
+						: 'border-transparent bg-foreground text-background hover:bg-foreground/90 hover:text-background'
+				)}
 				onpointerdown={(event) => event.stopPropagation()}
 				onclick={checkIn}
 			>
-				Check in
+				{hasCheckIn ? 'Edit check-in' : 'Check in'}
 			</Button.Root>
 		{/if}
 	</Card.Root>

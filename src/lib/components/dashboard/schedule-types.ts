@@ -1,5 +1,7 @@
 export type ScheduleMode = 'daily' | 'multi-day' | 'monthly';
 
+import type { MealFeedbackVerdict } from './meal-labels';
+
 export type MealFamiliarity = 'safe' | 'exploration' | 'wildcard';
 
 export type MealCardDensity = 'title' | 'summary' | 'detail';
@@ -26,6 +28,7 @@ export type Meal = {
 	description?: string;
 	ingredients?: string[];
 	instructions?: string[];
+	latestVerdict?: MealFeedbackVerdict;
 };
 
 export type MealDropTarget =
