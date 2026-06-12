@@ -195,9 +195,9 @@
 			updateMenuRecipe(recipe);
 			return;
 		}
-		const savedRecipe = await createMenuRecipe({ recipe });
+		await createMenuRecipe({ recipe });
 		draftRecipe = null;
-		openRecipe(savedRecipe);
+		selectMenuRecipe(null);
 	};
 
 	const toggleRecipeSelection = (recipe: RecipeMenuItem, selected: boolean) => {
