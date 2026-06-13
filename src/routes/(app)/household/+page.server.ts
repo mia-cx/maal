@@ -2,24 +2,30 @@ import { fail, redirect, type Cookies } from '@sveltejs/kit';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import {
+	billingSubscriptions,
+	foodAliases,
+	foodHouseholdAliases,
+	foodHouseholdEntries,
+	foods,
 	householdAppliances,
+	householdFoodDisplayOverrides,
+	householdInvites,
 	householdMealApplianceRequirements,
 	householdMealClassifications,
 	householdMealIngredients,
+	householdMealInstructionEvents,
 	householdMealInstructions,
 	householdMealMedia,
 	householdMealNutritionFacts,
-	foodAliases,
-	foodHouseholdAliases,
-	foods,
-	householdFoodDisplayOverrides,
 	householdMeals,
 	households,
+	householdMealUserRecipes,
 	householdUnitDisplayOverrides,
-	mealCheckIns,
 	unitAliases,
 	unitHouseholdAliases,
-	units
+	unitHouseholdEntries,
+	units,
+	userRecipes
 } from '$lib/server/db/schema';
 import {
 	canManageActiveHousehold,
@@ -1057,11 +1063,28 @@ export const actions: Actions = {
 				.from(householdMeals)
 				.where(eq(householdMeals.householdId, householdId));
 			const mealIds = mealRows.map((meal) => meal.id);
+			const instructionRows = mealIds.length
+				? await db
+						.select({ id: householdMealInstructions.id })
+						.from(householdMealInstructions)
+						.where(inArray(householdMealInstructions.householdMealId, mealIds))
+				: [];
+			const instructionIds = instructionRows.map((instruction) => instruction.id);
 
 			await createAuthRuntime(event.platform).workos.organizations.deleteOrganization(householdId);
 
+			if (instructionIds.length > 0) {
+				await db
+					.delete(householdMealInstructionEvents)
+					.where(
+						inArray(householdMealInstructionEvents.householdMealInstructionId, instructionIds)
+					);
+			}
+
 			if (mealIds.length > 0) {
-				await db.delete(mealCheckIns).where(inArray(mealCheckIns.householdMealId, mealIds));
+				await db
+					.delete(householdMealUserRecipes)
+					.where(inArray(householdMealUserRecipes.householdMealId, mealIds));
 				await db
 					.delete(householdMealIngredients)
 					.where(inArray(householdMealIngredients.householdMealId, mealIds));
@@ -1083,7 +1106,33 @@ export const actions: Actions = {
 			}
 
 			await db.delete(householdMeals).where(eq(householdMeals.householdId, householdId));
+			await db
+				.delete(billingSubscriptions)
+				.where(eq(billingSubscriptions.householdId, householdId));
+			await db.delete(householdInvites).where(eq(householdInvites.householdId, householdId));
+			await db
+				.delete(householdFoodDisplayOverrides)
+				.where(eq(householdFoodDisplayOverrides.householdId, householdId));
+			await db
+				.delete(householdUnitDisplayOverrides)
+				.where(eq(householdUnitDisplayOverrides.householdId, householdId));
+			await db
+				.delete(foodHouseholdAliases)
+				.where(eq(foodHouseholdAliases.householdId, householdId));
+			await db
+				.delete(foodHouseholdEntries)
+				.where(eq(foodHouseholdEntries.householdId, householdId));
+			await db
+				.delete(unitHouseholdAliases)
+				.where(eq(unitHouseholdAliases.householdId, householdId));
+			await db
+				.delete(unitHouseholdEntries)
+				.where(eq(unitHouseholdEntries.householdId, householdId));
 			await db.delete(householdAppliances).where(eq(householdAppliances.householdId, householdId));
+			await db
+				.update(userRecipes)
+				.set({ savedFromHouseholdId: null })
+				.where(eq(userRecipes.savedFromHouseholdId, householdId));
 			await db.delete(households).where(eq(households.householdId, householdId));
 			clearHouseholdCookie(event.cookies);
 		} catch (cause) {

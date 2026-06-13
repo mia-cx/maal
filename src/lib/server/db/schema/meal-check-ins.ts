@@ -11,9 +11,9 @@ export const mealCheckIns = sqliteTable(
 		workosUserId: text('workos_user_id')
 			.notNull()
 			.references(() => users.workosUserId, { onDelete: 'cascade' }),
-		householdMealId: text('household_meal_id')
-			.notNull()
-			.references(() => householdMeals.id, { onDelete: 'cascade' }),
+		householdMealId: text('household_meal_id').references(() => householdMeals.id, {
+			onDelete: 'set null'
+		}),
 		cookTime: integer('cook_time'),
 		verdict: text('verdict', { enum: ['repeat', 'neutral', 'avoid'] }).notNull(),
 		reason: text('reason'),
