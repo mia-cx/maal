@@ -6,6 +6,7 @@
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { useSidebar } from '$lib/components/ui/sidebar/index.js';
 	import UserSettingsDialog from '$lib/components/user-settings-dialog.svelte';
+	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import Settings2Icon from '@lucide/svelte/icons/settings-2';
@@ -19,6 +20,7 @@
 	let settingsOpen = $state(false);
 
 	const initials = $derived(localUser.name.slice(0, 2).toUpperCase());
+	const homeHref = resolve('/' as Pathname);
 	const logoutHref = resolve('/auth/logout' as Pathname);
 
 	const updateLocalUser = (updatedUser: {
@@ -85,6 +87,17 @@
 					<DropdownMenu.Item onclick={() => (settingsOpen = true)} class="cursor-pointer">
 						<Settings2Icon />
 						User settings
+					</DropdownMenu.Item>
+					<DropdownMenu.Item>
+						{#if homeHref}
+							<a href={homeHref} class="flex w-full items-center gap-2">
+								<ArrowLeftIcon />
+								Back to home
+							</a>
+						{:else}
+							<ArrowLeftIcon />
+							Back to home
+						{/if}
 					</DropdownMenu.Item>
 				</DropdownMenu.Group>
 				<DropdownMenu.Separator />
