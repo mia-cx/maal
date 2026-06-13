@@ -4,6 +4,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
+	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
 	import { Input } from '$lib/components/ui/input';
 	import * as Popover from '$lib/components/ui/popover';
 	import { Separator } from '$lib/components/ui/separator';
@@ -229,6 +230,7 @@
 	};
 
 	const openDeleteConfirm = () => {
+		if (!meal || !onmealdelete || deleteConfirmOpen) return;
 		deleteConfirmOpen = true;
 	};
 
@@ -349,195 +351,210 @@
 		<DialogPrimitive.Content
 			class="fixed inset-0 z-50 w-full overflow-hidden bg-transparent p-0 outline-none"
 		>
-			{#if meal}
-				<Sheet.Frame
-					leadIn={previewLeadIn}
-					closeLabel="Close meal preview"
-					onclose={() => (open = false)}
-				>
-					<div bind:this={heroElement} class="relative overflow-hidden rounded-t-xl">
-						{#if meal.image}
-							<img src={meal.image} alt={meal.title} class="aspect-[2/1] w-full object-cover" />
-						{/if}
+			<div
+				use:keyboardShortcut={{
+					target: 'window',
+					bindings: [
+						{
+							id: 'delete-open-meal',
+							combo: { key: 'd' },
+							handler: openDeleteConfirm,
+							when: () => open && Boolean(meal && onmealdelete && !deleteConfirmOpen)
+						}
+					]
+				}}
+				class="contents"
+			>
+				{#if meal}
+					<Sheet.Frame
+						leadIn={previewLeadIn}
+						closeLabel="Close meal preview"
+						onclose={() => (open = false)}
+					>
+						<div bind:this={heroElement} class="relative overflow-hidden rounded-t-xl">
+							{#if meal.image}
+								<img src={meal.image} alt={meal.title} class="aspect-[2/1] w-full object-cover" />
+							{/if}
 
-						<section class="px-5 py-5">
-							<Dialog.Header class="pr-8 sm:pr-10">
-								<div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-									<Dialog.Title
-										class="min-w-0 text-4xl leading-tight font-semibold tracking-tight sm:text-2xl"
-									>
-										{meal.title}
-									</Dialog.Title>
-									<div
-										class={`inline-flex w-fit shrink-0 items-center rounded-sm border px-2 py-1 text-xs leading-none font-semibold ${familiarityClass}`}
-									>
-										{familiarityLabel}
-									</div>
-								</div>
-								{#if customMeal}
-									<div class="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_8rem]">
-										<label class="grid gap-1">
-											<span class="text-xs font-medium text-muted-foreground">Meal name</span>
-											<Input type="text" bind:value={titleDraft} class="h-9 px-3" />
-										</label>
-										<label class="grid gap-1">
-											<span class="text-xs font-medium text-muted-foreground">Cook minutes</span>
-											<Input
-												type="text"
-												inputmode="numeric"
-												bind:value={cookTimeDraft}
-												class="h-9 px-3 tabular-nums"
-											/>
-										</label>
-									</div>
-								{/if}
-							</Dialog.Header>
-
-							<div class="mt-3 space-y-4">
-								{#if meal.description}
-									<Dialog.Description class="text-sm leading-relaxed text-foreground">
-										{meal.description}
-									</Dialog.Description>
-								{/if}
-
-								<div class="space-y-2 text-sm leading-relaxed">
-									<p>
-										<span class="font-medium">Cook time:</span>
-										<span class="tabular-nums">{formatDuration(cookTimeMinutes)}</span>
-										<span class="mx-1 text-muted-foreground">•</span>
-										<span class="font-medium">Adjusted:</span>
-										<span class="tabular-nums">{formatDuration(adjustedCookTimeMinutes)}</span>
-									</p>
-
-									<div>
-										<button
-											type="button"
-											aria-expanded={scheduleEditorOpen}
-											class="w-full rounded-md border border-border bg-muted/20 px-3 py-2 text-left text-sm font-medium tabular-nums hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none sm:hidden"
-											onclick={() => (scheduleEditorOpen = true)}
+							<section class="px-5 py-5">
+								<Dialog.Header class="pr-8 sm:pr-10">
+									<div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+										<Dialog.Title
+											class="min-w-0 text-4xl leading-tight font-semibold tracking-tight sm:text-2xl"
 										>
-											{scheduleSummary} · {cookSummary}
-										</button>
+											{meal.title}
+										</Dialog.Title>
+										<div
+											class={`inline-flex w-fit shrink-0 items-center rounded-sm border px-2 py-1 text-xs leading-none font-semibold ${familiarityClass}`}
+										>
+											{familiarityLabel}
+										</div>
+									</div>
+									{#if customMeal}
+										<div class="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_8rem]">
+											<label class="grid gap-1">
+												<span class="text-xs font-medium text-muted-foreground">Meal name</span>
+												<Input type="text" bind:value={titleDraft} class="h-9 px-3" />
+											</label>
+											<label class="grid gap-1">
+												<span class="text-xs font-medium text-muted-foreground">Cook minutes</span>
+												<Input
+													type="text"
+													inputmode="numeric"
+													bind:value={cookTimeDraft}
+													class="h-9 px-3 tabular-nums"
+												/>
+											</label>
+										</div>
+									{/if}
+								</Dialog.Header>
 
-										<Popover.Root bind:open={scheduleEditorOpen}>
-											<Popover.Trigger
-												class="hidden w-full rounded-md border border-border bg-muted/20 px-3 py-2 text-left text-sm font-medium tabular-nums hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none sm:block"
+								<div class="mt-3 space-y-4">
+									{#if meal.description}
+										<Dialog.Description class="text-sm leading-relaxed text-foreground">
+											{meal.description}
+										</Dialog.Description>
+									{/if}
+
+									<div class="space-y-2 text-sm leading-relaxed">
+										<p>
+											<span class="font-medium">Cook time:</span>
+											<span class="tabular-nums">{formatDuration(cookTimeMinutes)}</span>
+											<span class="mx-1 text-muted-foreground">•</span>
+											<span class="font-medium">Adjusted:</span>
+											<span class="tabular-nums">{formatDuration(adjustedCookTimeMinutes)}</span>
+										</p>
+
+										<div>
+											<button
+												type="button"
+												aria-expanded={scheduleEditorOpen}
+												class="w-full rounded-md border border-border bg-muted/20 px-3 py-2 text-left text-sm font-medium tabular-nums hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none sm:hidden"
+												onclick={() => (scheduleEditorOpen = true)}
 											>
 												{scheduleSummary} · {cookSummary}
-											</Popover.Trigger>
-											<Popover.Content
-												align="center"
-												side="bottom"
-												sideOffset={8}
-												class="hidden w-fit max-w-[calc(100vw-2rem)] border border-border sm:flex"
-											>
-												{@render scheduleEditorControls()}
-											</Popover.Content>
-										</Popover.Root>
+											</button>
+
+											<Popover.Root bind:open={scheduleEditorOpen}>
+												<Popover.Trigger
+													class="hidden w-full rounded-md border border-border bg-muted/20 px-3 py-2 text-left text-sm font-medium tabular-nums hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none sm:block"
+												>
+													{scheduleSummary} · {cookSummary}
+												</Popover.Trigger>
+												<Popover.Content
+													align="center"
+													side="bottom"
+													sideOffset={8}
+													class="hidden w-fit max-w-[calc(100vw-2rem)] border border-border sm:flex"
+												>
+													{@render scheduleEditorControls()}
+												</Popover.Content>
+											</Popover.Root>
+										</div>
 									</div>
 								</div>
-							</div>
-						</section>
-					</div>
+							</section>
+						</div>
 
-					<div class="space-y-4 px-5 pb-5">
-						<Separator />
+						<div class="space-y-4 px-5 pb-5">
+							<Separator />
 
-						<section class="min-w-0">
-							<div class="flex items-center justify-between gap-3">
+							<section class="min-w-0">
+								<div class="flex items-center justify-between gap-3">
+									<h3 class="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+										Ingredients
+									</h3>
+									<label class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+										Serves
+										<Input
+											type="number"
+											min="1"
+											step="1"
+											value={servingsDraft}
+											oninput={(event) => updateServingsDraft(event.currentTarget.value)}
+											class="h-7 w-20 px-2 text-right tabular-nums"
+										/>
+									</label>
+								</div>
+								{#if ingredients.length > 0}
+									<ul class="mt-3 space-y-2 text-sm leading-snug">
+										{#each ingredients as ingredient (ingredient)}
+											<li class="flex gap-2">
+												<span class="mt-1.5 size-1.5 shrink-0 rounded-full bg-meal-load-medium"
+												></span>
+												<span>{ingredient}</span>
+											</li>
+										{/each}
+									</ul>
+								{:else}
+									<p class="mt-3 text-sm text-muted-foreground">Ingredients are not saved yet.</p>
+								{/if}
+							</section>
+
+							<section class="min-w-0">
 								<h3 class="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-									Ingredients
+									Instructions
 								</h3>
-								<label class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-									Serves
-									<Input
-										type="number"
-										min="1"
-										step="1"
-										value={servingsDraft}
-										oninput={(event) => updateServingsDraft(event.currentTarget.value)}
-										class="h-7 w-20 px-2 text-right tabular-nums"
-									/>
-								</label>
-							</div>
-							{#if ingredients.length > 0}
-								<ul class="mt-3 space-y-2 text-sm leading-snug">
-									{#each ingredients as ingredient (ingredient)}
-										<li class="flex gap-2">
-											<span class="mt-1.5 size-1.5 shrink-0 rounded-full bg-meal-load-medium"
-											></span>
-											<span>{ingredient}</span>
-										</li>
-									{/each}
-								</ul>
-							{:else}
-								<p class="mt-3 text-sm text-muted-foreground">Ingredients are not saved yet.</p>
-							{/if}
-						</section>
-
-						<section class="min-w-0">
-							<h3 class="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-								Instructions
-							</h3>
-							{#if instructions.length > 0}
-								<ol class="mt-3 space-y-3 text-sm leading-relaxed">
-									{#each instructions as instruction, index (instruction)}
-										<li class="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-2">
-											<span
-												class="flex size-6 items-center justify-center rounded-sm bg-muted text-xs font-medium text-muted-foreground tabular-nums"
-											>
-												{index + 1}
-											</span>
-											<span>{instruction}</span>
-										</li>
-									{/each}
-								</ol>
-							{:else}
-								<p class="mt-3 text-sm text-muted-foreground">Instructions are not saved yet.</p>
-							{/if}
-						</section>
-					</div>
-
-					{#snippet footer()}
-						<div
-							class="flex items-center justify-between gap-3 rounded-b-xl border-t border-border bg-popover/95 px-5 py-3 shadow-[0_-12px_24px_-18px_rgba(0,0,0,0.45)] backdrop-blur"
-						>
-							<Button.Root variant="destructive" onclick={openDeleteConfirm}>Delete</Button.Root>
-							<Button.Root onclick={saveMealDraft}>Save meal</Button.Root>
+								{#if instructions.length > 0}
+									<ol class="mt-3 space-y-3 text-sm leading-relaxed">
+										{#each instructions as instruction, index (instruction)}
+											<li class="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-2">
+												<span
+													class="flex size-6 items-center justify-center rounded-sm bg-muted text-xs font-medium text-muted-foreground tabular-nums"
+												>
+													{index + 1}
+												</span>
+												<span>{instruction}</span>
+											</li>
+										{/each}
+									</ol>
+								{:else}
+									<p class="mt-3 text-sm text-muted-foreground">Instructions are not saved yet.</p>
+								{/if}
+							</section>
 						</div>
-					{/snippet}
-				</Sheet.Frame>
-				{#if scheduleEditorOpen}
-					<button
-						type="button"
-						aria-label="Close schedule editor"
-						class="pointer-events-auto fixed inset-0 z-[70] bg-background/55 backdrop-blur-[1px] sm:hidden"
-						onclick={() => (scheduleEditorOpen = false)}
-					></button>
-					<section
-						aria-label="Edit schedule"
-						class="pointer-events-auto fixed inset-x-0 bottom-0 z-[80] max-h-[82svh] overflow-y-auto rounded-t-xl border border-border bg-popover px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] text-popover-foreground shadow-2xl ring-1 ring-foreground/10 sm:hidden"
-					>
-						<div class="mx-auto mb-3 h-1.5 w-16 rounded-full bg-muted-foreground/25"></div>
-						<div class="mb-3 flex items-center justify-between gap-3">
-							<div class="min-w-0">
-								<h3 class="text-sm font-semibold">Schedule meal</h3>
-								<p class="truncate text-xs text-muted-foreground">
-									{scheduleSummary} · {cookSummary}
-								</p>
-							</div>
-							<button
-								type="button"
-								class="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted"
-								onclick={() => (scheduleEditorOpen = false)}
+
+						{#snippet footer()}
+							<div
+								class="flex items-center justify-between gap-3 rounded-b-xl border-t border-border bg-popover/95 px-5 py-3 shadow-[0_-12px_24px_-18px_rgba(0,0,0,0.45)] backdrop-blur"
 							>
-								Done
-							</button>
-						</div>
-						{@render scheduleEditorControls()}
-					</section>
+								<Button.Root variant="destructive" onclick={openDeleteConfirm}>Delete</Button.Root>
+								<Button.Root onclick={saveMealDraft}>Save meal</Button.Root>
+							</div>
+						{/snippet}
+					</Sheet.Frame>
+					{#if scheduleEditorOpen}
+						<button
+							type="button"
+							aria-label="Close schedule editor"
+							class="pointer-events-auto fixed inset-0 z-[70] bg-background/55 backdrop-blur-[1px] sm:hidden"
+							onclick={() => (scheduleEditorOpen = false)}
+						></button>
+						<section
+							aria-label="Edit schedule"
+							class="pointer-events-auto fixed inset-x-0 bottom-0 z-[80] max-h-[82svh] overflow-y-auto rounded-t-xl border border-border bg-popover px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] text-popover-foreground shadow-2xl ring-1 ring-foreground/10 sm:hidden"
+						>
+							<div class="mx-auto mb-3 h-1.5 w-16 rounded-full bg-muted-foreground/25"></div>
+							<div class="mb-3 flex items-center justify-between gap-3">
+								<div class="min-w-0">
+									<h3 class="text-sm font-semibold">Schedule meal</h3>
+									<p class="truncate text-xs text-muted-foreground">
+										{scheduleSummary} · {cookSummary}
+									</p>
+								</div>
+								<button
+									type="button"
+									class="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted"
+									onclick={() => (scheduleEditorOpen = false)}
+								>
+									Done
+								</button>
+							</div>
+							{@render scheduleEditorControls()}
+						</section>
+					{/if}
 				{/if}
-			{/if}
+			</div>
 		</DialogPrimitive.Content>
 	</Dialog.Portal>
 </Dialog.Root>

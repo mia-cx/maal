@@ -3,6 +3,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
+	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
 	import { Input } from '$lib/components/ui/input';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
@@ -414,6 +415,7 @@
 	};
 
 	const openArchiveConfirm = () => {
+		if (!recipe || !ondeleted || deleteConfirmOpen) return;
 		deleteError = null;
 		deleteConfirmOpen = true;
 	};
@@ -440,271 +442,286 @@
 		<DialogPrimitive.Content
 			class="fixed inset-0 z-50 w-full overflow-hidden bg-transparent p-0 outline-none"
 		>
-			{#if recipe}
-				<Sheet.Frame
-					leadIn={sheetLeadIn}
-					closeLabel="Close recipe editor"
-					onclose={() => (open = false)}
-				>
-					<form class="contents" onsubmit={saveRecipe}>
-						<div bind:this={sheetHeroElement} class="relative overflow-hidden rounded-t-xl">
-							{#if image}
-								<img src={image} alt="" class="aspect-[2/1] w-full object-cover" />
-							{/if}
+			<div
+				use:keyboardShortcut={{
+					target: 'window',
+					bindings: [
+						{
+							id: 'delete-open-recipe',
+							combo: { key: 'd' },
+							handler: openArchiveConfirm,
+							when: () => open && Boolean(recipe && ondeleted && !deleteConfirmOpen)
+						}
+					]
+				}}
+				class="contents"
+			>
+				{#if recipe}
+					<Sheet.Frame
+						leadIn={sheetLeadIn}
+						closeLabel="Close recipe editor"
+						onclose={() => (open = false)}
+					>
+						<form class="contents" onsubmit={saveRecipe}>
+							<div bind:this={sheetHeroElement} class="relative overflow-hidden rounded-t-xl">
+								{#if image}
+									<img src={image} alt="" class="aspect-[2/1] w-full object-cover" />
+								{/if}
 
-							<section class="px-5 py-5">
-								<Dialog.Header class="pr-10">
-									<Dialog.Title
-										class="text-3xl leading-tight font-semibold tracking-tight sm:text-2xl"
-									>
-										{isDraftRecipe ? 'Add recipe' : 'Edit recipe'}
-									</Dialog.Title>
-								</Dialog.Header>
-							</section>
-						</div>
-
-						<div class="space-y-5 px-5 pb-5">
-							<div class="grid gap-4">
-								<label class="grid gap-1 text-xs font-medium">
-									Title
-									<Input bind:value={title} />
-								</label>
-
-								<label class="grid gap-1 text-xs font-medium">
-									Source URL
-									<div class="flex gap-2">
-										<Input bind:value={sourceUrl} />
-										{#if onimporturl}
-											<Button.Root
-												type="button"
-												variant="outline"
-												disabled={!sourceUrlCanImport || importBusy}
-												onclick={importSourceUrl}
-											>
-												{importBusy ? 'Importing…' : 'Import'}
-											</Button.Root>
-										{/if}
-									</div>
-									{#if onimporturl && sourceUrlCanImport}
-										<span class="text-muted-foreground">
-											Import will fill this sheet from schema.org recipe data before you save.
-										</span>
-									{/if}
-									{#if importError}
-										<span class="text-destructive">{importError}</span>
-									{/if}
-								</label>
-
-								<div class="grid gap-3 sm:grid-cols-2">
-									<label class="grid gap-1 text-xs font-medium">
-										Source site
-										<Input bind:value={sourceSiteName} />
-									</label>
-									<label class="grid gap-1 text-xs font-medium">
-										Author
-										<Input bind:value={sourceAuthorName} />
-									</label>
-									<label class="grid gap-1 text-xs font-medium">
-										Publisher
-										<Input bind:value={sourcePublisherName} />
-									</label>
-									<label class="grid gap-1 text-xs font-medium">
-										Based on URL
-										<Input bind:value={sourceIsBasedOnUrl} />
-									</label>
-								</div>
-
-								<label class="grid gap-1 text-xs font-medium">
-									Description
-									<textarea bind:value={description} rows="4" class={textareaClass}></textarea>
-								</label>
-
-								<label class="grid gap-1 text-xs font-medium">
-									Image URL
-									<Input bind:value={image} />
-								</label>
-
-								<div class="grid gap-3 sm:grid-cols-3">
-									<label class="grid gap-1 text-xs font-medium">
-										Prep minutes
-										<Input type="number" min="0" bind:value={prepTimeMinutes} />
-									</label>
-									<label class="grid gap-1 text-xs font-medium">
-										Cook minutes
-										<Input type="number" min="0" bind:value={cookTimeMinutes} />
-									</label>
-									<label class="grid gap-1 text-xs font-medium">
-										Yield
-										<Input type="number" min="1" step="1" bind:value={recipeYield} />
-									</label>
-								</div>
+								<section class="px-5 py-5">
+									<Dialog.Header class="pr-10">
+										<Dialog.Title
+											class="text-3xl leading-tight font-semibold tracking-tight sm:text-2xl"
+										>
+											{isDraftRecipe ? 'Add recipe' : 'Edit recipe'}
+										</Dialog.Title>
+									</Dialog.Header>
+								</section>
 							</div>
 
-							<section class="grid gap-2">
-								<h3 class="text-xs font-medium text-foreground">Ingredients</h3>
-								<div class="grid gap-2">
-									{#each ingredients as ingredient, index (ingredient.draftId)}
-										<div
-											class="grid gap-2 sm:grid-cols-[4.5rem_5rem_minmax(0,1fr)_auto] sm:items-end"
-										>
-											<div>
-												<Input
-													value={ingredient.amount}
-													oninput={(event) =>
-														updateIngredientAmount(ingredient.draftId, event.currentTarget.value)}
-													aria-label={`Ingredient ${index + 1} amount`}
-													placeholder="2"
-												/>
-											</div>
-											<div>
-												<Input
-													value={ingredient.unit ?? ''}
-													oninput={(event) =>
-														updateIngredientUnit(ingredient.draftId, event.currentTarget.value)}
-													aria-label={`Ingredient ${index + 1} unit`}
-													placeholder="tbsp"
-												/>
-											</div>
-											<div>
-												<Input
-													value={ingredient.item}
-													oninput={(event) =>
-														updateIngredientItem(ingredient.draftId, event.currentTarget.value)}
-													aria-label={`Ingredient ${index + 1}`}
-													placeholder="olive oil"
-												/>
-											</div>
-											<Button.Root
-												variant="ghost"
-												size="sm"
-												onclick={() => removeIngredient(ingredient.draftId)}
-											>
-												Remove
-											</Button.Root>
-										</div>
-									{/each}
-								</div>
-								<div>
-									<Button.Root variant="outline" size="sm" class="w-full" onclick={addIngredient}
-										>Add ingredient</Button.Root
-									>
-								</div>
-							</section>
+							<div class="space-y-5 px-5 pb-5">
+								<div class="grid gap-4">
+									<label class="grid gap-1 text-xs font-medium">
+										Title
+										<Input bind:value={title} />
+									</label>
 
-							<section class="grid gap-2">
-								<h3 class="text-xs font-medium text-foreground">Instructions</h3>
-								<div bind:this={instructionListElement} role="list" class="grid gap-3">
-									{#if draggedInstruction && instructionDropIndex === 0}
-										<div
-											class="h-20 rounded-md border border-dashed border-primary/70 bg-primary/10"
-										></div>
-									{/if}
-									{#each visibleInstructions as instruction, index (instruction.draftId)}
-										<div
-											data-instruction-row
-											role="listitem"
-											class="grid gap-2 sm:grid-cols-[4.75rem_minmax(0,1fr)_auto] sm:items-center"
-										>
-											<div class="flex items-stretch gap-1 text-xs font-medium">
-												<button
-													type="button"
-													aria-label={`Drag instruction ${instruction.position}`}
-													class="flex w-3 cursor-grab touch-none items-center justify-center p-0 text-muted-foreground active:cursor-grabbing"
-													onpointerdown={(event) => startInstructionDrag(instruction, event)}
-												>
-													<GripVerticalIcon class="size-4" />
-												</button>
-												<div class="grid flex-1 gap-1">
-													<Button.Root
-														type="button"
-														variant="outline"
-														size="sm"
-														class="h-7 px-1"
-														disabled={instruction.position === 1}
-														aria-label="Move instruction up"
-														onclick={() => swapInstructionPosition(instruction.draftId, -1)}
-													>
-														<ChevronUpIcon class="size-4" />
-													</Button.Root>
-													<Input
-														type="text"
-														inputmode="numeric"
-														value={instructionPositionDrafts[instruction.draftId] ??
-															String(instruction.position)}
-														oninput={(event) =>
-															updateInstructionPositionDraft(
-																instruction.draftId,
-																event.currentTarget.value
-															)}
-														onblur={() => commitInstructionPosition(instruction.draftId)}
-														onkeydown={(event) =>
-															handleInstructionPositionKeydown(instruction.draftId, event)}
-														aria-label="Instruction position"
-														class="px-1 text-center"
-													/>
-													<Button.Root
-														type="button"
-														variant="outline"
-														size="sm"
-														class="h-7 px-1"
-														disabled={instruction.position === sortedInstructions.length}
-														aria-label="Move instruction down"
-														onclick={() => swapInstructionPosition(instruction.draftId, 1)}
-													>
-														<ChevronDownIcon class="size-4" />
-													</Button.Root>
-												</div>
-											</div>
-											<textarea
-												value={instruction.text}
-												oninput={(event) =>
-													updateInstructionText(instruction.draftId, event.currentTarget.value)}
-												aria-label={`Instruction ${instruction.position} text`}
-												class={`${textareaClass} min-h-[5.75rem]`}
-											></textarea>
-											<div class="flex flex-wrap gap-1 sm:flex-col sm:self-start">
+									<label class="grid gap-1 text-xs font-medium">
+										Source URL
+										<div class="flex gap-2">
+											<Input bind:value={sourceUrl} />
+											{#if onimporturl}
 												<Button.Root
 													type="button"
+													variant="outline"
+													disabled={!sourceUrlCanImport || importBusy}
+													onclick={importSourceUrl}
+												>
+													{importBusy ? 'Importing…' : 'Import'}
+												</Button.Root>
+											{/if}
+										</div>
+										{#if onimporturl && sourceUrlCanImport}
+											<span class="text-muted-foreground">
+												Import will fill this sheet from schema.org recipe data before you save.
+											</span>
+										{/if}
+										{#if importError}
+											<span class="text-destructive">{importError}</span>
+										{/if}
+									</label>
+
+									<div class="grid gap-3 sm:grid-cols-2">
+										<label class="grid gap-1 text-xs font-medium">
+											Source site
+											<Input bind:value={sourceSiteName} />
+										</label>
+										<label class="grid gap-1 text-xs font-medium">
+											Author
+											<Input bind:value={sourceAuthorName} />
+										</label>
+										<label class="grid gap-1 text-xs font-medium">
+											Publisher
+											<Input bind:value={sourcePublisherName} />
+										</label>
+										<label class="grid gap-1 text-xs font-medium">
+											Based on URL
+											<Input bind:value={sourceIsBasedOnUrl} />
+										</label>
+									</div>
+
+									<label class="grid gap-1 text-xs font-medium">
+										Description
+										<textarea bind:value={description} rows="4" class={textareaClass}></textarea>
+									</label>
+
+									<label class="grid gap-1 text-xs font-medium">
+										Image URL
+										<Input bind:value={image} />
+									</label>
+
+									<div class="grid gap-3 sm:grid-cols-3">
+										<label class="grid gap-1 text-xs font-medium">
+											Prep minutes
+											<Input type="number" min="0" bind:value={prepTimeMinutes} />
+										</label>
+										<label class="grid gap-1 text-xs font-medium">
+											Cook minutes
+											<Input type="number" min="0" bind:value={cookTimeMinutes} />
+										</label>
+										<label class="grid gap-1 text-xs font-medium">
+											Yield
+											<Input type="number" min="1" step="1" bind:value={recipeYield} />
+										</label>
+									</div>
+								</div>
+
+								<section class="grid gap-2">
+									<h3 class="text-xs font-medium text-foreground">Ingredients</h3>
+									<div class="grid gap-2">
+										{#each ingredients as ingredient, index (ingredient.draftId)}
+											<div
+												class="grid gap-2 sm:grid-cols-[4.5rem_5rem_minmax(0,1fr)_auto] sm:items-end"
+											>
+												<div>
+													<Input
+														value={ingredient.amount}
+														oninput={(event) =>
+															updateIngredientAmount(ingredient.draftId, event.currentTarget.value)}
+														aria-label={`Ingredient ${index + 1} amount`}
+														placeholder="2"
+													/>
+												</div>
+												<div>
+													<Input
+														value={ingredient.unit ?? ''}
+														oninput={(event) =>
+															updateIngredientUnit(ingredient.draftId, event.currentTarget.value)}
+														aria-label={`Ingredient ${index + 1} unit`}
+														placeholder="tbsp"
+													/>
+												</div>
+												<div>
+													<Input
+														value={ingredient.item}
+														oninput={(event) =>
+															updateIngredientItem(ingredient.draftId, event.currentTarget.value)}
+														aria-label={`Ingredient ${index + 1}`}
+														placeholder="olive oil"
+													/>
+												</div>
+												<Button.Root
 													variant="ghost"
 													size="sm"
-													onclick={() => removeInstruction(instruction.draftId)}
+													onclick={() => removeIngredient(ingredient.draftId)}
 												>
 													Remove
 												</Button.Root>
 											</div>
-										</div>
-										{#if draggedInstruction && instructionDropIndex === index + 1}
+										{/each}
+									</div>
+									<div>
+										<Button.Root variant="outline" size="sm" class="w-full" onclick={addIngredient}
+											>Add ingredient</Button.Root
+										>
+									</div>
+								</section>
+
+								<section class="grid gap-2">
+									<h3 class="text-xs font-medium text-foreground">Instructions</h3>
+									<div bind:this={instructionListElement} role="list" class="grid gap-3">
+										{#if draggedInstruction && instructionDropIndex === 0}
 											<div
 												class="h-20 rounded-md border border-dashed border-primary/70 bg-primary/10"
 											></div>
 										{/if}
-									{/each}
-								</div>
-								<div>
-									<Button.Root variant="outline" size="sm" class="w-full" onclick={addInstruction}
-										>Add step</Button.Root
-									>
-								</div>
-							</section>
-						</div>
-					</form>
-
-					{#snippet footer()}
-						<div
-							class="flex items-center justify-between gap-2 rounded-b-xl border-t border-border bg-popover/95 p-3 backdrop-blur"
-						>
-							<div>
-								{#if ondeleted}
-									<Button.Root variant="destructive" onclick={openArchiveConfirm}
-										>Archive</Button.Root
-									>
-								{/if}
+										{#each visibleInstructions as instruction, index (instruction.draftId)}
+											<div
+												data-instruction-row
+												role="listitem"
+												class="grid gap-2 sm:grid-cols-[4.75rem_minmax(0,1fr)_auto] sm:items-center"
+											>
+												<div class="flex items-stretch gap-1 text-xs font-medium">
+													<button
+														type="button"
+														aria-label={`Drag instruction ${instruction.position}`}
+														class="flex w-3 cursor-grab touch-none items-center justify-center p-0 text-muted-foreground active:cursor-grabbing"
+														onpointerdown={(event) => startInstructionDrag(instruction, event)}
+													>
+														<GripVerticalIcon class="size-4" />
+													</button>
+													<div class="grid flex-1 gap-1">
+														<Button.Root
+															type="button"
+															variant="outline"
+															size="sm"
+															class="h-7 px-1"
+															disabled={instruction.position === 1}
+															aria-label="Move instruction up"
+															onclick={() => swapInstructionPosition(instruction.draftId, -1)}
+														>
+															<ChevronUpIcon class="size-4" />
+														</Button.Root>
+														<Input
+															type="text"
+															inputmode="numeric"
+															value={instructionPositionDrafts[instruction.draftId] ??
+																String(instruction.position)}
+															oninput={(event) =>
+																updateInstructionPositionDraft(
+																	instruction.draftId,
+																	event.currentTarget.value
+																)}
+															onblur={() => commitInstructionPosition(instruction.draftId)}
+															onkeydown={(event) =>
+																handleInstructionPositionKeydown(instruction.draftId, event)}
+															aria-label="Instruction position"
+															class="px-1 text-center"
+														/>
+														<Button.Root
+															type="button"
+															variant="outline"
+															size="sm"
+															class="h-7 px-1"
+															disabled={instruction.position === sortedInstructions.length}
+															aria-label="Move instruction down"
+															onclick={() => swapInstructionPosition(instruction.draftId, 1)}
+														>
+															<ChevronDownIcon class="size-4" />
+														</Button.Root>
+													</div>
+												</div>
+												<textarea
+													value={instruction.text}
+													oninput={(event) =>
+														updateInstructionText(instruction.draftId, event.currentTarget.value)}
+													aria-label={`Instruction ${instruction.position} text`}
+													class={`${textareaClass} min-h-[5.75rem]`}
+												></textarea>
+												<div class="flex flex-wrap gap-1 sm:flex-col sm:self-start">
+													<Button.Root
+														type="button"
+														variant="ghost"
+														size="sm"
+														onclick={() => removeInstruction(instruction.draftId)}
+													>
+														Remove
+													</Button.Root>
+												</div>
+											</div>
+											{#if draggedInstruction && instructionDropIndex === index + 1}
+												<div
+													class="h-20 rounded-md border border-dashed border-primary/70 bg-primary/10"
+												></div>
+											{/if}
+										{/each}
+									</div>
+									<div>
+										<Button.Root variant="outline" size="sm" class="w-full" onclick={addInstruction}
+											>Add step</Button.Root
+										>
+									</div>
+								</section>
 							</div>
-							<Button.Root type="button" onclick={() => saveRecipe()}>Save recipe</Button.Root>
-						</div>
-					{/snippet}
-				</Sheet.Frame>
-			{/if}
+						</form>
+
+						{#snippet footer()}
+							<div
+								class="flex items-center justify-between gap-2 rounded-b-xl border-t border-border bg-popover/95 p-3 backdrop-blur"
+							>
+								<div>
+									{#if ondeleted}
+										<Button.Root variant="destructive" onclick={openArchiveConfirm}
+											>Archive</Button.Root
+										>
+									{/if}
+								</div>
+								<Button.Root type="button" onclick={() => saveRecipe()}>Save recipe</Button.Root>
+							</div>
+						{/snippet}
+					</Sheet.Frame>
+				{/if}
+			</div>
 		</DialogPrimitive.Content>
 	</Dialog.Portal>
 </Dialog.Root>
