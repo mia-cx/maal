@@ -24,6 +24,17 @@ const cloneMeal = (meal: Meal): Meal => ({
 });
 const cloneMeals = (meals: Meal[]): Meal[] => meals.map(cloneMeal);
 
+const uniqueMeals = (meals: Meal[]): Meal[] => {
+	const seen = new Set<string>();
+	const unique: Meal[] = [];
+	for (const meal of meals) {
+		if (seen.has(meal.id)) continue;
+		seen.add(meal.id);
+		unique.push(meal);
+	}
+	return unique;
+};
+
 const normalizedServings = (servings: number | undefined): number => {
 	const value = servings ?? 1;
 	return Number.isFinite(value) ? Math.max(1, Math.round(value)) : 1;
@@ -206,7 +217,7 @@ const setScheduleMeals = (
 	changedMealId?: string,
 	previousMeal?: Meal
 ) => {
-	scheduleMealStore.set(cloneMeals(meals));
+	scheduleMealStore.set(cloneMeals(uniqueMeals(meals)));
 	if (!changedMealId) return;
 	const meal = meals.find((candidate) => candidate.id === changedMealId);
 	if (!meal) return;
@@ -219,7 +230,9 @@ export const hydrateScheduleMeals = (meals: Meal[]) => {
 
 export const mergeHydratedScheduleMeals = (meals: Meal[], startDate: string, endDate: string) => {
 	const currentMeals = scheduleMealStore.get();
-	const incomingMeals = cloneMeals(meals);
+	const incomingMeals = uniqueMeals(cloneMeals(meals)).filter(
+		(meal) => !deletedMealIds.has(meal.id)
+	);
 	const incomingById = new Map(incomingMeals.map((meal) => [meal.id, meal]));
 	const optimisticIdsToKeep = new Set<string>();
 

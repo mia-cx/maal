@@ -478,7 +478,7 @@
 								</div>
 								{#if ingredients.length > 0}
 									<ul class="mt-3 space-y-2 text-sm leading-snug">
-										{#each ingredients as ingredient (ingredient)}
+										{#each ingredients as ingredient, index (`${index}:${ingredient}`)}
 											<li class="flex gap-2">
 												<span class="mt-1.5 size-1.5 shrink-0 rounded-full bg-meal-load-medium"
 												></span>
@@ -497,7 +497,7 @@
 								</h3>
 								{#if instructions.length > 0}
 									<ol class="mt-3 space-y-3 text-sm leading-relaxed">
-										{#each instructions as instruction, index (instruction)}
+										{#each instructions as instruction, index (`${index}:${instruction}`)}
 											<li class="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-2">
 												<span
 													class="flex size-6 items-center justify-center rounded-sm bg-muted text-xs font-medium text-muted-foreground tabular-nums"
