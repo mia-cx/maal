@@ -20,6 +20,7 @@ export const households = sqliteTable('households', {
 	weekStartsOn: integer('week_starts_on').notNull().default(1),
 	defaultPlannedYield: integer('default_planned_yield').notNull().default(1),
 	preferredDinnerTime: text('preferred_dinner_time'),
+	createdByUserId: text('created_by_user_id'),
 	createdAt: createdAt(),
 	updatedAt: updatedAt()
 });

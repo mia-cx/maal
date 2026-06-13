@@ -7,6 +7,8 @@ export const users = sqliteTable('users', {
 	timezone: text('timezone'),
 	cachedCookTimeCoefficient: real('cached_cook_time_coefficient').notNull().default(1),
 	cookTimeCoefficientUpdatedAt: text('cook_time_coefficient_updated_at'),
+	trialHouseholdId: text('trial_household_id'),
+	trialStartedAt: text('trial_started_at'),
 	createdAt: createdAt(),
 	updatedAt: updatedAt()
 });

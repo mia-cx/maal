@@ -1,7 +1,3 @@
-ALTER TABLE `unit_aliases` ADD COLUMN `plural_alias` text;
-ALTER TABLE `unit_user_aliases` ADD COLUMN `plural_alias` text;
-ALTER TABLE `unit_household_aliases` ADD COLUMN `plural_alias` text;
-
 UPDATE `unit_aliases`
 SET `plural_alias` = CASE `alias`
 	WHEN 'teentje' THEN 'teentjes'

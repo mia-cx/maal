@@ -1,3 +1,20 @@
+CREATE TABLE `billing_subscriptions` (
+	`household_id` text PRIMARY KEY NOT NULL,
+	`stripe_customer_id` text NOT NULL,
+	`subscriber_user_id` text,
+	`stripe_subscription_id` text,
+	`stripe_price_id` text,
+	`status` text NOT NULL,
+	`current_period_end` text,
+	`cancel_at_period_end` integer DEFAULT false NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`household_id`) REFERENCES `households`(`household_id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `billing_subscriptions_customer_idx` ON `billing_subscriptions` (`stripe_customer_id`);--> statement-breakpoint
+CREATE INDEX `billing_subscriptions_subscriber_idx` ON `billing_subscriptions` (`subscriber_user_id`);--> statement-breakpoint
+CREATE INDEX `billing_subscriptions_subscription_idx` ON `billing_subscriptions` (`stripe_subscription_id`);--> statement-breakpoint
 CREATE TABLE `food_aliases` (
 	`id` text PRIMARY KEY NOT NULL,
 	`food_id` text NOT NULL,
@@ -120,6 +137,22 @@ CREATE UNIQUE INDEX `user_food_preferences_user_food_unique` ON `user_food_prefe
 CREATE INDEX `user_food_preferences_user_idx` ON `user_food_preferences` (`workos_user_id`);--> statement-breakpoint
 CREATE INDEX `user_food_preferences_food_idx` ON `user_food_preferences` (`food_id`);--> statement-breakpoint
 CREATE INDEX `user_food_preferences_preference_idx` ON `user_food_preferences` (`preference`);--> statement-breakpoint
+CREATE TABLE `household_invites` (
+	`id` text PRIMARY KEY NOT NULL,
+	`household_id` text NOT NULL,
+	`code` text NOT NULL,
+	`created_by_user_id` text NOT NULL,
+	`role_slug` text DEFAULT 'member' NOT NULL,
+	`max_uses` integer,
+	`uses_count` integer DEFAULT 0 NOT NULL,
+	`expires_at` text,
+	`revoked_at` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`household_id`) REFERENCES `households`(`household_id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `household_invites_code_unique` ON `household_invites` (`code`);--> statement-breakpoint
+CREATE INDEX `household_invites_household_id_idx` ON `household_invites` (`household_id`);--> statement-breakpoint
 CREATE TABLE `household_meal_appliance_requirements` (
 	`id` text PRIMARY KEY NOT NULL,
 	`household_meal_id` text NOT NULL,
@@ -332,6 +365,7 @@ CREATE TABLE `households` (
 	`week_starts_on` integer DEFAULT 1 NOT NULL,
 	`default_planned_yield` integer DEFAULT 1 NOT NULL,
 	`preferred_dinner_time` text,
+	`created_by_user_id` text,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
@@ -440,6 +474,7 @@ CREATE TABLE `unit_aliases` (
 	`unit_id` text NOT NULL,
 	`base_unit_id` text NOT NULL,
 	`alias` text NOT NULL,
+	`plural_alias` text,
 	`locale` text NOT NULL,
 	`source_domain` text,
 	`default_for_locale` integer DEFAULT false NOT NULL,
@@ -460,6 +495,7 @@ CREATE TABLE `unit_household_aliases` (
 	`unit_id` text NOT NULL,
 	`base_unit_id` text NOT NULL,
 	`alias` text NOT NULL,
+	`plural_alias` text,
 	`locale` text NOT NULL,
 	`source_domain` text,
 	`adoption_status` text DEFAULT 'pending_review' NOT NULL,
@@ -497,6 +533,7 @@ CREATE TABLE `unit_user_aliases` (
 	`unit_id` text NOT NULL,
 	`base_unit_id` text NOT NULL,
 	`alias` text NOT NULL,
+	`plural_alias` text,
 	`locale` text NOT NULL,
 	`source_domain` text,
 	`adoption_status` text DEFAULT 'pending_review' NOT NULL,
@@ -719,6 +756,8 @@ CREATE TABLE `users` (
 	`timezone` text,
 	`cached_cook_time_coefficient` real DEFAULT 1 NOT NULL,
 	`cook_time_coefficient_updated_at` text,
+	`trial_household_id` text,
+	`trial_started_at` text,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
 	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
