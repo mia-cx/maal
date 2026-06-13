@@ -16,7 +16,11 @@ import {
 import { provisionAuthSession } from '$lib/server/auth/provisioning';
 import { smokeAuthEnabled, smokeSession } from '$lib/server/auth/smoke';
 import { tryCreateAuthRuntime } from '$lib/server/auth/workos';
-import { firstAccessibleHouseholdId, hasHouseholdAccess } from '$lib/server/billing/entitlements';
+import {
+	firstAccessibleHouseholdId,
+	hasBillingGrant,
+	hasHouseholdAccess
+} from '$lib/server/billing/entitlements';
 
 const handleAuth: Handle = async ({ event, resolve }) => {
 	event.locals.session = null;
@@ -65,6 +69,15 @@ const activeSubscribedHouseholdId = async (
 	return firstAccessibleHouseholdId({ database: platform.env.DB, session, households });
 };
 
+const refreshSessionMetadata = async (event: Parameters<Handle>[0]['event']): Promise<void> => {
+	const session = event.locals.session;
+	const runtime = tryCreateAuthRuntime(event.platform);
+	if (!session || !runtime) return;
+
+	const user = await runtime.workos.userManagement.getUser(session.user.id);
+	session.user.metadata = user.metadata ?? {};
+};
+
 const handleSubscriptionGate: Handle = async ({ event, resolve }) => {
 	if (
 		!event.locals.session ||
@@ -84,11 +97,19 @@ const handleSubscriptionGate: Handle = async ({ event, resolve }) => {
 	});
 	if (!householdId) return resolve(event);
 
-	const hasAccess = await hasHouseholdAccess({
+	let hasAccess = await hasHouseholdAccess({
 		database: event.platform.env.DB,
 		session: event.locals.session,
 		householdId
 	});
+	if (!hasAccess && !hasBillingGrant(event.locals.session, householdId)) {
+		await refreshSessionMetadata(event).catch(() => undefined);
+		hasAccess = await hasHouseholdAccess({
+			database: event.platform.env.DB,
+			session: event.locals.session,
+			householdId
+		});
+	}
 	if (!hasAccess) {
 		const canManageSubscription = await canManageActiveHousehold(
 			event.platform,
