@@ -49,6 +49,32 @@ const archiveRecipe = (recipe: RecipeMenuItem, archivedAt?: string) => {
 	]);
 };
 
+const removeRecipes = (recipeIds: string[]) => {
+	const idSet = new Set(recipeIds);
+	menuRecipesStore.set(menuRecipesStore.get().filter((recipe) => !idSet.has(recipe.id)));
+	if (selectedMenuRecipeIdStore.get() && idSet.has(selectedMenuRecipeIdStore.get()!)) {
+		selectedMenuRecipeIdStore.set(null);
+	}
+};
+
+const removeArchivedRecipes = (recipeIds: string[]) => {
+	const idSet = new Set(recipeIds);
+	archivedMenuRecipesStore.set(
+		archivedMenuRecipesStore.get().filter((recipe) => !idSet.has(recipe.id))
+	);
+};
+
+const archiveRecipes = (recipes: RecipeMenuItem[], archivedAt?: string) => {
+	const recipeIds = new Set(recipes.map((recipe) => recipe.id));
+	archivedMenuRecipesStore.set([
+		...recipes.map((recipe) => ({
+			...cloneRecipe(recipe),
+			archivedAt: archivedAt ?? recipe.archivedAt
+		})),
+		...archivedMenuRecipesStore.get().filter((candidate) => !recipeIds.has(candidate.id))
+	]);
+};
+
 export const hydrateMenuRecipes = (
 	recipes: RecipeMenuItem[],
 	archivedRecipes?: RecipeMenuItem[]
@@ -123,59 +149,86 @@ export const updateMenuRecipe = (recipe: RecipeMenuItem) => {
 };
 
 export const deleteMenuRecipe = async (recipe: RecipeMenuItem) => {
+	await deleteMenuRecipes([recipe]);
+};
+
+export const deleteMenuRecipes = async (recipes: RecipeMenuItem[]) => {
+	if (!recipes.length) return;
 	const previousRecipes = menuRecipesStore.get();
 	const previousArchivedRecipes = archivedMenuRecipesStore.get();
-	removeRecipe(recipe.id);
+	const recipeIds = recipes.map((recipe) => recipe.id);
+	removeRecipes(recipeIds);
 	if (!browser) return;
 
-	const response = await fetch(`/menu/recipes/${encodeURIComponent(recipe.id)}`, {
-		method: 'DELETE'
+	const response = await fetch('/menu/recipes', {
+		method: 'DELETE',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ recipeIds })
 	});
 	if (response.ok) {
 		const body = (await response.json()) as { deletedAt?: string };
-		archiveRecipe(recipe, body.deletedAt);
+		archiveRecipes(recipes, body.deletedAt);
 		return;
 	}
 
 	menuRecipesStore.set(previousRecipes);
 	archivedMenuRecipesStore.set(previousArchivedRecipes);
-	throw new Error(await readResponseError(response, 'Could not archive recipe.'));
+	throw new Error(await readResponseError(response, 'Could not archive recipes.'));
 };
 
 export const restoreMenuRecipe = async (recipe: RecipeMenuItem) => {
+	return (await restoreMenuRecipes([recipe]))[0];
+};
+
+export const restoreMenuRecipes = async (recipes: RecipeMenuItem[]) => {
+	if (!recipes.length) return [];
 	const previousRecipes = menuRecipesStore.get();
 	const previousArchivedRecipes = archivedMenuRecipesStore.get();
-	removeArchivedRecipe(recipe.id);
-	if (!browser) return;
+	const recipeIds = recipes.map((recipe) => recipe.id);
+	removeArchivedRecipes(recipeIds);
+	if (!browser) return [];
 
-	const response = await fetch(`/menu/recipes/${encodeURIComponent(recipe.id)}`, {
-		method: 'PATCH'
+	const response = await fetch('/menu/recipes', {
+		method: 'PATCH',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ recipeIds })
 	});
 	if (response.ok) {
-		const body = (await response.json()) as { recipe?: RecipeMenuItem };
-		const restoredRecipe = body.recipe ?? { ...recipe, archivedAt: undefined };
+		const body = (await response.json()) as { recipes?: RecipeMenuItem[] };
+		const restoredRecipes = body.recipes?.length
+			? body.recipes
+			: recipes.map((recipe) => ({ ...recipe, archivedAt: undefined }));
+		const restoredIds = new Set(restoredRecipes.map((recipe) => recipe.id));
 		menuRecipesStore.set([
-			cloneRecipe(restoredRecipe),
-			...menuRecipesStore.get().filter((candidate) => candidate.id !== recipe.id)
+			...restoredRecipes.map(cloneRecipe),
+			...menuRecipesStore.get().filter((candidate) => !restoredIds.has(candidate.id))
 		]);
-		return restoredRecipe;
+		return restoredRecipes;
 	}
 
 	menuRecipesStore.set(previousRecipes);
 	archivedMenuRecipesStore.set(previousArchivedRecipes);
-	throw new Error(await readResponseError(response, 'Could not restore recipe.'));
+	throw new Error(await readResponseError(response, 'Could not restore recipes.'));
 };
 
 export const permanentlyDeleteMenuRecipe = async (recipe: RecipeMenuItem) => {
+	return permanentlyDeleteMenuRecipes([recipe]);
+};
+
+export const permanentlyDeleteMenuRecipes = async (recipes: RecipeMenuItem[]) => {
+	if (!recipes.length) return { deletedMealCount: 0 };
 	const previousArchivedRecipes = archivedMenuRecipesStore.get();
-	removeArchivedRecipe(recipe.id);
+	const recipeIds = recipes.map((recipe) => recipe.id);
+	removeArchivedRecipes(recipeIds);
 	if (!browser) return { deletedMealCount: 0 };
 
-	const response = await fetch(`/menu/recipes/${encodeURIComponent(recipe.id)}?permanent=true`, {
-		method: 'DELETE'
+	const response = await fetch('/menu/recipes', {
+		method: 'DELETE',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ recipeIds, permanent: true })
 	});
 	if (response.ok) return (await response.json()) as { deletedMealCount: number };
 
 	archivedMenuRecipesStore.set(previousArchivedRecipes);
-	throw new Error(await readResponseError(response, 'Could not permanently delete recipe.'));
+	throw new Error(await readResponseError(response, 'Could not permanently delete recipes.'));
 };

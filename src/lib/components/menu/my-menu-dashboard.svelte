@@ -15,10 +15,13 @@
 		archivedMenuRecipesStore,
 		createMenuRecipe,
 		deleteMenuRecipe,
+		deleteMenuRecipes,
 		hydrateMenuRecipes,
 		menuRecipesStore,
 		permanentlyDeleteMenuRecipe,
+		permanentlyDeleteMenuRecipes,
 		restoreMenuRecipe,
+		restoreMenuRecipes,
 		selectMenuRecipe,
 		selectedMenuRecipeStore,
 		updateMenuRecipe
@@ -302,7 +305,7 @@
 		archiveActionRecipeId = 'bulk-archive';
 		archiveActionError = null;
 		try {
-			for (const recipe of selectedRecipes) await deleteMenuRecipe(recipe);
+			await deleteMenuRecipes(selectedRecipes);
 			selectedRecipeIds = [];
 			lastSelectedRecipeId = null;
 		} catch (error) {
@@ -317,7 +320,7 @@
 		archiveActionRecipeId = 'bulk-restore';
 		archiveActionError = null;
 		try {
-			for (const recipe of selectedArchivedRecipes) await restoreMenuRecipe(recipe);
+			await restoreMenuRecipes(selectedArchivedRecipes);
 			selectedArchivedRecipeIds = [];
 			lastSelectedArchivedRecipeId = null;
 		} catch (error) {
@@ -350,7 +353,7 @@
 		archiveActionRecipeId = 'permanent-delete';
 		archiveActionError = null;
 		try {
-			for (const recipe of permanentDeleteRecipes) await permanentlyDeleteMenuRecipe(recipe);
+			await permanentlyDeleteMenuRecipes(permanentDeleteRecipes);
 			selectedArchivedRecipeIds = [];
 			lastSelectedArchivedRecipeId = null;
 			permanentDeleteOpen = false;

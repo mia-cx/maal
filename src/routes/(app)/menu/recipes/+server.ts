@@ -1,12 +1,14 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { resolveActiveHouseholdId } from '$lib/server/auth/household';
 import { requireHouseholdAccess } from '$lib/server/billing/guards';
 import { getDb } from '$lib/server/db';
 import {
-	userRecipeClassifications,
+	householdMeals,
+	householdMealUserRecipes,
 	households,
 	unitAliases,
+	userRecipeClassifications,
 	userRecipeMedia,
 	userRecipeNutritionFacts,
 	userRecipes
@@ -56,6 +58,11 @@ type RecipeIdentity = {
 	title: string;
 	sourceUrl?: string | null;
 	sourceIsBasedOnUrl?: string | null;
+};
+
+type BulkRecipeBody = {
+	recipeIds: string[];
+	permanent?: boolean;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -727,6 +734,23 @@ const readBody = async (request: Request): Promise<CreateRecipeBody> => {
 	};
 };
 
+const readBulkBody = async (request: Request): Promise<BulkRecipeBody> => {
+	let body: unknown;
+	try {
+		body = await request.json();
+	} catch {
+		error(400, { message: 'Invalid request.' });
+	}
+	if (!isRecord(body) || !Array.isArray(body.recipeIds)) {
+		error(400, { message: 'Choose at least one recipe.' });
+	}
+	const recipeIds = [
+		...new Set(body.recipeIds.filter((id): id is string => typeof id === 'string'))
+	];
+	if (!recipeIds.length) error(400, { message: 'Choose at least one recipe.' });
+	return { recipeIds, permanent: body.permanent === true };
+};
+
 const matchingExistingRecipe = (
 	recipes: RecipeIdentity[],
 	body: CreateRecipeBody,
@@ -869,4 +893,103 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	);
 	if (!recipe) error(500, { message: 'Recipe was created but could not be loaded.' });
 	return json({ recipe }, { status: 201 });
+};
+
+export const PATCH: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
+	const session = locals.session;
+	if (!session) error(401, { message: 'Sign in required.' });
+	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
+	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
+	if (!householdId) error(400, { message: 'Household is required.' });
+	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
+
+	const { recipeIds } = await readBulkBody(request);
+	const db = getDb(platform.env.DB);
+	const updatedAt = new Date().toISOString();
+	await db
+		.update(userRecipes)
+		.set({ deletedAt: null, updatedAt })
+		.where(
+			and(
+				eq(userRecipes.workosUserId, session.user.id),
+				inArray(userRecipes.id, recipeIds),
+				isNotNull(userRecipes.deletedAt)
+			)
+		);
+
+	const unitPreferences = await loadHouseholdUnitPreferences(db, session.user.id, householdId);
+	const recipes = await loadMenuRecipes(db, session.user.id, householdId, {
+		unitPreferences,
+		recipeIds
+	});
+	return json({ restored: true, recipeIds, recipes });
+};
+
+export const DELETE: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
+	const session = locals.session;
+	if (!session) error(401, { message: 'Sign in required.' });
+	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
+	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
+	if (!householdId) error(400, { message: 'Household is required.' });
+	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
+
+	const { recipeIds, permanent } = await readBulkBody(request);
+	const db = getDb(platform.env.DB);
+	const existingRows = await db
+		.select({ id: userRecipes.id })
+		.from(userRecipes)
+		.where(
+			and(
+				eq(userRecipes.workosUserId, session.user.id),
+				inArray(userRecipes.id, recipeIds),
+				permanent ? isNotNull(userRecipes.deletedAt) : isNull(userRecipes.deletedAt)
+			)
+		);
+	const existingRecipeIds = existingRows.map((recipe) => recipe.id);
+	if (!existingRecipeIds.length) {
+		error(404, { message: permanent ? 'Archived recipes not found.' : 'Recipes not found.' });
+	}
+
+	if (permanent) {
+		const mealLinks = await db
+			.select({ householdMealId: householdMealUserRecipes.householdMealId })
+			.from(householdMealUserRecipes)
+			.where(inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds));
+		const householdMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
+		if (householdMealIds.length) {
+			await db.delete(householdMeals).where(inArray(householdMeals.id, householdMealIds));
+		}
+		await db
+			.delete(householdMealUserRecipes)
+			.where(inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds));
+		await db
+			.delete(userRecipes)
+			.where(
+				and(
+					eq(userRecipes.workosUserId, session.user.id),
+					inArray(userRecipes.id, existingRecipeIds),
+					isNotNull(userRecipes.deletedAt)
+				)
+			);
+		return json({
+			deleted: true,
+			permanent: true,
+			recipeIds: existingRecipeIds,
+			deletedMealCount: householdMealIds.length
+		});
+	}
+
+	const deletedAt = new Date().toISOString();
+	await db
+		.update(userRecipes)
+		.set({ deletedAt, updatedAt: deletedAt })
+		.where(
+			and(
+				eq(userRecipes.workosUserId, session.user.id),
+				inArray(userRecipes.id, existingRecipeIds),
+				isNull(userRecipes.deletedAt)
+			)
+		);
+
+	return json({ deleted: true, recipeIds: existingRecipeIds, deletedAt });
 };
