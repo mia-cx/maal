@@ -1,0 +1,45 @@
+<script module lang="ts">
+	export const meta = {
+		title: 'Privacy Policy',
+		description: 'How Maal collects, uses, and protects household meal planning data.',
+		effectiveDate: '2026-06-12',
+		summary: 'Initial Maal privacy policy.'
+	};
+</script>
+
+## Overview
+
+Maal helps households manage recipes, meal plans, subscriptions, and related account settings. This policy explains what we collect, why we collect it, which service providers process it, and how to contact us about your data.
+
+## Information we collect and why
+
+- Account information, such as your name, email address, user ID, email verification status, profile image, authentication sessions, and organization memberships. We use this to sign you in, secure your account, provision household access, and enforce permissions.
+- Household information, such as household names, members, roles, active household selection, invite links, invite usage, locale, and household preferences. We use this to share meal planning data with the right people and manage household-level settings.
+- Meal planning and recipe information, such as recipes, imported recipe sources, meal plans, scheduled meals, floating meals, meal check-ins, cook-time notes, statuses, and data exports. We use this to provide Maal’s recipe, planning, history, and export features.
+- MCP access information, such as MCP key metadata, scopes, labels, and last-used timestamps. We use this to let authorized assistants access Maal on your behalf and to help you audit or revoke that access.
+- Billing information, such as Stripe customer IDs, subscription IDs, subscription status, checkout sessions, portal sessions, trial status, product and price IDs, and payment-related webhook metadata. We use this to provide trials, subscriptions, billing management, and entitlement checks.
+- Technical and security information, such as request metadata, server logs, error details, webhook delivery data, and security events. We use this to operate, debug, secure, and improve Maal.
+
+## Service providers
+
+Maal uses external service providers to store, process, or route information needed to operate the service:
+
+- WorkOS provides user management, authentication, identity provisioning, organization membership, and session handling. WorkOS processes account information, authentication events, and organization membership data.
+- Stripe provides payment processing, checkout, customer billing portals, subscription management, trials, invoices, and billing webhooks. Stripe processes billing information and payment-related metadata. Maal does not store full card numbers.
+- Cloudflare Workers Platform provides application compute, hosting, request routing, and storage. Maal uses Cloudflare Workers for server-side compute, Cloudflare D1 for relational application data, and Cloudflare KV for key-value data such as MCP key storage.
+
+## How we use information
+
+- To provide household meal planning, recipe management, invite links, and MCP access.
+- To authenticate users, manage household membership, and enforce permissions.
+- To process subscriptions, trials, and billing status.
+- To secure, debug, maintain, and improve Maal.
+- To respond to support, privacy, and data export requests.
+
+## Your choices
+
+You can request access, correction, deletion, or export of your data by emailing [data-governance@maal.mia.cx](mailto:data-governance@maal.mia.cx). Some requests may require identity verification or may be limited by legal, security, or billing obligations.
+
+## Contact
+
+For privacy questions or data requests, email [data-governance@maal.mia.cx](mailto:data-governance@maal.mia.cx).

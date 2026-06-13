@@ -11,6 +11,7 @@
 @plugin '@tailwindcss/typography';
 
 :root {
+	--brand-salmon: #fe7156;
 	--background: oklch(1 0 0);
 	--foreground: oklch(0.145 0 0);
 	--card: oklch(1 0 0);
@@ -138,13 +139,13 @@
 	html {
 		height: 100%;
 		overflow: hidden;
-		overscroll-behavior: none;
+		overscroll-behavior-y: none;
 		@apply font-sans;
 	}
 	body {
 		height: 100%;
 		overflow: hidden;
-		overscroll-behavior: none;
+		overscroll-behavior-y: none;
 		@apply bg-background text-foreground;
 	}
 	h1,

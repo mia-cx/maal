@@ -1,7 +1,99 @@
-import { redirect } from '@sveltejs/kit';
+import type Stripe from 'stripe';
 import type { PageServerLoad } from './$types';
+import { resolveActiveHouseholdId } from '$lib/server/auth/household';
+import { createStripeClient, getStripePublicConfig } from '$lib/server/billing/stripe';
+import { loadTrialAvailability } from '$lib/server/billing/trials';
 
-export const load: PageServerLoad = ({ locals }) => {
-	if (!locals.session) redirect(303, '/auth/login');
-	redirect(303, '/plan');
+export type LandingPrice = {
+	id: string;
+	label: 'Weekly' | 'Monthly' | 'Yearly';
+	amount: number;
+	currency: string;
+	interval: 'week' | 'month' | 'year';
+	intervalCount: number;
+};
+
+const labelFor = (price: Stripe.Price): LandingPrice['label'] | null => {
+	if (price.unit_amount === 0) return null;
+	if (price.recurring?.interval === 'week') return 'Weekly';
+	if (price.recurring?.interval === 'month') return 'Monthly';
+	if (price.recurring?.interval === 'year') return 'Yearly';
+	return null;
+};
+
+const intervalFor = (
+	interval: Stripe.Price.Recurring.Interval
+): LandingPrice['interval'] | null => {
+	if (interval === 'week' || interval === 'month' || interval === 'year') return interval;
+	return null;
+};
+
+const priceOrder = new Map<LandingPrice['label'], number>([
+	['Weekly', 1],
+	['Monthly', 2],
+	['Yearly', 3]
+]);
+
+const paidLandingPrice = (price: Stripe.Price): LandingPrice | null => {
+	const label = labelFor(price);
+	const interval = price.recurring ? intervalFor(price.recurring.interval) : null;
+	if (!label || !price.recurring || !interval) return null;
+	return {
+		id: price.id,
+		label,
+		amount: price.unit_amount ?? 0,
+		currency: price.currency,
+		interval,
+		intervalCount: price.recurring.interval_count
+	};
+};
+
+const findProduct = async (stripe: Stripe, configuredProductId: string) => {
+	if (configuredProductId) return stripe.products.retrieve(configuredProductId);
+	const products = await stripe.products.list({ active: true, limit: 2 });
+	return products.data[0] ?? null;
+};
+
+export const load: PageServerLoad = async ({ cookies, locals, platform, url }) => {
+	try {
+		const stripe = createStripeClient(platform);
+		const product = await findProduct(stripe, getStripePublicConfig(platform).productId);
+		if (!product || 'deleted' in product)
+			return { productName: 'Maal', pricing: [], trialPriceId: null, trialAvailable: false };
+
+		const prices = await stripe.prices.list({
+			product: product.id,
+			active: true,
+			limit: 20
+		});
+		const pricing = prices.data
+			.map(paidLandingPrice)
+			.filter((price): price is LandingPrice => Boolean(price))
+			.sort(
+				(left, right) => (priceOrder.get(left.label) ?? 99) - (priceOrder.get(right.label) ?? 99)
+			);
+		const trialPriceId = prices.data.find((price) => price.unit_amount === 0)?.id ?? null;
+		let trialAvailable = false;
+		if (locals.session && platform?.env.DB && trialPriceId) {
+			const { householdId } = await resolveActiveHouseholdId({
+				platform,
+				cookies,
+				url,
+				session: locals.session
+			});
+			if (householdId) {
+				trialAvailable = (
+					await loadTrialAvailability({
+						database: platform.env.DB,
+						userId: locals.session.user.id,
+						householdId
+					})
+				).available;
+			}
+		}
+
+		return { productName: product.name, pricing, trialPriceId, trialAvailable };
+	} catch {
+		return { productName: 'Maal', pricing: [], trialPriceId: null, trialAvailable: false };
+	}
 };

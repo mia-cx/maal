@@ -1,5 +1,5 @@
 <script lang="ts">
-	import wordmark from '$lib/assets/wordmark.svg?raw';
+	import wordmark from '$lib/assets/Maal.svg?raw';
 	import { cn } from '$lib/utils';
 	import type { HTMLAttributes } from 'svelte/elements';
 
@@ -12,7 +12,7 @@
 		.replace(/<g[^>]*>\s*<use\b[\s\S]*?<\/g>/g, '')
 		.replace(/<use\b[^>]*\/?>(?:<\/use>)?/g, '')
 		.replace(/<svg\s/, '<svg aria-hidden="true" ')
-		.replace('style="', 'style="color:var(--foreground);')
+		.replace('style="', 'style="color:currentColor;')
 		.replaceAll('stroke:black', 'stroke:currentColor')
 		.replaceAll('<path ', '<path fill="currentColor" ');
 </script>
@@ -27,7 +27,7 @@
 
 <style>
 	:global(.wordmark-logo svg) {
-		color: var(--foreground) !important;
+		color: inherit !important;
 	}
 
 	:global(.wordmark-logo path) {
