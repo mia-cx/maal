@@ -36,6 +36,7 @@ export type Meal = {
 	sortOrder?: number;
 	status?: MealStatus;
 	plannedCookWorkosUserId?: string;
+	prepTimeMinutes?: number;
 	cookTimeMinutes?: number;
 	adjustedCookTimeMinutes?: number;
 	servingsPlanned?: number;

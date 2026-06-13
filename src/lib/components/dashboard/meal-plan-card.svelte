@@ -1,9 +1,9 @@
 <script lang="ts">
+	import { CookIcon, PrepIcon } from '$lib/components/icons/solar-outline';
 	import * as Button from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { cn } from '$lib/utils.js';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
-	import TimerIcon from '@lucide/svelte/icons/timer';
 	import { familiarityLabels } from './meal-labels';
 	import type {
 		Meal,
@@ -112,7 +112,9 @@
 
 	const mealLoad = $derived(mentalLoadLevel(combinedMentalLoadScore(meal)));
 	const displayedTime = $derived(startCookingTime(meal));
-	const showMetadata = $derived(density !== 'title' && (meal.cookTimeMinutes || meal.familiarity));
+	const prepTimeMinutes = $derived(meal.prepTimeMinutes ?? 0);
+	const cookTimeMinutes = $derived(meal.cookTimeMinutes ?? 0);
+	const showMetadata = $derived(density !== 'title');
 	const showDescription = $derived(density === 'detail' && meal.description);
 	const showCardImage = $derived(showImage && density !== 'title' && meal.image);
 	const showAdaptiveImage = $derived(showCardImage && imageLayout === 'adaptive');
@@ -135,7 +137,7 @@
 	const sideImageClass = $derived(
 		imageAspect === 'portrait'
 			? cn(
-					'pointer-events-none min-h-full w-14 shrink-0 self-stretch object-cover select-none [-webkit-user-drag:none] @min-[22rem]:w-20 @min-[28rem]:w-24',
+					'pointer-events-none aspect-square w-14 shrink-0 self-start object-cover select-none [-webkit-user-drag:none] @min-[22rem]:w-20 @min-[28rem]:w-24',
 					showCompactSideImage
 						? compactSideImageVisibility
 						: showAdaptiveImage
@@ -143,7 +145,7 @@
 							: 'hidden @min-[22rem]:block'
 				)
 			: cn(
-					'pointer-events-none min-h-full w-20 shrink-0 self-stretch object-cover select-none [-webkit-user-drag:none] @min-[24rem]:w-24 @min-[32rem]:w-28',
+					'pointer-events-none aspect-square w-20 shrink-0 self-start object-cover select-none [-webkit-user-drag:none] @min-[24rem]:w-24 @min-[32rem]:w-28',
 					showCompactSideImage
 						? compactSideImageVisibility
 						: showAdaptiveImage
@@ -409,21 +411,27 @@
 					<div
 						class="mt-0.5 grid min-w-0 gap-0.5 overflow-visible text-[0.6875rem] leading-tight text-muted-foreground @min-[28ch]/meal-card-body:flex @min-[28ch]/meal-card-body:flex-wrap @min-[28ch]/meal-card-body:items-center @min-[28ch]/meal-card-body:gap-x-1.5 @min-[28ch]/meal-card-body:gap-y-0.5"
 					>
-						{#if meal.cookTimeMinutes}
-							<span class="inline-flex min-w-0 items-center gap-1 tabular-nums">
-								<TimerIcon class="size-3 shrink-0" />
-								<span>{meal.cookTimeMinutes} min</span>
-							</span>
-						{/if}
-						{#if meal.cookTimeMinutes && meal.familiarity}
+						<span class="inline-flex min-w-0 items-center gap-1 tabular-nums" title="Prep time">
+							<PrepIcon class="size-3 shrink-0" />
+							<span>{prepTimeMinutes} min</span>
+						</span>
+						<span
+							aria-hidden="true"
+							class="hidden text-muted-foreground/60 @min-[28ch]/meal-card-body:inline"
+						>
+							•
+						</span>
+						<span class="inline-flex min-w-0 items-center gap-1 tabular-nums" title="Cook time">
+							<CookIcon class="size-3 shrink-0" />
+							<span>{cookTimeMinutes} min</span>
+						</span>
+						{#if meal.familiarity}
 							<span
 								aria-hidden="true"
 								class="hidden text-muted-foreground/60 @min-[28ch]/meal-card-body:inline"
 							>
 								•
 							</span>
-						{/if}
-						{#if meal.familiarity}
 							<span class="inline-flex min-w-0 items-center gap-1">
 								<SparklesIcon class="size-3 shrink-0" />
 								<span>{familiarityLabels[meal.familiarity]}</span>

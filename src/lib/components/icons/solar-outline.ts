@@ -3,6 +3,7 @@ export {
 	AltArrowLeft as CaretLeftIcon,
 	AltArrowRight as CaretRightIcon,
 	AltArrowUp as CaretUpIcon,
+	ChefHat as CookIcon,
 	CheckCircle as CheckCircleIcon,
 	CheckSquare as CheckIcon,
 	CloseCircle as XCircleIcon,
@@ -14,5 +15,6 @@ export {
 	MenuDots as DotsThreeIcon,
 	MinusSquare as MinusIcon,
 	Refresh as SpinnerIcon,
-	Sidebar as SidebarIcon
+	Sidebar as SidebarIcon,
+	Whisk as PrepIcon
 } from '@solar-icons/svelte/Outline';

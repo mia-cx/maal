@@ -37,6 +37,7 @@ export type CreateHouseholdMealInput = {
 		title: string;
 		description?: string;
 		imageUrl?: string;
+		prepTimeMinutes?: number;
 		cookTimeMinutes?: number;
 		ingredients?: string[];
 		instructions?: string[];
@@ -56,6 +57,7 @@ export type UpdateHouseholdMealInput = {
 		status: 'planned' | 'cooked' | 'skipped';
 		title: string;
 		description: string | null;
+		prepTimeMinutes: number | null;
 		cookTimeMinutes: number | null;
 		ingredients: string[];
 		instructions: string[];
@@ -280,7 +282,7 @@ export const createHouseholdMeal = async (input: {
 		title: recipe?.title ?? meal.customMeal?.title?.trim() ?? 'New meal',
 		description: recipe?.description ?? meal.customMeal?.description ?? null,
 		imageUrl: recipe?.imageUrl ?? meal.customMeal?.imageUrl ?? null,
-		prepTimeMinutes: recipe?.prepTimeMinutes ?? null,
+		prepTimeMinutes: recipe?.prepTimeMinutes ?? meal.customMeal?.prepTimeMinutes ?? null,
 		cookTimeMinutes: recipe?.cookTimeMinutes ?? meal.customMeal?.cookTimeMinutes ?? null,
 		yield: recipe?.yield ?? defaultMealServings,
 		plannedYield: servingsPlanned({ servingsPlanned: meal.servingsPlanned }, defaultMealServings),
