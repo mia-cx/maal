@@ -25,6 +25,7 @@ import {
 	type UnitPreferences
 } from '$lib/recipes/ingredient-text';
 import { displayIngredient, displayIngredientText } from '$lib/taxonomy/display';
+import { cleanImportedText } from '$lib/server/services/html-text';
 
 type Db = DrizzleD1Database<typeof schema>;
 type UserRecipeRow = typeof userRecipes.$inferSelect;
@@ -44,9 +45,11 @@ const maxInstructionRowsPerInsert = 16;
 const duration = (minutes?: number): string | undefined =>
 	minutes === undefined ? undefined : `PT${Math.max(0, Math.round(minutes))}M`;
 
-const recipeTitle = (recipe: UserRecipeRow): string => recipe.title || fallbackTitle;
+const recipeTitle = (recipe: UserRecipeRow): string =>
+	cleanImportedText(recipe.title || fallbackTitle);
 
-const recipeDescription = (recipe: UserRecipeRow): string => recipe.description ?? '';
+const recipeDescription = (recipe: UserRecipeRow): string =>
+	cleanImportedText(recipe.description ?? '');
 
 const recipeImage = (recipe: UserRecipeRow): string | undefined => recipe.imageUrl ?? undefined;
 
@@ -170,8 +173,8 @@ const groupByRecipeId = <T extends { userRecipeId: string }>(rows: T[]): Map<str
 export const schemaOrgFromRecipeItem = (recipe: RecipeMenuItem): RecipeJson => ({
 	'@context': 'https://schema.org',
 	'@type': 'Recipe',
-	name: recipe.title,
-	description: recipe.description,
+	name: cleanImportedText(recipe.title),
+	description: cleanImportedText(recipe.description ?? ''),
 	image: recipe.image,
 	url: recipe.sourceUrl,
 	author: recipe.sourceAuthorName
@@ -189,11 +192,13 @@ export const schemaOrgFromRecipeItem = (recipe: RecipeMenuItem): RecipeJson => (
 			: undefined
 	),
 	recipeYield: recipe.yield,
-	recipeIngredient: recipe.ingredients?.map(fullIngredientText),
+	recipeIngredient: recipe.ingredients?.map((ingredient) =>
+		cleanImportedText(fullIngredientText(ingredient))
+	),
 	recipeInstructions: recipe.instructions?.map((instruction) => ({
 		'@type': 'HowToStep',
 		position: instruction.position,
-		text: instruction.text
+		text: cleanImportedText(instruction.text)
 	}))
 });
 
@@ -258,7 +263,10 @@ export const menuItemFromRecipe = (params: {
 			}),
 		instructions: instructions
 			.toSorted((left, right) => left.stepIndex - right.stepIndex)
-			.map((instruction) => ({ position: instruction.stepIndex + 1, text: instruction.text })),
+			.map((instruction) => ({
+				position: instruction.stepIndex + 1,
+				text: cleanImportedText(instruction.text)
+			})),
 		ingredientCount: ingredients.length,
 		appliances: appliances.map((appliance) => appliance.appliance),
 		dietTags: [],
@@ -388,21 +396,24 @@ export const mealFromMenuRecipe = (
 	overrides: Partial<Meal> = {}
 ): Meal => ({
 	id: recipe.id,
-	title: recipe.title,
+	title: cleanImportedText(recipe.title),
+	prepTimeMinutes: recipe.prepTimeMinutes,
 	cookTimeMinutes: recipe.cookTimeMinutes,
 	servingsPlanned: recipe.yield ?? 1,
 	baseServings: recipe.yield ?? 1,
 	image: recipe.image,
-	description: recipe.description,
-	ingredients: recipe.ingredients?.map(fullIngredientText),
-	instructions: recipe.instructions?.map((instruction) => instruction.text),
+	description: cleanImportedText(recipe.description ?? ''),
+	ingredients: recipe.ingredients?.map((ingredient) =>
+		cleanImportedText(fullIngredientText(ingredient))
+	),
+	instructions: recipe.instructions?.map((instruction) => cleanImportedText(instruction.text)),
 	...overrides
 });
 
 const mealIngredientText = (
 	ingredient: HouseholdMealIngredientRow | UserRecipeIngredientRow,
 	unitPreferences: UnitPreferences = {}
-): string => displayIngredientText(ingredient, unitPreferences);
+): string => cleanImportedText(displayIngredientText(ingredient, unitPreferences));
 
 export const mealFromHouseholdMeal = (
 	meal: HouseholdMealRow,
@@ -417,23 +428,24 @@ export const mealFromHouseholdMeal = (
 	return {
 		id: meal.id,
 		userRecipeId,
-		title: meal.title || fallbackTitle,
+		title: cleanImportedText(meal.title || fallbackTitle),
 		date,
 		time: meal.time ?? undefined,
 		sortOrder: meal.sortOrder ?? undefined,
 		status: meal.status,
 		plannedCookWorkosUserId: meal.plannedCookWorkosUserId ?? undefined,
+		prepTimeMinutes: meal.prepTimeMinutes ?? undefined,
 		cookTimeMinutes: meal.cookTimeMinutes ?? undefined,
 		servingsPlanned: meal.plannedYield ?? meal.yield ?? 1,
 		baseServings: meal.yield ?? meal.plannedYield ?? 1,
 		image: meal.imageUrl ?? undefined,
-		description: meal.description ?? '',
+		description: cleanImportedText(meal.description ?? ''),
 		ingredients: ingredients
 			.toSorted((left, right) => left.lineIndex - right.lineIndex)
 			.map((ingredient) => mealIngredientText(ingredient, unitPreferences)),
 		instructions: instructions
 			.toSorted((left, right) => left.stepIndex - right.stepIndex)
-			.map((instruction) => instruction.text),
+			.map((instruction) => cleanImportedText(instruction.text)),
 		latestVerdict,
 		latestCheckIn
 	};
@@ -539,11 +551,12 @@ export const updateRecipeIngredients = async (
 		return {
 			userRecipeId: recipeId,
 			lineIndex: index,
-			originalText: fullIngredientText(ingredient),
-			sourceAmountText: amountText || null,
+			originalText: cleanImportedText(fullIngredientText(ingredient)),
+			sourceAmountText: cleanImportedText(amountText) || null,
 			sourceQuantity: parsedAmount.quantity,
 			sourceUnitLabel: parsedAmount.unit ?? (ingredient.unit?.trim() || null),
-			sourceFoodLabel: ingredient.item.trim() || ingredient.amount.trim() || 'Ingredient',
+			sourceFoodLabel:
+				cleanImportedText(ingredient.item) || ingredient.amount.trim() || 'Ingredient',
 			confidence: 1
 		};
 	});
@@ -564,7 +577,7 @@ export const updateRecipeInstructions = async (
 	const rows = instructions.map((instruction, index) => ({
 		userRecipeId: recipeId,
 		stepIndex: index,
-		text: instruction.text,
+		text: cleanImportedText(instruction.text),
 		confidence: 1
 	}));
 	for (let index = 0; index < rows.length; index += maxInstructionRowsPerInsert) {

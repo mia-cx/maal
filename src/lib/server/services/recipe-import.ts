@@ -1,5 +1,6 @@
 import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
 import { parseIngredientLine } from '$lib/recipes/ingredient-text';
+import { cleanImportedText } from './html-text';
 
 const maxImportBytes = 1_500_000;
 
@@ -9,7 +10,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
 
 const stringValue = (value: unknown): string | undefined =>
-	typeof value === 'string' && value.trim() ? value.trim() : undefined;
+	typeof value === 'string' && value.trim() ? cleanImportedText(value) : undefined;
 
 const arrayValue = (value: unknown): unknown[] =>
 	Array.isArray(value) ? value : value ? [value] : [];
@@ -68,7 +69,7 @@ const parseJsonLdScripts = (html: string): unknown[] => {
 };
 
 const instructionText = (value: unknown): string[] => {
-	if (typeof value === 'string') return [value.trim()].filter(Boolean);
+	if (typeof value === 'string') return [cleanImportedText(value)].filter(Boolean);
 	if (Array.isArray(value)) return value.flatMap(instructionText);
 	if (!isRecord(value)) return [];
 	if (recipeType(value['@type']) && value.recipeInstructions) {
@@ -151,7 +152,7 @@ export const fetchRecipeFromUrlForImport = async (url: string): Promise<RecipeMe
 	if (!recipe) throw new Error('No schema.org JSON-LD Recipe data found on that page.');
 
 	const ingredients = arrayValue(recipe.recipeIngredient)
-		.map((ingredient) => String(ingredient).trim())
+		.map((ingredient) => cleanImportedText(String(ingredient)))
 		.filter(Boolean)
 		.map((ingredient) => parseIngredientLine(ingredient));
 

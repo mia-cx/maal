@@ -31,6 +31,7 @@ import {
 import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
 import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
+import { cleanImportedText } from '$lib/server/services/html-text';
 
 const fallbackTitle = 'Untitled recipe';
 const maxTitleLength = 160;
@@ -61,7 +62,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
 
 const stringValue = (value: unknown): string | undefined =>
-	typeof value === 'string' && value.trim() ? value.trim() : undefined;
+	typeof value === 'string' && value.trim() ? cleanImportedText(value) : undefined;
 
 const firstString = (...values: unknown[]): string | undefined => {
 	for (const value of values) {
@@ -351,7 +352,7 @@ const ratingValue = (value: unknown, key: string): number | undefined => {
 };
 
 const instructionText = (value: unknown): string[] => {
-	if (typeof value === 'string') return [value.trim()].filter(Boolean);
+	if (typeof value === 'string') return [cleanImportedText(value)].filter(Boolean);
 	if (Array.isArray(value)) return value.flatMap(instructionText);
 	if (!isRecord(value)) return [];
 	if (recipeType(value['@type']) && value.recipeInstructions)
@@ -367,7 +368,7 @@ const ingredientsFromRecipe = (
 	unitAliasMap: IngredientUnitAliases = {}
 ): RecipeIngredientItem[] =>
 	arrayValue(recipe.recipeIngredient)
-		.map((ingredient) => String(ingredient).trim())
+		.map((ingredient) => cleanImportedText(String(ingredient)))
 		.filter(Boolean)
 		.map((ingredient) => parseIngredientLine(ingredient, unitAliasMap));
 
