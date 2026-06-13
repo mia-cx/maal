@@ -7,6 +7,7 @@ import type { Cookies } from '@sveltejs/kit';
 import {
 	AUTH_COOKIE_NAME,
 	CALLBACK_PATH,
+	OAUTH_RETURN_TO_COOKIE_NAME,
 	OAUTH_STATE_COOKIE_NAME,
 	OAUTH_STATE_MAX_AGE_SECONDS,
 	SESSION_MAX_AGE_SECONDS
@@ -21,6 +22,7 @@ export interface AuthUser {
 	lastName: string | null;
 	profilePictureUrl: string | null;
 	emailVerified: boolean;
+	metadata: Record<string, string>;
 }
 
 export interface AuthSession {
@@ -35,7 +37,10 @@ export interface AuthSession {
 	accessToken?: string;
 }
 
-export type PublicAuthSession = Omit<AuthSession, 'accessToken'>;
+type PublicAuthUser = Omit<AuthUser, 'metadata'>;
+export type PublicAuthSession = Omit<AuthSession, 'accessToken' | 'user'> & {
+	user: PublicAuthUser;
+};
 
 type RefreshSessionSuccessResponse = Extract<RefreshSessionResponse, { authenticated: true }>;
 type AuthenticatedSessionResponse =
@@ -59,7 +64,8 @@ const toAuthUser = (user: User): AuthUser => ({
 	firstName: user.firstName,
 	lastName: user.lastName,
 	profilePictureUrl: user.profilePictureUrl,
-	emailVerified: user.emailVerified
+	emailVerified: user.emailVerified,
+	metadata: user.metadata ?? {}
 });
 
 const accessTokenFrom = (response: AuthenticatedSessionResponse): string | undefined => {
@@ -70,8 +76,17 @@ const accessTokenFrom = (response: AuthenticatedSessionResponse): string | undef
 export const toPublicSession = (session: AuthSession | null): PublicAuthSession | null => {
 	if (!session) return null;
 
+	const user: PublicAuthUser = {
+		id: session.user.id,
+		email: session.user.email,
+		name: session.user.name,
+		firstName: session.user.firstName,
+		lastName: session.user.lastName,
+		profilePictureUrl: session.user.profilePictureUrl,
+		emailVerified: session.user.emailVerified
+	};
 	return {
-		user: session.user,
+		user,
 		sessionId: session.sessionId,
 		organizationId: session.organizationId,
 		role: session.role,
@@ -97,6 +112,21 @@ export const commitOAuthState = (cookies: Cookies, state: string, url: URL): voi
 
 export const clearOAuthState = (cookies: Cookies): void => {
 	cookies.delete(OAUTH_STATE_COOKIE_NAME, { path: '/' });
+};
+
+export const commitOAuthReturnTo = (cookies: Cookies, returnTo: string, url: URL): void => {
+	cookies.set(
+		OAUTH_RETURN_TO_COOKIE_NAME,
+		returnTo,
+		privateCookieOptions(OAUTH_STATE_MAX_AGE_SECONDS, url)
+	);
+};
+
+export const readOAuthReturnTo = (cookies: Cookies): string | undefined =>
+	cookies.get(OAUTH_RETURN_TO_COOKIE_NAME);
+
+export const clearOAuthReturnTo = (cookies: Cookies): void => {
+	cookies.delete(OAUTH_RETURN_TO_COOKIE_NAME, { path: '/' });
 };
 
 export const readSealedSession = (cookies: Cookies): string | undefined =>

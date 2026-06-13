@@ -1,6 +1,7 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq, isNull } from 'drizzle-orm';
 import { resolveActiveHouseholdId } from '$lib/server/auth/household';
+import { requireHouseholdAccess } from '$lib/server/billing/guards';
 import { getDb } from '$lib/server/db';
 import {
 	userRecipeClassifications,
@@ -681,6 +682,7 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) error(400, { message: 'Household is required.' });
+	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
 
 	const db = getDb(platform.env.DB);
 	const importUrl = url.searchParams.get('importUrl')?.trim();
@@ -753,6 +755,8 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	if (!session) error(401, { message: 'Sign in required.' });
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
+	if (!householdId) error(400, { message: 'Household is required.' });
+	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
 
 	const body = await readBody(request);
 	if (body.url && body.url.length > maxUrlLength)

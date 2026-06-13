@@ -1,5 +1,6 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { createHouseholdForUser } from '$lib/server/auth/household';
+import { startHouseholdTrial } from '$lib/server/billing/trials';
 
 const maxHouseholdNameLength = 120;
 
@@ -20,6 +21,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		error(400, { message: 'Household name is required.' });
 	}
 
+	const startTrialRequested = body.startTrial === true;
 	const name = body.name.trim();
 	if (!name) error(400, { message: 'Household name is required.' });
 	if (name.length > maxHouseholdNameLength) error(400, { message: 'Household name is too long.' });
@@ -32,7 +34,23 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 			userId: session.user.id,
 			name
 		});
-		return json({ household: { id: household.id, name: household.name } }, { status: 201 });
+		let trialStarted = false;
+		if (startTrialRequested) {
+			try {
+				await startHouseholdTrial({
+					platform,
+					user: session.user,
+					householdId: household.id
+				});
+				trialStarted = true;
+			} catch (cause) {
+				console.warn('Created household without starting trial', cause);
+			}
+		}
+		return json(
+			{ household: { id: household.id, name: household.name }, trialStarted },
+			{ status: 201 }
+		);
 	} catch (cause) {
 		console.error('Failed to create household', cause);
 		error(502, { message: 'Could not create household.' });

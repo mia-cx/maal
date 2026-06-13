@@ -7,6 +7,7 @@
 	import CalendarDaysIcon from '@lucide/svelte/icons/calendar-days';
 	import HomeIcon from '@lucide/svelte/icons/house';
 	import ListIcon from '@lucide/svelte/icons/list';
+	import ShoppingCartIcon from '@lucide/svelte/icons/shopping-cart';
 	import SoupIcon from '@lucide/svelte/icons/soup';
 	import type { DashboardNavItem } from './dashboard-nav';
 
@@ -72,6 +73,26 @@
 					</Sidebar.MenuItem>
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton
+							disabled
+							tooltipContent="Pantry coming soon"
+							class="h-9 text-muted-foreground group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
+						>
+							<SoupIcon />
+							<span>Pantry</span>
+						</Sidebar.MenuButton>
+					</Sidebar.MenuItem>
+					<Sidebar.MenuItem>
+						<Sidebar.MenuButton
+							disabled
+							tooltipContent="Grocery rollup coming soon"
+							class="h-9 text-muted-foreground group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
+						>
+							<ShoppingCartIcon />
+							<span>Grocery rollup</span>
+						</Sidebar.MenuButton>
+					</Sidebar.MenuItem>
+					<Sidebar.MenuItem>
+						<Sidebar.MenuButton
 							isActive={activeNav === 'household'}
 							tooltipContent="Household"
 							class="h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
@@ -82,16 +103,6 @@
 									<span>Household</span>
 								</a>
 							{/snippet}
-						</Sidebar.MenuButton>
-					</Sidebar.MenuItem>
-					<Sidebar.MenuItem>
-						<Sidebar.MenuButton
-							disabled
-							tooltipContent="Pantry staples coming soon"
-							class="h-9 text-muted-foreground group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
-						>
-							<SoupIcon />
-							<span>Pantry staples</span>
 						</Sidebar.MenuButton>
 					</Sidebar.MenuItem>
 				</Sidebar.Menu>

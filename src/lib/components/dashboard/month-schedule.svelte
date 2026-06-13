@@ -198,11 +198,18 @@
 		return weekGrid.scrollToKey('y', dateKey(startOfWeek(date)), behavior);
 	};
 
+	const adjustActiveDragStartAfterPrepend = (scrollDelta: number) => {
+		if (pendingDragScrollPointerId !== null) dragStartScrollTop += scrollDelta;
+		if (touchScrollId !== undefined) touchStartScrollTop += scrollDelta;
+		lastScrollTop = scroller?.scrollTop ?? lastScrollTop;
+	};
+
 	const prependWeeks = async () => {
 		if (!scroller || loadingMoreWeeks) return;
 		loadingMoreWeeks = true;
 		cancelProgrammaticScroll();
 		suppressAnchorUpdate = true;
+		const previousScrollTop = scroller.scrollTop;
 		const firstWeek = weeks[0];
 		await preservePrependScrollPosition(
 			scroller,
@@ -217,6 +224,7 @@
 			},
 			() => tick()
 		);
+		adjustActiveDragStartAfterPrepend(scroller.scrollTop - previousScrollTop);
 		releaseAnchorUpdateSuppression();
 		loadingMoreWeeks = false;
 	};
@@ -418,9 +426,16 @@
 		});
 	};
 
+	const browserNavigationEdgePx = 32;
+
+	const startsInBrowserNavigationEdge = (touch: Touch): boolean =>
+		touch.clientX <= browserNavigationEdgePx ||
+		(window.innerWidth > 0 && touch.clientX >= window.innerWidth - browserNavigationEdgePx);
+
 	const startTouchScroll = (event: TouchEvent) => {
 		if (!scroller || event.touches.length !== 1 || draggingMealId) return;
 		const touch = event.changedTouches[0];
+		if (startsInBrowserNavigationEdge(touch)) return;
 		clearPendingSnap();
 		clearTouchInput();
 		cancelProgrammaticScroll();
@@ -694,7 +709,7 @@
 			onpointermove={dragScroll}
 			onpointerup={stopDragScroll}
 			onpointercancel={stopDragScroll}
-			class="h-full min-h-0 touch-pan-x [scrollbar-width:none] overflow-x-hidden overflow-y-auto overscroll-y-none [overflow-anchor:none] [&::-webkit-scrollbar]:hidden"
+			class="h-full min-h-0 touch-pan-x [scrollbar-width:none] overflow-x-hidden overflow-y-auto [overflow-anchor:none] [&::-webkit-scrollbar]:hidden"
 			class:select-none={draggingScroller}
 		>
 			<div class="grid grid-cols-1" style="grid-auto-rows: {weekRowHeight}px;">
@@ -715,7 +730,6 @@
 								{onaddmeal}
 								{onpick}
 								{onselect}
-								{oncheckin}
 								{onselectdate}
 							/>
 						{/each}

@@ -2,9 +2,11 @@ import { error, redirect } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { provisionAuthSession } from '$lib/server/auth/provisioning';
 import {
+	clearOAuthReturnTo,
 	clearOAuthState,
 	commitSealedSession,
 	getRequestMetadata,
+	readOAuthReturnTo,
 	readOAuthState
 } from '$lib/server/auth/session';
 import { createAuthRuntime } from '$lib/server/auth/workos';
@@ -13,7 +15,9 @@ export const GET: RequestHandler = async ({ cookies, platform, request, url }) =
 	const code = url.searchParams.get('code');
 	const state = url.searchParams.get('state');
 	const expectedState = readOAuthState(cookies);
+	const returnTo = readOAuthReturnTo(cookies) ?? '/';
 	clearOAuthState(cookies);
+	clearOAuthReturnTo(cookies);
 
 	if (!code) error(400, 'Missing WorkOS authorization code');
 	if (!state || !expectedState || state !== expectedState) error(400, 'Invalid WorkOS OAuth state');
@@ -39,5 +43,5 @@ export const GET: RequestHandler = async ({ cookies, platform, request, url }) =
 	});
 	commitSealedSession(cookies, auth.sealedSession, url);
 
-	redirect(303, '/');
+	redirect(303, returnTo);
 };

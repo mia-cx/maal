@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
 	import {
 		addScheduleMealFromRecipe,
@@ -78,6 +79,8 @@
 	let hydratedRecipesSignature = $state('');
 	let loadedMealRanges = $state<{ start: string; end: string }[]>([]);
 	let loadingMealRangeKey = $state('');
+	let failedMealRangeKeys = $state<string[]>([]);
+	let mealRangeError = $state<string | null>(null);
 	let renderedMealRange = $state<{ start: string; end: string } | null>(null);
 
 	const mealPool = $derived(sortMealPool($scheduleMealStore.filter(isMealInPool)));
@@ -131,17 +134,36 @@
 		return missing;
 	};
 
+	const parseMealRangeError = async (response: Response) => {
+		const body = await response.text();
+		try {
+			const parsed = JSON.parse(body) as { message?: string };
+			return parsed.message ?? body;
+		} catch {
+			return body;
+		}
+	};
+
 	const loadMealRangeSegment = async (range: { start: string; end: string }) => {
 		const key = `${range.start}:${range.end}`;
-		if (loadingMealRangeKey === key) return;
+		if (loadingMealRangeKey === key || failedMealRangeKeys.includes(key)) return;
 		loadingMealRangeKey = key;
 		try {
 			const response = await fetch(`/plan/meals?start=${range.start}&end=${range.end}`);
-			if (!response.ok) throw new Error(await response.text());
+			if (!response.ok) {
+				const message = await parseMealRangeError(response);
+				failedMealRangeKeys = [...failedMealRangeKeys, key];
+				mealRangeError = message;
+				if (response.status !== 402) console.error('Failed to load meal range', message);
+				return;
+			}
 			const body = (await response.json()) as { meals: Meal[] };
+			mealRangeError = null;
 			mergeHydratedScheduleMeals(body.meals, range.start, range.end);
 			loadedMealRanges = [...loadedMealRanges, { start: range.start, end: range.end }];
 		} catch (error) {
+			failedMealRangeKeys = [...failedMealRangeKeys, key];
+			mealRangeError = error instanceof Error ? error.message : 'Failed to load meal range.';
 			console.error('Failed to load meal range', error);
 		} finally {
 			if (loadingMealRangeKey === key) loadingMealRangeKey = '';
@@ -479,8 +501,11 @@
 	});
 
 	$effect(() => {
-		if (!renderedMealRange) return;
-		void loadMealRange(renderedMealRange);
+		const range = renderedMealRange;
+		if (!range) return;
+		untrack(() => {
+			void loadMealRange(range);
+		});
 	});
 
 	$effect(() => {
@@ -521,6 +546,12 @@
 		onnext={next}
 		ontoday={today}
 	/>
+
+	{#if mealRangeError}
+		<div class="border-b border-border bg-secondary px-4 py-2 text-sm text-muted-foreground">
+			{mealRangeError}
+		</div>
+	{/if}
 
 	<div class="min-h-0 min-w-0 flex-1 overflow-hidden">
 		{#if mode === 'daily'}

@@ -130,29 +130,40 @@
 			showAdaptiveImage && '@max-h-[42rem]/multi-day-column:hidden'
 		)
 	);
+	const compactSideImageVisibility = 'hidden @min-[22rem]:block';
+	const adaptiveSideImageVisibility = 'hidden @min-[22rem]:block';
 	const sideImageClass = $derived(
 		imageAspect === 'portrait'
 			? cn(
-					'pointer-events-none min-h-full w-14 shrink-0 self-stretch object-cover select-none [-webkit-user-drag:none] @min-[14rem]:w-16 @min-[18rem]:w-20 @min-[24rem]:w-24',
-					showAdaptiveImage || showCompactSideImage ? 'block' : 'hidden @min-[14rem]:block'
+					'pointer-events-none min-h-full w-14 shrink-0 self-stretch object-cover select-none [-webkit-user-drag:none] @min-[22rem]:w-20 @min-[28rem]:w-24',
+					showCompactSideImage
+						? compactSideImageVisibility
+						: showAdaptiveImage
+							? adaptiveSideImageVisibility
+							: 'hidden @min-[22rem]:block'
 				)
 			: cn(
-					'pointer-events-none min-h-full w-16 shrink-0 self-stretch object-cover select-none [-webkit-user-drag:none] @min-[14rem]:w-20 @min-[24rem]:w-24 @min-[32rem]:w-28',
-					showAdaptiveImage || showCompactSideImage ? 'block' : 'hidden @min-[18rem]:block'
+					'pointer-events-none min-h-full w-20 shrink-0 self-stretch object-cover select-none [-webkit-user-drag:none] @min-[24rem]:w-24 @min-[32rem]:w-28',
+					showCompactSideImage
+						? compactSideImageVisibility
+						: showAdaptiveImage
+							? adaptiveSideImageVisibility
+							: 'hidden @min-[24rem]:block'
 				)
 	);
+	const sideLayoutBreakpoint = $derived(imageAspect === 'portrait' ? '22rem' : '24rem');
 	const sideLayoutClass = $derived(
-		imageAspect === 'portrait'
-			? cn(
-					showAdaptiveImage || showCompactSideImage
-						? 'flex items-stretch gap-2 pr-0'
-						: '@min-[14rem]:flex @min-[14rem]:items-stretch @min-[14rem]:gap-2 @min-[14rem]:pr-0'
-				)
-			: cn(
-					showAdaptiveImage || showCompactSideImage
-						? 'flex items-stretch gap-2 pr-0'
-						: '@min-[18rem]:flex @min-[18rem]:items-stretch @min-[18rem]:gap-2 @min-[18rem]:pr-0'
-				)
+		sideLayoutBreakpoint === '22rem'
+			? '@min-[22rem]:flex @min-[22rem]:items-stretch @min-[22rem]:gap-2 @min-[22rem]:pr-0'
+			: '@min-[24rem]:flex @min-[24rem]:items-stretch @min-[24rem]:gap-2 @min-[24rem]:pr-0'
+	);
+	const sideCardFlushClass = $derived(
+		sideLayoutBreakpoint === '22rem'
+			? '@min-[22rem]:py-0 @min-[22rem]:data-[size=sm]:py-0'
+			: '@min-[24rem]:py-0 @min-[24rem]:data-[size=sm]:py-0'
+	);
+	const sideBodyPaddingClass = $derived(
+		sideLayoutBreakpoint === '22rem' ? '@min-[22rem]:py-2' : '@min-[24rem]:py-2'
 	);
 
 	let pendingPointerId: number | null = null;
@@ -348,9 +359,9 @@
 	<Card.Root
 		size="sm"
 		class={cn(
-			"relative h-full w-full min-w-0 gap-1 overflow-hidden bg-card/50 py-1 shadow-sm ring-1 ring-border/70 after:absolute after:inset-y-0 after:left-0 after:w-1 after:content-[''] data-[size=sm]:py-1",
+			"relative h-full w-full min-w-0 gap-0 overflow-hidden bg-card/50 pt-1 pb-3 shadow-sm ring-1 ring-border/70 after:absolute after:inset-y-0 after:left-0 after:w-1 after:content-[''] data-[size=sm]:pt-1 data-[size=sm]:pb-3",
 			showTopImage && 'pt-0',
-			showSideImage && 'py-0 data-[size=sm]:py-0',
+			showSideImage && sideCardFlushClass,
 			showAdaptiveImage &&
 				'@min-h-[42rem]/multi-day-column:py-1 @min-h-[42rem]/multi-day-column:data-[size=sm]:py-1',
 			loadAccentClasses[mealLoad]
@@ -378,7 +389,8 @@
 			<div
 				class={cn(
 					'@container/meal-card-body min-w-0 flex-1',
-					showSideImage && 'flex flex-col justify-start py-2'
+					showSideImage && 'flex flex-col justify-start',
+					showSideImage && sideBodyPaddingClass
 				)}
 			>
 				<div class="flex min-w-0 items-baseline gap-2">
@@ -432,7 +444,7 @@
 						variant="outline"
 						size={density === 'title' ? 'xs' : 'sm'}
 						class={cn(
-							'mt-2 w-full',
+							'mt-1 w-fit max-w-full px-3',
 							hasCheckIn
 								? 'bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground dark:bg-muted/40'
 								: 'border-transparent bg-foreground text-background hover:bg-foreground/90 hover:text-background dark:bg-foreground dark:hover:bg-foreground/90'
@@ -463,7 +475,9 @@
 				variant="outline"
 				size={density === 'title' ? 'xs' : 'sm'}
 				class={cn(
-					'mb-1 ml-3.5 w-[calc(100%-1.5rem)]',
+					showTopImage
+						? 'ml-3.5 w-[calc(100%-1.5rem)] px-3'
+						: 'ml-3.5 w-fit max-w-[calc(100%-1.5rem)] px-3',
 					hasCheckIn
 						? 'bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground dark:bg-muted/40'
 						: 'border-transparent bg-foreground text-background hover:bg-foreground/90 hover:text-background dark:bg-foreground dark:hover:bg-foreground/90'

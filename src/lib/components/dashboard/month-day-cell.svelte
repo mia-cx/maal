@@ -7,7 +7,6 @@
 		Meal,
 		MealAddHandler,
 		MealDropTarget,
-		MealCheckInHandler,
 		MealPickHandler,
 		MealSelectHandler
 	} from './schedule-types';
@@ -23,7 +22,6 @@
 		onaddmeal,
 		onpick,
 		onselect,
-		oncheckin,
 		onselectdate
 	}: {
 		day: Date;
@@ -36,7 +34,6 @@
 		onaddmeal?: MealAddHandler;
 		onpick?: MealPickHandler;
 		onselect?: MealSelectHandler;
-		oncheckin?: MealCheckInHandler;
 		onselectdate?: (date: Date) => void;
 	} = $props();
 
@@ -155,7 +152,6 @@
 			showEmpty={false}
 			{onpick}
 			{onselect}
-			{oncheckin}
 		/>
 		{#if overflowCount > 0}
 			<button

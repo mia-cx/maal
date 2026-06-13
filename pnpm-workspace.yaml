@@ -3,3 +3,6 @@ allowBuilds:
   workerd: true
   sharp: true
   esbuild: true
+  msgpackr-extract: true
+minimumReleaseAgeExclude:
+  - effect@4.0.0-beta.83

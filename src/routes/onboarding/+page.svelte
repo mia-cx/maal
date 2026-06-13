@@ -9,4 +9,8 @@
 	<title>Set up household · Maal</title>
 </svelte:head>
 
-<HouseholdOnboarding defaultHouseholdName={data.defaultHouseholdName} />
+<HouseholdOnboarding
+	defaultHouseholdName={data.defaultHouseholdName}
+	canStartTrial={data.canStartTrial}
+	hasHouseholds={data.hasHouseholds}
+/>

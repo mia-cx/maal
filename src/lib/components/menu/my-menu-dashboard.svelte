@@ -5,9 +5,10 @@
 	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
+	import { Input } from '$lib/components/ui/input';
 	import { resolve } from '$app/paths';
 	import PlusIcon from '@lucide/svelte/icons/plus';
-	import type { Pathname } from '$app/types';
+	import SearchIcon from '@lucide/svelte/icons/search';
 	import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
 	import {
 		appendMenuRecipes,
@@ -24,6 +25,7 @@
 	} from '$lib/stores/menu-recipes';
 	import MyMenuRecipeSheet from './recipe-edit-sheet.svelte';
 	import RecipeMenuCard from './recipe-menu-card.svelte';
+	import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
 	import type { RecipeMenuItem } from './menu-types';
 
 	let {
@@ -51,11 +53,20 @@
 	let nextRecipeOffset = $state<number | null>(null);
 	let recipesLoading = $state(false);
 	let recipesLoadError = $state<string | null>(null);
+	let recipeSearchQuery = $state('');
+	let searchRecipes = $state<RecipeMenuItem[] | null>(null);
+	let searchLoading = $state(false);
+	let searchLoadError = $state<string | null>(null);
 	let loadMoreElement = $state<HTMLElement>();
 
 	const recipes = $derived($menuRecipesStore);
 	const archivedRecipes = $derived($archivedMenuRecipesStore);
 	const selectedRecipe = $derived(draftRecipe ?? $selectedMenuRecipeStore);
+	const normalizedRecipeSearchQuery = $derived(recipeSearchQuery.trim());
+	const serverSearchActive = $derived(normalizedRecipeSearchQuery.length >= 3);
+	const displayedRecipes = $derived(
+		serverSearchActive ? (searchRecipes ?? []) : rankRecipesByRelevance(recipes, recipeSearchQuery)
+	);
 	const selectedRecipes = $derived(
 		recipes.filter((recipe) => selectedRecipeIds.includes(recipe.id))
 	);
@@ -78,9 +89,11 @@
 		if (nextRecipeOffset === null || recipesLoading) return;
 		recipesLoading = true;
 		recipesLoadError = null;
-		const response = await fetch(
-			resolve(`/menu/recipes?offset=${nextRecipeOffset}&limit=${MENU_RECIPE_PAGE_SIZE}` as Pathname)
-		);
+		const params = new URLSearchParams({
+			offset: String(nextRecipeOffset),
+			limit: String(MENU_RECIPE_PAGE_SIZE)
+		});
+		const response = await fetch(`${resolve('/menu/recipes')}?${params}`);
 		recipesLoading = false;
 		if (!response.ok) {
 			recipesLoadError = 'Could not load more recipes.';
@@ -130,7 +143,42 @@
 	});
 
 	$effect(() => {
-		if (!loadMoreElement || nextRecipeOffset === null) return;
+		const query = normalizedRecipeSearchQuery;
+		if (query.length < 3) {
+			searchRecipes = null;
+			searchLoading = false;
+			searchLoadError = null;
+			return;
+		}
+
+		searchLoading = true;
+		searchLoadError = null;
+		const controller = new AbortController();
+		const timeout = setTimeout(async () => {
+			try {
+				const params = new URLSearchParams({ q: query, limit: '60' });
+				const response = await fetch(`${resolve('/menu/recipes')}?${params}`, {
+					signal: controller.signal
+				});
+				if (!response.ok) throw new Error('Could not search recipes.');
+				const body = (await response.json()) as { recipes: RecipeMenuItem[] };
+				searchRecipes = body.recipes;
+			} catch (error) {
+				if (controller.signal.aborted) return;
+				searchLoadError = readAddRecipeError(error);
+			} finally {
+				if (!controller.signal.aborted) searchLoading = false;
+			}
+		}, 250);
+
+		return () => {
+			controller.abort();
+			clearTimeout(timeout);
+		};
+	});
+
+	$effect(() => {
+		if (!loadMoreElement || nextRecipeOffset === null || serverSearchActive) return;
 		const observer = new IntersectionObserver(
 			(entries) => {
 				if (entries.some((entry) => entry.isIntersecting)) void loadMoreRecipes();
@@ -189,9 +237,8 @@
 	};
 
 	const loadRecipeDraftFromUrl = async (url: string): Promise<RecipeMenuItem> => {
-		const response = await fetch(
-			resolve(`/menu/recipes?importUrl=${encodeURIComponent(url)}` as Pathname)
-		);
+		const params = new URLSearchParams({ importUrl: url });
+		const response = await fetch(`${resolve('/menu/recipes')}?${params}`);
 		if (!response.ok)
 			throw new Error(await readResponseError(response, 'Could not import recipe.'));
 		const body = (await response.json()) as { recipe: RecipeMenuItem };
@@ -230,7 +277,7 @@
 		const useRange = range && selectedRecipeIds.length > 0;
 		selectedRecipeIds = applySelection(
 			selectedRecipeIds,
-			useRange ? rangeIds(recipes, lastSelectedRecipeId, recipe.id) : [recipe.id],
+			useRange ? rangeIds(displayedRecipes, lastSelectedRecipeId, recipe.id) : [recipe.id],
 			selected
 		);
 		lastSelectedRecipeId = recipe.id;
@@ -332,9 +379,7 @@
 	</header>
 
 	<div class="@container/my-menu-main min-h-0 flex-1 overflow-auto p-3 md:p-4">
-		<div
-			class="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 p-3"
-		>
+		<div class="mb-3 flex flex-wrap items-center gap-2">
 			<p class="mr-2 text-sm font-medium">
 				{selectedRecipes.length} recipe{selectedRecipes.length === 1 ? '' : 's'} selected
 			</p>
@@ -359,6 +404,13 @@
 					Archive selected
 				</Button>
 			</div>
+			<label class="relative ml-auto min-w-56 flex-1 sm:max-w-80">
+				<span class="sr-only">Search recipes</span>
+				<SearchIcon
+					class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+				/>
+				<Input bind:value={recipeSearchQuery} placeholder="Search recipes…" class="h-8 pl-8" />
+			</label>
 		</div>
 
 		<div
@@ -382,7 +434,7 @@
 					<span class="max-w-40 text-xs leading-5">Create a recipe or import from a URL.</span>
 				</button>
 			</Card.Root>
-			{#each recipes as recipe (recipe.id)}
+			{#each displayedRecipes as recipe (recipe.id)}
 				<RecipeMenuCard
 					{recipe}
 					selected={selectedRecipeIds.includes(recipe.id)}
@@ -391,10 +443,19 @@
 				/>
 			{/each}
 		</div>
+		{#if serverSearchActive && searchLoading}
+			<p class="py-4 text-center text-xs text-muted-foreground">Searching recipes…</p>
+		{:else if searchLoadError}
+			<p class="py-4 text-center text-xs text-destructive">{searchLoadError}</p>
+		{:else if recipeSearchQuery.trim() && displayedRecipes.length === 0}
+			<p class="py-8 text-center text-sm text-muted-foreground">
+				No recipes match “{recipeSearchQuery}”.
+			</p>
+		{/if}
 		<div bind:this={loadMoreElement} class="flex min-h-10 items-center justify-center py-4">
-			{#if recipesLoading}
+			{#if !serverSearchActive && recipesLoading}
 				<p class="text-xs text-muted-foreground">Loading recipes…</p>
-			{:else if recipesLoadError}
+			{:else if !serverSearchActive && recipesLoadError}
 				<button
 					type="button"
 					class="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"

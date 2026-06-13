@@ -1,0 +1,291 @@
+import { listUserHouseholds, type UserHousehold } from '$lib/server/auth/household';
+
+export type MaalApiScope =
+	| 'households:read'
+	| 'households:write'
+	| 'recipes:read'
+	| 'recipes:write'
+	| 'meals:read'
+	| 'meals:write'
+	| 'check_ins:read'
+	| 'check_ins:write'
+	| 'food_profile:read'
+	| 'food_profile:write';
+
+export const MAAL_API_SCOPES: MaalApiScope[] = [
+	'households:read',
+	'households:write',
+	'recipes:read',
+	'recipes:write',
+	'meals:read',
+	'meals:write',
+	'check_ins:read',
+	'check_ins:write',
+	'food_profile:read',
+	'food_profile:write'
+];
+
+export const MCP_KEY_PREFIX = 'mk_';
+export const MCP_KEY_KV_PREFIX = 'mk:';
+const MCP_KEY_USER_INDEX_PREFIX = 'mku:';
+
+export type McpKeyPreset = 'read_only_planner' | 'meal_planner' | 'full_access';
+
+export type McpKeyHouseholdScope = { kind: 'all' } | { kind: 'households'; householdIds: string[] };
+
+export type McpKeyRecord = {
+	id: string;
+	userId: string;
+	householdScope: McpKeyHouseholdScope;
+	scopes: MaalApiScope[];
+	label: string;
+	preset?: McpKeyPreset;
+	createdAt: string;
+	expiresAt?: string | null;
+	revokedAt?: string | null;
+	lastUsedAt?: string | null;
+};
+
+export type PublicMcpKey = Omit<McpKeyRecord, 'userId'> & {
+	households?: UserHousehold[];
+};
+
+export type CreatedMcpKey = {
+	key: string;
+	record: PublicMcpKey;
+};
+
+const encoder = new TextEncoder();
+
+const bytesToBase64Url = (bytes: Uint8Array): string => {
+	let binary = '';
+	for (const byte of bytes) binary += String.fromCharCode(byte);
+	return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+};
+
+const bufferToHex = (buffer: ArrayBuffer): string =>
+	[...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+
+export const hashMcpKey = async (rawKey: string): Promise<string> =>
+	bufferToHex(await crypto.subtle.digest('SHA-256', encoder.encode(rawKey)));
+
+const kvKeyForRawKey = async (rawKey: string): Promise<string> =>
+	`${MCP_KEY_KV_PREFIX}${await hashMcpKey(rawKey)}`;
+
+const randomSecret = (): string => {
+	const bytes = new Uint8Array(32);
+	crypto.getRandomValues(bytes);
+	return bytesToBase64Url(bytes);
+};
+
+const getMcpKeyStore = (platform: App.Platform | undefined): KVNamespace => {
+	const store = platform?.env.MCP_KEYS;
+	if (!store) throw new Error('MCP_KEYS KV binding is not configured');
+	return store;
+};
+
+const readRecord = async (store: KVNamespace, key: string): Promise<McpKeyRecord | null> => {
+	const record = await store.get<McpKeyRecord>(key, 'json');
+	if (!record || typeof record.id !== 'string' || typeof record.userId !== 'string') return null;
+	return record;
+};
+
+const listRecordKeys = async (store: KVNamespace): Promise<string[]> => {
+	const names: string[] = [];
+	let cursor: string | undefined;
+	do {
+		const page = await store.list({ prefix: MCP_KEY_KV_PREFIX, cursor });
+		names.push(...page.keys.map((key) => key.name));
+		cursor = page.list_complete ? undefined : page.cursor;
+	} while (cursor);
+	return names;
+};
+
+type McpKeyUserIndex = { keyNames: string[] };
+
+const userIndexKey = (userId: string): string => `${MCP_KEY_USER_INDEX_PREFIX}${userId}`;
+
+const readUserIndex = async (store: KVNamespace, userId: string): Promise<string[]> => {
+	const index = await store.get<McpKeyUserIndex>(userIndexKey(userId), 'json');
+	return Array.isArray(index?.keyNames)
+		? index.keyNames.filter((keyName): keyName is string => typeof keyName === 'string')
+		: [];
+};
+
+const writeUserIndex = async (store: KVNamespace, userId: string, keyNames: string[]) => {
+	await store.put(userIndexKey(userId), JSON.stringify({ keyNames: [...new Set(keyNames)] }));
+};
+
+const addToUserIndex = async (store: KVNamespace, userId: string, keyName: string) => {
+	await writeUserIndex(store, userId, [...(await readUserIndex(store, userId)), keyName]);
+};
+
+export const presetScopes = (preset: McpKeyPreset): MaalApiScope[] => {
+	if (preset === 'read_only_planner') return ['households:read', 'recipes:read', 'meals:read'];
+	if (preset === 'meal_planner') {
+		return ['households:read', 'recipes:read', 'meals:read', 'meals:write', 'check_ins:write'];
+	}
+	return [...MAAL_API_SCOPES];
+};
+
+export const createMcpKey = async (input: {
+	platform: App.Platform | undefined;
+	userId: string;
+	label: string;
+	householdScope: McpKeyHouseholdScope;
+	scopes: MaalApiScope[];
+	preset?: McpKeyPreset;
+	expiresAt?: string | null;
+}): Promise<CreatedMcpKey> => {
+	const store = getMcpKeyStore(input.platform);
+	const rawKey = `${MCP_KEY_PREFIX}${randomSecret()}`;
+	const record: McpKeyRecord = {
+		id: crypto.randomUUID(),
+		userId: input.userId,
+		label: input.label,
+		householdScope: input.householdScope,
+		scopes: input.scopes,
+		...(input.preset ? { preset: input.preset } : {}),
+		createdAt: new Date().toISOString(),
+		expiresAt: input.expiresAt ?? null,
+		revokedAt: null,
+		lastUsedAt: null
+	};
+	const keyName = await kvKeyForRawKey(rawKey);
+	await store.put(keyName, JSON.stringify(record));
+	await addToUserIndex(store, input.userId, keyName);
+	return { key: rawKey, record: toPublicMcpKey(record) };
+};
+
+export const verifyMcpKey = async (input: {
+	platform: App.Platform | undefined;
+	rawKey: string;
+}): Promise<McpKeyRecord | null> => {
+	if (!input.rawKey.startsWith(MCP_KEY_PREFIX)) return null;
+	const store = getMcpKeyStore(input.platform);
+	const key = await kvKeyForRawKey(input.rawKey);
+	const record = await readRecord(store, key);
+	if (!record || record.revokedAt) return null;
+	if (record.expiresAt && new Date(record.expiresAt).getTime() <= Date.now()) return null;
+	await store.put(key, JSON.stringify({ ...record, lastUsedAt: new Date().toISOString() }));
+	return record;
+};
+
+export const listMcpKeys = async (input: {
+	platform: App.Platform | undefined;
+	userId: string;
+}): Promise<PublicMcpKey[]> => {
+	const store = getMcpKeyStore(input.platform);
+	let keyNames = await readUserIndex(store, input.userId);
+	let records = await Promise.all(keyNames.map((keyName) => readRecord(store, keyName)));
+	let userRecords = records.filter(
+		(record): record is McpKeyRecord => record !== null && record.userId === input.userId
+	);
+	if (!userRecords.length) {
+		keyNames = await listRecordKeys(store);
+		records = await Promise.all(keyNames.map((keyName) => readRecord(store, keyName)));
+		userRecords = records.filter(
+			(record): record is McpKeyRecord => record !== null && record.userId === input.userId
+		);
+		if (userRecords.length) {
+			await writeUserIndex(
+				store,
+				input.userId,
+				keyNames.filter((keyName, index) => records[index]?.userId === input.userId)
+			);
+		}
+	}
+	userRecords = userRecords.toSorted((left, right) =>
+		right.createdAt.localeCompare(left.createdAt)
+	);
+	const households = await listUserHouseholds(input.platform, input.userId).catch(() => []);
+	const householdById = new Map(households.map((household) => [household.id, household]));
+	return userRecords.map((record) =>
+		toPublicMcpKey(
+			record,
+			record.householdScope.kind === 'households'
+				? record.householdScope.householdIds
+						.map((id) => householdById.get(id))
+						.filter((household): household is UserHousehold => Boolean(household))
+				: households
+		)
+	);
+};
+
+export const rerollMcpKey = async (input: {
+	platform: App.Platform | undefined;
+	userId: string;
+	keyId: string;
+}): Promise<CreatedMcpKey | null> => {
+	const store = getMcpKeyStore(input.platform);
+	const indexedKeyNames = await readUserIndex(store, input.userId);
+	for (const keyName of indexedKeyNames.length ? indexedKeyNames : await listRecordKeys(store)) {
+		const record = await readRecord(store, keyName);
+		if (!record || record.userId !== input.userId || record.id !== input.keyId) continue;
+		if (record.revokedAt) return null;
+		const rawKey = `${MCP_KEY_PREFIX}${randomSecret()}`;
+		const nextKeyName = await kvKeyForRawKey(rawKey);
+		const nextRecord = { ...record, lastUsedAt: null };
+		await store.put(nextKeyName, JSON.stringify(nextRecord));
+		await store.delete(keyName);
+		await writeUserIndex(
+			store,
+			input.userId,
+			(await readUserIndex(store, input.userId)).map((indexedKeyName) =>
+				indexedKeyName === keyName ? nextKeyName : indexedKeyName
+			)
+		);
+		return { key: rawKey, record: toPublicMcpKey(nextRecord) };
+	}
+	return null;
+};
+
+export const revokeMcpKey = async (input: {
+	platform: App.Platform | undefined;
+	userId: string;
+	keyId: string;
+}): Promise<boolean> => {
+	const store = getMcpKeyStore(input.platform);
+	const indexedKeyNames = await readUserIndex(store, input.userId);
+	for (const keyName of indexedKeyNames.length ? indexedKeyNames : await listRecordKeys(store)) {
+		const record = await readRecord(store, keyName);
+		if (!record || record.userId !== input.userId || record.id !== input.keyId) continue;
+		await store.put(keyName, JSON.stringify({ ...record, revokedAt: new Date().toISOString() }));
+		return true;
+	}
+	return false;
+};
+
+export const toPublicMcpKey = (
+	record: McpKeyRecord,
+	households?: UserHousehold[]
+): PublicMcpKey => ({
+	id: record.id,
+	label: record.label,
+	householdScope: record.householdScope,
+	scopes: record.scopes,
+	...(record.preset ? { preset: record.preset } : {}),
+	createdAt: record.createdAt,
+	expiresAt: record.expiresAt,
+	revokedAt: record.revokedAt,
+	lastUsedAt: record.lastUsedAt,
+	...(households ? { households } : {})
+});
+
+export const scopeAllowsHousehold = async (input: {
+	platform: App.Platform | undefined;
+	record: McpKeyRecord;
+	householdId: string;
+}): Promise<boolean> => {
+	if (input.record.householdScope.kind === 'households') {
+		return input.record.householdScope.householdIds.includes(input.householdId);
+	}
+	return (await listUserHouseholds(input.platform, input.record.userId)).some(
+		(household) => household.id === input.householdId
+	);
+};
+
+export const oneScopedHouseholdId = (record: McpKeyRecord): string | null =>
+	record.householdScope.kind === 'households' && record.householdScope.householdIds.length === 1
+		? record.householdScope.householdIds[0]
+		: null;

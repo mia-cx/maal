@@ -7,9 +7,16 @@ import {
 	clearSealedSession,
 	readSealedSession
 } from '$lib/server/auth/session';
+import {
+	canManageActiveHousehold,
+	commitHouseholdCookie,
+	listUserHouseholds,
+	resolveActiveHouseholdId
+} from '$lib/server/auth/household';
 import { provisionAuthSession } from '$lib/server/auth/provisioning';
 import { smokeAuthEnabled, smokeSession } from '$lib/server/auth/smoke';
 import { tryCreateAuthRuntime } from '$lib/server/auth/workos';
+import { firstAccessibleHouseholdId, hasHouseholdAccess } from '$lib/server/billing/entitlements';
 
 const handleAuth: Handle = async ({ event, resolve }) => {
 	event.locals.session = null;
@@ -42,6 +49,67 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 	return resolve(event);
 };
 
+const subscriptionExemptPath = (pathname: string): boolean =>
+	pathname.startsWith('/auth') ||
+	pathname.startsWith('/onboarding') ||
+	pathname.startsWith('/subscribe') ||
+	pathname.startsWith('/billing') ||
+	pathname.startsWith('/export-data') ||
+	pathname.startsWith('/demo');
+
+const activeSubscribedHouseholdId = async (
+	platform: App.Platform,
+	session: NonNullable<App.Locals['session']>
+): Promise<string | null> => {
+	const households = await listUserHouseholds(platform, session.user.id).catch(() => []);
+	return firstAccessibleHouseholdId({ database: platform.env.DB, session, households });
+};
+
+const handleSubscriptionGate: Handle = async ({ event, resolve }) => {
+	if (
+		!event.locals.session ||
+		event.request.method !== 'GET' ||
+		subscriptionExemptPath(event.url.pathname) ||
+		!event.request.headers.get('accept')?.includes('text/html') ||
+		!event.platform?.env.DB
+	) {
+		return resolve(event);
+	}
+
+	const { householdId } = await resolveActiveHouseholdId({
+		platform: event.platform,
+		cookies: event.cookies,
+		url: event.url,
+		session: event.locals.session
+	});
+	if (!householdId) return resolve(event);
+
+	const hasAccess = await hasHouseholdAccess({
+		database: event.platform.env.DB,
+		session: event.locals.session,
+		householdId
+	});
+	if (!hasAccess) {
+		const canManageSubscription = await canManageActiveHousehold(
+			event.platform,
+			event.locals.session,
+			householdId
+		);
+		if (canManageSubscription) return resolve(event);
+
+		const subscribedHouseholdId = await activeSubscribedHouseholdId(
+			event.platform,
+			event.locals.session
+		);
+		if (subscribedHouseholdId) {
+			commitHouseholdCookie(event.cookies, subscribedHouseholdId, event.url);
+			return resolve(event);
+		}
+	}
+
+	return resolve(event);
+};
+
 const handleParaglide: Handle = ({ event, resolve }) =>
 	paraglideMiddleware(event.request, ({ request, locale }) => {
 		event.request = request;
@@ -54,4 +122,4 @@ const handleParaglide: Handle = ({ event, resolve }) =>
 		});
 	});
 
-export const handle: Handle = sequence(handleAuth, handleParaglide);
+export const handle: Handle = sequence(handleAuth, handleSubscriptionGate, handleParaglide);

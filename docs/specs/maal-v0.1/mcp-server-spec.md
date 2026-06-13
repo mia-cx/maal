@@ -61,6 +61,7 @@ Suggested shape:
 ```ts
 type MaalApiScope =
 	| 'households:read'
+	| 'households:write'
 	| 'recipes:read'
 	| 'recipes:write'
 	| 'meals:read'
@@ -355,7 +356,42 @@ type CreateHouseholdMealInput = {
 Validation:
 
 - `plannedCookUserId` must be an active member of the household.
-- If omitted, default to authenticated API-key owner.
+- If omitted, default to authenticated MCP key owner.
+
+### `maal_create_household_meals`
+
+Bulk-creates household meals so assistants can schedule a week or plan batch without issuing one tool call per meal.
+
+Inputs:
+
+```ts
+type CreateHouseholdMealsInput = {
+	householdId?: string;
+	meals: Array<Omit<CreateHouseholdMealInput, 'householdId'>>;
+	mode?: 'all_or_nothing' | 'best_effort'; // default all_or_nothing
+};
+```
+
+Validation:
+
+- Requires `meals:write` and the same WorkOS role permission as `maal_create_household_meal`.
+- `meals` length must be between 1 and 50.
+- Each item uses the same validation/defaulting rules as `maal_create_household_meal`.
+- `all_or_nothing` should reject the whole batch if any item is invalid.
+- `best_effort` should create valid meals and return per-item errors for invalid meals.
+
+Returns:
+
+```ts
+type CreateHouseholdMealsResult = {
+	created: HouseholdMeal[];
+	errors?: Array<{
+		index: number;
+		code: string;
+		message: string;
+	}>;
+};
+```
 
 ### `maal_get_household_meal`
 

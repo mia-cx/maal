@@ -1,11 +1,12 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq } from 'drizzle-orm';
-import type { Meal } from '$lib/components/dashboard/schedule-types';
+import type { Meal, MealStatus } from '$lib/components/dashboard/schedule-types';
 import {
 	countActiveHouseholdMembers,
 	listHouseholdMembers,
 	resolveActiveHouseholdId
 } from '$lib/server/auth/household';
+import { requireHouseholdAccess } from '$lib/server/billing/guards';
 import { getDb } from '$lib/server/db';
 import {
 	householdMealClassifications,
@@ -101,7 +102,7 @@ const plannedMealUpdate = (meal: Meal, defaultServings: number) => ({
 	date: meal.date ?? null,
 	time: meal.time ?? null,
 	sortOrder: meal.sortOrder ?? null,
-	status: meal.status ?? ('planned' as const),
+	status: meal.status ?? ('planned' satisfies MealStatus),
 	plannedCookWorkosUserId: meal.plannedCookWorkosUserId ?? null,
 	updatedAt: new Date().toISOString()
 });
@@ -245,6 +246,7 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) error(400, { message: 'Household is required.' });
+	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
 	const startDate = dateParam(url, 'start');
 	const endDate = dateParam(url, 'end');
 	if (!startDate || !endDate) error(400, { message: 'Date range is required.' });
@@ -269,6 +271,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) error(400, { message: 'Household is required.' });
+	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
 	const defaultMealServings = await countActiveHouseholdMembers(platform, householdId);
 
 	const meal = await readMeal(request);
@@ -343,6 +346,7 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) error(400, { message: 'Household is required.' });
+	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
 
 	const mealId = await readMealId(request);
 	const db = getDb(platform.env.DB);
@@ -363,6 +367,7 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) error(400, { message: 'Household is required.' });
+	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
 	const defaultMealServings = await countActiveHouseholdMembers(platform, householdId);
 
 	const meal = await readMeal(request);

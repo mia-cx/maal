@@ -26,6 +26,15 @@ import {
 	clearHouseholdCookie,
 	resolveActiveHouseholdId
 } from '$lib/server/auth/household';
+import {
+	createHouseholdInvite,
+	deleteHouseholdInvite,
+	householdRoleSlug,
+	inviteUsable,
+	listHouseholdInvites,
+	revokeHouseholdInvite,
+	updateHouseholdInviteRole
+} from '$lib/server/auth/household-invites';
 import { createAuthRuntime } from '$lib/server/auth/workos';
 import {
 	SMOKE_HOUSEHOLD_ID,
@@ -51,6 +60,7 @@ const weekStartDays = ['sunday', 'monday'] as const;
 const defaultLocale = 'en-US';
 const defaultTimezone = 'UTC';
 const maxHouseholdNameLength = 120;
+const inviteExpiryDays = [1, 7, 30] as const;
 
 type Appliance = (typeof applianceOptions)[number];
 type WeekStartDay = (typeof weekStartDays)[number];
@@ -105,6 +115,12 @@ const timeFromForm = (value: FormDataEntryValue | null): string | null => {
 	if (typeof value !== 'string') return null;
 	const trimmed = value.trim();
 	return /^\d{2}:\d{2}$/.test(trimmed) ? trimmed : null;
+};
+
+const inviteExpiryFromForm = (value: FormDataEntryValue | null): string => {
+	const days = Number.parseInt(String(value ?? '7'), 10);
+	const safeDays = inviteExpiryDays.includes(days as (typeof inviteExpiryDays)[number]) ? days : 7;
+	return new Date(Date.now() + safeDays * 24 * 60 * 60 * 1000).toISOString();
 };
 
 type TaxonomyOption = { value: string; label: string; keywords?: string[] };
@@ -487,7 +503,7 @@ const loadMembers = async (platform: App.Platform | undefined, householdId: stri
 					userId: membership.userId,
 					name: user.name ?? user.email,
 					email: user.email,
-					role: membership.role.slug,
+					role: householdRoleSlug(membership.role.slug),
 					directoryManaged: membership.directoryManaged,
 					createdAt: membership.createdAt
 				};
@@ -497,7 +513,7 @@ const loadMembers = async (platform: App.Platform | undefined, householdId: stri
 					userId: membership.userId,
 					name: membership.userId,
 					email: '',
-					role: membership.role.slug,
+					role: householdRoleSlug(membership.role.slug),
 					directoryManaged: membership.directoryManaged,
 					createdAt: membership.createdAt
 				};
@@ -543,13 +559,14 @@ export const load: PageServerLoad = async (event) => {
 					userId: SMOKE_USER_ID,
 					name: 'Smoke User',
 					email: 'smoke@maal.test',
-					role: 'admin',
+					role: 'admin' as const,
 					directoryManaged: false,
 					createdAt: null
 				}
 			],
 			currentUserId: session.user.id,
 			canManageHousehold: true,
+			invites: [],
 			taxonomyOptions: emptyTaxonomyOptions(),
 			displayOverrideRows: { unitOverrides: [], ingredientOverrides: [] }
 		};
@@ -558,7 +575,7 @@ export const load: PageServerLoad = async (event) => {
 	if (!event.platform?.env.DB) redirect(302, '/onboarding');
 
 	const runtime = createAuthRuntime(event.platform);
-	const [organization, householdRows, applianceRows, members, hasManagePermission] =
+	const [organization, householdRows, applianceRows, members, hasManagePermission, invites] =
 		await Promise.all([
 			runtime.workos.organizations.getOrganization(householdId),
 			getDb(event.platform.env.DB)
@@ -571,7 +588,8 @@ export const load: PageServerLoad = async (event) => {
 				.from(householdAppliances)
 				.where(eq(householdAppliances.householdId, householdId)),
 			loadMembers(event.platform, householdId),
-			canManageActiveHousehold(event.platform, session, householdId)
+			canManageActiveHousehold(event.platform, session, householdId),
+			listHouseholdInvites(event.platform.env.DB, householdId)
 		]);
 
 	const profile = householdRows[0] ?? {
@@ -628,12 +646,131 @@ export const load: PageServerLoad = async (event) => {
 		members,
 		currentUserId: session.user.id,
 		canManageHousehold: hasManagePermission,
+		invites: invites.map((invite) => ({
+			id: invite.id,
+			code: invite.code,
+			url: `${event.url.origin}/invite/${invite.code}`,
+			role: householdRoleSlug(invite.roleSlug),
+			maxUses: invite.maxUses,
+			usesCount: invite.usesCount,
+			expiresAt: invite.expiresAt,
+			revokedAt: invite.revokedAt,
+			createdAt: invite.createdAt,
+			usable: inviteUsable(invite)
+		})),
 		taxonomyOptions,
 		displayOverrideRows
 	};
 };
 
 export const actions: Actions = {
+	createInvite: async (event) => {
+		const managedHousehold = await requireManageHousehold(event);
+		if ('status' in managedHousehold) return managedHousehold;
+		if (!event.platform?.env.DB) return fail(503, { message: 'Invite storage is not available.' });
+
+		const form = await event.request.formData();
+		const roleSlug = householdRoleSlug(form.get('role'));
+		const maxUsesRaw = String(form.get('maxUses') ?? '').trim();
+		const maxUses = maxUsesRaw ? Math.max(1, Math.min(100, Number.parseInt(maxUsesRaw, 10))) : null;
+		const expiresAt = inviteExpiryFromForm(form.get('expiresInDays'));
+		if (maxUsesRaw && !Number.isFinite(maxUses)) {
+			return fail(400, { message: 'Max uses must be a number.' });
+		}
+
+		await createHouseholdInvite({
+			database: event.platform.env.DB,
+			householdId: managedHousehold.householdId,
+			createdByUserId: managedHousehold.session.user.id,
+			roleSlug,
+			maxUses,
+			expiresAt
+		});
+		return { message: 'Invite link created.' };
+	},
+
+	revokeInvite: async (event) => {
+		const managedHousehold = await requireManageHousehold(event);
+		if ('status' in managedHousehold) return managedHousehold;
+		if (!event.platform?.env.DB) return fail(503, { message: 'Invite storage is not available.' });
+
+		const form = await event.request.formData();
+		const inviteId = String(form.get('inviteId') ?? '').trim();
+		if (!inviteId) return fail(400, { message: 'Choose an invite to revoke.' });
+		await revokeHouseholdInvite({
+			database: event.platform.env.DB,
+			householdId: managedHousehold.householdId,
+			inviteId
+		});
+		return { message: 'Invite revoked.' };
+	},
+
+	deleteInvite: async (event) => {
+		const managedHousehold = await requireManageHousehold(event);
+		if ('status' in managedHousehold) return managedHousehold;
+		if (!event.platform?.env.DB) return fail(503, { message: 'Invite storage is not available.' });
+
+		const form = await event.request.formData();
+		const inviteId = String(form.get('inviteId') ?? '').trim();
+		if (!inviteId) return fail(400, { message: 'Choose an invite to delete.' });
+		await deleteHouseholdInvite({
+			database: event.platform.env.DB,
+			householdId: managedHousehold.householdId,
+			inviteId
+		});
+		return { message: 'Invite deleted.' };
+	},
+
+	updateInviteRole: async (event) => {
+		const managedHousehold = await requireManageHousehold(event);
+		if ('status' in managedHousehold) return managedHousehold;
+		if (!event.platform?.env.DB) return fail(503, { message: 'Invite storage is not available.' });
+
+		const form = await event.request.formData();
+		const inviteId = String(form.get('inviteId') ?? '').trim();
+		if (!inviteId) return fail(400, { message: 'Choose an invite to update.' });
+		await updateHouseholdInviteRole({
+			database: event.platform.env.DB,
+			householdId: managedHousehold.householdId,
+			inviteId,
+			roleSlug: householdRoleSlug(form.get('role'))
+		});
+		return { message: 'Invite role updated.' };
+	},
+
+	updateMemberRole: async (event) => {
+		const managedHousehold = await requireManageHousehold(event);
+		if ('status' in managedHousehold) return managedHousehold;
+		const { householdId, session } = managedHousehold;
+		const form = await event.request.formData();
+		const membershipId = String(form.get('membershipId') ?? '').trim();
+		const userId = String(form.get('userId') ?? '').trim();
+		const roleSlug = householdRoleSlug(form.get('role'));
+		if (!membershipId || !userId) return fail(400, { message: 'Choose a member to update.' });
+		if (userId === session.user.id && roleSlug !== 'admin') {
+			return fail(400, { message: 'You cannot remove your own manager access.' });
+		}
+
+		try {
+			const runtime = createAuthRuntime(event.platform);
+			const membership =
+				await runtime.workos.userManagement.getOrganizationMembership(membershipId);
+			if (membership.organizationId !== householdId || membership.userId !== userId) {
+				return fail(404, { message: 'Household member not found.' });
+			}
+			if (membership.directoryManaged) {
+				return fail(400, {
+					message: 'Directory-managed member roles must be changed in the identity provider.'
+				});
+			}
+			await runtime.workos.userManagement.updateOrganizationMembership(membershipId, { roleSlug });
+			return { message: 'Member role updated.' };
+		} catch (cause) {
+			console.error('Failed to update household member role', cause);
+			return fail(502, { message: 'Could not update member role.' });
+		}
+	},
+
 	updateSettings: async (event) => {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;

@@ -16,13 +16,14 @@ export const smokeSession = (): AuthSession => ({
 		firstName: 'Smoke',
 		lastName: 'Tester',
 		profilePictureUrl: null,
-		emailVerified: true
+		emailVerified: true,
+		metadata: {}
 	},
 	sessionId: 'sess_smoke_maal',
 	organizationId: SMOKE_HOUSEHOLD_ID,
 	role: 'admin',
 	roles: ['admin'],
-	permissions: ['household:manage'],
+	permissions: ['households:write', 'household:manage'],
 	entitlements: [],
 	featureFlags: []
 });

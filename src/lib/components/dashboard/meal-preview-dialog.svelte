@@ -7,6 +7,9 @@
 	import { Input } from '$lib/components/ui/input';
 	import * as Popover from '$lib/components/ui/popover';
 	import { Separator } from '$lib/components/ui/separator';
+	import SearchCombobox, {
+		type SearchComboboxOption
+	} from '$lib/components/ui/search-combobox.svelte';
 	import { parseDate, type DateValue } from '@internationalized/date';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import { scaleIngredientText } from '$lib/recipes/ingredient-text';
@@ -82,6 +85,14 @@
 		householdMembers.find((member) => member.userId === plannedCookDraft)?.name ??
 			(plannedCookDraft ? 'Unknown cook' : 'Unassigned')
 	);
+	const plannedCookOptions = $derived<SearchComboboxOption[]>([
+		{ value: '', label: 'Unassigned', keywords: ['none', 'unassigned'] },
+		...householdMembers.map((member) => ({
+			value: member.userId,
+			label: member.name,
+			keywords: [member.name]
+		}))
+	]);
 
 	const previewViewportGutter = 16;
 	const previewTopOffset = $derived(
@@ -320,15 +331,14 @@
 		</label>
 		<label class="grid gap-1 sm:col-span-2">
 			<span class="text-xs font-medium text-muted-foreground">Cook</span>
-			<select
+			<SearchCombobox
 				bind:value={plannedCookDraft}
-				class="h-9 w-full rounded-md border border-input bg-input/20 px-3 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 md:text-xs/relaxed dark:bg-input/30"
-			>
-				<option value="">Unassigned</option>
-				{#each householdMembers as member (member.userId)}
-					<option value={member.userId}>{member.name}</option>
-				{/each}
-			</select>
+				options={plannedCookOptions}
+				placeholder="Unassigned"
+				searchPlaceholder="Search cooks…"
+				emptyText="No cooks found."
+				class="h-9 px-3 text-sm md:text-xs/relaxed"
+			/>
 		</label>
 	</div>
 {/snippet}

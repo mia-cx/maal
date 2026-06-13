@@ -1,6 +1,7 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { resolveActiveHouseholdId } from '$lib/server/auth/household';
+import { requireHouseholdAccess } from '$lib/server/billing/guards';
 import { getDb } from '$lib/server/db';
 import {
 	householdMeals,
@@ -35,6 +36,8 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 	if (!session) error(401, { message: 'Sign in required.' });
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
+	if (!householdId) error(400, { message: 'Household is required.' });
+	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
 	const recipeId = params.id;
 	if (!recipeId) error(400, { message: 'Recipe is required.' });
 
@@ -113,6 +116,8 @@ export const PATCH: RequestHandler = async ({ cookies, locals, params, platform,
 	if (!session) error(401, { message: 'Sign in required.' });
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
+	if (!householdId) error(400, { message: 'Household is required.' });
+	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
 	const recipeId = params.id;
 	if (!recipeId) error(400, { message: 'Recipe is required.' });
 
@@ -168,10 +173,13 @@ export const PATCH: RequestHandler = async ({ cookies, locals, params, platform,
 	return json({ restored: true, recipe });
 };
 
-export const DELETE: RequestHandler = async ({ locals, params, platform, url }) => {
+export const DELETE: RequestHandler = async ({ cookies, locals, params, platform, url }) => {
 	const session = locals.session;
 	if (!session) error(401, { message: 'Sign in required.' });
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
+	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
+	if (!householdId) error(400, { message: 'Household is required.' });
+	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
 	const recipeId = params.id;
 	if (!recipeId) error(400, { message: 'Recipe is required.' });
 

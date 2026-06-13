@@ -38,7 +38,7 @@
 
 	let columnHeight = $state(0);
 
-	const multiDayTopImageMinHeight = 672;
+	const multiDayTopImageMinHeight = 520;
 	const dayKey = $derived(dateKey(day));
 	const shortDayName = (date: Date): string =>
 		new Intl.DateTimeFormat('en', { weekday: 'short' }).format(date);

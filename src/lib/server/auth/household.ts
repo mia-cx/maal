@@ -4,7 +4,16 @@ import { provisionAuthSession } from '$lib/server/auth/provisioning';
 import { SMOKE_HOUSEHOLD_ID, SMOKE_HOUSEHOLD_NAME, SMOKE_USER_ID, smokeAuthEnabled } from './smoke';
 
 export const HOUSEHOLD_COOKIE_NAME = 'maal_household_id';
-export const HOUSEHOLD_MANAGE_PERMISSION = 'household:manage';
+export const HOUSEHOLD_MANAGE_PERMISSION = 'households:write';
+const LEGACY_HOUSEHOLD_MANAGE_PERMISSION = 'household:manage';
+const MEALS_ATTEND_PERMISSION = 'household:meals:attend';
+const MEALS_MANAGE_PERMISSION = 'household:meals:manage';
+
+export type MaalHouseholdPermission =
+	| 'recipes:read'
+	| 'recipes:write'
+	| 'meals:read'
+	| 'meals:write';
 
 const householdCookieOptions = (url: URL) => ({
 	path: '/',
@@ -33,7 +42,8 @@ export const canManageHousehold = (
 	householdId: string
 ): boolean =>
 	session.organizationId === householdId &&
-	(session.permissions ?? []).includes(HOUSEHOLD_MANAGE_PERMISSION);
+	((session.permissions ?? []).includes(HOUSEHOLD_MANAGE_PERMISSION) ||
+		(session.permissions ?? []).includes(LEGACY_HOUSEHOLD_MANAGE_PERMISSION));
 
 export const canManageActiveHousehold = async (
 	platform: App.Platform | undefined,
@@ -63,7 +73,11 @@ export const canManageActiveHousehold = async (
 				runtime.workos.authorization.getOrganizationRole(householdId, slug).catch(() => null)
 			)
 		);
-		return roles.some((role) => role?.permissions.includes(HOUSEHOLD_MANAGE_PERMISSION));
+		return roles.some(
+			(role) =>
+				role?.permissions.includes(HOUSEHOLD_MANAGE_PERMISSION) ||
+				role?.permissions.includes(LEGACY_HOUSEHOLD_MANAGE_PERMISSION)
+		);
 	} catch {
 		return false;
 	}
@@ -101,6 +115,67 @@ export const listUserHouseholds = async (
 
 export const listUserHouseholdIds = async (platform: App.Platform | undefined, userId: string) =>
 	(await listUserHouseholds(platform, userId)).map((household) => household.id);
+
+const workosPermissionsAllow = (
+	permissions: readonly string[],
+	permission: MaalHouseholdPermission
+): boolean => {
+	const granted = new Set(permissions);
+	if (granted.has(permission) || granted.has(HOUSEHOLD_MANAGE_PERMISSION)) return true;
+	if (granted.has(LEGACY_HOUSEHOLD_MANAGE_PERMISSION)) return true;
+
+	if (permission === 'meals:read') {
+		return granted.has(MEALS_ATTEND_PERMISSION) || granted.has(MEALS_MANAGE_PERMISSION);
+	}
+	if (
+		permission === 'meals:write' ||
+		permission === 'recipes:read' ||
+		permission === 'recipes:write'
+	) {
+		return granted.has(MEALS_MANAGE_PERMISSION);
+	}
+	return false;
+};
+
+export const userHasHouseholdPermission = async (
+	platform: App.Platform | undefined,
+	userId: string,
+	householdId: string,
+	permission: MaalHouseholdPermission
+): Promise<boolean> => {
+	if (
+		smokeAuthEnabled(platform) &&
+		userId === SMOKE_USER_ID &&
+		householdId === SMOKE_HOUSEHOLD_ID
+	) {
+		return true;
+	}
+
+	try {
+		const runtime = createAuthRuntime(platform);
+		const memberships = await runtime.workos.userManagement.listOrganizationMemberships({
+			organizationId: householdId,
+			userId,
+			statuses: ['active'],
+			limit: 1
+		});
+		const membership = memberships.data[0];
+		if (!membership) return false;
+
+		const roleSlugs = new Set([
+			membership.role.slug,
+			...(membership.roles ?? []).map((role) => role.slug)
+		]);
+		const roles = await Promise.all(
+			Array.from(roleSlugs).map((slug) =>
+				runtime.workos.authorization.getOrganizationRole(householdId, slug).catch(() => null)
+			)
+		);
+		return roles.some((role) => workosPermissionsAllow(role?.permissions ?? [], permission));
+	} catch {
+		return false;
+	}
+};
 
 export const listHouseholdMembers = async (
 	platform: App.Platform | undefined,
@@ -235,7 +310,8 @@ export const createHouseholdForUser = async (input: {
 	});
 	await provisionAuthSession(input.platform, {
 		user: { id: input.userId },
-		organizationId: organization.id
+		organizationId: organization.id,
+		createdByUserId: input.userId
 	});
 	commitHouseholdCookie(input.cookies, organization.id, input.url);
 	return organization;

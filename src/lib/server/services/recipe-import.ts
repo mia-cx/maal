@@ -1,0 +1,184 @@
+import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+import { parseIngredientLine } from '$lib/recipes/ingredient-text';
+
+const maxImportBytes = 1_500_000;
+
+type RecipeJson = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === 'object' && value !== null;
+
+const stringValue = (value: unknown): string | undefined =>
+	typeof value === 'string' && value.trim() ? value.trim() : undefined;
+
+const arrayValue = (value: unknown): unknown[] =>
+	Array.isArray(value) ? value : value ? [value] : [];
+
+const firstString = (...values: unknown[]): string | undefined => {
+	for (const value of values) {
+		if (Array.isArray(value)) {
+			const nested = firstString(...value);
+			if (nested) return nested;
+			continue;
+		}
+		if (isRecord(value)) {
+			const nested = firstString(value.name, value.url, value['@id']);
+			if (nested) return nested;
+			continue;
+		}
+		const text = stringValue(value);
+		if (text) return text;
+	}
+};
+
+const recipeType = (value: unknown): boolean => {
+	const types = arrayValue(value).map((type) => String(type).toLowerCase());
+	return (
+		types.includes('recipe') ||
+		types.includes('schema:recipe') ||
+		types.includes('https://schema.org/recipe')
+	);
+};
+
+const flattenJsonLd = (value: unknown): RecipeJson[] => {
+	if (Array.isArray(value)) return value.flatMap(flattenJsonLd);
+	if (!isRecord(value)) return [];
+	return [value, ...flattenJsonLd(value['@graph'])];
+};
+
+const parseJsonLdScripts = (html: string): unknown[] => {
+	const scripts = html.matchAll(
+		/<script\b(?=[^>]*\btype=["'][^"']*application\/ld\+json[^"']*["'])[^>]*>([\s\S]*?)<\/script>/gi
+	);
+	const values: unknown[] = [];
+	for (const script of scripts) {
+		const content = script[1]
+			.replace(/<!--/g, '')
+			.replace(/-->/g, '')
+			.replace(/&quot;/g, '"')
+			.trim();
+		if (!content) continue;
+		try {
+			values.push(JSON.parse(content));
+		} catch {
+			// Ignore unrelated broken JSON-LD snippets.
+		}
+	}
+	return values;
+};
+
+const instructionText = (value: unknown): string[] => {
+	if (typeof value === 'string') return [value.trim()].filter(Boolean);
+	if (Array.isArray(value)) return value.flatMap(instructionText);
+	if (!isRecord(value)) return [];
+	if (recipeType(value['@type']) && value.recipeInstructions) {
+		return instructionText(value.recipeInstructions);
+	}
+	if (String(value['@type']).toLowerCase().includes('howtosection')) {
+		return instructionText(value.itemListElement);
+	}
+	return [firstString(value.text, value.name)].filter((text): text is string => Boolean(text));
+};
+
+const durationMinutes = (value: unknown): number | undefined => {
+	const text = stringValue(value);
+	if (!text) return;
+	const match = /^PT(?:(\d+)H)?(?:(\d+)M)?$/i.exec(text);
+	if (!match) return;
+	return Number(match[1] ?? 0) * 60 + Number(match[2] ?? 0);
+};
+
+const cookMinutesFromRecipe = (recipe: RecipeJson): number | undefined => {
+	const cookMinutes = durationMinutes(recipe.cookTime);
+	if (cookMinutes !== undefined) return cookMinutes;
+	const totalMinutes = durationMinutes(recipe.totalTime);
+	if (totalMinutes === undefined) return;
+	const prepMinutes = durationMinutes(recipe.prepTime);
+	return prepMinutes === undefined ? totalMinutes : Math.max(0, totalMinutes - prepMinutes);
+};
+
+const firstNumber = (...values: unknown[]): number | undefined => {
+	for (const value of values) {
+		if (typeof value === 'number' && Number.isFinite(value)) return value;
+		if (typeof value === 'string') {
+			const match = /\d+(?:\.\d+)?/.exec(value);
+			if (match) return Number(match[0]);
+		}
+	}
+};
+
+const siteNameFromUrl = (url: string): string | undefined => {
+	try {
+		return new URL(url).hostname.replace(/^www\./, '');
+	} catch {
+		return;
+	}
+};
+
+export const fetchRecipeFromUrlForImport = async (url: string): Promise<RecipeMenuItem> => {
+	let parsedUrl: URL;
+	try {
+		parsedUrl = new URL(url);
+	} catch {
+		throw new Error('Invalid recipe URL.');
+	}
+	if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('Invalid recipe URL.');
+
+	let response: Response;
+	try {
+		response = await fetch(parsedUrl, {
+			headers: {
+				accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+				'accept-language': 'nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
+				'user-agent':
+					'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36'
+			}
+		});
+	} catch {
+		throw new Error('Could not fetch recipe page.');
+	}
+	if (!response.ok) throw new Error(`Could not fetch recipe page: HTTP ${response.status}.`);
+
+	let html: string;
+	try {
+		html = (await response.text()).slice(0, maxImportBytes);
+	} catch {
+		throw new Error('Could not read recipe page.');
+	}
+
+	const nodes = parseJsonLdScripts(html).flatMap(flattenJsonLd);
+	const recipe = nodes.find((node) => recipeType(node['@type']));
+	if (!recipe) throw new Error('No schema.org JSON-LD Recipe data found on that page.');
+
+	const ingredients = arrayValue(recipe.recipeIngredient)
+		.map((ingredient) => String(ingredient).trim())
+		.filter(Boolean)
+		.map((ingredient) => parseIngredientLine(ingredient));
+
+	return {
+		id: `imported-recipe-${crypto.randomUUID()}`,
+		title: firstString(recipe.name, recipe.headline) ?? 'Imported recipe',
+		description: stringValue(recipe.description) ?? '',
+		image: firstString(recipe.image),
+		sourceUrl: url,
+		sourceSiteName: siteNameFromUrl(url),
+		sourceClaimedMinutes: cookMinutesFromRecipe(recipe),
+		parseConfidence: 1,
+		ingredientConfidence: 1,
+		instructionConfidence: 1,
+		prepTimeMinutes: durationMinutes(recipe.prepTime),
+		cookTimeMinutes: cookMinutesFromRecipe(recipe),
+		totalTimeMinutes: durationMinutes(recipe.totalTime),
+		yield: firstNumber(recipe.recipeYield, recipe.yield),
+		ingredients,
+		ingredientCount: ingredients.length,
+		instructions: instructionText(recipe.recipeInstructions).map((text, index) => ({
+			position: index + 1,
+			text
+		})),
+		appliances: [],
+		timesCooked: 0,
+		plannedCount: 0,
+		reviewSummary: { worthRepeating: 0, neutral: 0, neverAgain: 0, notes: [] }
+	};
+};

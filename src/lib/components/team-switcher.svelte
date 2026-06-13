@@ -1,9 +1,12 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { HomeIcon } from '$lib/components/icons/solar-outline';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { useSidebar } from '$lib/components/ui/sidebar/index.js';
 	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
+	import PlusIcon from '@lucide/svelte/icons/plus';
 
 	type Household = { id: string; name: string };
 
@@ -19,6 +22,7 @@
 	);
 	const householdName = $derived(activeHousehold?.name ?? 'No household');
 	const householdMeta = $derived(activeHousehold ? 'Household' : 'Create one from Meal Plan');
+	const startHouseholdCreation = () => goto(resolve('/onboarding?new=1'));
 </script>
 
 <Sidebar.Menu>
@@ -31,7 +35,7 @@
 						class="h-9 gap-2 p-0 pr-3 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-0! data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
 					>
 						<span
-							class="flex size-9 shrink-0 items-center justify-center bg-primary text-primary-foreground"
+							class="flex size-9 shrink-0 items-center justify-center bg-[var(--brand-salmon)] text-white"
 						>
 							<HomeIcon class="size-4" />
 						</span>
@@ -63,6 +67,11 @@
 						No household yet
 					</DropdownMenu.Item>
 				{/if}
+				<DropdownMenu.Separator />
+				<DropdownMenu.Item class="gap-2 p-2" onclick={startHouseholdCreation}>
+					<PlusIcon class="size-5 shrink-0" />
+					<span class="truncate">New household</span>
+				</DropdownMenu.Item>
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>
 	</Sidebar.MenuItem>

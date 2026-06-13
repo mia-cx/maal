@@ -1,12 +1,17 @@
 <script lang="ts">
+	import { enhance } from '$app/forms';
 	import { Button } from '$lib/components/ui/button';
 	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
+	import * as Dialog from '$lib/components/ui/dialog';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { Input } from '$lib/components/ui/input';
 	import * as Select from '$lib/components/ui/select';
+	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
 	import SearchCombobox from '$lib/components/ui/search-combobox.svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { cn } from '$lib/utils.js';
 	import { untrack } from 'svelte';
+	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -39,6 +44,15 @@
 	let memberToRemove = $state<{ id: string; userId: string; name: string } | null>(null);
 	let deleteHouseholdFirstOpen = $state(false);
 	let deleteHouseholdSecondOpen = $state(false);
+	let inviteDialogOpen = $state(false);
+	let inviteRole = $state('member');
+	let inviteExpiresInDays = $state('7');
+	type InviteRow = PageData['invites'][number];
+	let visibleInvites = $state<InviteRow[]>(untrack(() => data.invites));
+
+	$effect(() => {
+		visibleInvites = data.invites;
+	});
 
 	const canManageHousehold = $derived(data.canManageHousehold);
 	const fieldDisabled = $derived(!canManageHousehold);
@@ -177,6 +191,42 @@
 		})
 	);
 	const appliancesChanged = $derived(changedAppliances.length > 0);
+	const roleOptions = [
+		{ value: 'admin', label: 'Manager' },
+		{ value: 'member', label: 'Adult' },
+		{ value: 'child', label: 'Child' }
+	] as const;
+	const roleLabel = (role: string): string =>
+		roleOptions.find((option) => option.value === role)?.label ?? role;
+	const formatInviteExpiry = (expiresAt: string | null) =>
+		expiresAt ? new Date(expiresAt).toLocaleDateString() : 'No expiry';
+	const inviteUsageLabel = (invite: { usesCount: number; maxUses: number | null }) =>
+		invite.maxUses === null
+			? `${invite.usesCount} used`
+			: `${invite.usesCount}/${invite.maxUses} used`;
+
+	const deleteInviteEnhance =
+		(inviteId: string): SubmitFunction =>
+		() => {
+			const previousInvites = visibleInvites;
+			visibleInvites = visibleInvites.filter((invite) => invite.id !== inviteId);
+			return async ({ result }) => {
+				if (result.type !== 'success') visibleInvites = previousInvites;
+			};
+		};
+
+	const revokeInviteEnhance =
+		(inviteId: string): SubmitFunction =>
+		() => {
+			const previousInvites = visibleInvites;
+			const revokedAt = new Date().toISOString();
+			visibleInvites = visibleInvites.map((invite) =>
+				invite.id === inviteId ? { ...invite, revokedAt, usable: false } : invite
+			);
+			return async ({ result }) => {
+				if (result.type !== 'success') visibleInvites = previousInvites;
+			};
+		};
 
 	const promptMemberRemoval = (member: { id: string; userId: string; name: string }) => {
 		memberToRemove = member;
@@ -537,7 +587,13 @@
 			</section>
 
 			<section class="grid gap-3 border-t border-border pt-4">
-				<h2 class="text-sm font-medium">Members</h2>
+				<div class="grid gap-1">
+					<h2 class="text-sm font-medium">Members</h2>
+					<p class="text-xs text-muted-foreground">
+						Manage who can access {data.household.name} and what role new invitees receive.
+					</p>
+				</div>
+
 				<div class="divide-y divide-border rounded-md border border-border">
 					{#each data.members as member (member.id)}
 						<div class="grid gap-3 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
@@ -546,25 +602,163 @@
 								<p class="truncate text-xs text-muted-foreground">
 									{member.email || member.userId}
 								</p>
-								<p class="text-xs text-muted-foreground">Role: {member.role}</p>
 							</div>
-							{#if member.userId === data.currentUserId}
-								<span class="text-xs text-muted-foreground">You</span>
-							{:else if member.directoryManaged}
-								<span class="text-xs text-muted-foreground">Managed by IdP</span>
-							{:else if canManageHousehold}
-								<Button
-									type="button"
-									variant="destructive"
-									size="sm"
-									onclick={() => promptMemberRemoval(member)}
-								>
-									Remove
-								</Button>
-							{/if}
+							<div class="flex items-center justify-end gap-2">
+								{#if canManageHousehold && !member.directoryManaged && member.userId !== data.currentUserId}
+									<form method="post" action="?/updateMemberRole" class="contents">
+										<input type="hidden" name="membershipId" value={member.id} />
+										<input type="hidden" name="userId" value={member.userId} />
+										<select
+											name="role"
+											class="h-8 rounded-md border border-input bg-background px-2 text-xs"
+											onchange={(event) => event.currentTarget.form?.requestSubmit()}
+										>
+											{#each roleOptions as role (role.value)}
+												<option value={role.value} selected={member.role === role.value}
+													>{role.label}</option
+												>
+											{/each}
+										</select>
+									</form>
+								{:else}
+									<span class="text-xs text-muted-foreground">{roleLabel(member.role)}</span>
+								{/if}
+
+								{#if member.userId === data.currentUserId}
+									<span class="text-xs text-muted-foreground">You</span>
+								{:else if member.directoryManaged}
+									<span class="text-xs text-muted-foreground">Managed by IdP</span>
+								{/if}
+
+								{#if canManageHousehold && !member.directoryManaged}
+									<DropdownMenu.Root>
+										<DropdownMenu.Trigger
+											class="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+											aria-label={`Actions for ${member.name}`}
+										>
+											<EllipsisIcon class="size-4" />
+										</DropdownMenu.Trigger>
+										<DropdownMenu.Content align="end" class="w-36">
+											<DropdownMenu.Item
+												disabled={member.userId === data.currentUserId}
+												onclick={() => {
+													if (member.userId !== data.currentUserId) promptMemberRemoval(member);
+												}}
+												variant="destructive"
+											>
+												Remove
+											</DropdownMenu.Item>
+										</DropdownMenu.Content>
+									</DropdownMenu.Root>
+								{/if}
+							</div>
 						</div>
 					{/each}
+
+					{#if visibleInvites.length > 0}
+						<div
+							class="bg-muted/20 px-3 py-1 text-[0.65rem] font-medium tracking-wide text-muted-foreground uppercase"
+						>
+							Invites
+						</div>
+						{#each visibleInvites as invite (invite.id)}
+							<div
+								class={cn(
+									'grid gap-3 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center',
+									!invite.usable && 'opacity-55'
+								)}
+							>
+								<div class="flex min-w-0 items-center gap-2">
+									<div class="min-w-0">
+										<p class="truncate text-sm font-medium">Invite</p>
+										<p class="truncate font-mono text-xs text-muted-foreground">{invite.code}</p>
+									</div>
+									{#if invite.usable}
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											onclick={() => navigator.clipboard.writeText(invite.url)}
+										>
+											Copy URL
+										</Button>
+									{/if}
+								</div>
+								<div class="flex items-center justify-end gap-2">
+									{#if canManageHousehold && invite.usable}
+										<form method="post" action="?/updateInviteRole" class="contents">
+											<input type="hidden" name="inviteId" value={invite.id} />
+											<select
+												name="role"
+												class="h-8 rounded-md border border-input bg-background px-2 text-xs"
+												onchange={(event) => event.currentTarget.form?.requestSubmit()}
+											>
+												{#each roleOptions as role (role.value)}
+													<option value={role.value} selected={invite.role === role.value}
+														>{role.label}</option
+													>
+												{/each}
+											</select>
+										</form>
+									{:else}
+										<span class="text-xs text-muted-foreground">{roleLabel(invite.role)}</span>
+									{/if}
+									{#if canManageHousehold}
+										<DropdownMenu.Root>
+											<DropdownMenu.Trigger
+												class="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+												aria-label={`Actions for invite ${invite.code}`}
+											>
+												<EllipsisIcon class="size-4" />
+											</DropdownMenu.Trigger>
+											<DropdownMenu.Content align="end" class="w-36">
+												<form
+													method="post"
+													action="?/revokeInvite"
+													use:enhance={revokeInviteEnhance(invite.id)}
+												>
+													<input type="hidden" name="inviteId" value={invite.id} />
+													<DropdownMenu.Item
+														disabled={Boolean(invite.revokedAt)}
+														variant="destructive"
+														onclick={(event) => {
+															if (!invite.revokedAt)
+																event.currentTarget.closest('form')?.requestSubmit();
+														}}
+													>
+														{invite.revokedAt ? 'Revoked' : 'Revoke'}
+													</DropdownMenu.Item>
+												</form>
+												<form
+													method="post"
+													action="?/deleteInvite"
+													use:enhance={deleteInviteEnhance(invite.id)}
+												>
+													<input type="hidden" name="inviteId" value={invite.id} />
+													<DropdownMenu.Item
+														variant="destructive"
+														onclick={(event) =>
+															event.currentTarget.closest('form')?.requestSubmit()}
+													>
+														Delete
+													</DropdownMenu.Item>
+												</form>
+											</DropdownMenu.Content>
+										</DropdownMenu.Root>
+									{/if}
+								</div>
+							</div>
+						{/each}
+					{/if}
 				</div>
+
+				{#if canManageHousehold}
+					<div>
+						<Button type="button" variant="outline" onclick={() => (inviteDialogOpen = true)}>
+							Invite people to your household
+						</Button>
+					</div>
+				{/if}
 			</section>
 
 			{#if Object.keys(data.household.metadata).length > 0}
@@ -595,6 +789,95 @@
 		</div>
 	</main>
 </div>
+
+<Dialog.Root bind:open={inviteDialogOpen}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>Invite people to your household</Dialog.Title>
+			<Dialog.Description>
+				Create an invite link for {data.household.name}. People who use it will join with the role
+				you choose.
+			</Dialog.Description>
+		</Dialog.Header>
+
+		<form method="post" action="?/createInvite" class="grid gap-4">
+			<input type="hidden" name="role" value={inviteRole} />
+			<input type="hidden" name="expiresInDays" value={inviteExpiresInDays} />
+			<label class="grid gap-1 text-xs font-medium">
+				Role
+				<Select.Root type="single" bind:value={inviteRole}>
+					<Select.Trigger class="!h-9 w-full text-sm">
+						{roleLabel(inviteRole)}
+					</Select.Trigger>
+					<Select.Content>
+						{#each roleOptions as role (role.value)}
+							<Select.Item value={role.value}>{role.label}</Select.Item>
+						{/each}
+					</Select.Content>
+				</Select.Root>
+			</label>
+			<div class="grid gap-3 sm:grid-cols-2">
+				<label class="grid gap-1 text-xs font-medium">
+					Max uses
+					<Input
+						name="maxUses"
+						type="number"
+						min="1"
+						max="100"
+						placeholder="Unlimited"
+						class="h-9"
+					/>
+				</label>
+				<label class="grid gap-1 text-xs font-medium">
+					Expires
+					<Select.Root type="single" bind:value={inviteExpiresInDays}>
+						<Select.Trigger class="!h-9 w-full text-sm">
+							{inviteExpiresInDays}
+							{inviteExpiresInDays === '1' ? 'day' : 'days'}
+						</Select.Trigger>
+						<Select.Content>
+							<Select.Item value="1">1 day</Select.Item>
+							<Select.Item value="7">7 days</Select.Item>
+							<Select.Item value="30">30 days</Select.Item>
+						</Select.Content>
+					</Select.Root>
+				</label>
+			</div>
+			<Dialog.Footer>
+				<Button type="button" variant="outline" onclick={() => (inviteDialogOpen = false)}
+					>Cancel</Button
+				>
+				<Button type="submit">Create invite link</Button>
+			</Dialog.Footer>
+		</form>
+
+		{#if visibleInvites.find((invite) => invite.usable)}
+			<div class="grid gap-2 border-t border-border pt-4">
+				<p class="text-xs font-medium text-muted-foreground">Current invite links</p>
+				{#each visibleInvites.filter((invite) => invite.usable).slice(0, 3) as invite (invite.id)}
+					<div class="flex min-w-0 items-center gap-2 rounded-md border border-border p-2">
+						<div class="min-w-0 flex-1">
+							<p class="truncate font-mono text-xs">{invite.url}</p>
+							<p class="text-xs text-muted-foreground">
+								{roleLabel(invite.role)} · {inviteUsageLabel(invite)} · {formatInviteExpiry(
+									invite.expiresAt
+								)}
+							</p>
+						</div>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onclick={() => navigator.clipboard.writeText(invite.url)}
+						>
+							Copy URL
+						</Button>
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
 
 <DeleteConfirmDialog
 	bind:open={removeMemberDialogOpen}

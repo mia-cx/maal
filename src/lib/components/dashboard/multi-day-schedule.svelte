@@ -226,11 +226,18 @@
 		scroller.scrollLeft += nextOffset - anchor.offset;
 	};
 
+	const adjustActiveDragStartAfterPrepend = (scrollDelta: number) => {
+		if (pendingDragScrollPointerId !== null) dragStartScrollLeft += scrollDelta;
+		if (touchScrollId !== undefined) touchStartScrollLeft += scrollDelta;
+		lastScrollLeft = scroller?.scrollLeft ?? lastScrollLeft;
+	};
+
 	const prependDays = async () => {
 		if (!scroller || loadingMoreDays) return;
 		loadingMoreDays = true;
 		cancelProgrammaticScroll();
 		suppressAnchorUpdate = true;
+		const previousScrollLeft = scroller.scrollLeft;
 		const anchor = currentHorizontalAnchor();
 		const firstDay = days[0];
 		days = [
@@ -239,6 +246,7 @@
 		];
 		await tick();
 		if (anchor) restoreHorizontalAnchor(anchor);
+		adjustActiveDragStartAfterPrepend(scroller.scrollLeft - previousScrollLeft);
 		releaseAnchorUpdateSuppression();
 		loadingMoreDays = false;
 	};
@@ -443,14 +451,21 @@
 		});
 	};
 
+	const browserNavigationEdgePx = 32;
+
+	const startsInBrowserNavigationEdge = (touch: Touch): boolean =>
+		touch.clientX <= browserNavigationEdgePx ||
+		(window.innerWidth > 0 && touch.clientX >= window.innerWidth - browserNavigationEdgePx);
+
 	const startTouchScroll = (event: TouchEvent) => {
 		if (!scroller || event.touches.length !== 1 || draggingMealId) return;
+		const touch = event.changedTouches[0];
+		if (startsInBrowserNavigationEdge(touch)) return;
 		const now = performance.now();
 		clearPendingSnap();
 		clearTouchInput();
 		cancelProgrammaticScroll();
 		suppressAnchorUpdate = false;
-		const touch = event.changedTouches[0];
 		touchScrollId = touch.identifier;
 		touchScrollAxis = undefined;
 		touchStartX = touch.clientX;
@@ -754,7 +769,7 @@
 			onpointermove={dragScroll}
 			onpointerup={stopDragScroll}
 			onpointercancel={stopDragScroll}
-			class="grid h-full min-h-0 touch-pan-y [scrollbar-width:none] grid-flow-col overflow-x-auto overflow-y-auto overscroll-x-none [overflow-anchor:none] [&::-webkit-scrollbar]:hidden"
+			class="grid h-full min-h-0 touch-pan-y [scrollbar-width:none] grid-flow-col overflow-x-auto overflow-y-auto [overflow-anchor:none] [&::-webkit-scrollbar]:hidden"
 			class:select-none={draggingScroller}
 			style="--visible-days: {visibleDayCount}; grid-auto-columns: calc(100% / var(--visible-days));"
 		>

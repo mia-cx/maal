@@ -1,6 +1,7 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq } from 'drizzle-orm';
 import { resolveActiveHouseholdId } from '$lib/server/auth/household';
+import { requireHouseholdAccess } from '$lib/server/billing/guards';
 import { getDb } from '$lib/server/db';
 import { householdMeals, mealCheckIns } from '$lib/server/db/schema';
 import type { MealFeedbackVerdict } from '$lib/components/dashboard/meal-labels';
@@ -30,6 +31,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) error(400, { message: 'Household is required.' });
+	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
 
 	const body = await readJson(request);
 	const mealId = isRecord(body) && typeof body.mealId === 'string' ? body.mealId.trim() : '';

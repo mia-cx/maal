@@ -4,6 +4,7 @@ import { getDb } from '$lib/server/db';
 interface ProvisionableSession {
 	user: { id: string };
 	organizationId?: string | null;
+	createdByUserId?: string | null;
 }
 
 export const provisionAuthSession = async (
@@ -18,5 +19,11 @@ export const provisionAuthSession = async (
 
 	if (!session.organizationId) return;
 
-	await db.insert(households).values({ householdId: session.organizationId }).onConflictDoNothing();
+	await db
+		.insert(households)
+		.values({
+			householdId: session.organizationId,
+			createdByUserId: session.createdByUserId ?? null
+		})
+		.onConflictDoNothing();
 };
