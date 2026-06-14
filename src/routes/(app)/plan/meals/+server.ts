@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import type { Meal } from '$lib/components/dashboard/schedule-types';
 import { countActiveHouseholdMembers } from '$lib/server/auth/household';
 import { requireAppContext } from '$lib/server/http/app-context';
+import { readJsonObject } from '$lib/server/http/request';
 import { householdMeals } from '$lib/server/db/schema';
 import {
 	createHouseholdMeal,
@@ -20,23 +21,15 @@ const dateParam = (url: URL, key: string): string | undefined => {
 	return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined;
 };
 
-const readJson = async (request: Request): Promise<unknown> => {
-	try {
-		return await request.json();
-	} catch {
-		error(400, { message: 'Invalid request.' });
-	}
-};
-
 const readMeal = async (request: Request): Promise<Meal> => {
-	const body = await readJson(request);
-	if (!isRecord(body) || !isRecord(body.meal)) error(400, { message: 'Meal is required.' });
+	const body = await readJsonObject(request);
+	if (!isRecord(body.meal)) error(400, { message: 'Meal is required.' });
 	return body.meal as Meal;
 };
 
 const readMealId = async (request: Request): Promise<string> => {
-	const body = await readJson(request);
-	const mealId = isRecord(body) && typeof body.mealId === 'string' ? body.mealId.trim() : '';
+	const body = await readJsonObject(request);
+	const mealId = typeof body.mealId === 'string' ? body.mealId.trim() : '';
 	if (!mealId) error(400, { message: 'Meal is required.' });
 	return mealId;
 };
