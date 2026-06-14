@@ -27,11 +27,22 @@ export const fetchMenuRecipesPage = async (
 
 export const searchMenuRecipes = async (
 	query: string,
-	options: { signal?: AbortSignal; limit?: number } = {}
+	options: { signal?: AbortSignal; limit?: number; picker?: 'meal' } = {}
 ): Promise<RecipeMenuItem[]> => {
 	const params = new URLSearchParams({ q: query, limit: String(options.limit ?? 60) });
+	if (options.picker) params.set('picker', options.picker);
 	const response = await fetch(`${resolve('/menu/recipes')}?${params}`, { signal: options.signal });
-	if (!response.ok) throw new Error('Could not search recipes.');
+	if (!response.ok)
+		throw new Error(await readMenuResponseError(response, 'Could not search recipes.'));
+	const body = (await response.json()) as { recipes: RecipeMenuItem[] };
+	return body.recipes;
+};
+
+export const fetchRecipePickerRecipes = async (limit = 60): Promise<RecipeMenuItem[]> => {
+	const params = new URLSearchParams({ picker: 'meal', limit: String(limit) });
+	const response = await fetch(`${resolve('/menu/recipes')}?${params}`);
+	if (!response.ok)
+		throw new Error(await readMenuResponseError(response, 'Could not load recipes.'));
 	const body = (await response.json()) as { recipes: RecipeMenuItem[] };
 	return body.recipes;
 };

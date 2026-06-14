@@ -13,6 +13,7 @@
 		updateScheduleMealSchedule
 	} from '$lib/stores/schedule-meals';
 	import { createMenuRecipe, hydrateMenuRecipes, menuRecipesStore } from '$lib/stores/menu-recipes';
+	import { fetchRecipePickerRecipes } from '$lib/menu/menu-client';
 	import { emptyRecipeMenuStats } from '$lib/menu/recipe-defaults';
 	import { setDailyScroll, uiState, updateUiState } from '$lib/stores/ui-state';
 	import AddMealDialog from './add-meal-dialog.svelte';
@@ -28,6 +29,7 @@
 	import { dropTargetFromPointer } from './schedule-dnd';
 	import { isMealInPool, sortMealPool } from './schedule-ordering';
 	import { submitMealCheckIn } from './schedule-check-ins';
+	import { fetchScheduleMealRange } from './schedule-meal-client';
 	import { cardDirectionByKey, focusMealCard } from './schedule-keyboard';
 	import {
 		hasLoadedMealRange,
@@ -128,22 +130,22 @@
 		if (loadingMealRangeKey === key || failedMealRangeKeys.includes(key)) return;
 		loadingMealRangeKey = key;
 		try {
-			const response = await fetch(`/plan/meals?start=${range.start}&end=${range.end}`);
-			if (!response.ok) {
-				const message = await parseMealRangeError(response);
-				failedMealRangeKeys = [...failedMealRangeKeys, key];
-				mealRangeError = message;
-				if (response.status !== 402) console.error('Failed to load meal range', message);
-				return;
-			}
-			const body = (await response.json()) as { meals: Meal[] };
+			const meals = await fetchScheduleMealRange(range);
 			mealRangeError = null;
-			mergeHydratedScheduleMeals(body.meals, range.start, range.end);
+			mergeHydratedScheduleMeals(meals, range.start, range.end);
 			loadedMealRanges = [...loadedMealRanges, { start: range.start, end: range.end }];
 		} catch (error) {
 			failedMealRangeKeys = [...failedMealRangeKeys, key];
-			mealRangeError = error instanceof Error ? error.message : 'Failed to load meal range.';
-			console.error('Failed to load meal range', error);
+			const message =
+				error instanceof Response
+					? await parseMealRangeError(error)
+					: error instanceof Error
+						? error.message
+						: 'Failed to load meal range.';
+			mealRangeError = message;
+			if (!(error instanceof Response) || error.status !== 402) {
+				console.error('Failed to load meal range', error);
+			}
 		} finally {
 			if (loadingMealRangeKey === key) loadingMealRangeKey = '';
 		}
@@ -160,10 +162,7 @@
 		if (pickerRecipesLoaded || pickerRecipesLoading || $menuRecipesStore.length > 0) return;
 		pickerRecipesLoading = true;
 		try {
-			const response = await fetch('/menu/recipes?picker=meal&limit=60');
-			if (!response.ok) throw new Error(await parseMealRangeError(response));
-			const body = (await response.json()) as { recipes: RecipeMenuItem[] };
-			hydrateMenuRecipes(body.recipes);
+			hydrateMenuRecipes(await fetchRecipePickerRecipes());
 			pickerRecipesLoaded = true;
 		} catch (error) {
 			addMealError = error instanceof Error ? error.message : 'Could not load recipes.';
