@@ -1,13 +1,13 @@
 import { fail, redirect, type Cookies } from '@sveltejs/kit';
 import { and, eq, isNull } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
-import { foods, householdAppliances, households } from '$lib/server/db/schema';
+import { foods, households } from '$lib/server/db/schema';
 import {
 	canManageActiveHousehold,
 	clearHouseholdCookie,
 	resolveActiveHouseholdId
 } from '$lib/server/auth/household';
-import { applianceValues, type Appliance } from '$lib/domain/household/appliances';
+import { applianceValues } from '$lib/domain/household/appliances';
 import {
 	asWeekStartDay,
 	defaultLocale,
@@ -43,6 +43,7 @@ import { createAuthRuntime } from '$lib/server/auth/workos';
 import { loadHouseholdView } from '$lib/server/household/household-view';
 import { membershipHasAdminRole } from '$lib/server/household/members';
 import { deleteHouseholdCascade } from '$lib/server/household/delete-household';
+import { updateHouseholdAppliancesFromForm } from '$lib/server/household/appliance-settings';
 import { SMOKE_HOUSEHOLD_ID, smokeAuthEnabled } from '$lib/server/auth/smoke';
 import { smokeHouseholdView } from '$lib/server/household/smoke-household-view';
 import type { Actions, PageServerLoad } from './$types';
@@ -348,28 +349,14 @@ export const actions: Actions = {
 	updateAppliances: async (event) => {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
-		const { householdId } = managedHousehold;
 		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
 
-		const form = await event.request.formData();
-		const db = getDb(event.platform.env.DB);
-		const now = new Date().toISOString();
-
 		try {
-			let changedCount = 0;
-			for (const appliance of applianceOptions) {
-				if (!form.has(`available:${appliance}`) && !form.has(`notes:${appliance}`)) continue;
-				changedCount += 1;
-				const available = form.get(`available:${appliance}`) === 'on';
-				const notes = String(form.get(`notes:${appliance}`) ?? '').trim() || null;
-				await db
-					.insert(householdAppliances)
-					.values({ householdId, appliance, available, notes })
-					.onConflictDoUpdate({
-						target: [householdAppliances.householdId, householdAppliances.appliance],
-						set: { available, notes, updatedAt: now }
-					});
-			}
+			const changedCount = await updateHouseholdAppliancesFromForm({
+				database: event.platform.env.DB,
+				householdId: managedHousehold.householdId,
+				form: await event.request.formData()
+			});
 			return { message: changedCount > 0 ? 'Appliances saved.' : 'No changes.' };
 		} catch (cause) {
 			console.error('Failed to update household appliances', cause);
