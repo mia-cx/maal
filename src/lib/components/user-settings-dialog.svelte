@@ -35,6 +35,10 @@
 	} from '$lib/settings/account-model';
 	import { readSettingsError } from '$lib/settings/api-client';
 	import {
+		createBillingPortalSession,
+		loadBillingStatus as requestBillingStatus
+	} from '$lib/settings/billing-client';
+	import {
 		saveAccountSettings,
 		sendAccountVerificationEmail,
 		verifyAccountEmailCode
@@ -436,13 +440,13 @@
 		if (billingBusy) return;
 		billingBusy = true;
 		billingError = null;
-		const response = await fetch(resolve('/billing/status'));
+		const result = await requestBillingStatus();
 		billingBusy = false;
-		if (!response.ok) {
-			billingError = await readSettingsError(response, 'Could not load billing.');
+		if (!result.ok) {
+			billingError = result.error;
 			return;
 		}
-		billingStatus = (await response.json()) as BillingStatus;
+		billingStatus = result.status;
 	};
 
 	$effect(() => {
@@ -453,18 +457,13 @@
 		if (!householdId) return;
 		billingPortalBusy = true;
 		billingError = null;
-		const response = await fetch(resolve('/billing/portal'), {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ householdId })
-		});
+		const result = await createBillingPortalSession(householdId);
 		billingPortalBusy = false;
-		if (!response.ok) {
-			billingError = await readSettingsError(response, 'Could not open billing portal.');
+		if (!result.ok) {
+			billingError = result.error;
 			return;
 		}
-		const body = (await response.json()) as { url?: string };
-		if (body.url) window.open(body.url, '_blank', 'noopener,noreferrer');
+		if (result.url) window.open(result.url, '_blank', 'noopener,noreferrer');
 	};
 
 	const startMfaSetup = async () => {
