@@ -61,6 +61,13 @@ import {
 	type TaxonomyOption,
 	type TaxonomyOptions
 } from '$lib/server/taxonomy/options';
+import {
+	upsertFoodDisplayOverride,
+	upsertUnitDisplayOverride,
+	type DisplayOverrideRows,
+	type IngredientOverrideInput,
+	type UnitOverrideInput
+} from '$lib/server/taxonomy/display-overrides';
 import { displayUserName } from '$lib/server/auth/user-display';
 import {
 	SMOKE_HOUSEHOLD_ID,
@@ -71,20 +78,6 @@ import {
 import type { Actions, PageServerLoad } from './$types';
 
 const applianceOptions = applianceValues;
-
-type UnitOverrideInput = { baseUnit: string; preferredUnitAlias: string };
-type IngredientOverrideInput = {
-	baseFood: string;
-	preferredFoodAlias: string;
-	preferredMeasureUnit: string;
-};
-type DisplayOverrideRows = {
-	preferredMassUnit?: string;
-	preferredVolumeUnit?: string;
-	preferredTemperatureUnit?: string;
-	unitOverrides: Array<UnitOverrideInput & { id: string }>;
-	ingredientOverrides: Array<IngredientOverrideInput & { id: string }>;
-};
 
 const parseJsonArray = <T>(value: FormDataEntryValue | null): T[] => {
 	if (typeof value !== 'string' || !value.trim()) return [];
@@ -186,109 +179,6 @@ const loadDisplayOverrideRows = async (
 		});
 	}
 	return result;
-};
-
-const unitByAlias = async (
-	database: D1Database,
-	alias: string,
-	baseUnitId?: string
-): Promise<{
-	unitId: string;
-	baseUnitId: string;
-	aliasScope: 'global';
-	aliasId: string;
-} | null> => {
-	const db = getDb(database);
-	const rows = await db
-		.select()
-		.from(unitAliases)
-		.where(
-			and(
-				eq(unitAliases.alias, alias),
-				isNull(unitAliases.sourceDomain),
-				baseUnitId ? eq(unitAliases.baseUnitId, baseUnitId) : undefined
-			)
-		)
-		.limit(1);
-	const row = rows[0];
-	return row
-		? { unitId: row.unitId, baseUnitId: row.baseUnitId, aliasScope: 'global', aliasId: row.id }
-		: null;
-};
-
-const upsertUnitDisplayOverride = async ({
-	database,
-	householdId,
-	locale,
-	baseUnitId,
-	preferredUnitAlias
-}: {
-	database: D1Database;
-	householdId: string;
-	locale: string;
-	baseUnitId?: string;
-	preferredUnitAlias: string;
-}) => {
-	const alias = preferredUnitAlias.trim();
-	if (!alias) return;
-	const db = getDb(database);
-	const globalAlias = await unitByAlias(database, alias, baseUnitId);
-	if (globalAlias) {
-		await db
-			.insert(householdUnitDisplayOverrides)
-			.values({
-				householdId,
-				baseUnitId: globalAlias.baseUnitId,
-				locale,
-				preferredUnitId: globalAlias.unitId,
-				preferredUnitAliasScope: globalAlias.aliasScope,
-				preferredUnitAliasId: globalAlias.aliasId
-			})
-			.onConflictDoUpdate({
-				target: [
-					householdUnitDisplayOverrides.householdId,
-					householdUnitDisplayOverrides.baseUnitId,
-					householdUnitDisplayOverrides.locale
-				],
-				set: {
-					preferredUnitId: globalAlias.unitId,
-					preferredUnitAliasScope: globalAlias.aliasScope,
-					preferredUnitAliasId: globalAlias.aliasId,
-					updatedAt: new Date().toISOString()
-				}
-			});
-		return;
-	}
-	if (!baseUnitId) return;
-	const insertedAliases = await db
-		.insert(unitHouseholdAliases)
-		.values({ householdId, unitId: baseUnitId, baseUnitId, alias, locale })
-		.returning({ id: unitHouseholdAliases.id });
-	const aliasId = insertedAliases[0]?.id;
-	if (!aliasId) return;
-	await db
-		.insert(householdUnitDisplayOverrides)
-		.values({
-			householdId,
-			baseUnitId,
-			locale,
-			preferredUnitId: baseUnitId,
-			preferredUnitAliasScope: 'household',
-			preferredUnitAliasId: aliasId
-		})
-		.onConflictDoUpdate({
-			target: [
-				householdUnitDisplayOverrides.householdId,
-				householdUnitDisplayOverrides.baseUnitId,
-				householdUnitDisplayOverrides.locale
-			],
-			set: {
-				preferredUnitId: baseUnitId,
-				preferredUnitAliasScope: 'household',
-				preferredUnitAliasId: aliasId,
-				updatedAt: new Date().toISOString()
-			}
-		});
 };
 
 const requireLoadedHousehold = async ({ locals, parent }: Parameters<PageServerLoad>[0]) => {
@@ -681,7 +571,6 @@ export const actions: Actions = {
 			form.has('ingredientOverrides')
 		) {
 			if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
-			const db = getDb(event.platform.env.DB);
 			const locale = localeFromForm(form.get('overrideLocale')) ?? defaultLocale;
 			const preferredMassUnit = String(form.get('preferredMassUnit') ?? '').trim();
 			const preferredVolumeUnit = String(form.get('preferredVolumeUnit') ?? '').trim();
@@ -732,72 +621,8 @@ export const actions: Actions = {
 				);
 			}
 			for (const row of parseJsonArray<IngredientOverrideInput>(form.get('ingredientOverrides'))) {
-				if (!row.baseFood) continue;
-				const unitRows = row.preferredMeasureUnit
-					? await db.select().from(units).where(eq(units.id, row.preferredMeasureUnit)).limit(1)
-					: [];
-				const measureUnit = unitRows[0];
-				let preferredFoodAliasScope: 'global' | 'household' | null = null;
-				let preferredFoodAliasId: string | null = null;
-				const alias = row.preferredFoodAlias.trim();
-				if (alias) {
-					const globalAliases = await db
-						.select()
-						.from(foodAliases)
-						.where(
-							and(
-								eq(foodAliases.foodId, row.baseFood),
-								eq(foodAliases.alias, alias),
-								isNull(foodAliases.sourceDomain)
-							)
-						)
-						.limit(1);
-					const globalAlias = globalAliases[0];
-					if (globalAlias) {
-						preferredFoodAliasScope = 'global';
-						preferredFoodAliasId = globalAlias.id;
-					} else {
-						const insertedAliases = await db
-							.insert(foodHouseholdAliases)
-							.values({
-								householdId,
-								foodId: row.baseFood,
-								alias,
-								locale,
-								defaultMeasureUnitId: measureUnit?.id,
-								defaultMeasureBaseUnitId: measureUnit?.baseUnitId
-							})
-							.returning({ id: foodHouseholdAliases.id });
-						preferredFoodAliasScope = 'household';
-						preferredFoodAliasId = insertedAliases[0]?.id ?? null;
-					}
-				}
 				updates.push(
-					db
-						.insert(householdFoodDisplayOverrides)
-						.values({
-							householdId,
-							foodId: row.baseFood,
-							locale,
-							preferredFoodAliasScope,
-							preferredFoodAliasId,
-							preferredMeasureUnitId: measureUnit?.id,
-							preferredMeasureBaseUnitId: measureUnit?.baseUnitId
-						})
-						.onConflictDoUpdate({
-							target: [
-								householdFoodDisplayOverrides.householdId,
-								householdFoodDisplayOverrides.foodId,
-								householdFoodDisplayOverrides.locale
-							],
-							set: {
-								preferredFoodAliasScope,
-								preferredFoodAliasId,
-								preferredMeasureUnitId: measureUnit?.id,
-								preferredMeasureBaseUnitId: measureUnit?.baseUnitId,
-								updatedAt: new Date().toISOString()
-							}
-						})
+					upsertFoodDisplayOverride({ database: event.platform.env.DB, householdId, locale, row })
 				);
 			}
 		}
