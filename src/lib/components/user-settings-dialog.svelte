@@ -151,6 +151,7 @@
 		needsEmailVerification(accountEmail, user.email, verifiedEmail)
 	);
 	const accountCanSave = $derived(!accountSaving && !emailVerificationRequired);
+	const mcpServerUrl = $derived(`${page.url.origin}/mcp`);
 
 	const categories: SettingsCategory[] = settingsCategories;
 
@@ -619,6 +620,7 @@
 					/>
 				{:else if activeCategory === 'mcp'}
 					<McpSettingsSection
+						{mcpServerUrl}
 						{mcpKeys}
 						{mcpKeysBusy}
 						{rerollingMcpKeyId}

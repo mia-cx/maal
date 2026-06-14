@@ -2,10 +2,12 @@
 	import McpCreatedKeyPanel from '$lib/components/settings/mcp-created-key-panel.svelte';
 	import McpKeyForm from '$lib/components/settings/mcp-key-form.svelte';
 	import McpKeyList from '$lib/components/settings/mcp-key-list.svelte';
+	import { Button } from '$lib/components/ui/button';
 	import type { McpKey, McpScope, McpScopeLevel } from '$lib/settings/mcp-key-model';
 	import type { SettingsHousehold } from '$lib/settings/types';
 
 	let {
+		mcpServerUrl,
 		mcpKeys,
 		mcpKeysBusy,
 		rerollingMcpKeyId,
@@ -33,6 +35,7 @@
 		toggleMcpHousehold,
 		createMcpAccessKey
 	}: {
+		mcpServerUrl: string;
 		mcpKeys: McpKey[];
 		mcpKeysBusy: boolean;
 		rerollingMcpKeyId: string | null;
@@ -60,9 +63,24 @@
 		toggleMcpHousehold: (householdId: string, checked: boolean) => void;
 		createMcpAccessKey: () => void;
 	} = $props();
+
+	const copyMcpServerUrl = () => navigator.clipboard.writeText(mcpServerUrl);
 </script>
 
 <div class="grid max-w-lg gap-5 text-sm">
+	<div class="grid gap-2 rounded-md border border-border bg-muted/30 p-3">
+		<div class="flex items-start justify-between gap-3">
+			<div>
+				<p class="text-xs font-medium">MCP server address</p>
+				<p class="text-xs text-muted-foreground">
+					Use this URL when connecting Claude Desktop, Inspector, or another MCP client.
+				</p>
+			</div>
+			<Button variant="outline" size="sm" onclick={copyMcpServerUrl}>Copy</Button>
+		</div>
+		<code class="overflow-x-auto rounded bg-background px-2 py-1.5 text-xs">{mcpServerUrl}</code>
+	</div>
+
 	<McpKeyList
 		{mcpKeys}
 		{mcpKeysBusy}
