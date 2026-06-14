@@ -34,6 +34,7 @@ export type CreateHouseholdMealInput = {
 		imageUrl?: string;
 		prepTimeMinutes?: number;
 		cookTimeMinutes?: number;
+		yield?: number;
 		ingredients?: string[];
 		instructions?: string[];
 	};
@@ -142,7 +143,7 @@ export const createHouseholdMeal = async (input: {
 		imageUrl: recipe?.imageUrl ?? meal.customMeal?.imageUrl ?? null,
 		prepTimeMinutes: recipe?.prepTimeMinutes ?? meal.customMeal?.prepTimeMinutes ?? null,
 		cookTimeMinutes: recipe?.cookTimeMinutes ?? meal.customMeal?.cookTimeMinutes ?? null,
-		yield: recipe?.yield ?? defaultMealServings,
+		yield: recipe?.yield ?? meal.customMeal?.yield ?? defaultMealServings,
 		plannedYield: normalizeServingsPlanned(
 			{ servingsPlanned: meal.servingsPlanned },
 			defaultMealServings
