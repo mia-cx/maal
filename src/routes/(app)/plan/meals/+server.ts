@@ -14,11 +14,14 @@ import {
 	userRecipes
 } from '$lib/server/db/schema';
 import { loadMealPlanMeals, mealFromHouseholdMeal } from '$lib/server/db/recipe-mappers';
-import { parseIngredientAmount, parseIngredientLine } from '$lib/recipes/ingredient-text';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { insertHouseholdMealInstructionEvents } from '$lib/server/taxonomy/instruction-events';
 import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
 import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
+import {
+	mealIngredientLineToSidecar,
+	mealInstructionLineToSidecar
+} from '$lib/server/services/meal-line-sidecars';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
@@ -127,18 +130,9 @@ const replaceMealIngredientsFromMeal = async (
 		.delete(householdMealIngredients)
 		.where(eq(householdMealIngredients.householdMealId, householdMealId));
 	for (const [index, line] of ingredients.entries()) {
-		const parsed = parseIngredientLine(line);
-		const amount = parseIngredientAmount(parsed.amount);
-		await db.insert(householdMealIngredients).values({
-			householdMealId,
-			lineIndex: index,
-			originalText: line,
-			sourceAmountText: parsed.amount || null,
-			sourceQuantity: amount.quantity,
-			sourceUnitLabel: amount.unit,
-			sourceFoodLabel: parsed.item || line,
-			confidence: 1
-		});
+		await db
+			.insert(householdMealIngredients)
+			.values(mealIngredientLineToSidecar(householdMealId, line, index));
 	}
 };
 
@@ -151,12 +145,9 @@ const replaceMealInstructionsFromMeal = async (
 		.delete(householdMealInstructions)
 		.where(eq(householdMealInstructions.householdMealId, householdMealId));
 	for (const [index, instruction] of instructions.entries()) {
-		await db.insert(householdMealInstructions).values({
-			householdMealId,
-			stepIndex: index,
-			text: instruction,
-			confidence: 1
-		});
+		await db
+			.insert(householdMealInstructions)
+			.values(mealInstructionLineToSidecar(householdMealId, instruction, index));
 	}
 	const insertedInstructions = await db
 		.select({ id: householdMealInstructions.id, text: householdMealInstructions.text })
