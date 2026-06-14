@@ -19,6 +19,7 @@
 		type DraftIngredient,
 		type DraftInstruction
 	} from '$lib/menu/recipe-editor-model';
+	import RecipeIdentityFields from '$lib/components/menu/recipe-identity-fields.svelte';
 	import type { RecipeInstructionItem, RecipeMenuItem } from './menu-types';
 
 	let {
@@ -452,81 +453,25 @@
 							</div>
 
 							<div class="space-y-5 px-5 pb-5">
-								<div class="grid gap-4">
-									<label class="grid gap-1 text-xs font-medium">
-										Title
-										<Input bind:value={title} />
-									</label>
-
-									<label class="grid gap-1 text-xs font-medium">
-										Source URL
-										<div class="flex gap-2">
-											<Input bind:value={sourceUrl} />
-											{#if onimporturl}
-												<Button.Root
-													type="button"
-													variant="outline"
-													disabled={!sourceUrlCanImport || importBusy}
-													onclick={importSourceUrl}
-												>
-													{importBusy ? 'Importing…' : 'Import'}
-												</Button.Root>
-											{/if}
-										</div>
-										{#if onimporturl && sourceUrlCanImport}
-											<span class="text-muted-foreground">
-												Import will fill this sheet from schema.org recipe data before you save.
-											</span>
-										{/if}
-										{#if importError}
-											<span class="text-destructive">{importError}</span>
-										{/if}
-									</label>
-
-									<div class="grid gap-3 sm:grid-cols-2">
-										<label class="grid gap-1 text-xs font-medium">
-											Source site
-											<Input bind:value={sourceSiteName} />
-										</label>
-										<label class="grid gap-1 text-xs font-medium">
-											Author
-											<Input bind:value={sourceAuthorName} />
-										</label>
-										<label class="grid gap-1 text-xs font-medium">
-											Publisher
-											<Input bind:value={sourcePublisherName} />
-										</label>
-										<label class="grid gap-1 text-xs font-medium">
-											Based on URL
-											<Input bind:value={sourceIsBasedOnUrl} />
-										</label>
-									</div>
-
-									<label class="grid gap-1 text-xs font-medium">
-										Description
-										<textarea bind:value={description} rows="4" class={textareaClass}></textarea>
-									</label>
-
-									<label class="grid gap-1 text-xs font-medium">
-										Image URL
-										<Input bind:value={image} />
-									</label>
-
-									<div class="grid gap-3 sm:grid-cols-3">
-										<label class="grid gap-1 text-xs font-medium">
-											Prep minutes
-											<Input type="number" min="0" bind:value={prepTimeMinutes} />
-										</label>
-										<label class="grid gap-1 text-xs font-medium">
-											Cook minutes
-											<Input type="number" min="0" bind:value={cookTimeMinutes} />
-										</label>
-										<label class="grid gap-1 text-xs font-medium">
-											Yield
-											<Input type="number" min="1" step="1" bind:value={recipeYield} />
-										</label>
-									</div>
-								</div>
+								<RecipeIdentityFields
+									bind:title
+									bind:sourceUrl
+									bind:sourceSiteName
+									bind:sourceAuthorName
+									bind:sourcePublisherName
+									bind:sourceIsBasedOnUrl
+									bind:description
+									bind:image
+									bind:prepTimeMinutes
+									bind:cookTimeMinutes
+									bind:recipeYield
+									{textareaClass}
+									{onimporturl}
+									{sourceUrlCanImport}
+									{importBusy}
+									{importError}
+									{importSourceUrl}
+								/>
 
 								<section class="grid gap-2">
 									<h3 class="text-xs font-medium text-foreground">Ingredients</h3>
