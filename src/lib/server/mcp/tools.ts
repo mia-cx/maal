@@ -1,6 +1,6 @@
-import { householdTools } from './household-tools';
-import { planningTools } from './planning-tools';
-import { recipeTools } from './recipe-tools';
+import { householdTools } from './household-adapter';
+import { planningTools } from './planning-adapter';
+import { recipeTools } from './recipe-adapter';
 import type { ToolDefinition } from './registry';
 
 export const tools: ToolDefinition[] = [...householdTools, ...recipeTools, ...planningTools];
