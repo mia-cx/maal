@@ -32,7 +32,7 @@
 	import MyMenuRecipeSheet from './recipe-edit-sheet.svelte';
 	import RecipeMenuCard from './recipe-menu-card.svelte';
 	import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
-	import { emptyRecipeMenuStats } from '$lib/menu/recipe-defaults';
+	import { createDraftRecipe } from '$lib/menu/recipe-draft';
 	import type { RecipeMenuItem } from './menu-types';
 
 	let {
@@ -196,19 +196,9 @@
 		return 'Could not add that recipe.';
 	};
 
-	const draftRecipeFromTitle = (title = 'New recipe'): RecipeMenuItem => ({
-		id: `draft-recipe-${crypto.randomUUID()}`,
-		title,
-		description: '',
-		ingredientCount: 0,
-		...emptyRecipeMenuStats(),
-		ingredients: [{ amount: '', item: '' }],
-		instructions: [{ position: 1, text: '' }]
-	});
-
 	const openAddRecipe = () => {
 		selectMenuRecipe(null);
-		draftRecipe = draftRecipeFromTitle();
+		draftRecipe = createDraftRecipe(() => crypto.randomUUID());
 		sheetOpen = true;
 	};
 
