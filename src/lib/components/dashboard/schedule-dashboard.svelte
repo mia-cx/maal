@@ -15,7 +15,12 @@
 	import { createMenuRecipe, hydrateMenuRecipes, menuRecipesStore } from '$lib/stores/menu-recipes';
 	import { fetchRecipePickerRecipes } from '$lib/menu/menu-client';
 	import { createDraftRecipe } from '$lib/menu/recipe-draft';
-	import { setDailyScroll, uiState, updateUiState } from '$lib/stores/ui-state';
+	import {
+		clearScheduleDailyScroll,
+		scheduleUiState,
+		setScheduleDailyScroll,
+		updateScheduleUiState
+	} from '$lib/stores/schedule-ui-state';
 	import AddMealDialog from './add-meal-dialog.svelte';
 	import ContinuousSchedule from './continuous-schedule.svelte';
 	import { RecipeEditSheet, type RecipeMenuItem } from '$lib/components/menu';
@@ -60,7 +65,7 @@
 		unitPreferences?: UnitPreferences;
 	} = $props();
 
-	const initialUiState = uiState.get();
+	const initialUiState = scheduleUiState.get();
 	const mealPoolImageMinHeight = 760;
 
 	let mode = $state<ScheduleMode>(initialUiState.scheduleMode);
@@ -181,7 +186,7 @@
 		dayNavigationSignal += 1;
 		if (mode !== 'daily') return;
 		dailyScroll = null;
-		updateUiState({ dailyScroll: null });
+		clearScheduleDailyScroll();
 	};
 
 	const moveByMonthRow = (rowDelta: number): boolean => {
@@ -244,20 +249,20 @@
 	const today = () => {
 		anchorDate = startOfDay(new Date());
 		dailyScroll = null;
-		updateUiState({ dailyScroll: null });
+		clearScheduleDailyScroll();
 		todaySignal += 1;
 	};
 
 	const openDay = (date: Date) => {
 		anchorDate = startOfDay(date);
 		dailyScroll = null;
-		updateUiState({ dailyScroll: null });
+		clearScheduleDailyScroll();
 		mode = 'daily';
 	};
 
 	const updateDailyScroll = (scrollState: NonNullable<typeof dailyScroll>) => {
 		dailyScroll = scrollState;
-		setDailyScroll(scrollState);
+		setScheduleDailyScroll(scrollState);
 	};
 
 	const updateVisibleAnchor = (date: Date) => {
@@ -430,7 +435,7 @@
 	});
 
 	$effect(() => {
-		updateUiState({ scheduleMode: mode, scheduleAnchorDate: dateKey(anchorDate) });
+		updateScheduleUiState({ scheduleMode: mode, scheduleAnchorDate: dateKey(anchorDate) });
 	});
 </script>
 

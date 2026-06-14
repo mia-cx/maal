@@ -6,7 +6,7 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { featurePreviews } from '$lib/features/flags';
-	import { uiState, updateUiState } from '$lib/stores/ui-state';
+	import { appShellUiState, updateAppShellUiState } from '$lib/stores/app-shell-ui-state';
 	import type { Snippet } from 'svelte';
 	import type { LayoutData } from './$types';
 
@@ -15,7 +15,7 @@
 
 	let { children, data }: { children: Snippet; data: LayoutData } = $props();
 
-	const initialUiState = uiState.get();
+	const initialUiState = appShellUiState.get();
 	let sidebarOpen = $state(initialUiState.sidebarOpen);
 	let sidebarWidth = $state(initialUiState.sidebarWidth);
 	let resizingSidebar = $state(false);
@@ -75,7 +75,7 @@
 	};
 
 	$effect(() => {
-		updateUiState({ activeNav, sidebarOpen, sidebarWidth });
+		updateAppShellUiState({ activeNav, sidebarOpen, sidebarWidth });
 	});
 </script>
 
