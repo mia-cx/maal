@@ -19,3 +19,9 @@ Use these notes when rebasing feature work across the refactor.
 - Use `src/lib/menu/menu-client.ts` for menu HTTP calls.
 - Use dashboard planning client helpers for schedule meal calls.
 - Import feature contracts from public barrels instead of deep component paths.
+
+## Settings UI
+
+- Keep section-specific display in `src/lib/components/settings/*`.
+- Keep field/state shaping in `src/lib/settings/*-model.ts` modules.
+- Keep route-specific mutation transport in `src/lib/settings/*-client.ts` modules.
