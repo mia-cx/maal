@@ -3,6 +3,11 @@ import { dateFromKey } from '$lib/components/dashboard/schedule-date';
 import { moveMealToDropTarget } from '$lib/components/dashboard/schedule-dnd';
 import { isMealInPool } from '$lib/components/dashboard/schedule-ordering';
 import type { Meal, MealDropTarget } from '$lib/components/dashboard/schedule-types';
+import {
+	createScheduleMealRemote,
+	deleteScheduleMealRemote,
+	updateScheduleMealRemote
+} from '$lib/components/dashboard/schedule-meal-client';
 import type { RecipeMenuItem } from '$lib/components/menu';
 import { convertInstructionTemperatures, type UnitPreferences } from '$lib/recipes/ingredient-text';
 import { atom, computed } from 'nanostores';
@@ -152,13 +157,8 @@ const emitScheduleMealChange = (change: ScheduleMealChange) => {
 
 const persistDeletedScheduleMeal = (mealId: string, onFailure?: (error: unknown) => void) => {
 	if (!browser) return;
-	fetch('/plan/meals', {
-		method: 'DELETE',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ mealId })
-	})
-		.then(async (response) => {
-			if (!response.ok) throw new Error(await response.text());
+	deleteScheduleMealRemote(mealId)
+		.then(() => {
 			deletedMealIds.delete(mealId);
 		})
 		.catch(
@@ -179,13 +179,8 @@ const persistExistingScheduleMeal = (
 	onSuccess?: () => void
 ) => {
 	if (!browser) return;
-	fetch('/plan/meals', {
-		method: 'PUT',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ meal })
-	})
-		.then(async (response) => {
-			if (!response.ok) throw new Error(await response.text());
+	updateScheduleMealRemote(meal)
+		.then(() => {
 			onSuccess?.();
 		})
 		.catch(
@@ -311,24 +306,18 @@ const mergePendingCreateResponse = (createdMeal: Meal, currentMeal?: Meal): Meal
 const persistNewScheduleMeal = (meal: Meal, previousMealId = meal.id) => {
 	if (!browser) return;
 	pendingCreateMealIds.add(previousMealId);
-	fetch('/plan/meals', {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ meal })
-	})
-		.then(async (response) => {
-			if (!response.ok) throw new Error(await response.text());
-			const body = (await response.json()) as { meal: Meal };
+	createScheduleMealRemote(meal)
+		.then((createdMeal) => {
 			if (deletedMealIds.has(previousMealId)) {
 				pendingCreateMealIds.delete(previousMealId);
-				deletedMealIds.add(body.meal.id);
-				persistDeletedScheduleMeal(body.meal.id);
+				deletedMealIds.add(createdMeal.id);
+				persistDeletedScheduleMeal(createdMeal.id);
 				return;
 			}
 			const currentMeal = scheduleMealStore
 				.get()
 				.find((candidate) => candidate.id === previousMealId);
-			const reconciledMeal = mergePendingCreateResponse(body.meal, currentMeal);
+			const reconciledMeal = mergePendingCreateResponse(createdMeal, currentMeal);
 			pendingCreateMealIds.delete(previousMealId);
 			replaceMeal(reconciledMeal, previousMealId);
 			if (currentMeal && scheduleFieldsChanged(currentMeal, meal)) {
