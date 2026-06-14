@@ -31,21 +31,13 @@
 		UpdatedUser,
 		User
 	} from '$lib/settings/types';
-	import BellIcon from '@lucide/svelte/icons/bell';
 	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
-	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
-	import KeyRoundIcon from '@lucide/svelte/icons/key-round';
 	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
-	import LockKeyholeIcon from '@lucide/svelte/icons/lock-keyhole';
-	import UserRoundIcon from '@lucide/svelte/icons/user-round';
-	import type { Component } from 'svelte';
-
-	type SettingsCategory = {
-		id: SettingsCategoryId;
-		label: string;
-		icon: Component;
-		disabled?: boolean;
-	};
+	import {
+		settingsCategories,
+		settingsCategoryFromParam,
+		type SettingsCategory
+	} from '$lib/settings/categories';
 
 	let {
 		open = $bindable(false),
@@ -132,13 +124,7 @@
 	const emailVerificationRequired = $derived(accountEmailChanged && !accountEmailVerified);
 	const accountCanSave = $derived(!accountSaving && !emailVerificationRequired);
 
-	const categories: SettingsCategory[] = [
-		{ id: 'account', label: 'Account', icon: UserRoundIcon },
-		{ id: 'security', label: 'Security', icon: LockKeyholeIcon },
-		{ id: 'mcp', label: 'MCP keys', icon: KeyRoundIcon },
-		{ id: 'notifications', label: 'Notifications', icon: BellIcon, disabled: true },
-		{ id: 'billing', label: 'Billing', icon: CreditCardIcon }
-	];
+	const categories: SettingsCategory[] = settingsCategories;
 
 	const activeCategoryDetails = $derived(
 		categories.find((category) => category.id === activeCategory) ?? categories[0]
@@ -146,13 +132,8 @@
 
 	let lastSettingsUrlParam = $state<string | null>(null);
 
-	const settingsCategoryFromUrl = (): SettingsCategoryId | null => {
-		const settingsParam = page.url.searchParams.get('settings');
-		if (!settingsParam) return null;
-		return categories.some((category) => category.id === settingsParam)
-			? (settingsParam as SettingsCategoryId)
-			: 'account';
-	};
+	const settingsCategoryFromUrl = (): SettingsCategoryId | null =>
+		settingsCategoryFromParam(page.url.searchParams.get('settings'));
 
 	const chooseCategory = async (category: SettingsCategory) => {
 		if (category.disabled) return;
