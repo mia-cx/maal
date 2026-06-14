@@ -57,6 +57,7 @@ import {
 	updateHouseholdInviteRole
 } from '$lib/server/auth/household-invites';
 import { createAuthRuntime } from '$lib/server/auth/workos';
+import { displayUserName } from '$lib/server/auth/user-display';
 import {
 	SMOKE_HOUSEHOLD_ID,
 	SMOKE_HOUSEHOLD_NAME,
@@ -453,16 +454,6 @@ const membershipHasAdminRole = (membership: {
 }): boolean =>
 	membership.role.slug === 'admin' ||
 	Boolean(membership.roles?.some((role) => role.slug === 'admin'));
-
-const displayUserName = (user: {
-	name?: string | null;
-	firstName?: string | null;
-	lastName?: string | null;
-	email: string;
-}): string => {
-	const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
-	return user.name?.trim() || fullName || user.email.split('@')[0] || user.email;
-};
 
 const loadMembers = async (
 	platform: App.Platform | undefined,

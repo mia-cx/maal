@@ -1,6 +1,7 @@
 import type { Cookies } from '@sveltejs/kit';
 import { createAuthRuntime } from '$lib/server/auth/workos';
 import { provisionAuthSession } from '$lib/server/auth/provisioning';
+import { displayUserName } from '$lib/server/auth/user-display';
 import { SMOKE_HOUSEHOLD_ID, SMOKE_HOUSEHOLD_NAME, SMOKE_USER_ID, smokeAuthEnabled } from './smoke';
 
 export const HOUSEHOLD_COOKIE_NAME = 'maal_household_id';
@@ -84,16 +85,6 @@ export const canManageActiveHousehold = async (
 };
 
 export type UserHousehold = { id: string; name: string };
-
-const displayUserName = (user: {
-	name?: string | null;
-	firstName?: string | null;
-	lastName?: string | null;
-	email: string;
-}): string => {
-	const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
-	return user.name?.trim() || fullName || user.email.split('@')[0] || user.email;
-};
 
 export type HouseholdMember = {
 	id: string;
