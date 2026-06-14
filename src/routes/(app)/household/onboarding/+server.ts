@@ -1,6 +1,6 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { createHouseholdForUser } from '$lib/server/auth/household';
-import { startHouseholdTrial } from '$lib/server/billing/trials';
+import { loadTrialAvailability, startHouseholdTrial } from '$lib/server/billing/trials';
 
 const maxHouseholdNameLength = 120;
 
@@ -21,7 +21,6 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		error(400, { message: 'Household name is required.' });
 	}
 
-	const startTrialRequested = body.startTrial === true;
 	const name = body.name.trim();
 	if (!name) error(400, { message: 'Household name is required.' });
 	if (name.length > maxHouseholdNameLength) error(400, { message: 'Household name is too long.' });
@@ -35,17 +34,18 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 			name
 		});
 		let trialStarted = false;
-		if (startTrialRequested) {
-			try {
-				await startHouseholdTrial({
-					platform,
-					user: session.user,
-					householdId: household.id
-				});
-				trialStarted = true;
-			} catch (cause) {
-				console.warn('Created household without starting trial', cause);
-			}
+		const trialAvailability = await loadTrialAvailability({
+			database: platform?.env.DB,
+			userId: session.user.id,
+			householdId: household.id
+		});
+		if (trialAvailability.available) {
+			await startHouseholdTrial({
+				platform,
+				user: session.user,
+				householdId: household.id
+			});
+			trialStarted = true;
 		}
 		return json(
 			{ household: { id: household.id, name: household.name }, trialStarted },

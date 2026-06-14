@@ -1,4 +1,4 @@
-import type { AuthSession } from '$lib/server/auth/session';
+import { tryCreateAuthRuntime } from '$lib/server/auth/workos';
 import { loadBillingStatus } from './subscriptions';
 
 const globalGrantTokens = new Set([
@@ -14,40 +14,52 @@ const globalGrantTokens = new Set([
 	'reward'
 ]);
 
-const splitGrantList = (value: string | null | undefined): string[] =>
-	(value ?? '')
-		.split(/[\s,;]+/)
-		.map((token) => token.trim())
-		.filter(Boolean);
+const grantMetadataKeys = ['maal_entitlement', 'maal_entitlements', 'maal_grant', 'maal_grants'];
 
-export const billingGrantTokens = (session: AuthSession): Set<string> => {
+const splitGrantList = (value: unknown): string[] =>
+	typeof value === 'string'
+		? value
+				.split(/[\s,;]+/)
+				.map((token) => token.trim())
+				.filter(Boolean)
+		: [];
+
+const billingGrantTokens = (metadata: Record<string, unknown>): Set<string> => {
 	const tokens = new Set<string>();
-	for (const token of [...session.entitlements, ...session.featureFlags]) tokens.add(token);
-	for (const key of ['maal_entitlement', 'maal_entitlements', 'maal_grant', 'maal_grants']) {
-		for (const token of splitGrantList(session.user.metadata[key])) tokens.add(token);
+	for (const key of grantMetadataKeys) {
+		for (const token of splitGrantList(metadata[key])) tokens.add(token);
 	}
 	return tokens;
 };
 
-export const hasBillingGrant = (session: AuthSession, householdId: string): boolean => {
-	const grants = billingGrantTokens(session);
+const grantsHouseholdAccess = (grants: Set<string>, householdId: string): boolean => {
 	if ([...globalGrantTokens].some((token) => grants.has(token))) return true;
 	return grants.has(`maal:household:${householdId}`) || grants.has(`household:${householdId}`);
 };
 
-export const hasHouseholdAccess = async (input: {
-	database: D1Database;
-	session: AuthSession;
+export const hasHouseholdBillingGrant = async (input: {
+	platform?: App.Platform;
 	householdId: string;
 }): Promise<boolean> => {
-	if (hasBillingGrant(input.session, input.householdId)) return true;
+	const runtime = tryCreateAuthRuntime(input.platform);
+	if (!runtime) return false;
+	const organization = await runtime.workos.organizations.getOrganization(input.householdId);
+	return grantsHouseholdAccess(billingGrantTokens(organization.metadata ?? {}), input.householdId);
+};
+
+export const hasHouseholdAccess = async (input: {
+	platform?: App.Platform;
+	database: D1Database;
+	householdId: string;
+}): Promise<boolean> => {
+	if (await hasHouseholdBillingGrant(input).catch(() => false)) return true;
 	const billing = await loadBillingStatus(input.database, input.householdId);
 	return billing.isPaid;
 };
 
 export const firstAccessibleHouseholdId = async (input: {
+	platform?: App.Platform;
 	database: D1Database;
-	session: AuthSession;
 	households: Array<{ id: string }>;
 }): Promise<string | null> => {
 	for (const household of input.households) {

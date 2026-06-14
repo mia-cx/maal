@@ -37,7 +37,7 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
+	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
 	const recipeId = params.id;
 	if (!recipeId) error(400, { message: 'Recipe is required.' });
 
@@ -117,7 +117,7 @@ export const PATCH: RequestHandler = async ({ cookies, locals, params, platform,
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
+	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
 	const recipeId = params.id;
 	if (!recipeId) error(400, { message: 'Recipe is required.' });
 
@@ -179,7 +179,7 @@ export const DELETE: RequestHandler = async ({ cookies, locals, params, platform
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
+	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
 	const recipeId = params.id;
 	if (!recipeId) error(400, { message: 'Recipe is required.' });
 

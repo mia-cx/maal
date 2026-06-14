@@ -49,7 +49,7 @@
 		const response = await fetch('/household/onboarding', {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ name, startTrial: canStartTrial })
+			body: JSON.stringify({ name })
 		});
 
 		busy = false;
@@ -91,7 +91,11 @@
 				/>
 			</label>
 			<Button type="submit" disabled={busy || !householdName.trim()}>
-				{busy ? 'Creating…' : canStartTrial ? 'Start trial' : 'Create household'}
+				{busy
+					? 'Creating…'
+					: canStartTrial
+						? 'Create household and start trial'
+						: 'Create household'}
 			</Button>
 		</form>
 

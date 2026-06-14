@@ -73,7 +73,7 @@ export const loadTrialAvailability = async (input: {
 
 export const startHouseholdTrial = async (input: {
 	platform: App.Platform | undefined;
-	user: { id: string; email: string };
+	user: { id: string; email: string; name?: string | null };
 	householdId: string;
 	priceId?: string | null;
 }): Promise<Stripe.Subscription> => {
@@ -103,6 +103,7 @@ export const startHouseholdTrial = async (input: {
 			input.priceId ?? (await findDefaultTrialPriceId(stripe, getStripeProductId(input.platform)));
 		const customer = await stripe.customers.create({
 			email: input.user.email,
+			name: input.user.name ?? undefined,
 			metadata: { householdId: input.householdId, workosUserId: input.user.id }
 		});
 		const subscription = await stripe.subscriptions.create({

@@ -623,8 +623,7 @@ export const load: PageServerLoad = async (event) => {
 			createdAt: organization.createdAt,
 			updatedAt: organization.updatedAt,
 			externalId: organization.externalId,
-			stripeCustomerId: organization.stripeCustomerId ?? null,
-			metadata: organization.metadata
+			stripeCustomerId: organization.stripeCustomerId ?? null
 		},
 		profile: {
 			defaultServings: profile.defaultPlannedYield,
@@ -684,15 +683,20 @@ export const actions: Actions = {
 			return fail(400, { message: 'Max uses must be a number.' });
 		}
 
-		await createHouseholdInvite({
-			database: event.platform.env.DB,
-			householdId: managedHousehold.householdId,
-			createdByUserId: managedHousehold.session.user.id,
-			roleSlug,
-			maxUses,
-			expiresAt
-		});
-		return { message: 'Invite link created.' };
+		try {
+			await createHouseholdInvite({
+				database: event.platform.env.DB,
+				householdId: managedHousehold.householdId,
+				createdByUserId: managedHousehold.session.user.id,
+				roleSlug,
+				maxUses,
+				expiresAt
+			});
+			return { message: 'Invite link created.' };
+		} catch (cause) {
+			console.error('Failed to create household invite', cause);
+			return fail(500, { message: 'Could not create invite link.' });
+		}
 	},
 
 	revokeInvite: async (event) => {

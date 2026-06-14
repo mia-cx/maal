@@ -761,17 +761,6 @@
 				{/if}
 			</section>
 
-			{#if Object.keys(data.household.metadata).length > 0}
-				<section class="grid gap-3 border-t border-border pt-4">
-					<h2 class="text-sm font-medium">Metadata</h2>
-					<div class="grid gap-1 text-xs text-muted-foreground">
-						{#each Object.entries(data.household.metadata) as [key, value] (key)}
-							<p><span class="font-mono">{key}</span>: {value}</p>
-						{/each}
-					</div>
-				</section>
-			{/if}
-
 			{#if canManageHousehold}
 				<section class="grid gap-3 border-t border-border pt-4">
 					<h2 class="text-sm font-medium">Danger zone</h2>

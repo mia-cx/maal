@@ -3,6 +3,7 @@ import type { AuthSession } from '$lib/server/auth/session';
 import { hasHouseholdAccess } from './entitlements';
 
 export const requireHouseholdAccess = async (input: {
+	platform?: App.Platform;
 	database: D1Database;
 	session: AuthSession;
 	householdId: string;

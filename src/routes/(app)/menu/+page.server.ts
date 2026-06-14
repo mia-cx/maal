@@ -19,14 +19,14 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 	if (!householdId) redirect(303, '/onboarding');
 
 	const activeHouseholdHasAccess = await hasHouseholdAccess({
+		platform,
 		database: platform.env.DB,
-		session,
 		householdId
 	});
 	if (!activeHouseholdHasAccess) {
 		const households = await listUserHouseholds(platform, session.user.id).catch(() => []);
 		householdId =
-			(await firstAccessibleHouseholdId({ database: platform.env.DB, session, households })) ??
+			(await firstAccessibleHouseholdId({ platform, database: platform.env.DB, households })) ??
 			householdId;
 	}
 	commitHouseholdCookie(cookies, householdId, url);

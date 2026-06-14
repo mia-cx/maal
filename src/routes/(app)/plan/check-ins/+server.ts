@@ -31,7 +31,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
+	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
 
 	const body = await readJson(request);
 	const mealId = isRecord(body) && typeof body.mealId === 'string' ? body.mealId.trim() : '';

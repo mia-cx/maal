@@ -690,7 +690,7 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
+	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
 
 	const db = getDb(platform.env.DB);
 	const importUrl = url.searchParams.get('importUrl')?.trim();
@@ -781,7 +781,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
+	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
 
 	const body = await readBody(request);
 	if (body.url && body.url.length > maxUrlLength)
@@ -901,7 +901,7 @@ export const PATCH: RequestHandler = async ({ cookies, locals, platform, request
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
+	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
 
 	const { recipeIds } = await readBulkBody(request);
 	const db = getDb(platform.env.DB);
@@ -931,7 +931,7 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ database: platform.env.DB, session, householdId });
+	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
 
 	const { recipeIds, permanent } = await readBulkBody(request);
 	const db = getDb(platform.env.DB);

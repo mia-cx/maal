@@ -27,7 +27,7 @@ export const load: LayoutServerLoad = async ({ cookies, locals, platform, url })
 	if (session && activeHouseholdId && platform?.env.DB) {
 		const [billing, hasAccess, canManageSubscription] = await Promise.all([
 			loadBillingStatus(platform.env.DB, activeHouseholdId),
-			hasHouseholdAccess({ database: platform.env.DB, session, householdId: activeHouseholdId }),
+			hasHouseholdAccess({ platform, database: platform.env.DB, householdId: activeHouseholdId }),
 			canManageActiveHousehold(platform, session, activeHouseholdId)
 		]);
 		subscriptionLock = {
