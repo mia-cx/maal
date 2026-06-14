@@ -9,7 +9,7 @@
 	import { resolve } from '$app/paths';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import SearchIcon from '@lucide/svelte/icons/search';
-	import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
+	import { fetchMenuRecipesPage, searchMenuRecipes } from '$lib/menu/menu-client';
 	import {
 		appendMenuRecipes,
 		archivedMenuRecipesStore,
@@ -93,22 +93,15 @@
 		if (nextRecipeOffset === null || recipesLoading) return;
 		recipesLoading = true;
 		recipesLoadError = null;
-		const params = new URLSearchParams({
-			offset: String(nextRecipeOffset),
-			limit: String(MENU_RECIPE_PAGE_SIZE)
-		});
-		const response = await fetch(`${resolve('/menu/recipes')}?${params}`);
-		recipesLoading = false;
-		if (!response.ok) {
+		try {
+			const body = await fetchMenuRecipesPage(nextRecipeOffset);
+			appendMenuRecipes(body.recipes);
+			nextRecipeOffset = body.nextRecipeOffset;
+		} catch {
 			recipesLoadError = 'Could not load more recipes.';
-			return;
+		} finally {
+			recipesLoading = false;
 		}
-		const body = (await response.json()) as {
-			recipes: RecipeMenuItem[];
-			nextRecipeOffset: number | null;
-		};
-		appendMenuRecipes(body.recipes);
-		nextRecipeOffset = body.nextRecipeOffset;
 	};
 
 	const idsMatch = (left: string[], right: string[]): boolean =>
@@ -160,13 +153,7 @@
 		const controller = new AbortController();
 		const timeout = setTimeout(async () => {
 			try {
-				const params = new URLSearchParams({ q: query, limit: '60' });
-				const response = await fetch(`${resolve('/menu/recipes')}?${params}`, {
-					signal: controller.signal
-				});
-				if (!response.ok) throw new Error('Could not search recipes.');
-				const body = (await response.json()) as { recipes: RecipeMenuItem[] };
-				searchRecipes = body.recipes;
+				searchRecipes = await searchMenuRecipes(query, { signal: controller.signal });
 			} catch (error) {
 				if (controller.signal.aborted) return;
 				searchLoadError = readAddRecipeError(error);
