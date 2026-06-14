@@ -22,3 +22,20 @@ export const searchMenuRecipes = async (
 	const body = (await response.json()) as { recipes: RecipeMenuItem[] };
 	return body.recipes;
 };
+
+export const importRecipeDraftFromUrl = async (url: string): Promise<RecipeMenuItem> => {
+	const params = new URLSearchParams({ importUrl: url });
+	const response = await fetch(`${resolve('/menu/recipes')}?${params}`);
+	if (!response.ok) {
+		let message = 'Could not import recipe.';
+		try {
+			const body = (await response.json()) as { message?: unknown };
+			if (typeof body.message === 'string' && body.message.trim()) message = body.message;
+		} catch {
+			// Fall through to fallback.
+		}
+		throw new Error(message);
+	}
+	const body = (await response.json()) as { recipe: RecipeMenuItem };
+	return body.recipe;
+};

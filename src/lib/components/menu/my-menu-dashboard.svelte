@@ -6,10 +6,13 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Input } from '$lib/components/ui/input';
-	import { resolve } from '$app/paths';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import SearchIcon from '@lucide/svelte/icons/search';
-	import { fetchMenuRecipesPage, searchMenuRecipes } from '$lib/menu/menu-client';
+	import {
+		fetchMenuRecipesPage,
+		importRecipeDraftFromUrl,
+		searchMenuRecipes
+	} from '$lib/menu/menu-client';
 	import {
 		appendMenuRecipes,
 		archivedMenuRecipesStore,
@@ -219,14 +222,8 @@
 		sheetOpen = true;
 	};
 
-	const loadRecipeDraftFromUrl = async (url: string): Promise<RecipeMenuItem> => {
-		const params = new URLSearchParams({ importUrl: url });
-		const response = await fetch(`${resolve('/menu/recipes')}?${params}`);
-		if (!response.ok)
-			throw new Error(await readResponseError(response, 'Could not import recipe.'));
-		const body = (await response.json()) as { recipe: RecipeMenuItem };
-		return body.recipe;
-	};
+	const loadRecipeDraftFromUrl = (url: string): Promise<RecipeMenuItem> =>
+		importRecipeDraftFromUrl(url);
 
 	const saveRecipeFromSheet = async (recipe: RecipeMenuItem) => {
 		if (!recipe.id.startsWith('draft-recipe-')) {
