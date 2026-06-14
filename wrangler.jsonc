@@ -1,6 +1,7 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "maal",
+	"account_id": "492214885e7a580ccc1d141dfdb4dc5f",
 	"compatibility_date": "2026-06-08",
 	"compatibility_flags": ["nodejs_compat"],
 	"main": ".svelte-kit/cloudflare/_worker.js",
