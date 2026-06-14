@@ -1,7 +1,6 @@
-import { and, eq } from 'drizzle-orm';
 import type { MealFeedbackVerdict } from '$lib/components/dashboard/meal-labels';
 import { getDb } from '$lib/server/db';
-import { householdMeals, mealCheckIns } from '$lib/server/db/schema';
+import { upsertMealCheckIn as upsertMealCheckInCore } from './meal-check-ins';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -25,44 +24,14 @@ export const upsertMealCheckIn = async (input: {
 }) => {
 	if (!input.mealId) throw new Error('Meal is required.');
 	if (!verdicts.has(input.verdict)) throw new Error('Verdict is required.');
-	const existingMeal = await input.db
-		.select()
-		.from(householdMeals)
-		.where(
-			and(eq(householdMeals.id, input.mealId), eq(householdMeals.householdId, input.householdId))
-		)
-		.get();
-	if (!existingMeal) throw new Error('Meal not found.');
-
-	const cooked = input.cooked !== false;
-	const canReportCookTime = existingMeal.plannedCookWorkosUserId === input.workosUserId;
-	const cookTime = cooked && canReportCookTime ? positiveInteger(input.cookTime) : null;
-	const updatedAt = new Date().toISOString();
-
-	await input.db
-		.insert(mealCheckIns)
-		.values({
-			workosUserId: input.workosUserId,
-			householdMealId: input.mealId,
-			verdict: input.verdict,
-			cookTime,
-			reason: input.reason?.trim() || null,
-			updatedAt
-		})
-		.onConflictDoUpdate({
-			target: [mealCheckIns.householdMealId, mealCheckIns.workosUserId],
-			set: {
-				verdict: input.verdict,
-				cookTime,
-				reason: input.reason?.trim() || null,
-				updatedAt
-			}
-		});
-
-	await input.db
-		.update(householdMeals)
-		.set({ status: cooked ? 'cooked' : 'skipped', updatedAt })
-		.where(eq(householdMeals.id, input.mealId));
-
+	await upsertMealCheckInCore(input.db, {
+		householdId: input.householdId,
+		workosUserId: input.workosUserId,
+		mealId: input.mealId,
+		verdict: input.verdict,
+		cooked: input.cooked !== false,
+		cookTime: positiveInteger(input.cookTime),
+		reason: input.reason ?? null
+	});
 	return { ok: true };
 };
