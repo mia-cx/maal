@@ -13,6 +13,7 @@
 		updateScheduleMealSchedule
 	} from '$lib/stores/schedule-meals';
 	import { createMenuRecipe, hydrateMenuRecipes, menuRecipesStore } from '$lib/stores/menu-recipes';
+	import { emptyRecipeMenuStats } from '$lib/menu/recipe-defaults';
 	import { setDailyScroll, uiState, updateUiState } from '$lib/stores/ui-state';
 	import AddMealDialog from './add-meal-dialog.svelte';
 	import ContinuousSchedule from './continuous-schedule.svelte';
@@ -401,15 +402,7 @@
 		title,
 		description: '',
 		ingredientCount: 0,
-		appliances: [],
-		timesCooked: 0,
-		plannedCount: 0,
-		reviewSummary: {
-			worthRepeating: 0,
-			neutral: 0,
-			neverAgain: 0,
-			notes: []
-		},
+		...emptyRecipeMenuStats(),
 		ingredients: [{ amount: '', item: '' }],
 		instructions: [{ position: 1, text: '' }]
 	});

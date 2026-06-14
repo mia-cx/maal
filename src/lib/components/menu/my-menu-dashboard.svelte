@@ -29,6 +29,7 @@
 	import MyMenuRecipeSheet from './recipe-edit-sheet.svelte';
 	import RecipeMenuCard from './recipe-menu-card.svelte';
 	import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
+	import { emptyRecipeMenuStats } from '$lib/menu/recipe-defaults';
 	import type { RecipeMenuItem } from './menu-types';
 
 	let {
@@ -220,15 +221,7 @@
 		title,
 		description: '',
 		ingredientCount: 0,
-		appliances: [],
-		timesCooked: 0,
-		plannedCount: 0,
-		reviewSummary: {
-			worthRepeating: 0,
-			neutral: 0,
-			neverAgain: 0,
-			notes: []
-		},
+		...emptyRecipeMenuStats(),
 		ingredients: [{ amount: '', item: '' }],
 		instructions: [{ position: 1, text: '' }]
 	});

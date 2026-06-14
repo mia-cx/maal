@@ -18,7 +18,7 @@
 		isoWeekNumber,
 		startOfDay
 	} from './schedule-date';
-	import MealPool from './meal-pool.svelte';
+	import ScheduleMealPool from './schedule-meal-pool.svelte';
 	import MultiDayColumn from './multi-day-column.svelte';
 	import { sortScheduledMeals } from './schedule-ordering';
 	import type { Meal, MealCheckInHandler, MealDropTarget } from './schedule-types';
@@ -743,7 +743,7 @@
 	class="@container/multi-day flex h-full min-w-0 flex-col overflow-hidden"
 >
 	<div class="border-b border-border">
-		<MealPool
+		<ScheduleMealPool
 			{draggingMealId}
 			{draggedMeal}
 			{dropTarget}

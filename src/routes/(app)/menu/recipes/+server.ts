@@ -31,6 +31,7 @@ import {
 	type UnitPreferences
 } from '$lib/recipes/ingredient-text';
 import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
+import { emptyRecipeMenuStats } from '$lib/menu/recipe-defaults';
 import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
 import { boundedPagination } from '$lib/shared/pagination';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
@@ -681,15 +682,7 @@ const draftRecipeFromImport = (
 			const text = convertInstructionTemperatures(instruction.text, unitPreferences);
 			return { ...instruction, text };
 		}),
-		appliances: [],
-		timesCooked: 0,
-		plannedCount: 0,
-		reviewSummary: {
-			worthRepeating: 0,
-			neutral: 0,
-			neverAgain: 0,
-			notes: []
-		}
+		...emptyRecipeMenuStats()
 	};
 };
 

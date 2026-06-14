@@ -10,7 +10,7 @@
 		type ProgrammaticScrollBehavior
 	} from '$lib/interaction/scroll-sdk';
 	import { onMount, tick } from 'svelte';
-	import MealPool from './meal-pool.svelte';
+	import ScheduleMealPool from './schedule-meal-pool.svelte';
 	import MonthDayCell from './month-day-cell.svelte';
 	import {
 		addDays,
@@ -672,7 +672,7 @@
 
 <div class="flex h-full min-w-0 flex-col overflow-hidden">
 	<div class="border-b border-border">
-		<MealPool
+		<ScheduleMealPool
 			{draggingMealId}
 			{draggedMeal}
 			{dropTarget}
