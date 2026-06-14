@@ -1,5 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { authDiscoveryResponse, bearerToken, handleMcpRequest } from '$lib/server/mcp/protocol';
+import { authDiscoveryResponse, bearerToken, handleMcpRequest } from '$lib/server/mcp';
 
 export const POST: RequestHandler = async ({ platform, request }) =>
 	handleMcpRequest(platform, request);
