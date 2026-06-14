@@ -35,6 +35,12 @@
 	} from '$lib/settings/account-model';
 	import { readSettingsError } from '$lib/settings/api-client';
 	import {
+		createMcpKey,
+		loadMcpKeys as requestMcpKeys,
+		rerollMcpKey,
+		revokeMcpKey
+	} from '$lib/settings/mcp-key-client';
+	import {
 		createBillingPortalSession,
 		loadBillingStatus as requestBillingStatus
 	} from '$lib/settings/billing-client';
@@ -307,13 +313,12 @@
 		if (mcpKeysBusy || (mcpKeysLoaded && !force)) return;
 		mcpKeysBusy = true;
 		mcpError = null;
-		const response = await fetch(resolve('/settings/mcp-keys'));
+		const body = await requestMcpKeys();
 		mcpKeysBusy = false;
-		if (!response.ok) {
-			mcpError = await readSettingsError(response, 'Could not load MCP keys.');
+		if (!body.ok) {
+			mcpError = body.error;
 			return;
 		}
-		const body = (await response.json()) as { keys: McpKey[]; households: SettingsHousehold[] };
 		mcpKeys = body.keys;
 		mcpHouseholds = body.households;
 		mcpKeyHouseholdIds = mcpKeyHouseholdIds.length
@@ -345,24 +350,19 @@
 		mcpMessage = null;
 		mcpError = null;
 		createdMcpKey = null;
-		const response = await fetch(resolve('/settings/mcp-keys'), {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({
-				label: mcpKeyLabel,
-				scopes: selectedMcpScopes,
-				householdScope:
-					mcpKeyHouseholdKind === 'all'
-						? { kind: 'all' }
-						: { kind: 'households', householdIds: mcpKeyHouseholdIds }
-			})
+		const body = await createMcpKey({
+			label: mcpKeyLabel,
+			scopes: selectedMcpScopes,
+			householdScope:
+				mcpKeyHouseholdKind === 'all'
+					? { kind: 'all' }
+					: { kind: 'households', householdIds: mcpKeyHouseholdIds }
 		});
 		mcpKeyCreating = false;
-		if (!response.ok) {
-			mcpError = await readSettingsError(response, 'Could not create MCP key.');
+		if (!body.ok) {
+			mcpError = body.error;
 			return;
 		}
-		const body = (await response.json()) as { key: string; record: McpKey };
 		createdMcpKey = body.key;
 		mcpKeys = [body.record, ...mcpKeys];
 		mcpKeyLabel = '';
@@ -375,17 +375,12 @@
 		mcpError = null;
 		mcpMessage = null;
 		createdMcpKey = null;
-		const response = await fetch(resolve('/settings/mcp-keys'), {
-			method: 'PUT',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ keyId: key.id })
-		});
+		const body = await rerollMcpKey(key.id);
 		rerollingMcpKeyId = null;
-		if (!response.ok) {
-			mcpError = await readSettingsError(response, 'Could not reroll MCP key.');
+		if (!body.ok) {
+			mcpError = body.error;
 			return;
 		}
-		const body = (await response.json()) as { key: string; record: McpKey };
 		createdMcpKey = body.key;
 		mcpKeys = mcpKeys.map((existingKey) =>
 			existingKey.id === body.record.id ? body.record : existingKey
@@ -408,14 +403,10 @@
 		revokingMcpKeyId = mcpKeyToRevoke.id;
 		mcpError = null;
 		mcpMessage = null;
-		const response = await fetch(resolve('/settings/mcp-keys'), {
-			method: 'DELETE',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ keyId: mcpKeyToRevoke.id })
-		});
+		const result = await revokeMcpKey(mcpKeyToRevoke.id);
 		revokingMcpKeyId = null;
-		if (!response.ok) {
-			mcpError = await readSettingsError(response, 'Could not revoke MCP key.');
+		if (!result.ok) {
+			mcpError = result.error;
 			return;
 		}
 		mcpKeys = mcpKeys.map((key) =>
