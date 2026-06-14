@@ -42,11 +42,9 @@ import {
 	localeFromForm,
 	maxHouseholdNameLength,
 	numberFromForm,
-	timeFromForm,
-	timezoneFromForm,
-	weekStartDay,
-	weekStartValue
+	weekStartDay
 } from '$lib/domain/household/settings-parsing';
+import { profileUpdateFromForm } from '$lib/domain/household/profile-settings';
 import {
 	createHouseholdInvite,
 	deleteHouseholdInvite,
@@ -656,13 +654,9 @@ export const actions: Actions = {
 		if ('status' in managedHousehold) return managedHousehold;
 		const { householdId } = managedHousehold;
 		const form = await event.request.formData();
-		const profileUpdate: Partial<{
-			defaultPlannedYield: number;
-			locale: string;
-			timezone: string | null;
-			weekStartsOn: number;
-			preferredDinnerTime: string | null;
-		}> = {};
+		const parsedProfileUpdate = profileUpdateFromForm(form);
+		if (!parsedProfileUpdate.ok) return fail(400, { message: parsedProfileUpdate.message });
+		const profileUpdate = parsedProfileUpdate.update;
 		const updates: Promise<unknown>[] = [];
 
 		if (form.has('name')) {
@@ -677,29 +671,6 @@ export const actions: Actions = {
 					name
 				})
 			);
-		}
-
-		if (form.has('defaultServings')) {
-			profileUpdate.defaultPlannedYield = Math.min(
-				24,
-				Math.max(1, numberFromForm(form.get('defaultServings'), 1))
-			);
-		}
-		if (form.has('locale')) {
-			const locale = localeFromForm(form.get('locale'));
-			if (!locale) return fail(400, { message: 'Locale is invalid.' });
-			profileUpdate.locale = locale;
-		}
-		if (form.has('timezone')) {
-			const timezone = timezoneFromForm(form.get('timezone'));
-			if (timezone === undefined) return fail(400, { message: 'Timezone is invalid.' });
-			profileUpdate.timezone = timezone;
-		}
-		if (form.has('weekStartsOn')) {
-			profileUpdate.weekStartsOn = weekStartValue(asWeekStartDay(form.get('weekStartsOn')));
-		}
-		if (form.has('preferredDinnerTime')) {
-			profileUpdate.preferredDinnerTime = timeFromForm(form.get('preferredDinnerTime'));
 		}
 
 		if (
