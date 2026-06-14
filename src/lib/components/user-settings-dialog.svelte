@@ -10,6 +10,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import SettingsCategoryNav from '$lib/components/settings/settings-category-nav.svelte';
+	import SettingsSectionHeading from '$lib/components/settings/settings-section-heading.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import * as InputOTP from '$lib/components/ui/input-otp';
 	import * as Popover from '$lib/components/ui/popover';
@@ -628,10 +629,7 @@
 			/>
 
 			<section class="min-h-0 overflow-y-auto p-4">
-				<div class="mb-4 flex items-center gap-2">
-					<activeCategoryDetails.icon class="size-4" />
-					<h2 class="text-sm font-medium">{activeCategoryDetails.label}</h2>
-				</div>
+				<SettingsSectionHeading category={activeCategoryDetails} />
 
 				{#if activeCategory === 'account'}
 					<form class="grid gap-3" onsubmit={saveAccount}>
