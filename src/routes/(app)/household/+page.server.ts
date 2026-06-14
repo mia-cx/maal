@@ -1,9 +1,5 @@
-import { fail, redirect, type Cookies } from '@sveltejs/kit';
-import {
-	canManageActiveHousehold,
-	clearHouseholdCookie,
-	resolveActiveHouseholdId
-} from '$lib/server/auth/household';
+import { fail, redirect } from '@sveltejs/kit';
+import { clearHouseholdCookie } from '$lib/server/auth/household';
 import { loadHouseholdView } from '$lib/server/household/household-view';
 import { deleteHouseholdCascade } from '$lib/server/household/delete-household';
 import { updateHouseholdAppliancesFromForm } from '$lib/server/household/appliance-settings';
@@ -23,6 +19,10 @@ import {
 } from '$lib/server/household/member-commands';
 import { SMOKE_HOUSEHOLD_ID, smokeAuthEnabled } from '$lib/server/auth/smoke';
 import { smokeHouseholdView } from '$lib/server/household/smoke-household-view';
+import {
+	requireActionHousehold,
+	requireManageHousehold
+} from '$lib/server/household/action-context';
 import type { Actions, PageServerLoad } from './$types';
 
 const requireLoadedHousehold = async ({ locals, parent }: Parameters<PageServerLoad>[0]) => {
@@ -30,36 +30,6 @@ const requireLoadedHousehold = async ({ locals, parent }: Parameters<PageServerL
 	const layout = await parent();
 	if (!layout.activeHouseholdId) redirect(302, '/onboarding');
 	return { session: locals.session, householdId: layout.activeHouseholdId };
-};
-
-const requireActionHousehold = async (event: {
-	locals: App.Locals;
-	platform: App.Platform | undefined;
-	cookies: Cookies;
-	url: URL;
-}) => {
-	if (!event.locals.session) redirect(302, '/auth/login');
-	const { householdId } = await resolveActiveHouseholdId({
-		platform: event.platform,
-		cookies: event.cookies,
-		url: event.url,
-		session: event.locals.session
-	});
-	if (!householdId) redirect(302, '/onboarding');
-	return { session: event.locals.session, householdId };
-};
-
-const requireManageHousehold = async (event: {
-	locals: App.Locals;
-	platform: App.Platform | undefined;
-	cookies: Cookies;
-	url: URL;
-}) => {
-	const household = await requireActionHousehold(event);
-	if (!(await canManageActiveHousehold(event.platform, household.session, household.householdId))) {
-		return fail(403, { message: 'You do not have permission to manage this household.' });
-	}
-	return household;
 };
 
 export const load: PageServerLoad = async (event) => {
