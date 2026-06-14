@@ -682,10 +682,43 @@ const bearerToken = (request: Request): string | null => {
 	return match?.[1]?.trim() ?? null;
 };
 
-const jsonResponse = (body: unknown, status: number) =>
+const mcpAuthDiscovery = {
+	authentication: {
+		type: 'bearer',
+		scheme: 'Bearer',
+		header: 'Authorization',
+		format: 'Authorization: Bearer <Maal MCP key>',
+		instructions: 'Create a Maal MCP key in Settings → MCP keys, then use it as a bearer token.'
+	}
+};
+
+const bearerChallenge = 'Bearer realm="Maal MCP", error="invalid_token"';
+
+const jsonResponse = (body: unknown, status: number, headers: HeadersInit = {}) =>
 	new Response(JSON.stringify(body), {
 		status,
-		headers: { 'content-type': 'application/json' }
+		headers: { 'content-type': 'application/json', ...headers }
+	});
+
+const authDiscoveryResponse = (request: Request) => {
+	const body = JSON.stringify(mcpAuthDiscovery);
+	if (request.headers.get('accept')?.includes('text/event-stream')) {
+		return new Response(`event: auth\ndata: ${body}\n\n`, {
+			status: 200,
+			headers: {
+				'content-type': 'text/event-stream',
+				'cache-control': 'no-store',
+				connection: 'keep-alive'
+			}
+		});
+	}
+	return jsonResponse(mcpAuthDiscovery, 200, { 'cache-control': 'no-store' });
+};
+
+const unauthorizedResponse = (error: string) =>
+	jsonResponse({ error, ...mcpAuthDiscovery }, 401, {
+		'www-authenticate': bearerChallenge,
+		'cache-control': 'no-store'
 	});
 
 const createContext = async (
@@ -694,10 +727,10 @@ const createContext = async (
 ): Promise<McpContext | Response> => {
 	if (!platform?.env.DB) return jsonResponse({ error: 'Database unavailable.' }, 503);
 	const token = bearerToken(request);
-	if (!token) return jsonResponse({ error: 'Missing bearer MCP key.' }, 401);
+	if (!token) return unauthorizedResponse('Missing bearer MCP key.');
 	try {
 		const key = await verifyMcpKey({ platform, rawKey: token });
-		if (!key) return jsonResponse({ error: 'Invalid MCP key.' }, 401);
+		if (!key) return unauthorizedResponse('Invalid MCP key.');
 		return { platform, key, db: getDb(platform.env.DB) };
 	} catch {
 		return jsonResponse({ error: 'MCP key storage unavailable.' }, 503);
@@ -768,7 +801,7 @@ export const POST: RequestHandler = async ({ platform, request }) =>
 	handleMcpRequest(platform, request);
 
 export const GET: RequestHandler = async ({ platform, request }) =>
-	handleMcpRequest(platform, request);
+	bearerToken(request) ? handleMcpRequest(platform, request) : authDiscoveryResponse(request);
 
 export const DELETE: RequestHandler = async ({ platform, request }) =>
 	handleMcpRequest(platform, request);
