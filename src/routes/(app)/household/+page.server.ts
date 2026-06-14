@@ -1,5 +1,8 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { clearHouseholdCookie } from '$lib/server/auth/household';
+import { applianceLabels, applianceValues } from '$lib/domain/household/appliances';
+import { defaultLocale, defaultTimezone } from '$lib/domain/household/settings-parsing';
+import { emptyTaxonomyOptions } from '$lib/server/taxonomy/options';
 import { loadHouseholdView } from '$lib/server/household/household-view';
 import { deleteHouseholdCascade } from '$lib/server/household/delete-household';
 import { updateHouseholdAppliancesFromForm } from '$lib/server/household/appliance-settings';
@@ -26,8 +29,53 @@ import {
 import { requireLoadedHousehold } from '$lib/server/household/load-context';
 import type { Actions, PageServerLoad } from './$types';
 
+type HouseholdView = Awaited<ReturnType<typeof loadHouseholdView>>;
+type HouseholdInviteView = HouseholdView['invites'][number];
+
+const fallbackHouseholdView = (
+	householdId: string,
+	householdName: string | undefined,
+	userId: string,
+	freshView: ReturnType<typeof loadHouseholdView>
+) => ({
+	household: {
+		id: householdId,
+		name: householdName ?? 'Household',
+		createdAt: '',
+		updatedAt: '',
+		externalId: null,
+		stripeCustomerId: null
+	},
+	profile: {
+		defaultServings: 1,
+		locale: defaultLocale,
+		timezone: defaultTimezone,
+		weekStartsOn: 'monday' as const,
+		preferredMassUnit: 'g',
+		preferredVolumeUnit: 'ml',
+		preferredTemperatureUnit: '',
+		ingredientUnitOverrides: {},
+		preferredDinnerTime: null
+	},
+	appliances: applianceValues.map((appliance) => ({
+		appliance,
+		label: applianceLabels[appliance],
+		available: false,
+		notes: ''
+	})),
+	members: [],
+	currentUserId: userId,
+	canManageHousehold: false,
+	canLeaveHousehold: false,
+	leaveHouseholdDisabledReason: 'Household details are still loading.',
+	invites: [] satisfies HouseholdInviteView[],
+	taxonomyOptions: emptyTaxonomyOptions(),
+	displayOverrideRows: { unitOverrides: [], ingredientOverrides: [] },
+	freshView
+});
+
 export const load: PageServerLoad = async (event) => {
-	const { session, householdId } = await requireLoadedHousehold(event);
+	const { session, householdId, layout } = await requireLoadedHousehold(event);
 
 	if (smokeAuthEnabled(event.platform) && householdId === SMOKE_HOUSEHOLD_ID) {
 		return smokeHouseholdView(session.user.id);
@@ -35,13 +83,19 @@ export const load: PageServerLoad = async (event) => {
 
 	if (!event.platform?.env.DB) redirect(302, '/onboarding');
 
-	return loadHouseholdView({
+	const freshView = loadHouseholdView({
 		platform: event.platform,
 		database: event.platform.env.DB,
 		householdId,
 		session,
 		origin: event.url.origin
 	});
+	return fallbackHouseholdView(
+		householdId,
+		layout.households?.find((household) => household.id === householdId)?.name,
+		session.user.id,
+		freshView
+	);
 };
 
 const requireInviteStorage = (platform: App.Platform | undefined) => {

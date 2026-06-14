@@ -14,31 +14,51 @@
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import type { ActionData, PageData } from './$types';
 
+	type InviteRow = {
+		id: string;
+		code: string;
+		url: string;
+		role: string;
+		maxUses: number | null;
+		usesCount: number;
+		expiresAt: string | null;
+		revokedAt: string | null;
+		createdAt: string;
+		usable: boolean;
+	};
+	type LocalPageData = Omit<PageData, 'invites' | 'freshView'> & {
+		invites: InviteRow[];
+		freshView?: Promise<LocalPageData>;
+	};
+
 	let { data, form }: { data: PageData; form: ActionData } = $props();
+	let view = $state<LocalPageData | null>(null);
 
-	let householdName = $state(untrack(() => data.household.name));
-	let defaultServings = $state(untrack(() => String(data.profile.defaultServings)));
-	let locale = $state(untrack(() => data.profile.locale));
-	let timezone = $state(untrack(() => data.profile.timezone ?? ''));
+	let initialView = untrack(() => data as LocalPageData);
+	let householdName = $state(initialView.household.name);
+	let defaultServings = $state(String(initialView.profile.defaultServings));
+	let locale = $state(initialView.profile.locale);
+	let timezone = $state(initialView.profile.timezone ?? '');
 
-	let weekStartsOn = $state(untrack(() => data.profile.weekStartsOn));
-	let preferredMassUnit = $state(untrack(() => data.profile.preferredMassUnit));
-	let preferredVolumeUnit = $state(untrack(() => data.profile.preferredVolumeUnit));
-	const initialPreferredTemperatureUnit = untrack(
-		() =>
-			data.profile.preferredTemperatureUnit ??
-			data.taxonomyOptions.temperaturePresetOptions[0]?.value ??
+	let weekStartsOn = $state(initialView.profile.weekStartsOn);
+	let preferredMassUnit = $state(initialView.profile.preferredMassUnit);
+	let preferredVolumeUnit = $state(initialView.profile.preferredVolumeUnit);
+	let initialPreferredTemperatureUnit = $state(
+		initialView.profile.preferredTemperatureUnit ??
+			initialView.taxonomyOptions.temperaturePresetOptions[0]?.value ??
 			''
 	);
-	let preferredTemperatureUnit = $state(initialPreferredTemperatureUnit);
-	let preferredDinnerTime = $state(untrack(() => data.profile.preferredDinnerTime ?? ''));
+	let preferredTemperatureUnit = $state(
+		initialView.profile.preferredTemperatureUnit ??
+			initialView.taxonomyOptions.temperaturePresetOptions[0]?.value ??
+			''
+	);
+	let preferredDinnerTime = $state(initialView.profile.preferredDinnerTime ?? '');
 	let appliances = $state(
-		untrack(() =>
-			data.appliances.map((appliance) => ({
-				...appliance,
-				notes: appliance.notes ?? ''
-			}))
-		)
+		initialView.appliances.map((appliance) => ({
+			...appliance,
+			notes: appliance.notes ?? ''
+		}))
 	);
 	let removeMemberDialogOpen = $state(false);
 	let memberToRemove = $state<{ id: string; userId: string; name: string } | null>(null);
@@ -48,14 +68,15 @@
 	let inviteDialogOpen = $state(false);
 	let inviteRole = $state('member');
 	let inviteExpiresInDays = $state('7');
-	type InviteRow = PageData['invites'][number];
-	let visibleInvites = $state<InviteRow[]>(untrack(() => data.invites));
+	let visibleInvites = $state<InviteRow[]>(initialView.invites);
+
+	const currentView = $derived(view ?? initialView);
 
 	$effect(() => {
-		visibleInvites = data.invites;
+		visibleInvites = currentView.invites;
 	});
 
-	const canManageHousehold = $derived(data.canManageHousehold);
+	const canManageHousehold = $derived(currentView.canManageHousehold);
 	const fieldDisabled = $derived(!canManageHousehold);
 	const weekStartLabels = {
 		sunday: 'Sunday',
@@ -109,19 +130,57 @@
 				}))
 				.filter((row) => row.baseFood || row.preferredFoodAlias || row.preferredMeasureUnit)
 		);
-	const initialUnitOverrideRows = untrack(() =>
-		serializeUnitOverrideRows(data.displayOverrideRows.unitOverrides)
+	let initialUnitOverrideRows = $state(
+		untrack(() => serializeUnitOverrideRows(initialView.displayOverrideRows.unitOverrides))
 	);
-	const initialIngredientOverrideRows = untrack(() =>
-		serializeIngredientOverrideRows(data.displayOverrideRows.ingredientOverrides)
+	let initialIngredientOverrideRows = $state(
+		untrack(() =>
+			serializeIngredientOverrideRows(initialView.displayOverrideRows.ingredientOverrides)
+		)
 	);
 	let nextOverrideRowId = 0;
 	let unitOverrideRows = $state<UnitOverrideRow[]>(
-		untrack(() => data.displayOverrideRows.unitOverrides)
+		untrack(() => initialView.displayOverrideRows.unitOverrides)
 	);
 	let ingredientOverrideRows = $state<IngredientOverrideRow[]>(
-		untrack(() => data.displayOverrideRows.ingredientOverrides)
+		untrack(() => initialView.displayOverrideRows.ingredientOverrides)
 	);
+	const applyHouseholdView = (nextView: LocalPageData) => {
+		view = { ...currentView, ...nextView };
+		householdName = nextView.household.name;
+		defaultServings = String(nextView.profile.defaultServings);
+		locale = nextView.profile.locale;
+		timezone = nextView.profile.timezone ?? '';
+		weekStartsOn = nextView.profile.weekStartsOn;
+		preferredMassUnit = nextView.profile.preferredMassUnit;
+		preferredVolumeUnit = nextView.profile.preferredVolumeUnit;
+		initialPreferredTemperatureUnit =
+			nextView.profile.preferredTemperatureUnit ??
+			nextView.taxonomyOptions.temperaturePresetOptions[0]?.value ??
+			'';
+		preferredTemperatureUnit = initialPreferredTemperatureUnit;
+		preferredDinnerTime = nextView.profile.preferredDinnerTime ?? '';
+		appliances = nextView.appliances.map((appliance) => ({
+			...appliance,
+			notes: appliance.notes ?? ''
+		}));
+		initialUnitOverrideRows = serializeUnitOverrideRows(nextView.displayOverrideRows.unitOverrides);
+		initialIngredientOverrideRows = serializeIngredientOverrideRows(
+			nextView.displayOverrideRows.ingredientOverrides
+		);
+		unitOverrideRows = nextView.displayOverrideRows.unitOverrides;
+		ingredientOverrideRows = nextView.displayOverrideRows.ingredientOverrides;
+		visibleInvites = nextView.invites;
+	};
+
+	$effect(() => {
+		view = data as LocalPageData;
+		if ('freshView' in data && data.freshView) {
+			void Promise.resolve(data.freshView).then((freshView) =>
+				applyHouseholdView(freshView as LocalPageData)
+			);
+		}
+	});
 	const addUnitOverrideRow = () => {
 		unitOverrideRows = [
 			...unitOverrideRows,
@@ -146,17 +205,21 @@
 		ingredientOverrideRows = ingredientOverrideRows.filter((row) => row.id !== id);
 	};
 
-	const householdNameChanged = $derived(householdName.trim() !== data.household.name);
-	const defaultServingsChanged = $derived(defaultServings !== String(data.profile.defaultServings));
-	const localeChanged = $derived(locale.trim() !== data.profile.locale);
-	const timezoneChanged = $derived(timezone.trim() !== (data.profile.timezone ?? ''));
-	const weekStartsOnChanged = $derived(weekStartsOn !== data.profile.weekStartsOn);
-	const preferredMassUnitChanged = $derived(preferredMassUnit !== data.profile.preferredMassUnit);
+	const householdNameChanged = $derived(householdName.trim() !== currentView.household.name);
+	const defaultServingsChanged = $derived(
+		defaultServings !== String(currentView.profile.defaultServings)
+	);
+	const localeChanged = $derived(locale.trim() !== currentView.profile.locale);
+	const timezoneChanged = $derived(timezone.trim() !== (currentView.profile.timezone ?? ''));
+	const weekStartsOnChanged = $derived(weekStartsOn !== currentView.profile.weekStartsOn);
+	const preferredMassUnitChanged = $derived(
+		preferredMassUnit !== currentView.profile.preferredMassUnit
+	);
 	const preferredVolumeUnitChanged = $derived(
-		preferredVolumeUnit !== data.profile.preferredVolumeUnit
+		preferredVolumeUnit !== currentView.profile.preferredVolumeUnit
 	);
 	const preferredDinnerTimeChanged = $derived(
-		preferredDinnerTime !== (data.profile.preferredDinnerTime ?? '')
+		preferredDinnerTime !== (currentView.profile.preferredDinnerTime ?? '')
 	);
 	const householdSettingsChanged = $derived(
 		householdNameChanged ||
@@ -184,7 +247,7 @@
 	);
 	const changedAppliances = $derived(
 		appliances.filter((appliance) => {
-			const initial = data.appliances.find((item) => item.appliance === appliance.appliance);
+			const initial = currentView.appliances.find((item) => item.appliance === appliance.appliance);
 			return (
 				initial &&
 				(appliance.available !== initial.available || appliance.notes !== (initial.notes ?? ''))
@@ -423,7 +486,7 @@
 								{/if}
 								<SearchCombobox
 									bind:value={preferredMassUnit}
-									options={data.taxonomyOptions.weightPresetOptions}
+									options={currentView.taxonomyOptions.weightPresetOptions}
 									disabled={fieldDisabled}
 									placeholder="Select weight unit"
 									searchPlaceholder="Search weight units..."
@@ -436,7 +499,7 @@
 								{/if}
 								<SearchCombobox
 									bind:value={preferredVolumeUnit}
-									options={data.taxonomyOptions.volumePresetOptions}
+									options={currentView.taxonomyOptions.volumePresetOptions}
 									disabled={fieldDisabled}
 									placeholder="Select volume unit"
 									searchPlaceholder="Search volume units..."
@@ -453,7 +516,7 @@
 								{/if}
 								<SearchCombobox
 									bind:value={preferredTemperatureUnit}
-									options={data.taxonomyOptions.temperaturePresetOptions}
+									options={currentView.taxonomyOptions.temperaturePresetOptions}
 									disabled={fieldDisabled}
 									placeholder="Select temperature unit"
 									searchPlaceholder="Search temperature units..."
@@ -475,7 +538,7 @@
 										Base unit
 										<SearchCombobox
 											bind:value={override.baseUnit}
-											options={data.taxonomyOptions.baseUnitOptions}
+											options={currentView.taxonomyOptions.baseUnitOptions}
 											disabled={fieldDisabled}
 											placeholder="base unit"
 											searchPlaceholder="Search base units..."
@@ -485,7 +548,7 @@
 										Preferred alias
 										<SearchCombobox
 											bind:value={override.preferredUnitAlias}
-											options={data.taxonomyOptions.unitAliasOptions}
+											options={currentView.taxonomyOptions.unitAliasOptions}
 											disabled={fieldDisabled}
 											placeholder="alias"
 											searchPlaceholder="Search unit aliases..."
@@ -530,7 +593,7 @@
 										Base food
 										<SearchCombobox
 											bind:value={override.baseFood}
-											options={data.taxonomyOptions.foodOptions}
+											options={currentView.taxonomyOptions.foodOptions}
 											disabled={fieldDisabled}
 											placeholder="base food"
 											searchPlaceholder="Search foods..."
@@ -540,7 +603,7 @@
 										Preferred alias
 										<SearchCombobox
 											bind:value={override.preferredFoodAlias}
-											options={data.taxonomyOptions.foodAliasOptions}
+											options={currentView.taxonomyOptions.foodAliasOptions}
 											disabled={fieldDisabled}
 											placeholder="alias"
 											searchPlaceholder="Search food aliases..."
@@ -552,7 +615,7 @@
 										Measure unit
 										<SearchCombobox
 											bind:value={override.preferredMeasureUnit}
-											options={data.taxonomyOptions.measureUnitOptions}
+											options={currentView.taxonomyOptions.measureUnitOptions}
 											disabled={fieldDisabled}
 											placeholder="unit"
 											searchPlaceholder="Search measure units..."
@@ -591,12 +654,12 @@
 				<div class="grid gap-1">
 					<h2 class="text-sm font-medium">Members</h2>
 					<p class="text-xs text-muted-foreground">
-						Manage who can access {data.household.name} and what role new invitees receive.
+						Manage who can access {currentView.household.name} and what role new invitees receive.
 					</p>
 				</div>
 
 				<div class="divide-y divide-border rounded-md border border-border">
-					{#each data.members as member (member.id)}
+					{#each currentView.members as member (member.id)}
 						<div class="grid gap-3 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
 							<div class="min-w-0">
 								<p class="truncate text-sm font-medium">{member.name}</p>
@@ -605,7 +668,7 @@
 								</p>
 							</div>
 							<div class="flex items-center justify-end gap-2">
-								{#if canManageHousehold && !member.directoryManaged && member.userId !== data.currentUserId}
+								{#if canManageHousehold && !member.directoryManaged && member.userId !== currentView.currentUserId}
 									<form method="post" action="?/updateMemberRole" class="contents">
 										<input type="hidden" name="membershipId" value={member.id} />
 										<input type="hidden" name="userId" value={member.userId} />
@@ -625,7 +688,7 @@
 									<span class="text-xs text-muted-foreground">{roleLabel(member.role)}</span>
 								{/if}
 
-								{#if member.userId === data.currentUserId}
+								{#if member.userId === currentView.currentUserId}
 									<span class="text-xs text-muted-foreground">You</span>
 								{:else if member.directoryManaged}
 									<span class="text-xs text-muted-foreground">Managed by IdP</span>
@@ -641,9 +704,10 @@
 										</DropdownMenu.Trigger>
 										<DropdownMenu.Content align="end" class="w-36">
 											<DropdownMenu.Item
-												disabled={member.userId === data.currentUserId}
+												disabled={member.userId === currentView.currentUserId}
 												onclick={() => {
-													if (member.userId !== data.currentUserId) promptMemberRemoval(member);
+													if (member.userId !== currentView.currentUserId)
+														promptMemberRemoval(member);
 												}}
 												variant="destructive"
 											>
@@ -768,8 +832,8 @@
 					<Button
 						type="button"
 						variant="outline"
-						disabled={!data.canLeaveHousehold}
-						title={data.leaveHouseholdDisabledReason ?? undefined}
+						disabled={!currentView.canLeaveHousehold}
+						title={currentView.leaveHouseholdDisabledReason ?? undefined}
 						onclick={() => (leaveHouseholdDialogOpen = true)}
 					>
 						Leave household
@@ -784,8 +848,8 @@
 						</Button>
 					{/if}
 				</div>
-				{#if !data.canLeaveHousehold && data.leaveHouseholdDisabledReason}
-					<p class="text-xs text-muted-foreground">{data.leaveHouseholdDisabledReason}</p>
+				{#if !currentView.canLeaveHousehold && currentView.leaveHouseholdDisabledReason}
+					<p class="text-xs text-muted-foreground">{currentView.leaveHouseholdDisabledReason}</p>
 				{/if}
 			</section>
 		</div>
@@ -797,8 +861,8 @@
 		<Dialog.Header>
 			<Dialog.Title>Invite people to your household</Dialog.Title>
 			<Dialog.Description>
-				Create an invite link for {data.household.name}. People who use it will join with the role
-				you choose.
+				Create an invite link for {currentView.household.name}. People who use it will join with the
+				role you choose.
 			</Dialog.Description>
 		</Dialog.Header>
 
@@ -893,7 +957,7 @@
 <DeleteConfirmDialog
 	bind:open={leaveHouseholdDialogOpen}
 	title="Leave household?"
-	description="You will lose access to {data.household
+	description="You will lose access to {currentView.household
 		.name}. Your personal menu and check-in history stay with your account."
 	confirmLabel="Leave household"
 	formAction="?/leaveHousehold"
@@ -902,8 +966,8 @@
 <DeleteConfirmDialog
 	bind:open={deleteHouseholdFirstOpen}
 	title="Delete household?"
-	description="This deletes the WorkOS organization and Maal household data for {data.household
-		.name}."
+	description="This deletes the WorkOS organization and Maal household data for {currentView
+		.household.name}."
 	confirmLabel="Continue"
 	onconfirm={() => {
 		deleteHouseholdFirstOpen = false;
