@@ -37,3 +37,9 @@ Use these notes when rebasing feature work across the refactor.
 - Use `src/lib/server/taxonomy/options.ts` for option loading.
 - Use `src/lib/server/taxonomy/display-overrides.ts` for display override queries and commands.
 - Keep route loaders from duplicating taxonomy joins or display override mapping.
+
+## Billing
+
+- Import checkout, portal, status, webhook, and pricing helpers through `src/lib/server/domains/billing` when crossing a route/domain boundary.
+- Keep Stripe event parsing and persistence side effects in billing server modules.
+- Keep subscription route loaders focused on redirect/page-data behavior.
