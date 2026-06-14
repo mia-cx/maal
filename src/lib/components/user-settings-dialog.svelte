@@ -8,9 +8,9 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Command from '$lib/components/ui/command';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import AccountSettingsSection from '$lib/components/settings/account-settings-section.svelte';
 	import BillingSettingsSection from '$lib/components/settings/billing-settings-section.svelte';
+	import McpKeyListItem from '$lib/components/settings/mcp-key-list-item.svelte';
 	import MfaSetupDialog from '$lib/components/settings/mfa-setup-dialog.svelte';
 	import NotificationsSettingsSection from '$lib/components/settings/notifications-settings-section.svelte';
 	import PasswordChangeDialog from '$lib/components/settings/password-change-dialog.svelte';
@@ -24,7 +24,6 @@
 		filterMcpHouseholds,
 		mcpHouseholdPickerLabel as formatMcpHouseholdPickerLabel,
 		mcpScopeGroups,
-		presetLabel,
 		selectedMcpHouseholds as selectMcpHouseholds,
 		selectedMcpScopesForLevels,
 		setMcpScopeReadLevel,
@@ -52,7 +51,6 @@
 		User
 	} from '$lib/settings/types';
 	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
-	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
 	import {
 		settingsCategories,
 		settingsCategoryFromParam,
@@ -685,48 +683,13 @@
 							{:else}
 								<ul class="divide-y rounded-md border border-border">
 									{#each mcpKeys as key (key.id)}
-										<li class="flex items-center justify-between gap-3 px-3 py-2">
-											<div class="min-w-0">
-												<p class="truncate text-xs font-medium">{key.label}</p>
-												<p class="truncate text-xs text-muted-foreground">
-													{presetLabel(key.preset)} · {key.householdScope.kind === 'all'
-														? 'All households'
-														: `${key.householdScope.householdIds.length} households`}
-													{#if key.revokedAt}
-														· Revoked{/if}
-												</p>
-											</div>
-											<DropdownMenu.Root>
-												<DropdownMenu.Trigger>
-													{#snippet child({ props })}
-														<Button
-															{...props}
-															type="button"
-															variant="ghost"
-															size="icon-sm"
-															disabled={Boolean(key.revokedAt) ||
-																rerollingMcpKeyId === key.id ||
-																revokingMcpKeyId === key.id}
-															aria-label={`Open actions for ${key.label}`}
-														>
-															<EllipsisIcon class="size-4" />
-														</Button>
-													{/snippet}
-												</DropdownMenu.Trigger>
-												<DropdownMenu.Content align="end">
-													<DropdownMenu.Item onclick={() => rerollMcpAccessKey(key)}>
-														{rerollingMcpKeyId === key.id ? 'Rerolling…' : 'Reroll key'}
-													</DropdownMenu.Item>
-													<DropdownMenu.Separator />
-													<DropdownMenu.Item
-														variant="destructive"
-														onclick={() => confirmRevokeMcpKey(key)}
-													>
-														{revokingMcpKeyId === key.id ? 'Revoking…' : 'Revoke key'}
-													</DropdownMenu.Item>
-												</DropdownMenu.Content>
-											</DropdownMenu.Root>
-										</li>
+										<McpKeyListItem
+											keyRecord={key}
+											{rerollingMcpKeyId}
+											{revokingMcpKeyId}
+											{rerollMcpAccessKey}
+											{confirmRevokeMcpKey}
+										/>
 									{/each}
 								</ul>
 							{/if}
