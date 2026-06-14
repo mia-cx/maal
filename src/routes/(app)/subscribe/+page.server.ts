@@ -5,10 +5,14 @@ import {
 	listUserHouseholds,
 	resolveActiveHouseholdId
 } from '$lib/server/auth/household';
-import { createStripeClient, getStripeProductId } from '$lib/server/domains/billing';
-import { loadBillingStatus } from '$lib/server/domains/billing';
-import { loadTrialAvailability } from '$lib/server/domains/billing';
-import { pricingOptionsFromPrices, type PricingOption } from '$lib/server/billing/pricing-options';
+import {
+	createStripeClient,
+	getStripeProductId,
+	loadBillingStatus,
+	loadTrialAvailability,
+	pricingOptionsFromPrices,
+	type PricingOption
+} from '$lib/server/domains/billing';
 
 export type { PricingOption };
 
