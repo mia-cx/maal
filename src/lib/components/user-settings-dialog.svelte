@@ -9,9 +9,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import AccountSettingsSection from '$lib/components/settings/account-settings-section.svelte';
 	import BillingSettingsSection from '$lib/components/settings/billing-settings-section.svelte';
-	import McpCreatedKeyPanel from '$lib/components/settings/mcp-created-key-panel.svelte';
-	import McpKeyForm from '$lib/components/settings/mcp-key-form.svelte';
-	import McpKeyList from '$lib/components/settings/mcp-key-list.svelte';
+	import McpSettingsSection from '$lib/components/settings/mcp-settings-section.svelte';
 	import MfaSetupDialog from '$lib/components/settings/mfa-setup-dialog.svelte';
 	import NotificationsSettingsSection from '$lib/components/settings/notifications-settings-section.svelte';
 	import PasswordChangeDialog from '$lib/components/settings/password-change-dialog.svelte';
@@ -662,42 +660,34 @@
 						{confirmDeleteMfaFactor}
 					/>
 				{:else if activeCategory === 'mcp'}
-					<div class="grid max-w-lg gap-5 text-sm">
-						<McpKeyList
-							{mcpKeys}
-							{mcpKeysBusy}
-							{rerollingMcpKeyId}
-							{revokingMcpKeyId}
-							{loadMcpKeys}
-							{rerollMcpAccessKey}
-							{confirmRevokeMcpKey}
-							openCreateForm={() => (mcpKeyFormOpen = true)}
-						/>
-						{#if createdMcpKey}
-							<McpCreatedKeyPanel {createdMcpKey} {copyCreatedMcpKey} />
-						{/if}
-						{#if mcpKeyFormOpen}
-							<McpKeyForm
-								bind:mcpKeyLabel
-								bind:mcpKeyHouseholdKind
-								bind:mcpHouseholdPickerOpen
-								bind:mcpHouseholdQuery
-								{mcpKeyCreating}
-								{selectedMcpScopes}
-								{mcpKeyHouseholdIds}
-								{mcpScopeLevels}
-								{mcpHouseholdPickerLabel}
-								{filteredMcpHouseholds}
-								{setMcpScopeRead}
-								{setMcpScopeWrite}
-								{toggleMcpHousehold}
-								cancel={() => (mcpKeyFormOpen = false)}
-								{createMcpAccessKey}
-							/>
-						{/if}
-						{#if mcpMessage}<p class="text-xs text-muted-foreground">{mcpMessage}</p>{/if}
-						{#if mcpError}<p class="text-xs text-destructive">{mcpError}</p>{/if}
-					</div>
+					<McpSettingsSection
+						{mcpKeys}
+						{mcpKeysBusy}
+						{rerollingMcpKeyId}
+						{revokingMcpKeyId}
+						{createdMcpKey}
+						bind:mcpKeyFormOpen
+						bind:mcpKeyLabel
+						bind:mcpKeyHouseholdKind
+						bind:mcpHouseholdPickerOpen
+						bind:mcpHouseholdQuery
+						{mcpKeyCreating}
+						{selectedMcpScopes}
+						{mcpKeyHouseholdIds}
+						{mcpScopeLevels}
+						{mcpHouseholdPickerLabel}
+						{filteredMcpHouseholds}
+						{mcpMessage}
+						{mcpError}
+						{loadMcpKeys}
+						{rerollMcpAccessKey}
+						{confirmRevokeMcpKey}
+						{copyCreatedMcpKey}
+						{setMcpScopeRead}
+						{setMcpScopeWrite}
+						{toggleMcpHousehold}
+						{createMcpAccessKey}
+					/>
 				{:else if activeCategory === 'notifications'}
 					<NotificationsSettingsSection />
 				{:else if activeCategory === 'billing'}
