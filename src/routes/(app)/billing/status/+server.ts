@@ -4,8 +4,8 @@ import {
 	listUserHouseholds,
 	resolveActiveHouseholdId
 } from '$lib/server/auth/household';
-import { getStripePublicConfig } from '$lib/server/billing/stripe';
-import { loadBillingStatus } from '$lib/server/billing/subscriptions';
+import { getStripePublicConfig } from '$lib/server/domains/billing';
+import { loadBillingStatus } from '$lib/server/domains/billing';
 
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
 	const session = locals.session;

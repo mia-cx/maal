@@ -1,8 +1,8 @@
 import { error, redirect, type RequestHandler } from '@sveltejs/kit';
 import { canManageActiveHousehold, resolveActiveHouseholdId } from '$lib/server/auth/household';
-import { createStripeClient } from '$lib/server/billing/stripe';
-import { loadBillingStatus, upsertSubscription } from '$lib/server/billing/subscriptions';
-import { startHouseholdTrial } from '$lib/server/billing/trials';
+import { createStripeClient } from '$lib/server/domains/billing';
+import { loadBillingStatus, upsertSubscription } from '$lib/server/domains/billing';
+import { startHouseholdTrial } from '$lib/server/domains/billing';
 
 const createCheckoutRedirect = async ({
 	cookies,

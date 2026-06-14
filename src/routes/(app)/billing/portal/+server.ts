@@ -4,8 +4,8 @@ import {
 	listUserHouseholdIds,
 	resolveActiveHouseholdId
 } from '$lib/server/auth/household';
-import { createStripeClient } from '$lib/server/billing/stripe';
-import { loadBillingStatus } from '$lib/server/billing/subscriptions';
+import { createStripeClient } from '$lib/server/domains/billing';
+import { loadBillingStatus } from '$lib/server/domains/billing';
 
 const readJson = async (request: Request): Promise<unknown> => {
 	try {

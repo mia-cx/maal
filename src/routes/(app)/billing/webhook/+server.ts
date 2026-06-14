@@ -1,10 +1,10 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import Stripe from 'stripe';
-import { createStripeClient, getStripeWebhookSecret } from '$lib/server/billing/stripe';
+import { createStripeClient, getStripeWebhookSecret } from '$lib/server/domains/billing';
 import {
 	findHouseholdIdForStripeSubscription,
 	upsertSubscription
-} from '$lib/server/billing/subscriptions';
+} from '$lib/server/domains/billing';
 
 const stringId = (value: string | { id: string } | null | undefined): string | null => {
 	if (!value) return null;

@@ -5,8 +5,8 @@ import {
 	readHouseholdCookie
 } from '$lib/server/auth/household';
 import { toPublicSession } from '$lib/server/auth/session';
-import { hasHouseholdBillingGrant } from '$lib/server/billing/entitlements';
-import { loadBillingStatus } from '$lib/server/billing/subscriptions';
+import { hasHouseholdBillingGrant } from '$lib/server/domains/billing';
+import { loadBillingStatus } from '$lib/server/domains/billing';
 
 export const load: LayoutServerLoad = async ({ cookies, locals, platform }) => {
 	const session = locals.session;

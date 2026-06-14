@@ -6,9 +6,9 @@ import {
 	listUserHouseholds,
 	resolveActiveHouseholdId
 } from '$lib/server/auth/household';
-import { createStripeClient, getStripeProductId } from '$lib/server/billing/stripe';
-import { loadBillingStatus } from '$lib/server/billing/subscriptions';
-import { loadTrialAvailability } from '$lib/server/billing/trials';
+import { createStripeClient, getStripeProductId } from '$lib/server/domains/billing';
+import { loadBillingStatus } from '$lib/server/domains/billing';
+import { loadTrialAvailability } from '$lib/server/domains/billing';
 
 export type PricingOption = {
 	id: string;

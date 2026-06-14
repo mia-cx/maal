@@ -1,8 +1,8 @@
 import type Stripe from 'stripe';
 import type { PageServerLoad } from './$types';
 import { resolveActiveHouseholdId } from '$lib/server/auth/household';
-import { createStripeClient, getStripePublicConfig } from '$lib/server/billing/stripe';
-import { loadTrialAvailability } from '$lib/server/billing/trials';
+import { createStripeClient, getStripePublicConfig } from '$lib/server/domains/billing';
+import { loadTrialAvailability } from '$lib/server/domains/billing';
 
 export type LandingPrice = {
 	id: string;
