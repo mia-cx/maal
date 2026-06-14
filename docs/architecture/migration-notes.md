@@ -31,3 +31,9 @@ Use these notes when rebasing feature work across the refactor.
 - Use household load/action context helpers before adding route-local session or household checks.
 - Put cascade deletes, invite commands, member commands, and settings commands in the household server modules.
 - Keep the household page server as an adapter that composes those helpers.
+
+## Taxonomy
+
+- Use `src/lib/server/taxonomy/options.ts` for option loading.
+- Use `src/lib/server/taxonomy/display-overrides.ts` for display override queries and commands.
+- Keep route loaders from duplicating taxonomy joins or display override mapping.
