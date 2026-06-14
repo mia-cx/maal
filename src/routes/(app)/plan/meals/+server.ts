@@ -11,7 +11,7 @@ import {
 	listHouseholdPlanMeals,
 	updateHouseholdMeal
 } from '$lib/server/services/meal-plan';
-import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
+import { mealToCreateInput, mealToUpdateInput } from '$lib/server/services/meal-route-input';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
@@ -61,28 +61,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 			meal: await createHouseholdMeal({
 				platform,
 				db,
-				meal: {
-					householdId,
-					workosUserId: session.user.id,
-					userRecipeId: meal.userRecipeId,
-					date: meal.date,
-					time: meal.time,
-					sortOrder: meal.sortOrder,
-					plannedCookUserId: meal.plannedCookWorkosUserId,
-					servingsPlanned: meal.servingsPlanned,
-					customMeal: meal.userRecipeId
-						? undefined
-						: {
-								title: meal.title,
-								description: meal.description,
-								imageUrl: meal.image,
-								prepTimeMinutes: meal.prepTimeMinutes,
-								cookTimeMinutes: meal.cookTimeMinutes,
-								yield: meal.baseServings,
-								ingredients: meal.ingredients,
-								instructions: meal.instructions
-							}
-				}
+				meal: mealToCreateInput(meal, householdId, session.user.id)
 			})
 		});
 	} catch (cause) {
@@ -127,32 +106,13 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 			meal: await updateHouseholdMeal({
 				platform,
 				db,
-				meal: {
+				meal: mealToUpdateInput(
+					meal,
 					householdId,
-					workosUserId: session.user.id,
-					mealId: meal.id,
-					patch: {
-						date: meal.date ?? null,
-						time: meal.time ?? null,
-						sortOrder: meal.sortOrder ?? null,
-						plannedCookUserId: meal.plannedCookWorkosUserId ?? existingMeal.plannedCookWorkosUserId,
-						servingsPlanned: meal.servingsPlanned,
-						status: meal.status ?? existingMeal.status,
-						title: meal.title.trim() || 'New meal',
-						description: meal.description ?? null,
-						imageUrl: meal.image ?? null,
-						prepTimeMinutes: meal.prepTimeMinutes ?? null,
-						cookTimeMinutes: meal.cookTimeMinutes ?? null,
-						yield:
-							meal.baseServings ??
-							normalizeServingsPlanned(
-								meal,
-								await countActiveHouseholdMembers(platform, householdId)
-							),
-						ingredients: meal.ingredients,
-						instructions: meal.instructions
-					}
-				}
+					session.user.id,
+					existingMeal,
+					await countActiveHouseholdMembers(platform, householdId)
+				)
 			})
 		});
 	} catch (cause) {
