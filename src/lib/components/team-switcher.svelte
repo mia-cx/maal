@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import { HomeIcon } from '$lib/components/icons/solar-outline';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
@@ -23,6 +24,12 @@
 	const householdName = $derived(activeHousehold?.name ?? 'No household');
 	const householdMeta = $derived(activeHousehold ? 'Household' : 'Create one from Meal Plan');
 	const startHouseholdCreation = () => goto(resolve('/onboarding?new=1'));
+	const switchHousehold = async (householdId: string) => {
+		if (householdId === activeHouseholdId) return;
+		const nextUrl = new URL(page.url);
+		nextUrl.searchParams.set('household', householdId);
+		await goto(`${nextUrl.pathname}${nextUrl.search}`, { invalidateAll: true });
+	};
 </script>
 
 <Sidebar.Menu>
@@ -56,7 +63,11 @@
 				<DropdownMenu.Label class="text-xs text-muted-foreground">{label}</DropdownMenu.Label>
 				{#if households.length > 0}
 					{#each households as household (household.id)}
-						<DropdownMenu.Item class="gap-2 p-2" disabled={household.id === activeHousehold?.id}>
+						<DropdownMenu.Item
+							class="gap-2 p-2"
+							disabled={household.id === activeHouseholdId}
+							onclick={() => switchHousehold(household.id)}
+						>
 							<HomeIcon class="size-5 shrink-0 text-primary" />
 							<span class="truncate">{household.name}</span>
 						</DropdownMenu.Item>

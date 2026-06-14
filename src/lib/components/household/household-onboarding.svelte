@@ -58,10 +58,17 @@
 			return;
 		}
 
-		const body = (await response.json()) as { trialStarted?: boolean };
-		await goto(resolve(body.trialStarted ? '/plan?trial=started' : '/subscribe'), {
-			invalidateAll: true
-		});
+		const body = (await response.json()) as {
+			trialStarted?: boolean;
+			household?: { id?: unknown };
+		};
+		const householdId = typeof body.household?.id === 'string' ? body.household.id : null;
+		const nextUrl = new URL(
+			resolve(body.trialStarted ? '/plan?trial=started' : '/subscribe'),
+			location.origin
+		);
+		if (householdId) nextUrl.searchParams.set('household', householdId);
+		await goto(`${nextUrl.pathname}${nextUrl.search}`, { invalidateAll: true });
 	};
 </script>
 
