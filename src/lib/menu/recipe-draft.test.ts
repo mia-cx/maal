@@ -20,4 +20,14 @@ describe('createDraftRecipe', () => {
 	it('accepts an explicit title', () => {
 		expect(createDraftRecipe(() => 'abc', 'Soup').title).toBe('Soup');
 	});
+
+	it('generates a new id for every draft', () => {
+		let next = 0;
+		const id = () => String(++next);
+
+		expect([createDraftRecipe(id).id, createDraftRecipe(id).id]).toEqual([
+			'draft-recipe-1',
+			'draft-recipe-2'
+		]);
+	});
 });
