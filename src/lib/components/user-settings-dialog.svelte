@@ -3,9 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import type { Pathname } from '$app/types';
-	import { Button } from '$lib/components/ui/button';
 	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
-	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import AccountSettingsSection from '$lib/components/settings/account-settings-section.svelte';
 	import BillingSettingsSection from '$lib/components/settings/billing-settings-section.svelte';
@@ -16,7 +14,6 @@
 	import SecuritySettingsSection from '$lib/components/settings/security-settings-section.svelte';
 	import SettingsCategoryNav from '$lib/components/settings/settings-category-nav.svelte';
 	import SettingsSectionHeading from '$lib/components/settings/settings-section-heading.svelte';
-	import { Input } from '$lib/components/ui/input';
 	import {
 		filterMcpHouseholds,
 		mcpHouseholdPickerLabel as formatMcpHouseholdPickerLabel,
