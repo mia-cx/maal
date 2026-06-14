@@ -18,7 +18,6 @@
 	import SettingsCategoryNav from '$lib/components/settings/settings-category-nav.svelte';
 	import SettingsSectionHeading from '$lib/components/settings/settings-section-heading.svelte';
 	import { Input } from '$lib/components/ui/input';
-	import * as InputOTP from '$lib/components/ui/input-otp';
 	import * as Popover from '$lib/components/ui/popover';
 	import * as RadioGroup from '$lib/components/ui/radio-group';
 	import {
