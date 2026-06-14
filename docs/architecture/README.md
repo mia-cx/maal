@@ -9,6 +9,7 @@ Start here when adding or refactoring product code:
 - `component-size-guidelines.md` — extraction triggers for large components.
 - `duplication-policy.md` — semantic duplication threshold and exceptions.
 - `mcp-compatibility.md` — MCP tool contract/versioning rules.
+- `local-first-pwa.md` — PWA shell, IDB sync, and sealed offline billing direction.
 - `accessibility-smoke-checks.md` — smoke checklist for split UI components.
 - `review-checks.md` — commands to run before review.
 - `migration-notes.md` — import and ownership changes to use while rebasing feature work.
