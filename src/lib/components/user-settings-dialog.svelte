@@ -22,6 +22,7 @@
 		type McpScope,
 		type McpScopeLevel
 	} from '$lib/settings/mcp-key-model';
+	import { readSettingsError } from '$lib/settings/api-client';
 	import type {
 		BillingStatus,
 		MfaFactor,
@@ -196,16 +197,6 @@
 		accountError = null;
 	});
 
-	const readError = async (response: Response, fallback: string): Promise<string> => {
-		try {
-			const body = (await response.json()) as { message?: unknown };
-			if (typeof body.message === 'string' && body.message.trim()) return body.message;
-		} catch {
-			// Keep the UI message generic when the server response is not JSON.
-		}
-		return fallback;
-	};
-
 	const saveAccount = async (event: SubmitEvent) => {
 		event.preventDefault();
 		if (emailVerificationRequired) return;
@@ -221,7 +212,7 @@
 
 		accountSaving = false;
 		if (!response.ok) {
-			accountError = await readError(response, 'Could not update account.');
+			accountError = await readSettingsError(response, 'Could not update account.');
 			return;
 		}
 
@@ -250,7 +241,7 @@
 
 		emailVerificationBusy = false;
 		if (!response.ok) {
-			accountError = await readError(response, 'Could not send verification email.');
+			accountError = await readSettingsError(response, 'Could not send verification email.');
 			return;
 		}
 		verificationEmail = normalizedAccountEmail;
@@ -274,7 +265,7 @@
 
 		emailVerificationChecking = false;
 		if (!response.ok) {
-			accountError = await readError(response, 'That code did not match.');
+			accountError = await readSettingsError(response, 'That code did not match.');
 			return;
 		}
 
@@ -312,7 +303,7 @@
 		const response = await fetch(resolve('/settings/security/mfa'));
 		mfaFactorsBusy = false;
 		if (!response.ok) {
-			securityError = await readError(response, 'Could not load two-factor methods.');
+			securityError = await readSettingsError(response, 'Could not load two-factor methods.');
 			return;
 		}
 
@@ -359,7 +350,7 @@
 		const response = await fetch(resolve('/settings/mcp-keys'));
 		mcpKeysBusy = false;
 		if (!response.ok) {
-			mcpError = await readError(response, 'Could not load MCP keys.');
+			mcpError = await readSettingsError(response, 'Could not load MCP keys.');
 			return;
 		}
 		const body = (await response.json()) as { keys: McpKey[]; households: SettingsHousehold[] };
@@ -412,7 +403,7 @@
 		});
 		mcpKeyCreating = false;
 		if (!response.ok) {
-			mcpError = await readError(response, 'Could not create MCP key.');
+			mcpError = await readSettingsError(response, 'Could not create MCP key.');
 			return;
 		}
 		const body = (await response.json()) as { key: string; record: McpKey };
@@ -435,7 +426,7 @@
 		});
 		rerollingMcpKeyId = null;
 		if (!response.ok) {
-			mcpError = await readError(response, 'Could not reroll MCP key.');
+			mcpError = await readSettingsError(response, 'Could not reroll MCP key.');
 			return;
 		}
 		const body = (await response.json()) as { key: string; record: McpKey };
@@ -468,7 +459,7 @@
 		});
 		revokingMcpKeyId = null;
 		if (!response.ok) {
-			mcpError = await readError(response, 'Could not revoke MCP key.');
+			mcpError = await readSettingsError(response, 'Could not revoke MCP key.');
 			return;
 		}
 		mcpKeys = mcpKeys.map((key) =>
@@ -496,7 +487,7 @@
 		const response = await fetch(resolve('/billing/status'));
 		billingBusy = false;
 		if (!response.ok) {
-			billingError = await readError(response, 'Could not load billing.');
+			billingError = await readSettingsError(response, 'Could not load billing.');
 			return;
 		}
 		billingStatus = (await response.json()) as BillingStatus;
@@ -517,7 +508,7 @@
 		});
 		billingPortalBusy = false;
 		if (!response.ok) {
-			billingError = await readError(response, 'Could not open billing portal.');
+			billingError = await readSettingsError(response, 'Could not open billing portal.');
 			return;
 		}
 		const body = (await response.json()) as { url?: string };
@@ -535,7 +526,7 @@
 
 		mfaSetupBusy = false;
 		if (!response.ok) {
-			securityError = await readError(response, 'Could not start two-factor setup.');
+			securityError = await readSettingsError(response, 'Could not start two-factor setup.');
 			return;
 		}
 
@@ -568,7 +559,7 @@
 
 		mfaVerifyBusy = false;
 		if (!response.ok) {
-			securityError = await readError(response, 'That code did not match.');
+			securityError = await readSettingsError(response, 'That code did not match.');
 			return;
 		}
 
@@ -596,7 +587,7 @@
 
 		deletingMfaFactorId = null;
 		if (!response.ok) {
-			securityError = await readError(response, 'Could not remove two-factor method.');
+			securityError = await readSettingsError(response, 'Could not remove two-factor method.');
 			return;
 		}
 
@@ -643,7 +634,7 @@
 
 		passwordChangeBusy = false;
 		if (!response.ok) {
-			passwordError = await readError(response, 'Could not change password.');
+			passwordError = await readSettingsError(response, 'Could not change password.');
 			return;
 		}
 
