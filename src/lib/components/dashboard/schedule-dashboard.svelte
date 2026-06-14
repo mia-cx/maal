@@ -27,6 +27,7 @@
 	import { addDays, addMonths, dateFromKey, dateKey, startOfDay } from './schedule-date';
 	import { dropTargetFromPointer } from './schedule-dnd';
 	import { isMealInPool, sortMealPool } from './schedule-ordering';
+	import { submitMealCheckIn } from './schedule-check-ins';
 	import { cardDirectionByKey, focusMealCard } from './schedule-keyboard';
 	import {
 		hasLoadedMealRange,
@@ -275,28 +276,8 @@
 		checkInOpen = true;
 	};
 
-	const saveMealCheckIn = async ({
-		meal,
-		cooked,
-		verdict,
-		cookTime,
-		reason
-	}: MealCheckInPayload) => {
-		const response = await fetch('/plan/check-ins', {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ mealId: meal.id, cooked, verdict, cookTime, reason })
-		});
-		if (!response.ok) throw new Error(await response.text());
-		updateScheduleMealSchedule(
-			{
-				...meal,
-				status: cooked ? 'cooked' : 'skipped',
-				latestVerdict: verdict,
-				latestCheckIn: { verdict, cookTime, reason: reason?.trim() || undefined }
-			},
-			'external'
-		);
+	const saveMealCheckIn = async (payload: MealCheckInPayload) => {
+		updateScheduleMealSchedule(await submitMealCheckIn(payload), 'external');
 	};
 
 	const createMeal = (date?: string) => {
