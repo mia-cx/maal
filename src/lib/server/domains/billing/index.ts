@@ -1,6 +1,7 @@
 export { createCheckoutRedirect } from '$lib/server/billing/checkout';
 export { createBillingPortalSession } from '$lib/server/billing/portal';
 export { loadBillingStatusView } from '$lib/server/billing/status-view';
+export { handleStripeWebhook } from '$lib/server/billing/webhook';
 export { requireHouseholdAccess } from '$lib/server/billing/guards';
 export {
 	firstAccessibleHouseholdId,
