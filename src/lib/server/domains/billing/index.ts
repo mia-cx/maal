@@ -1,5 +1,10 @@
 export { createCheckoutRedirect } from '$lib/server/billing/checkout';
 export { createBillingPortalSession } from '$lib/server/billing/portal';
+export {
+	priceToPricingOption,
+	pricingOptionsFromPrices,
+	type PricingOption
+} from '$lib/server/billing/pricing-options';
 export { loadBillingStatusView } from '$lib/server/billing/status-view';
 export { handleStripeWebhook } from '$lib/server/billing/webhook';
 export { requireHouseholdAccess } from '$lib/server/billing/guards';
