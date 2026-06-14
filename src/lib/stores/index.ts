@@ -16,6 +16,14 @@ export type {
 	ScheduleMealStoreSnapshot
 } from './schedule-meals';
 
+export {
+	getCachedMenuRouteData,
+	getCachedPlanRouteData,
+	setCachedMenuRouteData,
+	setCachedPlanRouteData
+} from './route-data-cache';
+export type { MenuRouteCacheEntry, PlanRouteCacheEntry } from './route-data-cache';
+
 export { appShellUiState, updateAppShellUiState } from './app-shell-ui-state';
 export type { AppShellUiState } from './app-shell-ui-state';
 export {

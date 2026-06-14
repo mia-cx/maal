@@ -2,6 +2,7 @@
 	import ScheduleDashboard from '$lib/components/dashboard/schedule-dashboard.svelte';
 	import type { HouseholdMember, Meal } from '$lib/components/dashboard/schedule-types';
 	import { activeHouseholdId } from '$lib/stores/active-household';
+	import { getCachedPlanRouteData, setCachedPlanRouteData } from '$lib/stores/route-data-cache';
 	import { onDestroy, onMount } from 'svelte';
 	import type { PageData } from './$types';
 
@@ -11,22 +12,27 @@
 	let unsubscribeActiveHousehold: (() => void) | null = null;
 
 	$effect(() => {
-		void Promise.resolve(data.meals).then((resolvedMeals) => {
-			meals = resolvedMeals ?? [];
-		});
-	});
-
-	$effect(() => {
-		void Promise.resolve(data.householdMembers).then((resolvedMembers) => {
-			householdMembers = resolvedMembers ?? [];
-		});
+		void Promise.all([Promise.resolve(data.meals), Promise.resolve(data.householdMembers)]).then(
+			([resolvedMeals, resolvedMembers]) => {
+				meals = resolvedMeals ?? [];
+				householdMembers = resolvedMembers ?? [];
+				setCachedPlanRouteData(data.activeHouseholdId, { meals, householdMembers });
+			}
+		);
 	});
 
 	onMount(() => {
+		const cached = getCachedPlanRouteData(data.activeHouseholdId);
+		if (cached) {
+			meals = cached.meals;
+			householdMembers = cached.householdMembers;
+		}
+
 		unsubscribeActiveHousehold = activeHouseholdId.subscribe((householdId) => {
 			if (householdId && householdId !== data.activeHouseholdId) {
-				meals = [];
-				householdMembers = [];
+				const cached = getCachedPlanRouteData(householdId);
+				meals = cached?.meals ?? [];
+				householdMembers = cached?.householdMembers ?? [];
 			}
 		});
 	});
