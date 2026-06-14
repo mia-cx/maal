@@ -27,6 +27,7 @@
 	import { addDays, addMonths, dateFromKey, dateKey, startOfDay } from './schedule-date';
 	import { dropTargetFromPointer } from './schedule-dnd';
 	import { isMealInPool, sortMealPool } from './schedule-ordering';
+	import { cardDirectionByKey, focusMealCard } from './schedule-keyboard';
 	import {
 		hasLoadedMealRange,
 		missingMealRanges,
@@ -176,43 +177,6 @@
 		renderedMealRange = range;
 	};
 
-	const visibleMealCards = (): HTMLElement[] =>
-		Array.from(document.querySelectorAll<HTMLElement>('[data-meal-card-id]')).filter((card) => {
-			const rect = card.getBoundingClientRect();
-			return rect.width > 0 && rect.height > 0 && getComputedStyle(card).visibility !== 'hidden';
-		});
-
-	const focusMealCard = (activeCard: HTMLElement, direction: 'left' | 'right' | 'up' | 'down') => {
-		const activeRect = activeCard.getBoundingClientRect();
-		const activeX = activeRect.left + activeRect.width / 2;
-		const activeY = activeRect.top + activeRect.height / 2;
-		const horizontal = direction === 'left' || direction === 'right';
-		const forward = direction === 'right' || direction === 'down';
-
-		const nextCard = visibleMealCards()
-			.filter((card) => card !== activeCard)
-			.map((card) => {
-				const rect = card.getBoundingClientRect();
-				const x = rect.left + rect.width / 2;
-				const y = rect.top + rect.height / 2;
-				const primaryDelta = horizontal
-					? forward
-						? x - activeX
-						: activeX - x
-					: forward
-						? y - activeY
-						: activeY - y;
-				const crossDelta = horizontal ? Math.abs(y - activeY) : Math.abs(x - activeX);
-				return { card, primaryDelta, score: primaryDelta + crossDelta * 1.5 };
-			})
-			.filter((candidate) => candidate.primaryDelta > 2)
-			.sort((left, right) => left.score - right.score)[0]?.card;
-
-		if (!nextCard) return;
-		nextCard.focus({ preventScroll: true });
-		nextCard.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
-	};
-
 	const moveByDay = (dayDelta: number) => {
 		anchorDate = startOfDay(addDays(anchorDate, dayDelta));
 		dayNavigationSignal += 1;
@@ -232,16 +196,6 @@
 			event.target instanceof Element
 				? event.target.closest<HTMLElement>('[data-meal-card-id]')
 				: null;
-		const cardDirectionByKey: Record<string, 'left' | 'right' | 'up' | 'down'> = {
-			ArrowLeft: 'left',
-			ArrowRight: 'right',
-			ArrowUp: 'up',
-			ArrowDown: 'down',
-			h: 'left',
-			l: 'right',
-			k: 'up',
-			j: 'down'
-		};
 		const cardDirection =
 			cardDirectionByKey[event.key] ?? cardDirectionByKey[event.key.toLowerCase()];
 		if (activeMealCard && cardDirection) {
