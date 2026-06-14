@@ -4,11 +4,7 @@ import {
 	clearHouseholdCookie,
 	resolveActiveHouseholdId
 } from '$lib/server/auth/household';
-import { householdRoleSlug } from '$lib/server/auth/household-invites';
-
-import { createAuthRuntime } from '$lib/server/auth/workos';
 import { loadHouseholdView } from '$lib/server/household/household-view';
-import { membershipHasAdminRole } from '$lib/server/household/members';
 import { deleteHouseholdCascade } from '$lib/server/household/delete-household';
 import { updateHouseholdAppliancesFromForm } from '$lib/server/household/appliance-settings';
 import { updateHouseholdSettingsFromForm } from '$lib/server/household/settings-command';
@@ -19,6 +15,12 @@ import {
 	updateInviteRoleFromForm,
 	type HouseholdInviteCommandResult
 } from '$lib/server/household/invite-commands';
+import {
+	leaveHouseholdMembership,
+	removeMemberFromForm,
+	updateMemberRoleFromForm,
+	type HouseholdMemberCommandResult
+} from '$lib/server/household/member-commands';
 import { SMOKE_HOUSEHOLD_ID, smokeAuthEnabled } from '$lib/server/auth/smoke';
 import { smokeHouseholdView } from '$lib/server/household/smoke-household-view';
 import type { Actions, PageServerLoad } from './$types';
@@ -84,6 +86,9 @@ const requireInviteStorage = (platform: App.Platform | undefined) => {
 };
 
 const inviteCommandResponse = (result: HouseholdInviteCommandResult) =>
+	result.ok ? { message: result.message } : fail(result.status, { message: result.message });
+
+const memberCommandResponse = (result: HouseholdMemberCommandResult) =>
 	result.ok ? { message: result.message } : fail(result.status, { message: result.message });
 
 export const actions: Actions = {
@@ -156,36 +161,21 @@ export const actions: Actions = {
 	updateMemberRole: async (event) => {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
-		const { householdId, session } = managedHousehold;
-		const form = await event.request.formData();
-		const membershipId = String(form.get('membershipId') ?? '').trim();
-		const userId = String(form.get('userId') ?? '').trim();
-		const roleSlug = householdRoleSlug(form.get('role'));
-		if (!membershipId || !userId) return fail(400, { message: 'Choose a member to update.' });
-		if (userId === session.user.id && roleSlug !== 'admin') {
-			return fail(400, { message: 'You cannot remove your own manager access.' });
-		}
 
 		try {
-			const runtime = createAuthRuntime(event.platform);
-			const membership =
-				await runtime.workos.userManagement.getOrganizationMembership(membershipId);
-			if (membership.organizationId !== householdId || membership.userId !== userId) {
-				return fail(404, { message: 'Household member not found.' });
-			}
-			if (membership.directoryManaged) {
-				return fail(400, {
-					message: 'Directory-managed member roles must be changed in the identity provider.'
-				});
-			}
-			await runtime.workos.userManagement.updateOrganizationMembership(membershipId, { roleSlug });
-			return { message: 'Member role updated.' };
+			return memberCommandResponse(
+				await updateMemberRoleFromForm({
+					platform: event.platform,
+					householdId: managedHousehold.householdId,
+					session: managedHousehold.session,
+					form: await event.request.formData()
+				})
+			);
 		} catch (cause) {
 			console.error('Failed to update household member role', cause);
 			return fail(502, { message: 'Could not update member role.' });
 		}
 	},
-
 	updateSettings: async (event) => {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
@@ -230,31 +220,13 @@ export const actions: Actions = {
 		}
 
 		try {
-			const runtime = createAuthRuntime(event.platform);
-			const memberships = await runtime.workos.userManagement.listOrganizationMemberships({
-				organizationId: householdId,
-				statuses: ['active'],
-				limit: 100
+			const result = await leaveHouseholdMembership({
+				platform: event.platform,
+				householdId,
+				session
 			});
-			const currentMembership = memberships.data.find(
-				(membership) => membership.userId === session.user.id
-			);
-			if (!currentMembership) return fail(404, { message: 'Household member not found.' });
-			if (currentMembership.directoryManaged) {
-				return fail(400, {
-					message: 'Directory-managed members must leave through the identity provider.'
-				});
-			}
-
-			const adminCount = memberships.data.filter(membershipHasAdminRole).length;
-			if (membershipHasAdminRole(currentMembership) && adminCount <= 1) {
-				return fail(400, {
-					message: 'You are the last manager. Add another manager or delete the household instead.'
-				});
-			}
-
-			await runtime.workos.userManagement.deleteOrganizationMembership(currentMembership.id);
-			clearHouseholdCookie(event.cookies);
+			if (!result.ok) return fail(result.status, { message: result.message });
+			if (result.clearHousehold) clearHouseholdCookie(event.cookies);
 		} catch (cause) {
 			console.error('Failed to leave household', cause);
 			return fail(502, { message: 'Could not leave household.' });
@@ -262,31 +234,19 @@ export const actions: Actions = {
 
 		redirect(303, '/onboarding');
 	},
-
 	removeMember: async (event) => {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
-		const { session, householdId } = managedHousehold;
-		const form = await event.request.formData();
-		const membershipId = String(form.get('membershipId') ?? '');
-		const userId = String(form.get('userId') ?? '');
-		if (!membershipId || !userId) return fail(400, { message: 'Choose a member to remove.' });
-		if (userId === session.user.id) return fail(400, { message: 'You cannot remove yourself.' });
 
 		try {
-			const runtime = createAuthRuntime(event.platform);
-			const membership =
-				await runtime.workos.userManagement.getOrganizationMembership(membershipId);
-			if (membership.organizationId !== householdId || membership.userId !== userId) {
-				return fail(404, { message: 'Household member not found.' });
-			}
-			if (membership.directoryManaged) {
-				return fail(400, {
-					message: 'Directory-managed members must be removed in the identity provider.'
-				});
-			}
-			await runtime.workos.userManagement.deleteOrganizationMembership(membershipId);
-			return { message: 'Member removed.' };
+			return memberCommandResponse(
+				await removeMemberFromForm({
+					platform: event.platform,
+					householdId: managedHousehold.householdId,
+					session: managedHousehold.session,
+					form: await event.request.formData()
+				})
+			);
 		} catch (cause) {
 			console.error('Failed to remove household member', cause);
 			return fail(502, { message: 'Could not remove member.' });
