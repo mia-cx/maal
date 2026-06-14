@@ -15,6 +15,7 @@ import { parseIngredientAmount, parseIngredientLine } from '$lib/recipes/ingredi
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { insertHouseholdMealInstructionEvents } from '$lib/server/taxonomy/instruction-events';
 import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
+import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -56,14 +57,6 @@ export type UpdateHouseholdMealInput = {
 		ingredients: string[];
 		instructions: string[];
 	}>;
-};
-
-const servingsPlanned = (
-	meal: { servingsPlanned?: number | null },
-	defaultServings = 1
-): number => {
-	const servings = meal.servingsPlanned ?? defaultServings;
-	return Number.isFinite(servings) ? Math.max(1, Math.round(servings)) : 1;
 };
 
 const loadUnitPreferences = async (db: Db, workosUserId: string, householdId: string) => {
@@ -197,7 +190,10 @@ export const createHouseholdMeal = async (input: {
 		prepTimeMinutes: recipe?.prepTimeMinutes ?? meal.customMeal?.prepTimeMinutes ?? null,
 		cookTimeMinutes: recipe?.cookTimeMinutes ?? meal.customMeal?.cookTimeMinutes ?? null,
 		yield: recipe?.yield ?? defaultMealServings,
-		plannedYield: servingsPlanned({ servingsPlanned: meal.servingsPlanned }, defaultMealServings),
+		plannedYield: normalizeServingsPlanned(
+			{ servingsPlanned: meal.servingsPlanned },
+			defaultMealServings
+		),
 		plannedCookWorkosUserId,
 		date: meal.date ?? null,
 		time: meal.time ?? null,
@@ -272,7 +268,7 @@ export const updateHouseholdMeal = async (input: {
 			plannedYield:
 				meal.patch.servingsPlanned === undefined
 					? existingMeal.plannedYield
-					: servingsPlanned(
+					: normalizeServingsPlanned(
 							{ servingsPlanned: meal.patch.servingsPlanned },
 							existingMeal.plannedYield ?? 1
 						),

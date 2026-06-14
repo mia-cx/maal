@@ -22,6 +22,7 @@ import { parseIngredientAmount, parseIngredientLine } from '$lib/recipes/ingredi
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { insertHouseholdMealInstructionEvents } from '$lib/server/taxonomy/instruction-events';
 import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
+import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
@@ -50,11 +51,6 @@ const readMealId = async (request: Request): Promise<string> => {
 	const mealId = isRecord(body) && typeof body.mealId === 'string' ? body.mealId.trim() : '';
 	if (!mealId) error(400, { message: 'Meal is required.' });
 	return mealId;
-};
-
-const servingsPlanned = (meal: Meal, defaultServings = 1): number => {
-	const servings = meal.servingsPlanned ?? defaultServings;
-	return Number.isFinite(servings) ? Math.max(1, Math.round(servings)) : 1;
 };
 
 const loadUnitPreferences = async (
@@ -94,8 +90,8 @@ const plannedMealUpdate = (meal: Meal, defaultServings: number) => ({
 	imageUrl: meal.image ?? null,
 	prepTimeMinutes: meal.prepTimeMinutes ?? null,
 	cookTimeMinutes: meal.cookTimeMinutes ?? null,
-	yield: meal.baseServings ?? servingsPlanned(meal, defaultServings),
-	plannedYield: servingsPlanned(meal, defaultServings),
+	yield: meal.baseServings ?? normalizeServingsPlanned(meal, defaultServings),
+	plannedYield: normalizeServingsPlanned(meal, defaultServings),
 	date: meal.date ?? null,
 	time: meal.time ?? null,
 	sortOrder: meal.sortOrder ?? null,
@@ -229,7 +225,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		prepTimeMinutes: recipe?.prepTimeMinutes ?? meal.prepTimeMinutes ?? null,
 		cookTimeMinutes: recipe?.cookTimeMinutes ?? meal.cookTimeMinutes ?? null,
 		yield: recipe?.yield ?? meal.baseServings ?? defaultMealServings,
-		plannedYield: servingsPlanned(meal, defaultMealServings),
+		plannedYield: normalizeServingsPlanned(meal, defaultMealServings),
 		plannedCookWorkosUserId,
 		date: meal.date ?? null,
 		time: meal.time ?? null,
