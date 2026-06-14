@@ -3,8 +3,6 @@ import type { Meal } from '$lib/components/dashboard/schedule-types';
 import { countActiveHouseholdMembers, listHouseholdMembers } from '$lib/server/auth/household';
 import { getDb } from '$lib/server/db';
 import {
-	householdMealIngredients,
-	householdMealInstructions,
 	householdMeals,
 	householdMealUserRecipes,
 	households,
@@ -12,10 +10,12 @@ import {
 } from '$lib/server/db/schema';
 import { loadMealPlanMeals, mealFromHouseholdMeal } from '$lib/server/db/recipe-mappers';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
-import { insertHouseholdMealInstructionEvents } from '$lib/server/taxonomy/instruction-events';
 import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
 import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
-import { mealIngredientLineToSidecar, mealInstructionLineToSidecar } from './meal-line-sidecars';
+import {
+	replaceMealIngredientsFromLines,
+	replaceMealInstructionsFromLines
+} from './meal-sidecar-writer';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -80,41 +80,6 @@ const ownedRecipe = async (db: Db, userRecipeId: string, workosUserId: string) =
 		.from(userRecipes)
 		.where(and(eq(userRecipes.id, userRecipeId), eq(userRecipes.workosUserId, workosUserId)))
 		.get();
-
-const replaceMealIngredientsFromMeal = async (
-	db: Db,
-	householdMealId: string,
-	ingredients: string[] = []
-) => {
-	await db
-		.delete(householdMealIngredients)
-		.where(eq(householdMealIngredients.householdMealId, householdMealId));
-	for (const [index, line] of ingredients.entries()) {
-		await db
-			.insert(householdMealIngredients)
-			.values(mealIngredientLineToSidecar(householdMealId, line, index));
-	}
-};
-
-const replaceMealInstructionsFromMeal = async (
-	db: Db,
-	householdMealId: string,
-	instructions: string[] = []
-) => {
-	await db
-		.delete(householdMealInstructions)
-		.where(eq(householdMealInstructions.householdMealId, householdMealId));
-	for (const [index, instruction] of instructions.entries()) {
-		await db
-			.insert(householdMealInstructions)
-			.values(mealInstructionLineToSidecar(householdMealId, instruction, index));
-	}
-	const insertedInstructions = await db
-		.select({ id: householdMealInstructions.id, text: householdMealInstructions.text })
-		.from(householdMealInstructions)
-		.where(eq(householdMealInstructions.householdMealId, householdMealId));
-	await insertHouseholdMealInstructionEvents(db, insertedInstructions);
-};
 
 const validateCook = async (
 	platform: App.Platform | undefined,
@@ -193,8 +158,8 @@ export const createHouseholdMeal = async (input: {
 		await db.insert(householdMealUserRecipes).values({ householdMealId, userRecipeId: recipe.id });
 		await copyRecipeSidecarsToMeal(db, recipe.id, householdMealId);
 	} else {
-		await replaceMealIngredientsFromMeal(db, householdMealId, meal.customMeal?.ingredients);
-		await replaceMealInstructionsFromMeal(db, householdMealId, meal.customMeal?.instructions);
+		await replaceMealIngredientsFromLines(db, householdMealId, meal.customMeal?.ingredients);
+		await replaceMealInstructionsFromLines(db, householdMealId, meal.customMeal?.instructions);
 	}
 
 	return getHouseholdMeal({
@@ -272,10 +237,10 @@ export const updateHouseholdMeal = async (input: {
 		})
 		.where(eq(householdMeals.id, existingMeal.id));
 	if (meal.patch.ingredients !== undefined) {
-		await replaceMealIngredientsFromMeal(db, existingMeal.id, meal.patch.ingredients);
+		await replaceMealIngredientsFromLines(db, existingMeal.id, meal.patch.ingredients);
 	}
 	if (meal.patch.instructions !== undefined) {
-		await replaceMealInstructionsFromMeal(db, existingMeal.id, meal.patch.instructions);
+		await replaceMealInstructionsFromLines(db, existingMeal.id, meal.patch.instructions);
 	}
 	return getHouseholdMeal({
 		db,
