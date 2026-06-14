@@ -1,21 +1,9 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
-import { and, eq, inArray } from 'drizzle-orm';
-import type { Meal, MealStatus } from '$lib/components/dashboard/schedule-types';
-import { countActiveHouseholdMembers, listHouseholdMembers } from '$lib/server/auth/household';
+import { and, eq } from 'drizzle-orm';
+import type { Meal } from '$lib/components/dashboard/schedule-types';
+import { countActiveHouseholdMembers } from '$lib/server/auth/household';
 import { requireAppContext } from '$lib/server/http/app-context';
-import { getDb } from '$lib/server/db';
-import {
-	householdMealIngredients,
-	householdMealInstructionEvents,
-	householdMealInstructions,
-	householdMeals,
-	householdMealUserRecipes,
-	households,
-	userRecipes
-} from '$lib/server/db/schema';
-import { loadMealPlanMeals, mealFromHouseholdMeal } from '$lib/server/db/recipe-mappers';
-import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
-import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
+import { householdMeals } from '$lib/server/db/schema';
 import {
 	createHouseholdMeal,
 	deleteHouseholdMeal,
@@ -23,10 +11,6 @@ import {
 	updateHouseholdMeal
 } from '$lib/server/services/meal-plan';
 import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
-import {
-	replaceMealIngredientsFromLines,
-	replaceMealInstructionsFromLines
-} from '$lib/server/services/meal-sidecar-writer';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
@@ -55,75 +39,6 @@ const readMealId = async (request: Request): Promise<string> => {
 	const mealId = isRecord(body) && typeof body.mealId === 'string' ? body.mealId.trim() : '';
 	if (!mealId) error(400, { message: 'Meal is required.' });
 	return mealId;
-};
-
-const loadUnitPreferences = async (
-	db: ReturnType<typeof getDb>,
-	workosUserId: string,
-	householdId: string
-) => {
-	const profileRows = await db
-		.select({ locale: households.locale })
-		.from(households)
-		.where(eq(households.householdId, householdId))
-		.limit(1);
-	const unitPreferences = (
-		await loadEffectiveTaxonomyPreferences(db, {
-			workosUserId,
-			householdId,
-			locale: profileRows[0]?.locale ?? 'en-US'
-		})
-	).unitPreferences;
-	return unitPreferences;
-};
-
-const ownedRecipe = async (
-	db: ReturnType<typeof getDb>,
-	userRecipeId: string,
-	workosUserId: string
-) =>
-	db
-		.select()
-		.from(userRecipes)
-		.where(and(eq(userRecipes.id, userRecipeId), eq(userRecipes.workosUserId, workosUserId)))
-		.get();
-
-const plannedMealUpdate = (meal: Meal, defaultServings: number) => ({
-	title: meal.title.trim() || 'New meal',
-	description: meal.description ?? null,
-	imageUrl: meal.image ?? null,
-	prepTimeMinutes: meal.prepTimeMinutes ?? null,
-	cookTimeMinutes: meal.cookTimeMinutes ?? null,
-	yield: meal.baseServings ?? normalizeServingsPlanned(meal, defaultServings),
-	plannedYield: normalizeServingsPlanned(meal, defaultServings),
-	date: meal.date ?? null,
-	time: meal.time ?? null,
-	sortOrder: meal.sortOrder ?? null,
-	status: meal.status ?? ('planned' satisfies MealStatus),
-	plannedCookWorkosUserId: meal.plannedCookWorkosUserId ?? null,
-	updatedAt: new Date().toISOString()
-});
-
-const loadInstructionEvents = async (
-	db: ReturnType<typeof getDb>,
-	instructions: Array<typeof householdMealInstructions.$inferSelect>
-) => {
-	const instructionIds = instructions.map((instruction) => instruction.id);
-	if (!instructionIds.length) {
-		return new Map<string, (typeof householdMealInstructionEvents.$inferSelect)[]>();
-	}
-	const rows = await db
-		.select()
-		.from(householdMealInstructionEvents)
-		.where(inArray(householdMealInstructionEvents.householdMealInstructionId, instructionIds));
-	const grouped = new Map<string, (typeof householdMealInstructionEvents.$inferSelect)[]>();
-	for (const row of rows) {
-		grouped.set(row.householdMealInstructionId, [
-			...(grouped.get(row.householdMealInstructionId) ?? []),
-			row
-		]);
-	}
-	return grouped;
 };
 
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
