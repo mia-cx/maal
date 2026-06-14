@@ -24,6 +24,88 @@ export type DisplayOverrideRows = {
 	ingredientOverrides: Array<IngredientOverrideInput & { id: string }>;
 };
 
+export const loadDisplayOverrideRows = async (
+	database: D1Database,
+	householdId: string,
+	locale: string
+): Promise<DisplayOverrideRows> => {
+	const db = getDb(database);
+	const [
+		unitOverrideRows,
+		ingredientOverrideRows,
+		globalUnitAliases,
+		householdUnitAliases,
+		globalFoodAliases,
+		householdFoodAliases
+	] = await Promise.all([
+		db
+			.select()
+			.from(householdUnitDisplayOverrides)
+			.where(
+				and(
+					eq(householdUnitDisplayOverrides.householdId, householdId),
+					eq(householdUnitDisplayOverrides.locale, locale)
+				)
+			),
+		db
+			.select()
+			.from(householdFoodDisplayOverrides)
+			.where(
+				and(
+					eq(householdFoodDisplayOverrides.householdId, householdId),
+					eq(householdFoodDisplayOverrides.locale, locale)
+				)
+			),
+		db.select().from(unitAliases),
+		db.select().from(unitHouseholdAliases).where(eq(unitHouseholdAliases.householdId, householdId)),
+		db.select().from(foodAliases),
+		db.select().from(foodHouseholdAliases).where(eq(foodHouseholdAliases.householdId, householdId))
+	]);
+	const globalUnitAliasById = new Map(globalUnitAliases.map((alias) => [alias.id, alias.alias]));
+	const householdUnitAliasById = new Map(
+		householdUnitAliases.map((alias) => [alias.id, alias.alias])
+	);
+	const globalFoodAliasById = new Map(globalFoodAliases.map((alias) => [alias.id, alias.alias]));
+	const householdFoodAliasById = new Map(
+		householdFoodAliases.map((alias) => [alias.id, alias.alias])
+	);
+	const unitAliasFor = (scope: string | null, id: string | null) => {
+		if (!id) return '';
+		return scope === 'household'
+			? (householdUnitAliasById.get(id) ?? '')
+			: (globalUnitAliasById.get(id) ?? '');
+	};
+	const foodAliasFor = (scope: string | null, id: string | null) => {
+		if (!id) return '';
+		return scope === 'household'
+			? (householdFoodAliasById.get(id) ?? '')
+			: (globalFoodAliasById.get(id) ?? '');
+	};
+	const result: DisplayOverrideRows = { unitOverrides: [], ingredientOverrides: [] };
+	for (const row of unitOverrideRows) {
+		const alias = unitAliasFor(row.preferredUnitAliasScope, row.preferredUnitAliasId);
+		if (!alias) continue;
+		if (row.baseUnitId === 'grams') result.preferredMassUnit = alias;
+		else if (row.baseUnitId === 'milliliters') result.preferredVolumeUnit = alias;
+		else if (row.baseUnitId === 'celsius') result.preferredTemperatureUnit = alias;
+		else
+			result.unitOverrides.push({
+				id: row.id,
+				baseUnit: row.baseUnitId,
+				preferredUnitAlias: alias
+			});
+	}
+	for (const row of ingredientOverrideRows) {
+		result.ingredientOverrides.push({
+			id: row.id,
+			baseFood: row.foodId,
+			preferredFoodAlias: foodAliasFor(row.preferredFoodAliasScope, row.preferredFoodAliasId),
+			preferredMeasureUnit: row.preferredMeasureUnitId ?? ''
+		});
+	}
+	return result;
+};
+
 type UnitAliasMatch = {
 	unitId: string;
 	baseUnitId: string;
