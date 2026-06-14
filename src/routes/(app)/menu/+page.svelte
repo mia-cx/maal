@@ -1,6 +1,5 @@
 <script lang="ts">
-	import MyMenuDashboard from '$lib/components/menu/my-menu-dashboard.svelte';
-	import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+	import { MyMenuDashboard, type RecipeMenuItem } from '$lib/components/menu';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
