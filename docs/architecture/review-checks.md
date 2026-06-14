@@ -8,6 +8,8 @@ pnpm test:unit -- --run
 pnpm architecture:check
 ```
 
+Run `pnpm test:e2e` for final validation before merging a broad route/component refactor.
+
 `pnpm architecture:check` runs:
 
 - `pnpm boundaries:check` — catches forbidden imports across route/server/design-system/menu public boundaries.
