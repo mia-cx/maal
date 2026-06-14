@@ -20,7 +20,7 @@
 	import RecipeInstructionDragPreview from '$lib/components/menu/recipe-instruction-drag-preview.svelte';
 	import RecipeIngredientsEditor from '$lib/components/menu/recipe-ingredients-editor.svelte';
 	import RecipeInstructionsEditor from '$lib/components/menu/recipe-instructions-editor.svelte';
-	import type { RecipeInstructionItem, RecipeMenuItem } from './menu-types';
+	import type { RecipeInstructionItem, RecipeMenuItem } from '$lib/menu/menu-types';
 
 	let {
 		open = $bindable(false),

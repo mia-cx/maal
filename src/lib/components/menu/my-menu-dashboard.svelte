@@ -34,7 +34,7 @@
 	import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
 	import { createDraftRecipe } from '$lib/menu/recipe-draft';
 	import { toggleMenuSelection } from '$lib/menu/menu-selection';
-	import type { RecipeMenuItem } from './menu-types';
+	import type { RecipeMenuItem } from '$lib/menu/menu-types';
 
 	let {
 		recipes: initialRecipes = [],

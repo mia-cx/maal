@@ -1,4 +1,4 @@
-import type { RecipeMenuItem } from './menu-types';
+import type { RecipeMenuItem } from '$lib/menu/menu-types';
 
 export const myMenuRecipes: RecipeMenuItem[] = [
 	{

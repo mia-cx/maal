@@ -1,5 +1,5 @@
 import { type MealFeedbackVerdict } from '$lib/components/dashboard/meal-labels';
-import type { RecipeMenuItem } from './menu-types';
+import type { RecipeMenuItem } from '$lib/menu/menu-types';
 
 export type MealLoad = 'low' | 'medium' | 'high';
 
