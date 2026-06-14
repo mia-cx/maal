@@ -1,32 +1,7 @@
 import { fail, redirect, type Cookies } from '@sveltejs/kit';
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
-import {
-	billingSubscriptions,
-	foodAliases,
-	foodHouseholdAliases,
-	foodHouseholdEntries,
-	foods,
-	householdAppliances,
-	householdFoodDisplayOverrides,
-	householdInvites,
-	householdMealApplianceRequirements,
-	householdMealClassifications,
-	householdMealIngredients,
-	householdMealInstructionEvents,
-	householdMealInstructions,
-	householdMealMedia,
-	householdMealNutritionFacts,
-	householdMeals,
-	households,
-	householdMealUserRecipes,
-	householdUnitDisplayOverrides,
-	unitAliases,
-	unitHouseholdAliases,
-	unitHouseholdEntries,
-	units,
-	userRecipes
-} from '$lib/server/db/schema';
+import { foods, householdAppliances, households } from '$lib/server/db/schema';
 import {
 	canManageActiveHousehold,
 	clearHouseholdCookie,
@@ -54,7 +29,6 @@ import {
 	revokeHouseholdInvite,
 	updateHouseholdInviteRole
 } from '$lib/server/auth/household-invites';
-import { createAuthRuntime } from '$lib/server/auth/workos';
 import {
 	emptyTaxonomyOptions,
 	loadTaxonomyOptions,
@@ -70,6 +44,8 @@ import {
 	type UnitOverrideInput
 } from '$lib/server/taxonomy/display-overrides';
 import { displayUserName } from '$lib/server/auth/user-display';
+import { createAuthRuntime } from '$lib/server/auth/workos';
+import { deleteHouseholdCascade } from '$lib/server/household/delete-household';
 import {
 	SMOKE_HOUSEHOLD_ID,
 	SMOKE_HOUSEHOLD_NAME,
@@ -687,83 +663,11 @@ export const actions: Actions = {
 		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
 
 		try {
-			const db = getDb(event.platform.env.DB);
-			const mealRows = await db
-				.select({ id: householdMeals.id })
-				.from(householdMeals)
-				.where(eq(householdMeals.householdId, householdId));
-			const mealIds = mealRows.map((meal) => meal.id);
-			const instructionRows = mealIds.length
-				? await db
-						.select({ id: householdMealInstructions.id })
-						.from(householdMealInstructions)
-						.where(inArray(householdMealInstructions.householdMealId, mealIds))
-				: [];
-			const instructionIds = instructionRows.map((instruction) => instruction.id);
-
-			await createAuthRuntime(event.platform).workos.organizations.deleteOrganization(householdId);
-
-			if (instructionIds.length > 0) {
-				await db
-					.delete(householdMealInstructionEvents)
-					.where(
-						inArray(householdMealInstructionEvents.householdMealInstructionId, instructionIds)
-					);
-			}
-
-			if (mealIds.length > 0) {
-				await db
-					.delete(householdMealUserRecipes)
-					.where(inArray(householdMealUserRecipes.householdMealId, mealIds));
-				await db
-					.delete(householdMealIngredients)
-					.where(inArray(householdMealIngredients.householdMealId, mealIds));
-				await db
-					.delete(householdMealApplianceRequirements)
-					.where(inArray(householdMealApplianceRequirements.householdMealId, mealIds));
-				await db
-					.delete(householdMealInstructions)
-					.where(inArray(householdMealInstructions.householdMealId, mealIds));
-				await db
-					.delete(householdMealClassifications)
-					.where(inArray(householdMealClassifications.householdMealId, mealIds));
-				await db
-					.delete(householdMealMedia)
-					.where(inArray(householdMealMedia.householdMealId, mealIds));
-				await db
-					.delete(householdMealNutritionFacts)
-					.where(inArray(householdMealNutritionFacts.householdMealId, mealIds));
-			}
-
-			await db.delete(householdMeals).where(eq(householdMeals.householdId, householdId));
-			await db
-				.delete(billingSubscriptions)
-				.where(eq(billingSubscriptions.householdId, householdId));
-			await db.delete(householdInvites).where(eq(householdInvites.householdId, householdId));
-			await db
-				.delete(householdFoodDisplayOverrides)
-				.where(eq(householdFoodDisplayOverrides.householdId, householdId));
-			await db
-				.delete(householdUnitDisplayOverrides)
-				.where(eq(householdUnitDisplayOverrides.householdId, householdId));
-			await db
-				.delete(foodHouseholdAliases)
-				.where(eq(foodHouseholdAliases.householdId, householdId));
-			await db
-				.delete(foodHouseholdEntries)
-				.where(eq(foodHouseholdEntries.householdId, householdId));
-			await db
-				.delete(unitHouseholdAliases)
-				.where(eq(unitHouseholdAliases.householdId, householdId));
-			await db
-				.delete(unitHouseholdEntries)
-				.where(eq(unitHouseholdEntries.householdId, householdId));
-			await db.delete(householdAppliances).where(eq(householdAppliances.householdId, householdId));
-			await db
-				.update(userRecipes)
-				.set({ savedFromHouseholdId: null })
-				.where(eq(userRecipes.savedFromHouseholdId, householdId));
-			await db.delete(households).where(eq(households.householdId, householdId));
+			await deleteHouseholdCascade({
+				database: event.platform.env.DB,
+				platform: event.platform,
+				householdId
+			});
 			clearHouseholdCookie(event.cookies);
 		} catch (cause) {
 			console.error('Failed to delete household', cause);
