@@ -24,9 +24,11 @@ export const optionalWholeNumber = (
 	return number === undefined ? undefined : Math.max(1, Math.round(number));
 };
 
+const createDraftId = (): string => crypto.randomUUID();
+
 export const defaultIngredients = (
 	nextRecipe: RecipeMenuItem,
-	createId: () => string = crypto.randomUUID
+	createId: () => string = createDraftId
 ): DraftIngredient[] => {
 	const recipeIngredients = nextRecipe.ingredients ?? [];
 	if (!recipeIngredients.length) return [{ draftId: createId(), amount: '', unit: '', item: '' }];
@@ -39,7 +41,7 @@ export const defaultIngredients = (
 
 export const defaultInstructions = (
 	nextRecipe: RecipeMenuItem,
-	createId: () => string = crypto.randomUUID
+	createId: () => string = createDraftId
 ): DraftInstruction[] => {
 	const recipeInstructions = nextRecipe.instructions ?? [];
 	if (!recipeInstructions.length) return [{ draftId: createId(), position: 1, text: '' }];
