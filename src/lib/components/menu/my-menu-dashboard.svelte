@@ -196,16 +196,6 @@
 		return 'Could not add that recipe.';
 	};
 
-	const readResponseError = async (response: Response, fallback: string): Promise<string> => {
-		try {
-			const body = (await response.json()) as { message?: unknown };
-			if (typeof body.message === 'string' && body.message.trim()) return body.message;
-		} catch {
-			// Fall through to fallback.
-		}
-		return fallback;
-	};
-
 	const draftRecipeFromTitle = (title = 'New recipe'): RecipeMenuItem => ({
 		id: `draft-recipe-${crypto.randomUUID()}`,
 		title,
