@@ -23,3 +23,5 @@ Preferred destinations:
 - Public domain API for cross-domain contracts.
 
 Every abstraction should be earned: extract behavior only when there is a coherent concept, not just repeated tokens.
+
+Use `pnpm duplicates:scan` or `pnpm architecture:check` during review. Generated/import-only noise is intentionally filtered by the scanner; product behavior inside generated-looking files is not exempt once edited by hand.
