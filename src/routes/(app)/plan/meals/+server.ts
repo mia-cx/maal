@@ -19,7 +19,8 @@ import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
 import {
 	createHouseholdMeal,
 	deleteHouseholdMeal,
-	listHouseholdPlanMeals
+	listHouseholdPlanMeals,
+	updateHouseholdMeal
 } from '$lib/server/services/meal-plan';
 import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
 import {
@@ -200,10 +201,7 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 
 export const PUT: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
 	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
-	const defaultMealServings = await countActiveHouseholdMembers(platform, householdId);
-
 	const meal = await readMeal(request);
-	const unitPreferences = await loadUnitPreferences(db, session.user.id, householdId);
 
 	const existingMeal = await db
 		.select()
@@ -211,50 +209,54 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 		.where(and(eq(householdMeals.id, meal.id), eq(householdMeals.householdId, householdId)))
 		.get();
 
-	if (existingMeal) {
-		meal.plannedCookWorkosUserId ??= existingMeal.plannedCookWorkosUserId ?? undefined;
-		meal.status ??= existingMeal.status;
-		if (meal.plannedCookWorkosUserId) {
-			const householdMembers = await listHouseholdMembers(platform, householdId);
-			if (!householdMembers.some((member) => member.userId === meal.plannedCookWorkosUserId)) {
-				error(400, { message: 'Choose an active household member as the cook.' });
-			}
-		}
-		await db
-			.update(householdMeals)
-			.set(plannedMealUpdate(meal, defaultMealServings))
-			.where(eq(householdMeals.id, existingMeal.id));
-		if (meal.ingredients !== undefined) {
-			await replaceMealIngredientsFromLines(db, existingMeal.id, meal.ingredients);
-		}
-		if (meal.instructions !== undefined) {
-			await replaceMealInstructionsFromLines(db, existingMeal.id, meal.instructions);
-		}
-
-		const [updatedMeal, ingredients, instructions] = await Promise.all([
-			db.select().from(householdMeals).where(eq(householdMeals.id, existingMeal.id)).get(),
-			db
-				.select()
-				.from(householdMealIngredients)
-				.where(eq(householdMealIngredients.householdMealId, existingMeal.id)),
-			db
-				.select()
-				.from(householdMealInstructions)
-				.where(eq(householdMealInstructions.householdMealId, existingMeal.id))
-		]);
-		const instructionEvents = await loadInstructionEvents(db, instructions);
-		return json({
-			meal: mealFromHouseholdMeal(
-				updatedMeal ?? existingMeal,
-				ingredients,
-				instructions,
-				instructionEvents,
-				meal.userRecipeId,
-				unitPreferences
-			)
-		});
+	if (!existingMeal) {
+		if (!meal.date) return json({ meal });
+		error(404, { message: 'Meal not found.' });
 	}
 
-	if (!meal.date) return json({ meal });
-	error(404, { message: 'Meal not found.' });
+	try {
+		return json({
+			meal: await updateHouseholdMeal({
+				platform,
+				db,
+				meal: {
+					householdId,
+					workosUserId: session.user.id,
+					mealId: meal.id,
+					patch: {
+						date: meal.date ?? null,
+						time: meal.time ?? null,
+						sortOrder: meal.sortOrder ?? null,
+						plannedCookUserId: meal.plannedCookWorkosUserId ?? existingMeal.plannedCookWorkosUserId,
+						servingsPlanned: meal.servingsPlanned,
+						status: meal.status ?? existingMeal.status,
+						title: meal.title.trim() || 'New meal',
+						description: meal.description ?? null,
+						imageUrl: meal.image ?? null,
+						prepTimeMinutes: meal.prepTimeMinutes ?? null,
+						cookTimeMinutes: meal.cookTimeMinutes ?? null,
+						yield:
+							meal.baseServings ??
+							normalizeServingsPlanned(
+								meal,
+								await countActiveHouseholdMembers(platform, householdId)
+							),
+						ingredients: meal.ingredients,
+						instructions: meal.instructions
+					}
+				}
+			})
+		});
+	} catch (cause) {
+		if (
+			cause instanceof Error &&
+			cause.message === 'Choose an active household member as the cook.'
+		) {
+			error(400, { message: cause.message });
+		}
+		if (cause instanceof Error && cause.message === 'Meal not found.') {
+			error(404, { message: cause.message });
+		}
+		throw cause;
+	}
 };
