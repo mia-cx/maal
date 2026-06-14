@@ -10,6 +10,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import AccountSettingsSection from '$lib/components/settings/account-settings-section.svelte';
+	import BillingSettingsSection from '$lib/components/settings/billing-settings-section.svelte';
 	import SecuritySettingsSection from '$lib/components/settings/security-settings-section.svelte';
 	import SettingsCategoryNav from '$lib/components/settings/settings-category-nav.svelte';
 	import SettingsSectionHeading from '$lib/components/settings/settings-section-heading.svelte';
@@ -884,44 +885,13 @@
 						</label>
 					</div>
 				{:else if activeCategory === 'billing'}
-					<div class="grid gap-4 text-sm">
-						{#if billingBusy && !billingStatus}
-							<p class="text-xs text-muted-foreground">Loading billing…</p>
-						{:else if billingStatus}
-							<div class="grid gap-2">
-								<p class="text-xs font-medium">Managed household subscriptions</p>
-								<ul class="divide-y divide-border">
-									{#each billingStatus.householdBilling as householdBilling (householdBilling.householdId)}
-										<li class="flex items-center justify-between gap-3 py-2">
-											<div class="min-w-0">
-												<p class="truncate text-xs font-medium">
-													{householdBilling.householdName}{householdBilling.isActiveHousehold
-														? ' · current'
-														: ''}
-												</p>
-												<p class="truncate text-xs text-muted-foreground">
-													{householdBilling.status
-														? `${householdBilling.status}${householdBilling.cancelAtPeriodEnd ? ' · cancels at period end' : ''}`
-														: 'No active plan'}
-												</p>
-											</div>
-											{#if householdBilling.stripeCustomerId && householdBilling.canManageBilling}
-												<Button
-													variant="outline"
-													size="sm"
-													disabled={billingPortalBusy}
-													onclick={() => openBillingPortal(householdBilling.householdId)}
-												>
-													{billingPortalBusy ? 'Opening…' : 'Manage subscriptions'}
-												</Button>
-											{/if}
-										</li>
-									{/each}
-								</ul>
-							</div>
-						{/if}
-						{#if billingError}<p class="text-xs text-destructive">{billingError}</p>{/if}
-					</div>
+					<BillingSettingsSection
+						{billingBusy}
+						{billingStatus}
+						{billingPortalBusy}
+						{billingError}
+						{openBillingPortal}
+					/>
 				{/if}
 			</section>
 		</div>
