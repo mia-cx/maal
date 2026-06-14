@@ -15,13 +15,12 @@ import {
 } from '$lib/server/db/schema';
 import { loadMealPlanMeals, mealFromHouseholdMeal } from '$lib/server/db/recipe-mappers';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
-import { insertHouseholdMealInstructionEvents } from '$lib/server/taxonomy/instruction-events';
 import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
 import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
 import {
-	mealIngredientLineToSidecar,
-	mealInstructionLineToSidecar
-} from '$lib/server/services/meal-line-sidecars';
+	replaceMealIngredientsFromLines,
+	replaceMealInstructionsFromLines
+} from '$lib/server/services/meal-sidecar-writer';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
@@ -121,41 +120,6 @@ const loadInstructionEvents = async (
 	return grouped;
 };
 
-const replaceMealIngredientsFromMeal = async (
-	db: ReturnType<typeof getDb>,
-	householdMealId: string,
-	ingredients: string[] = []
-) => {
-	await db
-		.delete(householdMealIngredients)
-		.where(eq(householdMealIngredients.householdMealId, householdMealId));
-	for (const [index, line] of ingredients.entries()) {
-		await db
-			.insert(householdMealIngredients)
-			.values(mealIngredientLineToSidecar(householdMealId, line, index));
-	}
-};
-
-const replaceMealInstructionsFromMeal = async (
-	db: ReturnType<typeof getDb>,
-	householdMealId: string,
-	instructions: string[] = []
-) => {
-	await db
-		.delete(householdMealInstructions)
-		.where(eq(householdMealInstructions.householdMealId, householdMealId));
-	for (const [index, instruction] of instructions.entries()) {
-		await db
-			.insert(householdMealInstructions)
-			.values(mealInstructionLineToSidecar(householdMealId, instruction, index));
-	}
-	const insertedInstructions = await db
-		.select({ id: householdMealInstructions.id, text: householdMealInstructions.text })
-		.from(householdMealInstructions)
-		.where(eq(householdMealInstructions.householdMealId, householdMealId));
-	await insertHouseholdMealInstructionEvents(db, insertedInstructions);
-};
-
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
 	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
 	const startDate = dateParam(url, 'start');
@@ -218,8 +182,8 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	if (recipe) {
 		await copyRecipeSidecarsToMeal(db, recipe.id, householdMealId);
 	} else {
-		await replaceMealIngredientsFromMeal(db, householdMealId, meal.ingredients);
-		await replaceMealInstructionsFromMeal(db, householdMealId, meal.instructions);
+		await replaceMealIngredientsFromLines(db, householdMealId, meal.ingredients);
+		await replaceMealInstructionsFromLines(db, householdMealId, meal.instructions);
 	}
 
 	const [createdMeal, ingredients, instructions] = await Promise.all([
@@ -288,10 +252,10 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 			.set(plannedMealUpdate(meal, defaultMealServings))
 			.where(eq(householdMeals.id, existingMeal.id));
 		if (meal.ingredients !== undefined) {
-			await replaceMealIngredientsFromMeal(db, existingMeal.id, meal.ingredients);
+			await replaceMealIngredientsFromLines(db, existingMeal.id, meal.ingredients);
 		}
 		if (meal.instructions !== undefined) {
-			await replaceMealInstructionsFromMeal(db, existingMeal.id, meal.instructions);
+			await replaceMealInstructionsFromLines(db, existingMeal.id, meal.instructions);
 		}
 
 		const [updatedMeal, ingredients, instructions] = await Promise.all([
