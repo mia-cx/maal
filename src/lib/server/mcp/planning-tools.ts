@@ -13,7 +13,8 @@ import { toolError } from './results';
 import { defaultPlanRange } from './plan-range';
 import { resolveHouseholdId, resolveScopedHouseholdId } from './context';
 import { optionalHouseholdInput, recordInput } from './schemas';
-import { createMealResolvingRecipe, mealFailureLabel, mealPatchFromArgs } from './meal-input';
+import { createMealResolvingRecipe, mealPatchFromArgs } from './meal-input';
+import { createBatchHouseholdMeals } from './batch-meal-handler';
 import type { ToolDefinition } from './registry';
 
 const defaultPlanLimit = 50;
@@ -94,30 +95,7 @@ export const planningTools: ToolDefinition[] = [
 		annotations: { readOnlyHint: false },
 		handler: async (context, args) => {
 			const householdId = await resolveHouseholdId(context, args, 'meals:write', 'meals:write');
-			const meals = Array.isArray(args.meals) ? args.meals.filter(isRecord).slice(0, 50) : [];
-			if (!meals.length) throw toolError('invalid_input', 'Pass between 1 and 50 meals.');
-			const created = [];
-			const errors = [];
-			for (const [index, mealArgs] of meals.entries()) {
-				try {
-					created.push(
-						await createHouseholdMeal({
-							platform: context.platform,
-							db: context.db,
-							meal: await createMealResolvingRecipe(context, householdId, mealArgs)
-						})
-					);
-				} catch (cause) {
-					errors.push({
-						index,
-						meal: mealFailureLabel(mealArgs, index),
-						url: text(mealArgs.url),
-						code: text(mealArgs.url) ? 'import_or_create_failed' : 'create_failed',
-						message: cause instanceof Error ? cause.message : 'Could not create meal.'
-					});
-				}
-			}
-			return { created, errors };
+			return createBatchHouseholdMeals(context, householdId, args);
 		}
 	},
 	{
