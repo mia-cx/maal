@@ -18,7 +18,7 @@
 		isoWeekNumber,
 		startOfDay
 	} from './schedule-date';
-	import ScheduleMealPool from './schedule-meal-pool.svelte';
+	import ScheduleMealPoolBar from './schedule-meal-pool-bar.svelte';
 	import MultiDayColumn from './multi-day-column.svelte';
 	import { sortScheduledMeals } from './schedule-ordering';
 	import type { Meal, MealCheckInHandler, MealDropTarget } from './schedule-types';
@@ -742,18 +742,16 @@
 	bind:clientWidth={contentWidth}
 	class="@container/multi-day flex h-full min-w-0 flex-col overflow-hidden"
 >
-	<div class="border-b border-border">
-		<ScheduleMealPool
-			{draggingMealId}
-			{draggedMeal}
-			{dropTarget}
-			{onaddmeal}
-			{onpick}
-			{onselect}
-			meals={mealPool}
-			showImages={showMealPoolImages}
-		/>
-	</div>
+	<ScheduleMealPoolBar
+		{draggingMealId}
+		{draggedMeal}
+		{dropTarget}
+		{onaddmeal}
+		{onpick}
+		{onselect}
+		meals={mealPool}
+		showImages={showMealPoolImages}
+	/>
 	<div class="border-b border-border px-4 py-1 text-xs font-medium">
 		{formatWeekHeading(anchorDate, new Date(), weekStartsOn)}
 	</div>
