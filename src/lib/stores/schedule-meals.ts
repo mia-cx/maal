@@ -18,6 +18,11 @@ export type ScheduleMealChange = {
 
 export type ScheduleMealChangeHook = (change: ScheduleMealChange) => void | Promise<void>;
 
+export type ScheduleMealStoreSnapshot = {
+	meals: Meal[];
+	selectedMealId: string | null;
+};
+
 const cloneMeal = (meal: Meal): Meal => ({
 	...meal,
 	ingredients: meal.ingredients ? [...meal.ingredients] : undefined,

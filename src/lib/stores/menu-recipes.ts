@@ -21,6 +21,12 @@ const cloneRecipe = (recipe: RecipeMenuItem): RecipeMenuItem => ({
 
 const cloneRecipes = (recipes: RecipeMenuItem[]): RecipeMenuItem[] => recipes.map(cloneRecipe);
 
+export type MenuRecipeStoreSnapshot = {
+	recipes: RecipeMenuItem[];
+	archivedRecipes: RecipeMenuItem[];
+	selectedRecipeId: string | null;
+};
+
 export const menuRecipesStore = atom<RecipeMenuItem[]>([]);
 export const archivedMenuRecipesStore = atom<RecipeMenuItem[]>([]);
 export const selectedMenuRecipeIdStore = atom<string | null>(null);
