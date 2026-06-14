@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
-	import { resolve } from '$app/paths';
 	import { navigating, page } from '$app/state';
 	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
 	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
@@ -8,7 +7,11 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { featurePreviews } from '$lib/features/flags';
-	import { activeHouseholdId, setActiveHouseholdId } from '$lib/stores/active-household';
+	import {
+		activeHouseholdId,
+		setActiveHouseholdId,
+		writeActiveHouseholdCookie
+	} from '$lib/stores/active-household';
 	import { appShellUiState, updateAppShellUiState } from '$lib/stores/app-shell-ui-state';
 	import { onMount, type Snippet } from 'svelte';
 	import type { LayoutData } from './$types';
@@ -89,16 +92,11 @@
 			storedHouseholdId !== data.activeHouseholdId &&
 			storedHouseholdIsAccessible
 		) {
-			void fetch(resolve('/api/active-household'), {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ householdId: storedHouseholdId })
-			}).then((response) => {
-				if (response.ok) return invalidateAll();
-				setActiveHouseholdId(data.activeHouseholdId);
-			});
+			writeActiveHouseholdCookie(storedHouseholdId);
+			void invalidateAll().catch(() => setActiveHouseholdId(data.activeHouseholdId));
 		} else {
 			setActiveHouseholdId(data.activeHouseholdId);
+			writeActiveHouseholdCookie(data.activeHouseholdId);
 		}
 
 		householdStateHydrated = true;

@@ -7,7 +7,8 @@
 	import { useSidebar } from '$lib/components/ui/sidebar/index.js';
 	import {
 		activeHouseholdId as activeHouseholdIdStore,
-		setActiveHouseholdId
+		setActiveHouseholdId,
+		writeActiveHouseholdCookie
 	} from '$lib/stores/active-household';
 	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -37,18 +38,15 @@
 		const previousHouseholdId = clientActiveHouseholdId;
 		clientActiveHouseholdId = householdId;
 		setActiveHouseholdId(householdId);
+		writeActiveHouseholdCookie(householdId);
 
-		const response = await fetch(resolve('/api/active-household'), {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ householdId })
-		});
-		if (!response.ok) {
+		try {
+			await invalidateAll();
+		} catch {
 			clientActiveHouseholdId = previousHouseholdId;
 			setActiveHouseholdId(previousHouseholdId);
-			return;
+			writeActiveHouseholdCookie(previousHouseholdId);
 		}
-		await invalidateAll();
 	};
 
 	$effect(() => {

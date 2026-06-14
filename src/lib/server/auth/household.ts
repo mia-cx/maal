@@ -18,7 +18,7 @@ export type MaalHouseholdPermission =
 
 const householdCookieOptions = (url: URL) => ({
 	path: '/',
-	httpOnly: true,
+	httpOnly: false,
 	sameSite: 'lax' as const,
 	secure: url.protocol === 'https:',
 	maxAge: 60 * 60 * 24 * 365
