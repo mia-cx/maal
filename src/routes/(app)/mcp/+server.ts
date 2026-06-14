@@ -28,19 +28,19 @@ import {
 	getUserRecipe,
 	createUserRecipe,
 	updateUserRecipe,
-	deleteUserRecipe
-} from '$lib/server/services/recipes';
-import { fetchRecipeFromUrlForImport } from '$lib/server/services/recipe-import';
+	deleteUserRecipe,
+	fetchRecipeFromUrlForImport
+} from '$lib/server/domains/recipes';
 import {
 	createHouseholdMeal,
 	deleteHouseholdMeal,
 	getHouseholdMeal,
 	listHouseholdPlanMeals,
 	updateHouseholdMeal,
+	upsertMealCheckIn,
 	type CreateHouseholdMealInput,
 	type UpdateHouseholdMealInput
-} from '$lib/server/services/meal-plan';
-import { upsertMealCheckIn } from '$lib/server/services/check-ins';
+} from '$lib/server/domains/planning';
 import { boundedPagination } from '$lib/shared/pagination';
 import { arrayOfStrings, isRecord, optionalNumber, text } from '$lib/server/mcp/scalars';
 import { toolError, toolResult } from '$lib/server/mcp/results';

@@ -1,7 +1,7 @@
 import { error, type Cookies } from '@sveltejs/kit';
 import type { AuthSession } from '$lib/server/auth/session';
 import { resolveActiveHouseholdId } from '$lib/server/auth/household';
-import { requireHouseholdAccess } from '$lib/server/billing/guards';
+import { requireHouseholdAccess } from '$lib/server/domains/billing';
 import { getDb } from '$lib/server/db';
 
 export type AuthenticatedAppContext = {
