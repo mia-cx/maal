@@ -53,8 +53,10 @@ export type UpdateHouseholdMealInput = {
 		status: 'planned' | 'cooked' | 'skipped';
 		title: string;
 		description: string | null;
+		imageUrl: string | null;
 		prepTimeMinutes: number | null;
 		cookTimeMinutes: number | null;
+		yield: number | null;
 		ingredients: string[];
 		instructions: string[];
 	}>;
@@ -228,6 +230,12 @@ export const updateHouseholdMeal = async (input: {
 						),
 			status: meal.patch.status ?? existingMeal.status,
 			title: meal.patch.title ?? existingMeal.title,
+			imageUrl: meal.patch.imageUrl === undefined ? existingMeal.imageUrl : meal.patch.imageUrl,
+			yield: meal.patch.yield === undefined ? existingMeal.yield : meal.patch.yield,
+			prepTimeMinutes:
+				meal.patch.prepTimeMinutes === undefined
+					? existingMeal.prepTimeMinutes
+					: meal.patch.prepTimeMinutes,
 			description:
 				meal.patch.description === undefined ? existingMeal.description : meal.patch.description,
 			cookTimeMinutes:
