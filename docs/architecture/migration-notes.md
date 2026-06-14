@@ -43,3 +43,9 @@ Use these notes when rebasing feature work across the refactor.
 - Import checkout, portal, status, webhook, and pricing helpers through `src/lib/server/domains/billing` when crossing a route/domain boundary.
 - Keep Stripe event parsing and persistence side effects in billing server modules.
 - Keep subscription route loaders focused on redirect/page-data behavior.
+
+## Meal sidecars
+
+- Use meal sidecar projection and writer helpers for ingredient/instruction copies.
+- Do not duplicate recipe-to-meal copy rules in routes or MCP tools.
+- Preserve ad-hoc meal overrides by keeping sidecar writes behind planning services.
