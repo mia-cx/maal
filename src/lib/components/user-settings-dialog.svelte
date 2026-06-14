@@ -11,6 +11,7 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import AccountSettingsSection from '$lib/components/settings/account-settings-section.svelte';
 	import BillingSettingsSection from '$lib/components/settings/billing-settings-section.svelte';
+	import NotificationsSettingsSection from '$lib/components/settings/notifications-settings-section.svelte';
 	import SecuritySettingsSection from '$lib/components/settings/security-settings-section.svelte';
 	import SettingsCategoryNav from '$lib/components/settings/settings-category-nav.svelte';
 	import SettingsSectionHeading from '$lib/components/settings/settings-section-heading.svelte';
@@ -873,17 +874,7 @@
 						{#if mcpError}<p class="text-xs text-destructive">{mcpError}</p>{/if}
 					</div>
 				{:else if activeCategory === 'notifications'}
-					<div class="grid max-w-lg gap-3 text-sm opacity-50 grayscale">
-						<p class="text-xs text-muted-foreground">Notifications are coming later.</p>
-						<label class="flex cursor-not-allowed items-center justify-between gap-4">
-							Planning reminders
-							<input type="checkbox" class="size-4 accent-primary" disabled />
-						</label>
-						<label class="flex cursor-not-allowed items-center justify-between gap-4">
-							Meal check-ins
-							<input type="checkbox" class="size-4 accent-primary" disabled />
-						</label>
-					</div>
+					<NotificationsSettingsSection />
 				{:else if activeCategory === 'billing'}
 					<BillingSettingsSection
 						{billingBusy}
