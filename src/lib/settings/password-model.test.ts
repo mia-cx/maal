@@ -7,8 +7,8 @@ describe('password model', () => {
 		expect(passwordChangeMismatch('new-password', 'new-password')).toBeNull();
 	});
 
-	it('does not show mismatch before confirmation is entered', () => {
-		expect(passwordChangeMismatch('new-password', '')).toBeNull();
+	it('reports mismatch when confirmation is empty', () => {
+		expect(passwordChangeMismatch('new-password', '')).toBe('Passwords do not match.');
 	});
 
 	it('provides empty password fields', () => {
