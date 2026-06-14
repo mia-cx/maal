@@ -27,6 +27,12 @@
 	import { addDays, addMonths, dateFromKey, dateKey, startOfDay } from './schedule-date';
 	import { dropTargetFromPointer } from './schedule-dnd';
 	import { isMealInPool, sortMealPool } from './schedule-ordering';
+	import {
+		hasLoadedMealRange,
+		missingMealRanges,
+		parseMealRangeError,
+		type MealRange
+	} from './schedule-ranges';
 	import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
 	import type { UnitPreferences } from '$lib/recipes/ingredient-text';
 	import type { HouseholdMember, Meal, MealDropTarget, ScheduleMode } from './schedule-types';
@@ -83,7 +89,7 @@
 	let secondaryScrollY = 0;
 	let hydratedMealsSignature = $state('');
 	let hydratedRecipesSignature = $state('');
-	let loadedMealRanges = $state<{ start: string; end: string }[]>([]);
+	let loadedMealRanges = $state<MealRange[]>([]);
 	let loadingMealRangeKey = $state('');
 	let failedMealRangeKeys = $state<string[]>([]);
 	let mealRangeError = $state<string | null>(null);
@@ -116,40 +122,6 @@
 		'm'
 	].map((key) => ({ key, meta: false, ctrl: false, alt: false }));
 
-	const hasLoadedMealRange = (start: string, end: string): boolean =>
-		loadedMealRanges.some((range) => range.start <= start && range.end >= end);
-
-	const nextDateKey = (key: string): string => dateKey(addDays(dateFromKey(key), 1));
-	const previousDateKey = (key: string): string => dateKey(addDays(dateFromKey(key), -1));
-
-	const missingMealRanges = (range: { start: string; end: string }) => {
-		let cursor = range.start;
-		const missing: { start: string; end: string }[] = [];
-		const overlappingRanges = loadedMealRanges
-			.filter((loadedRange) => loadedRange.end >= range.start && loadedRange.start <= range.end)
-			.toSorted((left, right) => left.start.localeCompare(right.start));
-
-		for (const loadedRange of overlappingRanges) {
-			if (loadedRange.start > cursor) {
-				missing.push({ start: cursor, end: previousDateKey(loadedRange.start) });
-			}
-			if (loadedRange.end >= cursor) cursor = nextDateKey(loadedRange.end);
-			if (cursor > range.end) break;
-		}
-		if (cursor <= range.end) missing.push({ start: cursor, end: range.end });
-		return missing;
-	};
-
-	const parseMealRangeError = async (response: Response) => {
-		const body = await response.text();
-		try {
-			const parsed = JSON.parse(body) as { message?: string };
-			return parsed.message ?? body;
-		} catch {
-			return body;
-		}
-	};
-
 	const loadMealRangeSegment = async (range: { start: string; end: string }) => {
 		const key = `${range.start}:${range.end}`;
 		if (loadingMealRangeKey === key || failedMealRangeKeys.includes(key)) return;
@@ -177,8 +149,8 @@
 	};
 
 	const loadMealRange = async (range: { start: string; end: string }) => {
-		if (hasLoadedMealRange(range.start, range.end) || loadingMealRangeKey) return;
-		for (const missingRange of missingMealRanges(range)) {
+		if (hasLoadedMealRange(loadedMealRanges, range.start, range.end) || loadingMealRangeKey) return;
+		for (const missingRange of missingMealRanges(loadedMealRanges, range)) {
 			await loadMealRangeSegment(missingRange);
 		}
 	};
