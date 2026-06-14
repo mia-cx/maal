@@ -6,7 +6,7 @@ import {
 } from '$lib/server/auth/household';
 import { toPublicSession } from '$lib/server/auth/session';
 import { hasHouseholdBillingGrant } from '$lib/server/domains/billing';
-import { loadBillingStatus } from '$lib/server/domains/billing';
+import { loadFreshBillingStatus } from '$lib/server/domains/billing';
 
 export const load: LayoutServerLoad = async ({ cookies, locals, platform, url }) => {
 	const session = locals.session;
@@ -25,7 +25,7 @@ export const load: LayoutServerLoad = async ({ cookies, locals, platform, url })
 
 	let subscriptionLock = null;
 	if (session && activeHouseholdId && platform?.env.DB) {
-		const billing = await loadBillingStatus(platform.env.DB, activeHouseholdId);
+		const billing = await loadFreshBillingStatus(platform, activeHouseholdId);
 		const hasAccess =
 			billing.isPaid ||
 			(await hasHouseholdBillingGrant({ platform, householdId: activeHouseholdId }).catch(

@@ -8,7 +8,7 @@ import {
 import {
 	createStripeClient,
 	getStripeProductId,
-	loadBillingStatus,
+	loadFreshBillingStatus,
 	loadTrialAvailability,
 	pricingOptionsFromPrices,
 	type PricingOption
@@ -24,7 +24,7 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) redirect(302, '/onboarding');
 
-	const billing = await loadBillingStatus(platform.env.DB, householdId);
+	const billing = await loadFreshBillingStatus(platform, householdId);
 	if (billing.isPaid) redirect(302, '/plan');
 	if (!(await canManageActiveHousehold(platform, session, householdId))) redirect(302, '/plan');
 

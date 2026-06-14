@@ -6,7 +6,7 @@ import {
 } from '$lib/server/auth/household';
 import type { AuthSession } from '$lib/server/auth/session';
 import { getStripePublicConfig } from './stripe';
-import { loadBillingStatus } from './subscriptions';
+import { loadBillingStatus, loadFreshBillingStatus } from './subscriptions';
 
 export const loadBillingStatusView = async ({
 	cookies,
@@ -28,7 +28,7 @@ export const loadBillingStatusView = async ({
 		accessibleHouseholds.find((household) => household.id === householdId)?.name ??
 		'Current household';
 	const billing = platform?.env.DB
-		? await loadBillingStatus(platform.env.DB, householdId)
+		? await loadFreshBillingStatus(platform, householdId)
 		: {
 				householdId,
 				stripeCustomerId: null,
@@ -45,7 +45,7 @@ export const loadBillingStatusView = async ({
 				await Promise.all(
 					accessibleHouseholds.map(async (household) => {
 						const [status, canManageBilling] = await Promise.all([
-							loadBillingStatus(platform.env.DB, household.id),
+							loadFreshBillingStatus(platform, household.id),
 							canManageActiveHousehold(platform, session, household.id)
 						]);
 						return {

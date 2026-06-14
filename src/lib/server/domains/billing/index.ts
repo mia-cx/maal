@@ -16,6 +16,7 @@ export {
 export {
 	findHouseholdIdForStripeSubscription,
 	loadBillingStatus,
+	loadFreshBillingStatus,
 	upsertSubscription
 } from '$lib/server/billing/subscriptions';
 export { loadTrialAvailability, startHouseholdTrial } from '$lib/server/billing/trials';

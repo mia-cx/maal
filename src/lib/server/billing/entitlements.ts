@@ -1,5 +1,5 @@
 import { tryCreateAuthRuntime } from '$lib/server/auth/workos';
-import { loadBillingStatus } from './subscriptions';
+import { loadFreshBillingStatus } from './subscriptions';
 
 const globalGrantTokens = new Set([
 	'maal:free',
@@ -70,7 +70,7 @@ export const hasHouseholdAccess = async (input: {
 	householdId: string;
 }): Promise<boolean> => {
 	if (await hasHouseholdBillingGrant(input).catch(() => false)) return true;
-	return (await loadBillingStatus(input.database, input.householdId)).isPaid;
+	return (await loadFreshBillingStatus(input.platform, input.householdId)).isPaid;
 };
 
 export const firstAccessibleHouseholdId = async (input: {
