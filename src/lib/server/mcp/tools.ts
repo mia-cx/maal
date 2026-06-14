@@ -358,21 +358,3 @@ export const tools: ToolDefinition[] = [
 		}
 	}
 ];
-
-const bearerToken = (request: Request): string | null => {
-	const authorization = request.headers.get('authorization') ?? '';
-	const match = /^Bearer\s+(.+)$/i.exec(authorization);
-	return match?.[1]?.trim() ?? null;
-};
-
-const mcpAuthDiscovery = {
-	authentication: {
-		type: 'bearer',
-		scheme: 'Bearer',
-		header: 'Authorization',
-		format: 'Authorization: Bearer <Maal MCP key>',
-		instructions: 'Create a Maal MCP key in Settings → MCP keys, then use it as a bearer token.'
-	}
-};
-
-const bearerChallenge = 'Bearer realm="Maal MCP", error="invalid_token"';
