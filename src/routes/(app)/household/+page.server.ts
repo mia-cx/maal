@@ -1,7 +1,4 @@
 import { fail, redirect, type Cookies } from '@sveltejs/kit';
-import { eq } from 'drizzle-orm';
-import { getDb } from '$lib/server/db';
-
 import {
 	canManageActiveHousehold,
 	clearHouseholdCookie,
