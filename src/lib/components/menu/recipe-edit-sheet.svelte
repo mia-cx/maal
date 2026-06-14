@@ -15,6 +15,7 @@
 		type DraftIngredient,
 		type DraftInstruction
 	} from '$lib/menu/recipe-editor-model';
+	import RecipeEditorFooterActions from '$lib/components/menu/recipe-editor-footer-actions.svelte';
 	import RecipeIdentityFields from '$lib/components/menu/recipe-identity-fields.svelte';
 	import RecipeInstructionDragPreview from '$lib/components/menu/recipe-instruction-drag-preview.svelte';
 	import RecipeIngredientsEditor from '$lib/components/menu/recipe-ingredients-editor.svelte';
@@ -502,18 +503,11 @@
 						</form>
 
 						{#snippet footer()}
-							<div
-								class="flex items-center justify-between gap-2 rounded-b-xl border-t border-border bg-popover/95 p-3 backdrop-blur"
-							>
-								<div>
-									{#if ondeleted}
-										<Button.Root variant="destructive" onclick={openArchiveConfirm}
-											>Archive</Button.Root
-										>
-									{/if}
-								</div>
-								<Button.Root type="button" onclick={() => saveRecipe()}>Save recipe</Button.Root>
-							</div>
+							<RecipeEditorFooterActions
+								canArchive={Boolean(ondeleted)}
+								{openArchiveConfirm}
+								saveRecipe={() => saveRecipe()}
+							/>
 						{/snippet}
 					</Sheet.Frame>
 				{/if}
