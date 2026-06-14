@@ -20,6 +20,7 @@
 		type DraftInstruction
 	} from '$lib/menu/recipe-editor-model';
 	import RecipeIdentityFields from '$lib/components/menu/recipe-identity-fields.svelte';
+	import RecipeIngredientsEditor from '$lib/components/menu/recipe-ingredients-editor.svelte';
 	import type { RecipeInstructionItem, RecipeMenuItem } from './menu-types';
 
 	let {
@@ -473,56 +474,14 @@
 									{importSourceUrl}
 								/>
 
-								<section class="grid gap-2">
-									<h3 class="text-xs font-medium text-foreground">Ingredients</h3>
-									<div class="grid gap-2">
-										{#each ingredients as ingredient, index (ingredient.draftId)}
-											<div
-												class="grid gap-2 sm:grid-cols-[4.5rem_5rem_minmax(0,1fr)_auto] sm:items-end"
-											>
-												<div>
-													<Input
-														value={ingredient.amount}
-														oninput={(event) =>
-															updateIngredientAmount(ingredient.draftId, event.currentTarget.value)}
-														aria-label={`Ingredient ${index + 1} amount`}
-														placeholder="2"
-													/>
-												</div>
-												<div>
-													<Input
-														value={ingredient.unit ?? ''}
-														oninput={(event) =>
-															updateIngredientUnit(ingredient.draftId, event.currentTarget.value)}
-														aria-label={`Ingredient ${index + 1} unit`}
-														placeholder="tbsp"
-													/>
-												</div>
-												<div>
-													<Input
-														value={ingredient.item}
-														oninput={(event) =>
-															updateIngredientItem(ingredient.draftId, event.currentTarget.value)}
-														aria-label={`Ingredient ${index + 1}`}
-														placeholder="olive oil"
-													/>
-												</div>
-												<Button.Root
-													variant="ghost"
-													size="sm"
-													onclick={() => removeIngredient(ingredient.draftId)}
-												>
-													Remove
-												</Button.Root>
-											</div>
-										{/each}
-									</div>
-									<div>
-										<Button.Root variant="outline" size="sm" class="w-full" onclick={addIngredient}
-											>Add ingredient</Button.Root
-										>
-									</div>
-								</section>
+								<RecipeIngredientsEditor
+									{ingredients}
+									{updateIngredientAmount}
+									{updateIngredientUnit}
+									{updateIngredientItem}
+									{removeIngredient}
+									{addIngredient}
+								/>
 
 								<section class="grid gap-2">
 									<h3 class="text-xs font-medium text-foreground">Instructions</h3>
