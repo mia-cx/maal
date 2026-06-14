@@ -48,4 +48,25 @@ describe('pricingOptionsFromPrices', () => {
 			])
 		).toEqual([]);
 	});
+
+	it('preserves recurring interval count and defaults missing amounts to zero', () => {
+		expect(
+			pricingOptionsFromPrices([
+				price({
+					id: 'monthly-every-two',
+					unit_amount: null,
+					recurring: { interval: 'month', interval_count: 2 } as Stripe.Price.Recurring
+				})
+			])
+		).toEqual([
+			{
+				id: 'monthly-every-two',
+				label: 'Monthly',
+				amount: 0,
+				currency: 'gbp',
+				interval: 'month',
+				intervalCount: 2
+			}
+		]);
+	});
 });
