@@ -41,6 +41,8 @@ const unitIdToIngredientUnit: Record<string, string> = {
 	tablespoons: 'tbsp',
 	cups: 'cup',
 	fluid_ounces: 'fl oz',
+	celsius: 'celsius',
+	fahrenheit: 'fahrenheit',
 	pints: 'pint',
 	quarts: 'quart',
 	gallons: 'gal',
@@ -54,6 +56,14 @@ const unitIdToIngredientUnit: Record<string, string> = {
 	cans: 'can',
 	bunches: 'bunch'
 };
+
+const normalizedInstructionUnitAlias = (value: string): string =>
+	value
+		.trim()
+		.toLowerCase()
+		.replace(/[°º]\s*/gu, '')
+		.replace(/\s+/gu, ' ')
+		.replace(/[.,]+$/g, '');
 
 const localeFallbacksFor = (locale: string): string[] => {
 	try {
@@ -231,6 +241,24 @@ export const loadEffectiveTaxonomyPreferences = async (
 	);
 
 	const unitPreferences: UnitPreferences = {
+		unitConversions: Object.fromEntries(
+			unitRows.map((unit) => [
+				unit.id,
+				{
+					baseUnitId: unit.baseUnitId,
+					toBaseFactor: unit.toBaseFactor,
+					toBaseOffset: unit.toBaseOffset
+				}
+			])
+		),
+		unitAliases: Object.fromEntries(
+			[...globalUnitAliases, ...householdScopedUnitAliases, ...userScopedUnitAliases].flatMap(
+				(alias) => [
+					[alias.alias, alias.unitId],
+					[normalizedInstructionUnitAlias(alias.alias), alias.unitId]
+				]
+			)
+		),
 		ingredientUnitOverrides: {},
 		ingredientUnitLabelOverrides: {},
 		ingredientUnitPluralLabelOverrides: {},
@@ -255,11 +283,21 @@ export const loadEffectiveTaxonomyPreferences = async (
 			unitPreferences.preferredVolumeUnitLabel = alias?.alias;
 			unitPreferences.preferredVolumeUnitPluralLabel = alias?.pluralAlias;
 		}
+		if (baseUnitId === 'celsius' && (canonical === 'celsius' || canonical === 'fahrenheit')) {
+			unitPreferences.preferredTemperatureUnit =
+				canonical as UnitPreferences['preferredTemperatureUnit'];
+			unitPreferences.preferredTemperatureUnitLabel = alias?.alias;
+		}
 		unitDisplay[baseUnitId] = {
 			unitId,
 			alias: alias?.alias ?? canonical ?? unitId,
 			pluralAlias: alias?.pluralAlias
 		};
+	}
+
+	if (!unitPreferences.preferredTemperatureUnit) {
+		unitPreferences.preferredTemperatureUnit = 'celsius';
+		unitPreferences.preferredTemperatureUnitLabel = '°C';
 	}
 
 	const foodDisplay: EffectiveTaxonomyPreferences['foodDisplay'] = {};

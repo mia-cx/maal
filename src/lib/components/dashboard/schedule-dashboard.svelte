@@ -27,6 +27,7 @@
 	import { dropTargetFromPointer } from './schedule-dnd';
 	import { isMealInPool, sortMealPool } from './schedule-ordering';
 	import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+	import type { UnitPreferences } from '$lib/recipes/ingredient-text';
 	import type { HouseholdMember, Meal, MealDropTarget, ScheduleMode } from './schedule-types';
 
 	let {
@@ -36,7 +37,8 @@
 		weekStartsOn = 'monday',
 		initialMealRange,
 		currentUserId,
-		householdMembers = []
+		householdMembers = [],
+		unitPreferences = {}
 	}: {
 		meals?: Meal[];
 		recipes?: RecipeMenuItem[];
@@ -45,6 +47,7 @@
 		initialMealRange?: { start: string; end: string };
 		currentUserId?: string;
 		householdMembers?: HouseholdMember[];
+		unitPreferences?: UnitPreferences;
 	} = $props();
 
 	const initialUiState = uiState.get();
@@ -66,6 +69,8 @@
 	let addMealDate = $state<string | undefined>();
 	let addMealBusy = $state(false);
 	let addMealError = $state<string | null>(null);
+	let pickerRecipesLoading = $state(false);
+	let pickerRecipesLoaded = $state(false);
 	let recipeEditorOpen = $state(false);
 	let draftRecipe = $state<RecipeMenuItem | null>(null);
 	let dragX = $state(0);
@@ -174,6 +179,22 @@
 		if (hasLoadedMealRange(range.start, range.end) || loadingMealRangeKey) return;
 		for (const missingRange of missingMealRanges(range)) {
 			await loadMealRangeSegment(missingRange);
+		}
+	};
+
+	const loadPickerRecipes = async () => {
+		if (pickerRecipesLoaded || pickerRecipesLoading || $menuRecipesStore.length > 0) return;
+		pickerRecipesLoading = true;
+		try {
+			const response = await fetch('/menu/recipes?picker=meal&limit=60');
+			if (!response.ok) throw new Error(await parseMealRangeError(response));
+			const body = (await response.json()) as { recipes: RecipeMenuItem[] };
+			hydrateMenuRecipes(body.recipes);
+			pickerRecipesLoaded = true;
+		} catch (error) {
+			addMealError = error instanceof Error ? error.message : 'Could not load recipes.';
+		} finally {
+			pickerRecipesLoading = false;
 		}
 	};
 
@@ -358,7 +379,12 @@
 	};
 
 	const previewAddedRecipe = (recipe: RecipeMenuItem) => {
-		const meal = addScheduleMealFromRecipe(recipe, addMealDate, defaultMealServings);
+		const meal = addScheduleMealFromRecipe(
+			recipe,
+			addMealDate,
+			defaultMealServings,
+			unitPreferences
+		);
 		selectScheduleMeal(meal.id);
 		previewOpen = true;
 		addMealOpen = false;
@@ -509,6 +535,13 @@
 	});
 
 	$effect(() => {
+		if (!addMealOpen) return;
+		untrack(() => {
+			void loadPickerRecipes();
+		});
+	});
+
+	$effect(() => {
 		updateUiState({ scheduleMode: mode, scheduleAnchorDate: dateKey(anchorDate) });
 	});
 </script>
@@ -618,7 +651,7 @@
 		bind:open={addMealOpen}
 		date={addMealDate}
 		recipes={menuRecipes}
-		busy={addMealBusy}
+		busy={addMealBusy || pickerRecipesLoading}
 		error={addMealError}
 		onexisting={previewAddedRecipe}
 		onnewrecipe={createRecipeFromTitle}
@@ -629,6 +662,7 @@
 		bind:open={previewOpen}
 		meal={selectedMeal}
 		{householdMembers}
+		{unitPreferences}
 		onmealchange={updateScheduleMealSchedule}
 		onmealdelete={deleteScheduleMeal}
 	/>

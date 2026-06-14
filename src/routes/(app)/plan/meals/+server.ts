@@ -1,5 +1,5 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { Meal, MealStatus } from '$lib/components/dashboard/schedule-types';
 import {
 	countActiveHouseholdMembers,
@@ -11,6 +11,7 @@ import { getDb } from '$lib/server/db';
 import {
 	householdMealClassifications,
 	householdMealIngredients,
+	householdMealInstructionEvents,
 	householdMealInstructions,
 	householdMealMedia,
 	householdMealNutritionFacts,
@@ -27,6 +28,7 @@ import {
 import { loadMealPlanMeals, mealFromHouseholdMeal } from '$lib/server/db/recipe-mappers';
 import { parseIngredientAmount, parseIngredientLine } from '$lib/recipes/ingredient-text';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
+import { insertHouseholdMealInstructionEvents } from '$lib/server/taxonomy/instruction-events';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
@@ -72,13 +74,14 @@ const loadUnitPreferences = async (
 		.from(households)
 		.where(eq(households.householdId, householdId))
 		.limit(1);
-	return (
+	const unitPreferences = (
 		await loadEffectiveTaxonomyPreferences(db, {
 			workosUserId,
 			householdId,
 			locale: profileRows[0]?.locale ?? 'en-US'
 		})
 	).unitPreferences;
+	return unitPreferences;
 };
 
 const ownedRecipe = async (
@@ -107,6 +110,28 @@ const plannedMealUpdate = (meal: Meal, defaultServings: number) => ({
 	plannedCookWorkosUserId: meal.plannedCookWorkosUserId ?? null,
 	updatedAt: new Date().toISOString()
 });
+
+const loadInstructionEvents = async (
+	db: ReturnType<typeof getDb>,
+	instructions: Array<typeof householdMealInstructions.$inferSelect>
+) => {
+	const instructionIds = instructions.map((instruction) => instruction.id);
+	if (!instructionIds.length) {
+		return new Map<string, (typeof householdMealInstructionEvents.$inferSelect)[]>();
+	}
+	const rows = await db
+		.select()
+		.from(householdMealInstructionEvents)
+		.where(inArray(householdMealInstructionEvents.householdMealInstructionId, instructionIds));
+	const grouped = new Map<string, (typeof householdMealInstructionEvents.$inferSelect)[]>();
+	for (const row of rows) {
+		grouped.set(row.householdMealInstructionId, [
+			...(grouped.get(row.householdMealInstructionId) ?? []),
+			row
+		]);
+	}
+	return grouped;
+};
 
 const replaceMealIngredientsFromMeal = async (
 	db: ReturnType<typeof getDb>,
@@ -148,6 +173,11 @@ const replaceMealInstructionsFromMeal = async (
 			confidence: 1
 		});
 	}
+	const insertedInstructions = await db
+		.select({ id: householdMealInstructions.id, text: householdMealInstructions.text })
+		.from(householdMealInstructions)
+		.where(eq(householdMealInstructions.householdMealId, householdMealId));
+	await insertHouseholdMealInstructionEvents(db, insertedInstructions);
 };
 
 const copyRecipeSidecarsToMeal = async (
@@ -201,6 +231,11 @@ const copyRecipeSidecarsToMeal = async (
 			confidence: instruction.confidence
 		});
 	}
+	const insertedInstructions = await db
+		.select({ id: householdMealInstructions.id, text: householdMealInstructions.text })
+		.from(householdMealInstructions)
+		.where(eq(householdMealInstructions.householdMealId, householdMealId));
+	await insertHouseholdMealInstructionEvents(db, insertedInstructions);
 	for (const classification of classifications) {
 		await db.insert(householdMealClassifications).values({
 			householdMealId,
@@ -330,11 +365,13 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 			.from(householdMealInstructions)
 			.where(eq(householdMealInstructions.householdMealId, householdMealId))
 	]);
+	const instructionEvents = await loadInstructionEvents(db, instructions);
 	return json({
 		meal: mealFromHouseholdMeal(
 			createdMeal!,
 			ingredients,
 			instructions,
+			instructionEvents,
 			recipe?.id,
 			unitPreferences
 		)
@@ -412,11 +449,13 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 				.from(householdMealInstructions)
 				.where(eq(householdMealInstructions.householdMealId, existingMeal.id))
 		]);
+		const instructionEvents = await loadInstructionEvents(db, instructions);
 		return json({
 			meal: mealFromHouseholdMeal(
 				updatedMeal ?? existingMeal,
 				ingredients,
 				instructions,
+				instructionEvents,
 				meal.userRecipeId,
 				unitPreferences
 			)

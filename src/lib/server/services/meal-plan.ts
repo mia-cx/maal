@@ -21,6 +21,7 @@ import {
 import { loadMealPlanMeals, mealFromHouseholdMeal } from '$lib/server/db/recipe-mappers';
 import { parseIngredientAmount, parseIngredientLine } from '$lib/recipes/ingredient-text';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
+import { insertHouseholdMealInstructionEvents } from '$lib/server/taxonomy/instruction-events';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -134,6 +135,11 @@ const replaceMealInstructionsFromMeal = async (
 			confidence: 1
 		});
 	}
+	const insertedInstructions = await db
+		.select({ id: householdMealInstructions.id, text: householdMealInstructions.text })
+		.from(householdMealInstructions)
+		.where(eq(householdMealInstructions.householdMealId, householdMealId));
+	await insertHouseholdMealInstructionEvents(db, insertedInstructions);
 };
 
 const copyRecipeSidecarsToMeal = async (db: Db, userRecipeId: string, householdMealId: string) => {
@@ -183,6 +189,11 @@ const copyRecipeSidecarsToMeal = async (db: Db, userRecipeId: string, householdM
 			confidence: instruction.confidence
 		});
 	}
+	const insertedInstructions = await db
+		.select({ id: householdMealInstructions.id, text: householdMealInstructions.text })
+		.from(householdMealInstructions)
+		.where(eq(householdMealInstructions.householdMealId, householdMealId));
+	await insertHouseholdMealInstructionEvents(db, insertedInstructions);
 	for (const classification of classifications) {
 		await db.insert(householdMealClassifications).values({
 			householdMealId,

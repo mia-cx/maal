@@ -26,6 +26,7 @@ import type {
 } from '$lib/components/menu/menu-types';
 import {
 	canonicalIngredientUnit,
+	convertInstructionTemperatures,
 	parseIngredientLine,
 	type IngredientUnitAliases,
 	type UnitPreferences
@@ -586,19 +587,27 @@ const loadHouseholdUnitPreferences = async (
 	workosUserId: string,
 	householdId: string | null
 ): Promise<UnitPreferences> => {
-	if (!householdId) return { preferredMassUnit: 'g', preferredVolumeUnit: 'ml' };
+	if (!householdId) {
+		return {
+			preferredMassUnit: 'g',
+			preferredVolumeUnit: 'ml',
+			preferredTemperatureUnit: 'celsius',
+			preferredTemperatureUnitLabel: '°C'
+		};
+	}
 	const profileRows = await db
 		.select({ locale: households.locale })
 		.from(households)
 		.where(eq(households.householdId, householdId))
 		.limit(1);
-	return (
+	const unitPreferences = (
 		await loadEffectiveTaxonomyPreferences(db, {
 			workosUserId,
 			householdId,
 			locale: profileRows[0]?.locale ?? 'en-US'
 		})
 	).unitPreferences;
+	return unitPreferences;
 };
 
 const normalizedUnitAliasKey = (value: string): string =>
@@ -647,9 +656,11 @@ const loadSingleMenuRecipe = async (
 
 const draftRecipeFromImport = (
 	imported: Awaited<ReturnType<typeof fetchRecipeFromUrl>>,
-	unitAliasMap: IngredientUnitAliases = {}
+	unitAliasMap: IngredientUnitAliases = {},
+	unitPreferences: UnitPreferences = {}
 ): RecipeMenuItem => {
 	const recipe = imported.recipe;
+	const rawInstructions = instructionsFromRecipe(recipe);
 	const ingredients = ingredientsFromRecipe(recipe, unitAliasMap);
 	return {
 		id: `draft-recipe-${crypto.randomUUID()}`,
@@ -671,7 +682,10 @@ const draftRecipeFromImport = (
 		yield: firstNumber(recipe.recipeYield, recipe.yield),
 		ingredients,
 		ingredientCount: ingredients.length,
-		instructions: instructionsFromRecipe(recipe),
+		instructions: rawInstructions.map((instruction) => {
+			const text = convertInstructionTemperatures(instruction.text, unitPreferences);
+			return { ...instruction, text };
+		}),
 		appliances: [],
 		timesCooked: 0,
 		plannedCount: 0,
@@ -695,26 +709,48 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 	const db = getDb(platform.env.DB);
 	const importUrl = url.searchParams.get('importUrl')?.trim();
 	if (importUrl) {
-		const unitAliasMap = await loadIngredientUnitAliases(db);
+		const [unitAliasMap, unitPreferences] = await Promise.all([
+			loadIngredientUnitAliases(db),
+			loadHouseholdUnitPreferences(db, session.user.id, householdId)
+		]);
 		return json({
-			recipe: draftRecipeFromImport(await fetchRecipeFromUrl(importUrl), unitAliasMap)
+			recipe: draftRecipeFromImport(
+				await fetchRecipeFromUrl(importUrl),
+				unitAliasMap,
+				unitPreferences
+			)
 		});
 	}
 
 	const offset = integerParam(url, 'offset', 0);
 	const limit = Math.min(integerParam(url, 'limit', defaultRecipePageSize), maxRecipePageSize);
+	const query = url.searchParams.get('q') ?? '';
+	const picker = url.searchParams.get('picker') === 'meal';
 	const unitPreferences = await loadHouseholdUnitPreferences(db, session.user.id, householdId);
-	const recipes = await loadMenuRecipes(db, session.user.id, householdId, { unitPreferences });
-	const rankedRecipes = rankRecipesByRelevance(recipes, url.searchParams.get('q') ?? '');
-	if (url.searchParams.get('picker') === 'meal') {
+	const recipes = await loadMenuRecipes(db, session.user.id, householdId, {
+		limit: query ? undefined : limit + (picker ? 0 : 1),
+		offset: query || picker ? 0 : offset,
+		unitPreferences
+	});
+	const rankedRecipes = rankRecipesByRelevance(recipes, query);
+	if (picker) {
 		return json({
 			recipes: rankedRecipes.slice(0, limit),
 			nextRecipeOffset: null
 		});
 	}
-	const nextRecipeOffset = rankedRecipes.length > offset + limit ? offset + limit : null;
+	const pageRecipes = query
+		? rankedRecipes.slice(offset, offset + limit)
+		: rankedRecipes.slice(0, limit);
+	const nextRecipeOffset = query
+		? rankedRecipes.length > offset + limit
+			? offset + limit
+			: null
+		: recipes.length > limit
+			? offset + limit
+			: null;
 	return json({
-		recipes: rankedRecipes.slice(offset, offset + limit),
+		recipes: pageRecipes,
 		nextRecipeOffset
 	});
 };
@@ -840,6 +876,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	const recipeJson =
 		imported?.recipe ??
 		(body.recipe ? schemaOrgFromRecipeItem(body.recipe) : minimalRecipe(body.title!));
+	const recipeInstructions = body.recipe?.instructions ?? instructionsFromRecipe(recipeJson);
 	const recipeId = crypto.randomUUID();
 
 	await db.insert(userRecipes).values({
@@ -877,11 +914,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		recipeId,
 		body.recipe?.ingredients ?? ingredientsFromRecipe(recipeJson, unitAliasMap)
 	);
-	await updateRecipeInstructions(
-		db,
-		recipeId,
-		body.recipe?.instructions ?? instructionsFromRecipe(recipeJson)
-	);
+	await updateRecipeInstructions(db, recipeId, recipeInstructions);
 	await saveRecipeSidecars(db, recipeId, recipeJson);
 
 	const recipe = await loadSingleMenuRecipe(

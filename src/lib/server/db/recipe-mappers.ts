@@ -3,12 +3,14 @@ import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import type * as schema from '$lib/server/db/schema';
 import {
 	householdMealIngredients,
+	householdMealInstructionEvents,
 	householdMealInstructions,
 	householdMeals,
 	householdMealUserRecipes,
 	mealCheckIns,
 	userRecipeApplianceRequirements,
 	userRecipeIngredients,
+	userRecipeInstructionEvents,
 	userRecipeInstructions,
 	userRecipes
 } from '$lib/server/db/schema';
@@ -21,11 +23,15 @@ import type {
 } from '$lib/components/menu/menu-types';
 import {
 	canonicalIngredientUnit,
+	convertInstructionTemperatureEvents,
+	convertInstructionTemperatures,
 	parseIngredientAmount,
+	type InstructionTemperatureEvent,
 	type UnitPreferences
 } from '$lib/recipes/ingredient-text';
 import { displayIngredient, displayIngredientText } from '$lib/taxonomy/display';
 import { cleanImportedText } from '$lib/server/services/html-text';
+import { insertUserRecipeInstructionEvents } from '$lib/server/taxonomy/instruction-events';
 
 type Db = DrizzleD1Database<typeof schema>;
 type UserRecipeRow = typeof userRecipes.$inferSelect;
@@ -35,8 +41,26 @@ type UserRecipeApplianceRow = typeof userRecipeApplianceRequirements.$inferSelec
 type HouseholdMealRow = typeof householdMeals.$inferSelect;
 type HouseholdMealIngredientRow = typeof householdMealIngredients.$inferSelect;
 type HouseholdMealInstructionRow = typeof householdMealInstructions.$inferSelect;
+type UserRecipeInstructionEventRow = typeof userRecipeInstructionEvents.$inferSelect;
+type HouseholdMealInstructionEventRow = typeof householdMealInstructionEvents.$inferSelect;
+type InstructionEventRow = UserRecipeInstructionEventRow | HouseholdMealInstructionEventRow;
 
 type RecipeJson = Record<string, unknown>;
+
+const displayInstructionText = (
+	text: string,
+	unitPreferences?: UnitPreferences,
+	events: InstructionTemperatureEvent[] = [],
+	context: Record<string, unknown> = {}
+): string => {
+	const cleaned = cleanImportedText(text);
+	const eventRendered = convertInstructionTemperatureEvents(cleaned, events, unitPreferences);
+	const outputText =
+		eventRendered === cleaned
+			? convertInstructionTemperatures(cleaned, unitPreferences)
+			: eventRendered;
+	return outputText;
+};
 
 const fallbackTitle = 'Untitled recipe';
 const maxIngredientRowsPerInsert = 8;
@@ -206,6 +230,7 @@ export const menuItemFromRecipe = (params: {
 	recipe: UserRecipeRow;
 	ingredients: UserRecipeIngredientRow[];
 	instructions: UserRecipeInstructionRow[];
+	instructionEvents?: Map<string, InstructionEventRow[]>;
 	appliances: UserRecipeApplianceRow[];
 	plannedCount: number;
 	timesCooked: number;
@@ -265,7 +290,12 @@ export const menuItemFromRecipe = (params: {
 			.toSorted((left, right) => left.stepIndex - right.stepIndex)
 			.map((instruction) => ({
 				position: instruction.stepIndex + 1,
-				text: cleanImportedText(instruction.text)
+				text: displayInstructionText(
+					instruction.text,
+					unitPreferences,
+					params.instructionEvents?.get(instruction.id),
+					{ surface: 'menu-recipe', recipeId: recipe.id, instructionId: instruction.id }
+				)
 			})),
 		ingredientCount: ingredients.length,
 		appliances: appliances.map((appliance) => appliance.appliance),
@@ -313,7 +343,7 @@ export const loadMenuRecipes = async (
 
 	if (!recipes.length) return [];
 	const recipeIds = recipes.map((recipe) => recipe.id);
-	const [ingredients, instructions, appliances, mealLinks] = await Promise.all([
+	const [ingredients, instructions, instructionEvents, appliances, mealLinks] = await Promise.all([
 		db
 			.select()
 			.from(userRecipeIngredients)
@@ -321,6 +351,14 @@ export const loadMenuRecipes = async (
 		db
 			.select()
 			.from(userRecipeInstructions)
+			.where(inArray(userRecipeInstructions.userRecipeId, recipeIds)),
+		db
+			.select({ event: userRecipeInstructionEvents })
+			.from(userRecipeInstructionEvents)
+			.innerJoin(
+				userRecipeInstructions,
+				eq(userRecipeInstructions.id, userRecipeInstructionEvents.userRecipeInstructionId)
+			)
 			.where(inArray(userRecipeInstructions.userRecipeId, recipeIds)),
 		db
 			.select()
@@ -354,6 +392,7 @@ export const loadMenuRecipes = async (
 
 	const ingredientsByRecipeId = groupByRecipeId(ingredients);
 	const instructionsByRecipeId = groupByRecipeId(instructions);
+	const eventsByInstructionId = groupInstructionEvents(instructionEvents.map((row) => row.event));
 	const appliancesByRecipeId = groupByRecipeId(appliances);
 	const mealsById = new Map(householdMealRows.map((meal) => [meal.id, meal]));
 	const checkInsByMealId = groupByMealId(checkIns);
@@ -379,6 +418,7 @@ export const loadMenuRecipes = async (
 			recipe,
 			ingredients: ingredientsByRecipeId.get(recipe.id) ?? [],
 			instructions: instructionsByRecipeId.get(recipe.id) ?? [],
+			instructionEvents: eventsByInstructionId,
 			appliances: appliancesByRecipeId.get(recipe.id) ?? [],
 			plannedCount: cookStats.plannedCount,
 			timesCooked: cookStats.timesCooked,
@@ -406,7 +446,13 @@ export const mealFromMenuRecipe = (
 	ingredients: recipe.ingredients?.map((ingredient) =>
 		cleanImportedText(fullIngredientText(ingredient))
 	),
-	instructions: recipe.instructions?.map((instruction) => cleanImportedText(instruction.text)),
+	instructions: recipe.instructions?.map((instruction) =>
+		displayInstructionText(instruction.text, undefined, [], {
+			surface: 'meal-from-menu-recipe',
+			recipeId: recipe.id,
+			position: instruction.position
+		})
+	),
 	...overrides
 });
 
@@ -419,6 +465,7 @@ export const mealFromHouseholdMeal = (
 	meal: HouseholdMealRow,
 	ingredients: Array<HouseholdMealIngredientRow | UserRecipeIngredientRow> = [],
 	instructions: Array<HouseholdMealInstructionRow | UserRecipeInstructionRow> = [],
+	instructionEvents: Map<string, InstructionEventRow[]> = new Map(),
 	userRecipeId?: string,
 	unitPreferences: UnitPreferences = {},
 	latestVerdict?: Meal['latestVerdict'],
@@ -445,10 +492,29 @@ export const mealFromHouseholdMeal = (
 			.map((ingredient) => mealIngredientText(ingredient, unitPreferences)),
 		instructions: instructions
 			.toSorted((left, right) => left.stepIndex - right.stepIndex)
-			.map((instruction) => cleanImportedText(instruction.text)),
+			.map((instruction) =>
+				displayInstructionText(
+					instruction.text,
+					unitPreferences,
+					instructionEvents.get(instruction.id),
+					{ surface: 'household-meal', mealId: meal.id, instructionId: instruction.id }
+				)
+			),
 		latestVerdict,
 		latestCheckIn
 	};
+};
+
+const groupInstructionEvents = <T extends InstructionEventRow>(rows: T[]): Map<string, T[]> => {
+	const grouped = new Map<string, T[]>();
+	for (const row of rows) {
+		const instructionId =
+			'userRecipeInstructionId' in row
+				? row.userRecipeInstructionId
+				: row.householdMealInstructionId;
+		grouped.set(instructionId, [...(grouped.get(instructionId) ?? []), row]);
+	}
+	return grouped;
 };
 
 const groupByMealId = <T extends { householdMealId: string | null }>(
@@ -495,28 +561,43 @@ export const loadMealPlanMeals = async (
 		.from(householdMeals)
 		.where(and(eq(householdMeals.householdId, params.householdId), dateRangeFilter));
 	const householdMealIds = householdMealRows.map((meal) => meal.id);
-	const [mealIngredientRows, mealInstructionRows, mealLinks, checkIns] = householdMealIds.length
-		? await Promise.all([
-				db
-					.select()
-					.from(householdMealIngredients)
-					.where(inArray(householdMealIngredients.householdMealId, householdMealIds)),
-				db
-					.select()
-					.from(householdMealInstructions)
-					.where(inArray(householdMealInstructions.householdMealId, householdMealIds)),
-				db
-					.select()
-					.from(householdMealUserRecipes)
-					.where(inArray(householdMealUserRecipes.householdMealId, householdMealIds)),
-				db
-					.select()
-					.from(mealCheckIns)
-					.where(inArray(mealCheckIns.householdMealId, householdMealIds))
-			])
-		: [[], [], [], []];
+	const [mealIngredientRows, mealInstructionRows, mealInstructionEventRows, mealLinks, checkIns] =
+		householdMealIds.length
+			? await Promise.all([
+					db
+						.select()
+						.from(householdMealIngredients)
+						.where(inArray(householdMealIngredients.householdMealId, householdMealIds)),
+					db
+						.select()
+						.from(householdMealInstructions)
+						.where(inArray(householdMealInstructions.householdMealId, householdMealIds)),
+					db
+						.select({ event: householdMealInstructionEvents })
+						.from(householdMealInstructionEvents)
+						.innerJoin(
+							householdMealInstructions,
+							eq(
+								householdMealInstructions.id,
+								householdMealInstructionEvents.householdMealInstructionId
+							)
+						)
+						.where(inArray(householdMealInstructions.householdMealId, householdMealIds)),
+					db
+						.select()
+						.from(householdMealUserRecipes)
+						.where(inArray(householdMealUserRecipes.householdMealId, householdMealIds)),
+					db
+						.select()
+						.from(mealCheckIns)
+						.where(inArray(mealCheckIns.householdMealId, householdMealIds))
+				])
+			: [[], [], [], [], []];
 	const ingredientsByMealId = groupByMealId(mealIngredientRows);
 	const instructionsByMealId = groupByMealId(mealInstructionRows);
+	const eventsByInstructionId = groupInstructionEvents(
+		mealInstructionEventRows.map((row) => row.event)
+	);
 	const recipeIdByMealId = new Map(
 		mealLinks.map((link) => [link.householdMealId, link.userRecipeId])
 	);
@@ -527,6 +608,7 @@ export const loadMealPlanMeals = async (
 			meal,
 			ingredientsByMealId.get(meal.id) ?? [],
 			instructionsByMealId.get(meal.id) ?? [],
+			eventsByInstructionId,
 			recipeIdByMealId.get(meal.id),
 			unitPreferences,
 			latestCheckIn?.verdict,
@@ -573,7 +655,9 @@ export const updateRecipeInstructions = async (
 	instructions: RecipeInstructionItem[]
 ) => {
 	await db.delete(userRecipeInstructions).where(eq(userRecipeInstructions.userRecipeId, recipeId));
-	if (!instructions.length) return;
+	if (!instructions.length) {
+		return;
+	}
 	const rows = instructions.map((instruction, index) => ({
 		userRecipeId: recipeId,
 		stepIndex: index,
@@ -585,4 +669,9 @@ export const updateRecipeInstructions = async (
 			.insert(userRecipeInstructions)
 			.values(rows.slice(index, index + maxInstructionRowsPerInsert));
 	}
+	const insertedInstructions = await db
+		.select({ id: userRecipeInstructions.id, text: userRecipeInstructions.text })
+		.from(userRecipeInstructions)
+		.where(eq(userRecipeInstructions.userRecipeId, recipeId));
+	await insertUserRecipeInstructionEvents(db, insertedInstructions);
 };
