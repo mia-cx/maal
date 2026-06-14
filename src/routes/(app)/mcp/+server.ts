@@ -42,7 +42,9 @@ import {
 } from '$lib/server/services/meal-plan';
 import { upsertMealCheckIn } from '$lib/server/services/check-ins';
 import { boundedPagination } from '$lib/shared/pagination';
-import { addUtcDays, dateKey, utcDateFromKey, utcDaysBetween } from '$lib/shared/utc-date';
+import { arrayOfStrings, isRecord, optionalNumber, text } from '$lib/server/mcp/scalars';
+import { toolError, toolResult } from '$lib/server/mcp/results';
+import { defaultPlanRange } from '$lib/server/mcp/plan-range';
 
 type ToolHandler = (context: McpContext, args: Record<string, unknown>) => Promise<unknown>;
 type ToolDefinition = {
@@ -59,71 +61,10 @@ type McpContext = {
 	db: ReturnType<typeof getDb>;
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === 'object' && value !== null;
-
-const text = (value: unknown): string | undefined =>
-	typeof value === 'string' && value.trim() ? value.trim() : undefined;
-
-const optionalNumber = (value: unknown): number | undefined => {
-	const number = Number(value);
-	return Number.isFinite(number) ? number : undefined;
-};
-
-const arrayOfStrings = (value: unknown): string[] | undefined =>
-	Array.isArray(value)
-		? value.filter((item): item is string => typeof item === 'string')
-		: undefined;
-
 const defaultRecipeLimit = 25;
 const maxRecipeLimit = 60;
-const defaultPlanRangeDays = 14;
-const maxPlanRangeDays = 62;
 const defaultPlanLimit = 50;
 const maxPlanLimit = 100;
-
-const defaultPlanRange = (args: Record<string, unknown>) => {
-	const startDate = text(args.startDate);
-	const endDate = text(args.endDate);
-	let range = startDate
-		? {
-				startDate,
-				endDate: endDate ?? dateKey(addUtcDays(utcDateFromKey(startDate), defaultPlanRangeDays))
-			}
-		: endDate
-			? {
-					startDate: dateKey(addUtcDays(utcDateFromKey(endDate), -defaultPlanRangeDays)),
-					endDate
-				}
-			: (() => {
-					const today = new Date();
-					return {
-						startDate: dateKey(today),
-						endDate: dateKey(addUtcDays(today, defaultPlanRangeDays))
-					};
-				})();
-	if (utcDaysBetween(range.startDate, range.endDate) > maxPlanRangeDays) {
-		range = {
-			startDate: range.startDate,
-			endDate: dateKey(addUtcDays(utcDateFromKey(range.startDate), maxPlanRangeDays))
-		};
-	}
-	return range;
-};
-
-const toolError = (code: string, message: string, suggestion?: string) => ({
-	code,
-	message,
-	suggestion
-});
-
-const toolResult = (value: unknown): CallToolResult => {
-	const structuredContent = isRecord(value) ? value : { value };
-	return {
-		content: [{ type: 'text', text: JSON.stringify(structuredContent, null, 2) }],
-		structuredContent
-	};
-};
 
 const requireScope = (key: McpKeyRecord, scope: MaalApiScope) => {
 	if (!key.scopes.includes(scope)) {
