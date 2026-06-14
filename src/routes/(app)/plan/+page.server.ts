@@ -2,7 +2,7 @@ import { redirect } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { commitHouseholdCookie, listHouseholdMembers } from '$lib/server/auth/household';
 import { getDb } from '$lib/server/db';
-import { loadMealPlanMeals, loadMenuRecipes } from '$lib/server/db/recipe-mappers';
+import { loadMealPlanMeals } from '$lib/server/db/recipe-mappers';
 import { households } from '$lib/server/db/schema';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import type { PageServerLoad } from './$types';
@@ -28,44 +28,39 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 
 	const db = getDb(platform.env.DB);
 	const initialDate = new Date();
-	const initialStartDate = dateKey(addDays(initialDate, -45));
-	const initialEndDate = dateKey(addDays(initialDate, 90));
-	const [householdMembers, profileRows] = await Promise.all([
-		listHouseholdMembers(platform, householdId),
-		db
-			.select({
-				defaultPlannedYield: households.defaultPlannedYield,
-				weekStartsOn: households.weekStartsOn,
-				locale: households.locale
-			})
-			.from(households)
-			.where(eq(households.householdId, householdId))
-			.limit(1)
-	]);
+	const initialStartDate = dateKey(addDays(initialDate, -7));
+	const initialEndDate = dateKey(addDays(initialDate, 14));
+	const householdMembers = listHouseholdMembers(platform, householdId);
+	const profileRows = await db
+		.select({
+			defaultPlannedYield: households.defaultPlannedYield,
+			weekStartsOn: households.weekStartsOn,
+			locale: households.locale
+		})
+		.from(households)
+		.where(eq(households.householdId, householdId))
+		.limit(1);
 	const householdProfile = profileRows[0];
-	const defaultMealServings =
-		householdProfile?.defaultPlannedYield ?? Math.max(1, householdMembers.length);
+	const defaultMealServings = householdProfile?.defaultPlannedYield ?? 1;
 	const taxonomyPreferences = await loadEffectiveTaxonomyPreferences(db, {
 		workosUserId: session.user.id,
 		householdId,
 		locale: householdProfile?.locale ?? 'en-US'
 	});
 	const unitPreferences = taxonomyPreferences.unitPreferences;
-	const recipes = await loadMenuRecipes(db, session.user.id, householdId, { unitPreferences });
 	return {
-		recipes,
+		recipes: [],
 		defaultMealServings,
 		weekStartsOn: weekStartsOnName(householdProfile?.weekStartsOn),
 		householdMembers,
 		unitPreferences,
 		initialMealRange: { start: initialStartDate, end: initialEndDate },
-		meals: await loadMealPlanMeals(db, {
+		meals: loadMealPlanMeals(db, {
 			workosUserId: session.user.id,
 			householdId,
 			defaultMealServings,
 			startDate: initialStartDate,
 			endDate: initialEndDate,
-			menuRecipes: recipes,
 			unitPreferences
 		})
 	};

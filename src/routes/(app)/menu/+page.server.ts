@@ -19,14 +19,14 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 	if (!householdId) redirect(303, '/onboarding');
 
 	const activeHouseholdHasAccess = await hasHouseholdAccess({
+		platform,
 		database: platform.env.DB,
-		session,
 		householdId
 	});
 	if (!activeHouseholdHasAccess) {
 		const households = await listUserHouseholds(platform, session.user.id).catch(() => []);
 		householdId =
-			(await firstAccessibleHouseholdId({ database: platform.env.DB, session, households })) ??
+			(await firstAccessibleHouseholdId({ platform, database: platform.env.DB, households })) ??
 			householdId;
 	}
 	commitHouseholdCookie(cookies, householdId, url);
@@ -42,19 +42,24 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 		householdId,
 		locale: profileRows[0]?.locale ?? 'en-US'
 	});
-	const [recipes, archivedRecipes] = await Promise.all([
-		loadMenuRecipes(db, session.user.id, householdId, {
-			unitPreferences: taxonomyPreferences.unitPreferences
-		}),
-		loadMenuRecipes(db, session.user.id, householdId, {
-			archive: 'archived',
-			unitPreferences: taxonomyPreferences.unitPreferences
-		})
-	]);
-	const rankedRecipes = rankRecipesByRelevance(recipes);
+	const recipeRows = loadMenuRecipes(db, session.user.id, householdId, {
+		limit: MENU_RECIPE_PAGE_SIZE + 1,
+		unitPreferences: taxonomyPreferences.unitPreferences
+	});
+	const recipes = recipeRows.then((rows) =>
+		rankRecipesByRelevance(rows).slice(0, MENU_RECIPE_PAGE_SIZE)
+	);
+	const archivedRecipes = loadMenuRecipes(db, session.user.id, householdId, {
+		archive: 'archived',
+		unitPreferences: taxonomyPreferences.unitPreferences
+	}).then((rows) => rankRecipesByRelevance(rows));
+	const nextRecipeOffset = recipeRows.then((rows) =>
+		rows.length > MENU_RECIPE_PAGE_SIZE ? MENU_RECIPE_PAGE_SIZE : null
+	);
 	return {
-		recipes: rankedRecipes.slice(0, MENU_RECIPE_PAGE_SIZE),
-		archivedRecipes: rankRecipesByRelevance(archivedRecipes),
-		nextRecipeOffset: rankedRecipes.length > MENU_RECIPE_PAGE_SIZE ? MENU_RECIPE_PAGE_SIZE : null
+		recipes,
+		archivedRecipes,
+		nextRecipeOffset,
+		unitPreferences: taxonomyPreferences.unitPreferences
 	};
 };

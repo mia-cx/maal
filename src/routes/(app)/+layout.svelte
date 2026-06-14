@@ -1,11 +1,10 @@
 <script lang="ts">
-	import { page } from '$app/state';
+	import { navigating, page } from '$app/state';
 	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
 	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
 	import type { DashboardNavItem } from '$lib/components/dashboard/dashboard-nav';
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Sidebar from '$lib/components/ui/sidebar';
-	import { hydrateTaxonomyPreferences } from '$lib/stores/taxonomy-preferences';
 	import { uiState, updateUiState } from '$lib/stores/ui-state';
 	import type { Snippet } from 'svelte';
 	import type { LayoutData } from './$types';
@@ -42,6 +41,13 @@
 			!isSubscribePage
 	);
 	const canManageSubscription = $derived(Boolean(data.subscriptionLock?.canManageSubscription));
+	const navigatingWithinApp = $derived(
+		Boolean(
+			navigating.to?.url.pathname.startsWith('/plan') ||
+			navigating.to?.url.pathname.startsWith('/menu') ||
+			navigating.to?.url.pathname.startsWith('/household')
+		)
+	);
 
 	const startSidebarResize = (event: PointerEvent) => {
 		resizingSidebar = true;
@@ -61,10 +67,6 @@
 		if (!showDashboardShell) return;
 		sidebarOpen = !sidebarOpen;
 	};
-
-	$effect(() => {
-		hydrateTaxonomyPreferences(data.taxonomyPreferences);
-	});
 
 	$effect(() => {
 		updateUiState({ activeNav, sidebarOpen, sidebarWidth });
@@ -108,6 +110,13 @@
 				></button>
 			{/if}
 			<Sidebar.Inset>
+				{#if navigatingWithinApp}
+					<div class="fixed top-0 right-0 left-0 z-[70] h-0.5 overflow-hidden bg-transparent">
+						<div
+							class="h-full w-1/2 animate-pulse rounded-full bg-[var(--brand-salmon)]/80 shadow-[0_0_18px_rgb(254_113_86_/_0.55)]"
+						></div>
+					</div>
+				{/if}
 				<div
 					class="relative min-h-svh min-w-0"
 					class:h-svh={isSubscribePage}
@@ -115,6 +124,7 @@
 				>
 					<main
 						data-dashboard-main
+						aria-busy={navigatingWithinApp}
 						class="@container/dashboard-main min-h-svh min-w-0 transition-opacity"
 						class:h-svh={isSubscribePage}
 						class:overflow-y-scroll={isSubscribePage}

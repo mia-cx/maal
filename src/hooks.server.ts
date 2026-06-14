@@ -16,11 +16,7 @@ import {
 import { provisionAuthSession } from '$lib/server/auth/provisioning';
 import { smokeAuthEnabled, smokeSession } from '$lib/server/auth/smoke';
 import { tryCreateAuthRuntime } from '$lib/server/auth/workos';
-import {
-	firstAccessibleHouseholdId,
-	hasBillingGrant,
-	hasHouseholdAccess
-} from '$lib/server/billing/entitlements';
+import { firstAccessibleHouseholdId, hasHouseholdAccess } from '$lib/server/billing/entitlements';
 
 const handleAuth: Handle = async ({ event, resolve }) => {
 	event.locals.session = null;
@@ -66,16 +62,7 @@ const activeSubscribedHouseholdId = async (
 	session: NonNullable<App.Locals['session']>
 ): Promise<string | null> => {
 	const households = await listUserHouseholds(platform, session.user.id).catch(() => []);
-	return firstAccessibleHouseholdId({ database: platform.env.DB, session, households });
-};
-
-const refreshSessionMetadata = async (event: Parameters<Handle>[0]['event']): Promise<void> => {
-	const session = event.locals.session;
-	const runtime = tryCreateAuthRuntime(event.platform);
-	if (!session || !runtime) return;
-
-	const user = await runtime.workos.userManagement.getUser(session.user.id);
-	session.user.metadata = user.metadata ?? {};
+	return firstAccessibleHouseholdId({ platform, database: platform.env.DB, households });
 };
 
 const handleSubscriptionGate: Handle = async ({ event, resolve }) => {
@@ -97,19 +84,11 @@ const handleSubscriptionGate: Handle = async ({ event, resolve }) => {
 	});
 	if (!householdId) return resolve(event);
 
-	let hasAccess = await hasHouseholdAccess({
+	const hasAccess = await hasHouseholdAccess({
+		platform: event.platform,
 		database: event.platform.env.DB,
-		session: event.locals.session,
 		householdId
 	});
-	if (!hasAccess && !hasBillingGrant(event.locals.session, householdId)) {
-		await refreshSessionMetadata(event).catch(() => undefined);
-		hasAccess = await hasHouseholdAccess({
-			database: event.platform.env.DB,
-			session: event.locals.session,
-			householdId
-		});
-	}
 	if (!hasAccess) {
 		const canManageSubscription = await canManageActiveHousehold(
 			event.platform,
