@@ -7,14 +7,7 @@ import {
 	clearHouseholdCookie,
 	resolveActiveHouseholdId
 } from '$lib/server/auth/household';
-import { inviteExpiryFromForm } from '$lib/domain/household/settings-parsing';
-import {
-	createHouseholdInvite,
-	deleteHouseholdInvite,
-	householdRoleSlug,
-	revokeHouseholdInvite,
-	updateHouseholdInviteRole
-} from '$lib/server/auth/household-invites';
+import { householdRoleSlug } from '$lib/server/auth/household-invites';
 
 import { createAuthRuntime } from '$lib/server/auth/workos';
 import { loadHouseholdView } from '$lib/server/household/household-view';
@@ -22,6 +15,13 @@ import { membershipHasAdminRole } from '$lib/server/household/members';
 import { deleteHouseholdCascade } from '$lib/server/household/delete-household';
 import { updateHouseholdAppliancesFromForm } from '$lib/server/household/appliance-settings';
 import { updateHouseholdSettingsFromForm } from '$lib/server/household/settings-command';
+import {
+	createInviteFromForm,
+	deleteInviteFromForm,
+	revokeInviteFromForm,
+	updateInviteRoleFromForm,
+	type HouseholdInviteCommandResult
+} from '$lib/server/household/invite-commands';
 import { SMOKE_HOUSEHOLD_ID, smokeAuthEnabled } from '$lib/server/auth/smoke';
 import { smokeHouseholdView } from '$lib/server/household/smoke-household-view';
 import type { Actions, PageServerLoad } from './$types';
@@ -81,31 +81,30 @@ export const load: PageServerLoad = async (event) => {
 	});
 };
 
+const requireInviteStorage = (platform: App.Platform | undefined) => {
+	const database = platform?.env.DB;
+	return database ?? null;
+};
+
+const inviteCommandResponse = (result: HouseholdInviteCommandResult) =>
+	result.ok ? { message: result.message } : fail(result.status, { message: result.message });
+
 export const actions: Actions = {
 	createInvite: async (event) => {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
-		if (!event.platform?.env.DB) return fail(503, { message: 'Invite storage is not available.' });
-
-		const form = await event.request.formData();
-		const roleSlug = householdRoleSlug(form.get('role'));
-		const maxUsesRaw = String(form.get('maxUses') ?? '').trim();
-		const maxUses = maxUsesRaw ? Math.max(1, Math.min(100, Number.parseInt(maxUsesRaw, 10))) : null;
-		const expiresAt = inviteExpiryFromForm(form.get('expiresInDays'));
-		if (maxUsesRaw && !Number.isFinite(maxUses)) {
-			return fail(400, { message: 'Max uses must be a number.' });
-		}
+		const database = requireInviteStorage(event.platform);
+		if (!database) return fail(503, { message: 'Invite storage is not available.' });
 
 		try {
-			await createHouseholdInvite({
-				database: event.platform.env.DB,
-				householdId: managedHousehold.householdId,
-				createdByUserId: managedHousehold.session.user.id,
-				roleSlug,
-				maxUses,
-				expiresAt
-			});
-			return { message: 'Invite link created.' };
+			return inviteCommandResponse(
+				await createInviteFromForm({
+					database,
+					householdId: managedHousehold.householdId,
+					session: managedHousehold.session,
+					form: await event.request.formData()
+				})
+			);
 		} catch (cause) {
 			console.error('Failed to create household invite', cause);
 			return fail(500, { message: 'Could not create invite link.' });
@@ -115,50 +114,46 @@ export const actions: Actions = {
 	revokeInvite: async (event) => {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
-		if (!event.platform?.env.DB) return fail(503, { message: 'Invite storage is not available.' });
+		const database = requireInviteStorage(event.platform);
+		if (!database) return fail(503, { message: 'Invite storage is not available.' });
 
-		const form = await event.request.formData();
-		const inviteId = String(form.get('inviteId') ?? '').trim();
-		if (!inviteId) return fail(400, { message: 'Choose an invite to revoke.' });
-		await revokeHouseholdInvite({
-			database: event.platform.env.DB,
-			householdId: managedHousehold.householdId,
-			inviteId
-		});
-		return { message: 'Invite revoked.' };
+		return inviteCommandResponse(
+			await revokeInviteFromForm({
+				database,
+				householdId: managedHousehold.householdId,
+				form: await event.request.formData()
+			})
+		);
 	},
 
 	deleteInvite: async (event) => {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
-		if (!event.platform?.env.DB) return fail(503, { message: 'Invite storage is not available.' });
+		const database = requireInviteStorage(event.platform);
+		if (!database) return fail(503, { message: 'Invite storage is not available.' });
 
-		const form = await event.request.formData();
-		const inviteId = String(form.get('inviteId') ?? '').trim();
-		if (!inviteId) return fail(400, { message: 'Choose an invite to delete.' });
-		await deleteHouseholdInvite({
-			database: event.platform.env.DB,
-			householdId: managedHousehold.householdId,
-			inviteId
-		});
-		return { message: 'Invite deleted.' };
+		return inviteCommandResponse(
+			await deleteInviteFromForm({
+				database,
+				householdId: managedHousehold.householdId,
+				form: await event.request.formData()
+			})
+		);
 	},
 
 	updateInviteRole: async (event) => {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
-		if (!event.platform?.env.DB) return fail(503, { message: 'Invite storage is not available.' });
+		const database = requireInviteStorage(event.platform);
+		if (!database) return fail(503, { message: 'Invite storage is not available.' });
 
-		const form = await event.request.formData();
-		const inviteId = String(form.get('inviteId') ?? '').trim();
-		if (!inviteId) return fail(400, { message: 'Choose an invite to update.' });
-		await updateHouseholdInviteRole({
-			database: event.platform.env.DB,
-			householdId: managedHousehold.householdId,
-			inviteId,
-			roleSlug: householdRoleSlug(form.get('role'))
-		});
-		return { message: 'Invite role updated.' };
+		return inviteCommandResponse(
+			await updateInviteRoleFromForm({
+				database,
+				householdId: managedHousehold.householdId,
+				form: await event.request.formData()
+			})
+		);
 	},
 
 	updateMemberRole: async (event) => {
