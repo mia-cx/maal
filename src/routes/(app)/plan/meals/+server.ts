@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import type { Meal } from '$lib/components/dashboard/schedule-types';
 import { countActiveHouseholdMembers } from '$lib/server/auth/household';
 import { requireAppContext } from '$lib/server/http/app-context';
+import { mapKnownError } from '$lib/server/http/domain-errors';
 import { readJsonObject } from '$lib/server/http/request';
 import { householdMeals } from '$lib/server/db/schema';
 import {
@@ -65,16 +66,10 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 			})
 		});
 	} catch (cause) {
-		if (cause instanceof Error && cause.message === 'Recipe not found.') {
-			error(404, { message: cause.message });
-		}
-		if (
-			cause instanceof Error &&
-			cause.message === 'Choose an active household member as the cook.'
-		) {
-			error(400, { message: cause.message });
-		}
-		throw cause;
+		return mapKnownError(cause, {
+			'Recipe not found.': 404,
+			'Choose an active household member as the cook.': 400
+		});
 	}
 };
 
@@ -116,15 +111,9 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 			})
 		});
 	} catch (cause) {
-		if (
-			cause instanceof Error &&
-			cause.message === 'Choose an active household member as the cook.'
-		) {
-			error(400, { message: cause.message });
-		}
-		if (cause instanceof Error && cause.message === 'Meal not found.') {
-			error(404, { message: cause.message });
-		}
-		throw cause;
+		return mapKnownError(cause, {
+			'Choose an active household member as the cook.': 400,
+			'Meal not found.': 404
+		});
 	}
 };
