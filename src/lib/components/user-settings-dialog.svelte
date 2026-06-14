@@ -15,6 +15,21 @@
 	import * as RadioGroup from '$lib/components/ui/radio-group';
 	import { Separator } from '$lib/components/ui/separator';
 	import { cn } from '$lib/utils';
+	import {
+		mcpScopeGroups,
+		presetLabel,
+		type McpKey,
+		type McpScope,
+		type McpScopeLevel
+	} from '$lib/settings/mcp-key-model';
+	import type {
+		BillingStatus,
+		MfaFactor,
+		SettingsCategoryId,
+		SettingsHousehold,
+		UpdatedUser,
+		User
+	} from '$lib/settings/types';
 	import BellIcon from '@lucide/svelte/icons/bell';
 	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
 	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
@@ -23,71 +38,6 @@
 	import LockKeyholeIcon from '@lucide/svelte/icons/lock-keyhole';
 	import UserRoundIcon from '@lucide/svelte/icons/user-round';
 	import type { Component } from 'svelte';
-
-	type SettingsCategoryId = 'account' | 'security' | 'mcp' | 'notifications' | 'billing';
-	type User = { name: string; email: string; emailVerified: boolean };
-	type UpdatedUser = { name: string | null; email: string; emailVerified: boolean };
-	type MfaFactor = {
-		id: string;
-		type: 'totp';
-		issuer: string;
-		user: string;
-		createdAt: string;
-		updatedAt: string;
-	};
-	type McpScope =
-		| 'households:read'
-		| 'households:write'
-		| 'recipes:read'
-		| 'recipes:write'
-		| 'meals:read'
-		| 'meals:write'
-		| 'check_ins:read'
-		| 'check_ins:write'
-		| 'food_profile:read'
-		| 'food_profile:write';
-	type McpKeyPreset = 'read_only_planner' | 'meal_planner' | 'full_access';
-	type McpScopeLevel = 'none' | 'read' | 'write';
-	type McpScopeGroup = {
-		id: string;
-		label: string;
-		description: string;
-		read?: McpScope;
-		write?: McpScope;
-	};
-	type SettingsHousehold = { id: string; name: string };
-	type McpKey = {
-		id: string;
-		label: string;
-		householdScope: { kind: 'all' } | { kind: 'households'; householdIds: string[] };
-		scopes: McpScope[];
-		preset?: McpKeyPreset;
-		createdAt: string;
-		expiresAt?: string | null;
-		revokedAt?: string | null;
-		lastUsedAt?: string | null;
-		households?: SettingsHousehold[];
-	};
-
-	type BillingHouseholdStatus = {
-		householdId: string;
-		householdName: string;
-		stripeCustomerId: string | null;
-		subscriberUserId: string | null;
-		status: string | null;
-		currentPeriodEnd: string | null;
-		cancelAtPeriodEnd: boolean;
-		isPaid: boolean;
-		isActiveHousehold: boolean;
-		canManageBilling: boolean;
-	};
-	type BillingStatus = BillingHouseholdStatus & {
-		householdBilling: BillingHouseholdStatus[];
-		canManageBilling: boolean;
-		publishableKey: string;
-		pricingTableId: string;
-		customerEmail: string;
-	};
 
 	type SettingsCategory = {
 		id: SettingsCategoryId;
@@ -375,43 +325,6 @@
 		if (open && activeCategory === 'security') void loadMfaFactors();
 	});
 
-	const mcpScopeGroups: McpScopeGroup[] = [
-		{
-			id: 'households',
-			label: 'Households',
-			description: 'List or manage household settings and memberships.',
-			read: 'households:read',
-			write: 'households:write'
-		},
-		{
-			id: 'recipes',
-			label: 'Recipes',
-			description: 'Read or manage recipes in the menu.',
-			read: 'recipes:read',
-			write: 'recipes:write'
-		},
-		{
-			id: 'meals',
-			label: 'Meals',
-			description: 'Read or manage planned meals.',
-			read: 'meals:read',
-			write: 'meals:write'
-		},
-		{
-			id: 'checkIns',
-			label: 'Check-ins',
-			description: 'Read or submit meal feedback.',
-			read: 'check_ins:read',
-			write: 'check_ins:write'
-		},
-		{
-			id: 'foodProfile',
-			label: 'Food profile',
-			description: 'Read or manage food preferences.',
-			read: 'food_profile:read',
-			write: 'food_profile:write'
-		}
-	];
 	const selectedMcpScopes = $derived(
 		mcpScopeGroups.flatMap((group) => {
 			const level = mcpScopeLevels[group.id] ?? 'none';
@@ -421,12 +334,6 @@
 		})
 	);
 
-	const presetLabel = (preset?: McpKeyPreset): string => {
-		if (preset === 'read_only_planner') return 'Read-only planner';
-		if (preset === 'meal_planner') return 'Meal planner';
-		if (preset === 'full_access') return 'Full access';
-		return 'Custom';
-	};
 	const selectedMcpHouseholds = $derived(
 		mcpHouseholds.filter((household) => mcpKeyHouseholdIds.includes(household.id))
 	);
