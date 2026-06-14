@@ -26,10 +26,16 @@ Move Maal from route-centered modules to domain-centered modules that can later 
 - Server-only behavior stays behind server-only module surfaces.
 - Client stores are feature internals unless exported through a domain client API.
 
-## First risk centers
+## Current public boundaries
 
-- Recipe-to-meal sidecar copying and meal ingredient/instruction replacement.
-- `src/routes/(app)/mcp/+server.ts` protocol/tool/service mixing.
-- `src/routes/(app)/household/+page.server.ts` load/action orchestration.
-- `src/routes/(app)/household/+page.svelte` and `src/lib/components/user-settings-dialog.svelte` monoliths.
-- `src/lib/components/dashboard/schedule-dashboard.svelte` schedule orchestration.
+- Server domain APIs live under `src/lib/server/domains/*` for planning, recipes, and billing.
+- MCP protocol, context, registry, schemas, result formatting, and domain adapters live under `src/lib/server/mcp/*`.
+- Menu feature components are exported from `src/lib/components/menu/index.ts`; menu data contracts live under `src/lib/menu/menu-types.ts`.
+- Store contracts are exported from `src/lib/stores/index.ts`; feature-specific network calls live in client adapters.
+- Design-system rules and component extraction triggers are documented in sibling architecture notes.
+
+## Remaining risk centers
+
+- Large Svelte shells may still need future extraction when they acquire new responsibilities.
+- Household UI componentization remains the largest product-surface split left for follow-up work.
+- MCP tool contracts should remain snapshot-tested when adding or renaming tools.
