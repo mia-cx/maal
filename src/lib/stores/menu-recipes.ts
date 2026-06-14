@@ -1,6 +1,10 @@
 import { browser } from '$app/environment';
 import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
-import { createMenuRecipeRemote, readMenuResponseError } from '$lib/menu/menu-client';
+import {
+	createMenuRecipeRemote,
+	readMenuResponseError,
+	updateMenuRecipeRemote
+} from '$lib/menu/menu-client';
 import { atom, computed } from 'nanostores';
 
 const cloneRecipe = (recipe: RecipeMenuItem): RecipeMenuItem => ({
@@ -117,15 +121,9 @@ export const updateMenuRecipe = (recipe: RecipeMenuItem) => {
 	replaceRecipe(recipe);
 	if (!browser) return;
 
-	fetch(`/menu/recipes/${encodeURIComponent(recipe.id)}`, {
-		method: 'PUT',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ recipe })
-	})
-		.then(async (response) => {
-			if (!response.ok) throw new Error(await response.text());
-			const body = (await response.json()) as { recipe: RecipeMenuItem };
-			replaceRecipe(body.recipe);
+	updateMenuRecipeRemote(recipe)
+		.then((persistedRecipe) => {
+			replaceRecipe(persistedRecipe);
 		})
 		.catch((error: unknown) => {
 			console.error('Failed to persist menu recipe', error);

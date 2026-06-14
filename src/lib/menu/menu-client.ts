@@ -60,3 +60,14 @@ export const createMenuRecipeRemote = async (input: {
 	const body = (await response.json()) as { recipe: RecipeMenuItem };
 	return body.recipe;
 };
+
+export const updateMenuRecipeRemote = async (recipe: RecipeMenuItem): Promise<RecipeMenuItem> => {
+	const response = await fetch(`/menu/recipes/${encodeURIComponent(recipe.id)}`, {
+		method: 'PUT',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ recipe })
+	});
+	if (!response.ok) throw new Error(await response.text());
+	const body = (await response.json()) as { recipe: RecipeMenuItem };
+	return body.recipe;
+};
