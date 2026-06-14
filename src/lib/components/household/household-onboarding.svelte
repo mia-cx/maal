@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { setActiveHouseholdId } from '$lib/stores/active-household';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import WordmarkLogo from '$lib/components/wordmark-logo.svelte';
@@ -63,12 +64,10 @@
 			household?: { id?: unknown };
 		};
 		const householdId = typeof body.household?.id === 'string' ? body.household.id : null;
-		const nextUrl = new URL(
-			resolve(body.trialStarted ? '/plan?trial=started' : '/subscribe'),
-			location.origin
-		);
-		if (householdId) nextUrl.searchParams.set('household', householdId);
-		await goto(`${nextUrl.pathname}${nextUrl.search}`, { invalidateAll: true });
+		if (householdId) setActiveHouseholdId(householdId);
+		await goto(resolve(body.trialStarted ? '/plan?trial=started' : '/subscribe'), {
+			invalidateAll: true
+		});
 	};
 </script>
 

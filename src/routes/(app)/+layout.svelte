@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { invalidateAll } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { navigating, page } from '$app/state';
 	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
 	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
@@ -6,8 +8,9 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { featurePreviews } from '$lib/features/flags';
+	import { activeHouseholdId, setActiveHouseholdId } from '$lib/stores/active-household';
 	import { appShellUiState, updateAppShellUiState } from '$lib/stores/app-shell-ui-state';
-	import type { Snippet } from 'svelte';
+	import { onMount, type Snippet } from 'svelte';
 	import type { LayoutData } from './$types';
 
 	const minSidebarWidth = 208;
@@ -20,6 +23,7 @@
 	let sidebarWidth = $state(initialUiState.sidebarWidth);
 	let resizingSidebar = $state(false);
 	let exportDataPopoverOpen = $state(false);
+	let householdStateHydrated = $state(false);
 
 	const features = $derived(featurePreviews(data.session));
 	const sidebarUser = $derived({
@@ -74,8 +78,38 @@
 		sidebarOpen = !sidebarOpen;
 	};
 
+	onMount(() => {
+		const storedHouseholdId = activeHouseholdId.get();
+		const storedHouseholdIsAccessible = data.households.some(
+			(household) => household.id === storedHouseholdId
+		);
+
+		if (
+			storedHouseholdId &&
+			storedHouseholdId !== data.activeHouseholdId &&
+			storedHouseholdIsAccessible
+		) {
+			void fetch(resolve('/api/active-household'), {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ householdId: storedHouseholdId })
+			}).then((response) => {
+				if (response.ok) return invalidateAll();
+				setActiveHouseholdId(data.activeHouseholdId);
+			});
+		} else {
+			setActiveHouseholdId(data.activeHouseholdId);
+		}
+
+		householdStateHydrated = true;
+	});
+
 	$effect(() => {
 		updateAppShellUiState({ activeNav, sidebarOpen, sidebarWidth });
+	});
+
+	$effect(() => {
+		if (householdStateHydrated) setActiveHouseholdId(data.activeHouseholdId);
 	});
 </script>
 

@@ -152,13 +152,15 @@ export const getLoginUrl = (input: {
 	origin: string;
 	state: string;
 	screenHint?: 'sign-in' | 'sign-up';
+	organizationId?: string | null;
 }): string =>
 	input.runtime.workos.userManagement.getAuthorizationUrl({
 		provider: 'authkit',
 		clientId: input.runtime.clientId,
 		redirectUri: `${input.origin}${CALLBACK_PATH}`,
 		state: input.state,
-		...(input.screenHint ? { screenHint: input.screenHint } : {})
+		...(input.screenHint ? { screenHint: input.screenHint } : {}),
+		...(input.organizationId ? { organizationId: input.organizationId } : {})
 	});
 
 export const authenticateSealedSession = async (input: {

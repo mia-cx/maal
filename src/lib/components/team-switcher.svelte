@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { page } from '$app/state';
 	import { HomeIcon } from '$lib/components/icons/solar-outline';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { useSidebar } from '$lib/components/ui/sidebar/index.js';
+	import { setActiveHouseholdId } from '$lib/stores/active-household';
 	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 
@@ -26,9 +26,19 @@
 	const startHouseholdCreation = () => goto(resolve('/onboarding?new=1'));
 	const switchHousehold = async (householdId: string) => {
 		if (householdId === activeHouseholdId) return;
-		const nextUrl = new URL(page.url);
-		nextUrl.searchParams.set('household', householdId);
-		await goto(`${nextUrl.pathname}${nextUrl.search}`, { invalidateAll: true });
+		const previousHouseholdId = activeHouseholdId;
+		setActiveHouseholdId(householdId);
+
+		const response = await fetch(resolve('/api/active-household'), {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ householdId })
+		});
+		if (!response.ok) {
+			setActiveHouseholdId(previousHouseholdId);
+			return;
+		}
+		await invalidateAll();
 	};
 </script>
 

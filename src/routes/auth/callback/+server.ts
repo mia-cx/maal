@@ -41,7 +41,7 @@ export const GET: RequestHandler = async ({ cookies, platform, request, url }) =
 
 	await provisionAuthSession(platform, {
 		user: auth.user,
-		organizationId: auth.organizationId ?? null
+		organizationId: null
 	});
 	commitSealedSession(cookies, auth.sealedSession, url);
 

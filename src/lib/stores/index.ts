@@ -1,3 +1,5 @@
+export { activeHouseholdId, setActiveHouseholdId } from './active-household';
+
 export {
 	archivedMenuRecipesStore,
 	menuRecipesStore,

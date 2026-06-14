@@ -5,7 +5,6 @@ import { displayUserName } from '$lib/server/auth/user-display';
 import { SMOKE_HOUSEHOLD_ID, SMOKE_HOUSEHOLD_NAME, SMOKE_USER_ID, smokeAuthEnabled } from './smoke';
 
 export const HOUSEHOLD_COOKIE_NAME = 'maal_household_id';
-export const ACTIVE_HOUSEHOLD_QUERY_PARAM = 'household';
 export const HOUSEHOLD_MANAGE_PERMISSION = 'households:write';
 const LEGACY_HOUSEHOLD_MANAGE_PERMISSION = 'household:manage';
 const MEALS_ATTEND_PERMISSION = 'household:meals:attend';
@@ -266,25 +265,14 @@ export const countActiveHouseholdMembers = async (
 ): Promise<number> => Math.max(1, (await listHouseholdMembers(platform, householdId)).length);
 
 export const selectActiveHouseholdId = (input: {
-	requestedHouseholdId?: string | null;
 	cookieHouseholdId?: string | null;
-	sessionOrganizationId?: string | null;
 	householdIds: string[];
 }): string | null => {
 	const accessibleHouseholdIds = new Set(input.householdIds);
-	const preferredHouseholdIds = [
-		input.requestedHouseholdId,
-		input.cookieHouseholdId,
-		input.sessionOrganizationId
-	];
-
-	return (
-		preferredHouseholdIds.find(
-			(householdId) => householdId && accessibleHouseholdIds.has(householdId)
-		) ??
-		input.householdIds[0] ??
-		null
-	);
+	if (input.cookieHouseholdId && accessibleHouseholdIds.has(input.cookieHouseholdId)) {
+		return input.cookieHouseholdId;
+	}
+	return input.householdIds[0] ?? null;
 };
 
 export const resolveActiveHouseholdId = async (input: {
@@ -297,9 +285,7 @@ export const resolveActiveHouseholdId = async (input: {
 	const householdIds =
 		input.householdIds ?? (await listUserHouseholdIds(input.platform, input.session.user.id));
 	const householdId = selectActiveHouseholdId({
-		requestedHouseholdId: input.url.searchParams.get(ACTIVE_HOUSEHOLD_QUERY_PARAM),
 		cookieHouseholdId: readHouseholdCookie(input.cookies),
-		sessionOrganizationId: input.session.organizationId,
 		householdIds
 	});
 

@@ -4,33 +4,19 @@ import { selectActiveHouseholdId } from './household';
 describe('selectActiveHouseholdId', () => {
 	const householdIds = ['mia-kitchen', 'new-household', 'shared-household'];
 
-	it('prefers an explicit requested household over cookie and session organization', () => {
-		expect(
-			selectActiveHouseholdId({
-				requestedHouseholdId: 'new-household',
-				cookieHouseholdId: 'mia-kitchen',
-				sessionOrganizationId: 'mia-kitchen',
-				householdIds
-			})
-		).toBe('new-household');
-	});
-
-	it('prefers a valid cookie over a stale session organization', () => {
+	it('prefers a valid household cookie', () => {
 		expect(
 			selectActiveHouseholdId({
 				cookieHouseholdId: 'shared-household',
-				sessionOrganizationId: 'mia-kitchen',
 				householdIds
 			})
 		).toBe('shared-household');
 	});
 
-	it('ignores inaccessible requested and cookie households', () => {
+	it('ignores inaccessible household cookies', () => {
 		expect(
 			selectActiveHouseholdId({
-				requestedHouseholdId: 'not-mine',
-				cookieHouseholdId: 'also-not-mine',
-				sessionOrganizationId: 'mia-kitchen',
+				cookieHouseholdId: 'not-mine',
 				householdIds
 			})
 		).toBe('mia-kitchen');
