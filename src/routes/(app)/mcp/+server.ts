@@ -1,13 +1,7 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import {
-	CallToolRequestSchema,
-	ListToolsRequestSchema,
-	type CallToolResult,
-	type Tool,
-	type ToolAnnotations
-} from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import * as Schema from 'effect/Schema';
 import { getDb } from '$lib/server/db';
 import { listUserHouseholds } from '$lib/server/auth/household';
@@ -43,8 +37,7 @@ import {
 	optionalHouseholdInput,
 	recipeShape,
 	recordInput,
-	stringArray,
-	type InputSchema
+	stringArray
 } from '$lib/server/mcp/schemas';
 import {
 	createMealResolvingRecipe,
@@ -53,15 +46,7 @@ import {
 	recipeFromArgs,
 	recipePatchFromArgs
 } from '$lib/server/mcp/meal-input';
-
-type ToolHandler = (context: McpContext, args: Record<string, unknown>) => Promise<unknown>;
-type ToolDefinition = {
-	name: string;
-	description: string;
-	inputSchema: InputSchema;
-	annotations?: ToolAnnotations;
-	handler: ToolHandler;
-};
+import { registerToolHandlers, type ToolDefinition } from '$lib/server/mcp/registry';
 
 const defaultRecipeLimit = 25;
 const maxRecipeLimit = 60;
@@ -446,52 +431,12 @@ const createContext = async (
 	}
 };
 
-const schemaForToolList = (schema: InputSchema): Tool['inputSchema'] => {
-	const jsonSchema = Schema.toJsonSchemaDocument(schema).schema as Record<string, unknown>;
-	if (!jsonSchema.type) {
-		return { type: 'object', properties: {}, additionalProperties: false };
-	}
-	return jsonSchema as Tool['inputSchema'];
-};
-
-const registerToolHandlers = (server: Server, context: McpContext) => {
-	const toolMap = new Map(tools.map((tool) => [tool.name, tool]));
-
-	server.setRequestHandler(ListToolsRequestSchema, () => ({
-		tools: tools.map((tool) => ({
-			name: tool.name,
-			description: tool.description,
-			inputSchema: schemaForToolList(tool.inputSchema),
-			annotations: tool.annotations
-		}))
-	}));
-
-	server.setRequestHandler(CallToolRequestSchema, async (request) => {
-		const tool = toolMap.get(request.params.name);
-		if (!tool) {
-			return { isError: true, ...toolResult(toolError('unknown_tool', 'Unknown tool.')) };
-		}
-		try {
-			const args = Schema.decodeUnknownSync(tool.inputSchema)(
-				request.params.arguments ?? {}
-			) as Record<string, unknown>;
-			return toolResult(await tool.handler(context, args));
-		} catch (cause) {
-			const data =
-				isRecord(cause) && typeof cause.code === 'string'
-					? cause
-					: toolError('tool_failed', cause instanceof Error ? cause.message : 'Tool failed.');
-			return { isError: true, ...toolResult(data) };
-		}
-	});
-};
-
 const handleMcpRequest = async (platform: App.Platform | undefined, request: Request) => {
 	const context = await createContext(platform, request);
 	if (context instanceof Response) return context;
 
 	const server = new Server({ name: 'maal', version: '0.1.0' }, { capabilities: { tools: {} } });
-	registerToolHandlers(server, context);
+	registerToolHandlers(server, context, tools);
 
 	const transport = new WebStandardStreamableHTTPServerTransport({
 		sessionIdGenerator: undefined,
