@@ -25,3 +25,9 @@ Use these notes when rebasing feature work across the refactor.
 - Keep section-specific display in `src/lib/components/settings/*`.
 - Keep field/state shaping in `src/lib/settings/*-model.ts` modules.
 - Keep route-specific mutation transport in `src/lib/settings/*-client.ts` modules.
+
+## Household server modules
+
+- Use household load/action context helpers before adding route-local session or household checks.
+- Put cascade deletes, invite commands, member commands, and settings commands in the household server modules.
+- Keep the household page server as an adapter that composes those helpers.
