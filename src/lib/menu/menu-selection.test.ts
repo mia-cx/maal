@@ -8,6 +8,15 @@ describe('menu selection helpers', () => {
 		expect(applyMenuSelection(['a'], ['a', 'b'], true)).toEqual(['a', 'b']);
 	});
 
+	it('keeps current order when adding later range ids', () => {
+		expect(applyMenuSelection(['c', 'a'], ['a', 'b', 'c', 'd'], true)).toEqual([
+			'c',
+			'a',
+			'b',
+			'd'
+		]);
+	});
+
 	it('removes selected ids', () => {
 		expect(applyMenuSelection(['a', 'b', 'c'], ['b'], false)).toEqual(['a', 'c']);
 	});
