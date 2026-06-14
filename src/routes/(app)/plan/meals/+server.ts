@@ -16,7 +16,7 @@ import {
 import { loadMealPlanMeals, mealFromHouseholdMeal } from '$lib/server/db/recipe-mappers';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
-import { deleteHouseholdMeal } from '$lib/server/services/meal-plan';
+import { deleteHouseholdMeal, listHouseholdPlanMeals } from '$lib/server/services/meal-plan';
 import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
 import {
 	replaceMealIngredientsFromLines,
@@ -127,15 +127,14 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 	const endDate = dateParam(url, 'end');
 	if (!startDate || !endDate) error(400, { message: 'Date range is required.' });
 
-	const unitPreferences = await loadUnitPreferences(db, session.user.id, householdId);
 	return json({
-		meals: await loadMealPlanMeals(db, {
+		meals: await listHouseholdPlanMeals({
+			platform,
+			db,
 			workosUserId: session.user.id,
 			householdId,
-			defaultMealServings: await countActiveHouseholdMembers(platform, householdId),
 			startDate,
-			endDate,
-			unitPreferences
+			endDate
 		})
 	});
 };
