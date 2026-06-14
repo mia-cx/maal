@@ -1,8 +1,6 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
-import { resolveActiveHouseholdId } from '$lib/server/auth/household';
-import { requireHouseholdAccess } from '$lib/server/billing/guards';
-import { getDb } from '$lib/server/db';
+import { requireAppContext } from '$lib/server/http/app-context';
 import {
 	householdMeals,
 	householdMealUserRecipes,
@@ -32,19 +30,13 @@ const readRecipe = async (request: Request): Promise<RecipeMenuItem> => {
 };
 
 export const PUT: RequestHandler = async ({ cookies, locals, params, platform, request, url }) => {
-	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
-	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
-	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
-	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
+	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
 	const recipeId = params.id;
 	if (!recipeId) error(400, { message: 'Recipe is required.' });
 
 	const recipe = await readRecipe(request);
 	if (recipe.id !== recipeId) error(400, { message: 'Recipe id mismatch.' });
 
-	const db = getDb(platform.env.DB);
 	const existing = await db
 		.select({ id: userRecipes.id })
 		.from(userRecipes)
@@ -112,16 +104,10 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 };
 
 export const PATCH: RequestHandler = async ({ cookies, locals, params, platform, url }) => {
-	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
-	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
-	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
-	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
+	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
 	const recipeId = params.id;
 	if (!recipeId) error(400, { message: 'Recipe is required.' });
 
-	const db = getDb(platform.env.DB);
 	const existing = await db
 		.select({ id: userRecipes.id })
 		.from(userRecipes)
@@ -174,16 +160,10 @@ export const PATCH: RequestHandler = async ({ cookies, locals, params, platform,
 };
 
 export const DELETE: RequestHandler = async ({ cookies, locals, params, platform, url }) => {
-	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
-	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
-	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
-	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
+	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
 	const recipeId = params.id;
 	if (!recipeId) error(400, { message: 'Recipe is required.' });
 
-	const db = getDb(platform.env.DB);
 	const permanent = url.searchParams.get('permanent') === 'true';
 	const existing = await db
 		.select({ id: userRecipes.id })

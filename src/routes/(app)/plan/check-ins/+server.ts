@@ -1,8 +1,6 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq } from 'drizzle-orm';
-import { resolveActiveHouseholdId } from '$lib/server/auth/household';
-import { requireHouseholdAccess } from '$lib/server/billing/guards';
-import { getDb } from '$lib/server/db';
+import { requireAppContext } from '$lib/server/http/app-context';
 import { householdMeals, mealCheckIns } from '$lib/server/db/schema';
 import type { MealFeedbackVerdict } from '$lib/components/dashboard/meal-labels';
 
@@ -26,12 +24,7 @@ const positiveInteger = (value: unknown): number | null => {
 };
 
 export const POST: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
-	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
-	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
-	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
+	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
 
 	const body = await readJson(request);
 	const mealId = isRecord(body) && typeof body.mealId === 'string' ? body.mealId.trim() : '';
@@ -40,7 +33,6 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	if (!verdicts.has(verdict as MealFeedbackVerdict))
 		error(400, { message: 'Verdict is required.' });
 
-	const db = getDb(platform.env.DB);
 	const existingMeal = await db
 		.select()
 		.from(householdMeals)

@@ -1,12 +1,8 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq, inArray } from 'drizzle-orm';
 import type { Meal, MealStatus } from '$lib/components/dashboard/schedule-types';
-import {
-	countActiveHouseholdMembers,
-	listHouseholdMembers,
-	resolveActiveHouseholdId
-} from '$lib/server/auth/household';
-import { requireHouseholdAccess } from '$lib/server/billing/guards';
+import { countActiveHouseholdMembers, listHouseholdMembers } from '$lib/server/auth/household';
+import { requireAppContext } from '$lib/server/http/app-context';
 import { getDb } from '$lib/server/db';
 import {
 	householdMealIngredients,
@@ -170,17 +166,11 @@ const replaceMealInstructionsFromMeal = async (
 };
 
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
-	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
-	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
-	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
-	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
+	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
 	const startDate = dateParam(url, 'start');
 	const endDate = dateParam(url, 'end');
 	if (!startDate || !endDate) error(400, { message: 'Date range is required.' });
 
-	const db = getDb(platform.env.DB);
 	const unitPreferences = await loadUnitPreferences(db, session.user.id, householdId);
 	return json({
 		meals: await loadMealPlanMeals(db, {
@@ -195,16 +185,10 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 };
 
 export const POST: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
-	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
-	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
-	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
+	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
 	const defaultMealServings = await countActiveHouseholdMembers(platform, householdId);
 
 	const meal = await readMeal(request);
-	const db = getDb(platform.env.DB);
 	const plannedCookWorkosUserId = meal.plannedCookWorkosUserId ?? session.user.id;
 	const householdMembers = await listHouseholdMembers(platform, householdId);
 	if (!householdMembers.some((member) => member.userId === plannedCookWorkosUserId)) {
@@ -272,15 +256,9 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 };
 
 export const DELETE: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
-	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
-	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
-	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
+	const { db, householdId } = await requireAppContext({ cookies, locals, platform, url });
 
 	const mealId = await readMealId(request);
-	const db = getDb(platform.env.DB);
 	const existingMeal = await db
 		.select()
 		.from(householdMeals)
@@ -293,16 +271,10 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 };
 
 export const PUT: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
-	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
-	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
-	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
+	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
 	const defaultMealServings = await countActiveHouseholdMembers(platform, householdId);
 
 	const meal = await readMeal(request);
-	const db = getDb(platform.env.DB);
 	const unitPreferences = await loadUnitPreferences(db, session.user.id, householdId);
 
 	const existingMeal = await db
