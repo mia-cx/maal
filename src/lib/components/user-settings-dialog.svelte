@@ -10,9 +10,8 @@
 	import AccountSettingsSection from '$lib/components/settings/account-settings-section.svelte';
 	import BillingSettingsSection from '$lib/components/settings/billing-settings-section.svelte';
 	import McpCreatedKeyPanel from '$lib/components/settings/mcp-created-key-panel.svelte';
-	import McpHouseholdAccessPicker from '$lib/components/settings/mcp-household-access-picker.svelte';
+	import McpKeyForm from '$lib/components/settings/mcp-key-form.svelte';
 	import McpKeyList from '$lib/components/settings/mcp-key-list.svelte';
-	import McpPermissionsEditor from '$lib/components/settings/mcp-permissions-editor.svelte';
 	import MfaSetupDialog from '$lib/components/settings/mfa-setup-dialog.svelte';
 	import NotificationsSettingsSection from '$lib/components/settings/notifications-settings-section.svelte';
 	import PasswordChangeDialog from '$lib/components/settings/password-change-dialog.svelte';
@@ -678,43 +677,23 @@
 							<McpCreatedKeyPanel {createdMcpKey} {copyCreatedMcpKey} />
 						{/if}
 						{#if mcpKeyFormOpen}
-							<div class="grid gap-3">
-								<div>
-									<p class="text-xs font-medium">Create MCP key</p>
-									<p class="text-xs text-muted-foreground">
-										Choose permissions and household access.
-									</p>
-								</div>
-								<label class="grid gap-1 text-xs font-medium">
-									Label
-									<Input bind:value={mcpKeyLabel} placeholder="Claude on my laptop" class="h-8" />
-								</label>
-								<McpPermissionsEditor {mcpScopeLevels} {setMcpScopeRead} {setMcpScopeWrite} />
-								<McpHouseholdAccessPicker
-									bind:mcpKeyHouseholdKind
-									bind:mcpHouseholdPickerOpen
-									bind:mcpHouseholdQuery
-									{mcpHouseholdPickerLabel}
-									{filteredMcpHouseholds}
-									{mcpKeyHouseholdIds}
-									{toggleMcpHousehold}
-								/>
-								<div class="flex justify-end gap-2">
-									<Button
-										variant="ghost"
-										disabled={mcpKeyCreating}
-										onclick={() => (mcpKeyFormOpen = false)}>Cancel</Button
-									>
-									<Button
-										disabled={mcpKeyCreating ||
-											!mcpKeyLabel.trim() ||
-											!selectedMcpScopes.length ||
-											(mcpKeyHouseholdKind === 'households' && !mcpKeyHouseholdIds.length)}
-										onclick={createMcpAccessKey}
-										>{mcpKeyCreating ? 'Creating…' : 'Create MCP key'}</Button
-									>
-								</div>
-							</div>
+							<McpKeyForm
+								bind:mcpKeyLabel
+								bind:mcpKeyHouseholdKind
+								bind:mcpHouseholdPickerOpen
+								bind:mcpHouseholdQuery
+								{mcpKeyCreating}
+								{selectedMcpScopes}
+								{mcpKeyHouseholdIds}
+								{mcpScopeLevels}
+								{mcpHouseholdPickerLabel}
+								{filteredMcpHouseholds}
+								{setMcpScopeRead}
+								{setMcpScopeWrite}
+								{toggleMcpHousehold}
+								cancel={() => (mcpKeyFormOpen = false)}
+								{createMcpAccessKey}
+							/>
 						{/if}
 						{#if mcpMessage}<p class="text-xs text-muted-foreground">{mcpMessage}</p>{/if}
 						{#if mcpError}<p class="text-xs text-destructive">{mcpError}</p>{/if}
