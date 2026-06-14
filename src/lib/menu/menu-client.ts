@@ -71,3 +71,41 @@ export const updateMenuRecipeRemote = async (recipe: RecipeMenuItem): Promise<Re
 	const body = (await response.json()) as { recipe: RecipeMenuItem };
 	return body.recipe;
 };
+
+export const archiveMenuRecipesRemote = async (
+	recipeIds: string[]
+): Promise<{ deletedAt?: string }> => {
+	const response = await fetch('/menu/recipes', {
+		method: 'DELETE',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ recipeIds })
+	});
+	if (!response.ok)
+		throw new Error(await readMenuResponseError(response, 'Could not archive recipes.'));
+	return (await response.json()) as { deletedAt?: string };
+};
+
+export const restoreMenuRecipesRemote = async (recipeIds: string[]): Promise<RecipeMenuItem[]> => {
+	const response = await fetch('/menu/recipes', {
+		method: 'PATCH',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ recipeIds })
+	});
+	if (!response.ok)
+		throw new Error(await readMenuResponseError(response, 'Could not restore recipes.'));
+	const body = (await response.json()) as { recipes?: RecipeMenuItem[] };
+	return body.recipes ?? [];
+};
+
+export const permanentlyDeleteMenuRecipesRemote = async (
+	recipeIds: string[]
+): Promise<{ deletedMealCount: number }> => {
+	const response = await fetch('/menu/recipes', {
+		method: 'DELETE',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ recipeIds, permanent: true })
+	});
+	if (!response.ok)
+		throw new Error(await readMenuResponseError(response, 'Could not permanently delete recipes.'));
+	return (await response.json()) as { deletedMealCount: number };
+};
