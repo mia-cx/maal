@@ -5,9 +5,13 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { useSidebar } from '$lib/components/ui/sidebar/index.js';
-	import { setActiveHouseholdId } from '$lib/stores/active-household';
+	import {
+		activeHouseholdId as activeHouseholdIdStore,
+		setActiveHouseholdId
+	} from '$lib/stores/active-household';
 	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import { onDestroy, onMount } from 'svelte';
 
 	type Household = { id: string; name: string };
 
@@ -17,16 +21,21 @@
 		label = 'Households'
 	}: { households?: Household[]; activeHouseholdId?: string | null; label?: string } = $props();
 	const sidebar = useSidebar();
+	let clientActiveHouseholdId = $state<string | null>(null);
+	let lastServerActiveHouseholdId = $state<string | null>(null);
 
 	const activeHousehold = $derived(
-		households.find((household) => household.id === activeHouseholdId) ?? households[0] ?? null
+		households.find((household) => household.id === clientActiveHouseholdId) ??
+			households[0] ??
+			null
 	);
 	const householdName = $derived(activeHousehold?.name ?? 'No household');
 	const householdMeta = $derived(activeHousehold ? 'Household' : 'Create one from Meal Plan');
 	const startHouseholdCreation = () => goto(resolve('/onboarding?new=1'));
 	const switchHousehold = async (householdId: string) => {
-		if (householdId === activeHouseholdId) return;
-		const previousHouseholdId = activeHouseholdId;
+		if (householdId === clientActiveHouseholdId) return;
+		const previousHouseholdId = clientActiveHouseholdId;
+		clientActiveHouseholdId = householdId;
 		setActiveHouseholdId(householdId);
 
 		const response = await fetch(resolve('/api/active-household'), {
@@ -35,11 +44,27 @@
 			body: JSON.stringify({ householdId })
 		});
 		if (!response.ok) {
+			clientActiveHouseholdId = previousHouseholdId;
 			setActiveHouseholdId(previousHouseholdId);
 			return;
 		}
 		await invalidateAll();
 	};
+
+	$effect(() => {
+		if (activeHouseholdId !== lastServerActiveHouseholdId) {
+			lastServerActiveHouseholdId = activeHouseholdId;
+			clientActiveHouseholdId = activeHouseholdId;
+		}
+	});
+
+	let unsubscribeActiveHousehold: (() => void) | null = null;
+	onMount(() => {
+		unsubscribeActiveHousehold = activeHouseholdIdStore.subscribe((householdId) => {
+			if (householdId) clientActiveHouseholdId = householdId;
+		});
+	});
+	onDestroy(() => unsubscribeActiveHousehold?.());
 </script>
 
 <Sidebar.Menu>
@@ -75,7 +100,7 @@
 					{#each households as household (household.id)}
 						<DropdownMenu.Item
 							class="gap-2 p-2"
-							disabled={household.id === activeHouseholdId}
+							disabled={household.id === clientActiveHouseholdId}
 							onclick={() => switchHousehold(household.id)}
 						>
 							<HomeIcon class="size-5 shrink-0 text-primary" />
