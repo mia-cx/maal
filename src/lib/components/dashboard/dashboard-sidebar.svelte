@@ -38,7 +38,12 @@
 	const householdHref = resolve('/household');
 </script>
 
-<Sidebar.Root collapsible="icon" data-testid="app-sidebar">
+<Sidebar.Root
+	collapsible="icon"
+	data-testid="app-sidebar"
+	data-sveltekit-preload-code="eager"
+	data-sveltekit-preload-data="hover"
+>
 	<Sidebar.Header>
 		<TeamSwitcher {households} {activeHouseholdId} label="Households" />
 	</Sidebar.Header>

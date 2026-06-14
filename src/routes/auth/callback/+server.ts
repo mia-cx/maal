@@ -20,7 +20,9 @@ export const GET: RequestHandler = async ({ cookies, platform, request, url }) =
 	clearOAuthReturnTo(cookies);
 
 	if (!code) error(400, 'Missing WorkOS authorization code');
-	if (!state || !expectedState || state !== expectedState) error(400, 'Invalid WorkOS OAuth state');
+	const appStartedOAuth = Boolean(expectedState);
+	if (appStartedOAuth && state !== expectedState) error(400, 'Invalid WorkOS OAuth state');
+	if (!appStartedOAuth && state) error(400, 'Invalid WorkOS OAuth state');
 
 	const runtime = createAuthRuntime(platform);
 	const { ipAddress, userAgent } = getRequestMetadata(request);

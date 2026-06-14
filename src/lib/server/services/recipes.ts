@@ -17,6 +17,7 @@ import {
 	userRecipeInstructions
 } from '$lib/server/db/schema';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
+import { insertHouseholdMealInstructionEvents } from '$lib/server/taxonomy/instruction-events';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -214,6 +215,11 @@ const replaceMealRecipeSidecars = async (db: Db, mealId: string, recipeId: strin
 			confidence: instruction.confidence
 		});
 	}
+	const insertedInstructions = await db
+		.select({ id: householdMealInstructions.id, text: householdMealInstructions.text })
+		.from(householdMealInstructions)
+		.where(eq(householdMealInstructions.householdMealId, mealId));
+	await insertHouseholdMealInstructionEvents(db, insertedInstructions);
 };
 
 const propagateRecipeUpdateToLinkedMeals = async (

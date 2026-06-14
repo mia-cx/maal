@@ -15,6 +15,10 @@ const globalGrantTokens = new Set([
 ]);
 
 const grantMetadataKeys = ['maal_entitlement', 'maal_entitlements', 'maal_grant', 'maal_grants'];
+const lifetimeGrantPresenceKeys = ['lifetime_grant', 'maal_lifetime_grant'];
+const accessCacheTtlMs = 60_000;
+const accessCache = new Map<string, { value: boolean; expiresAt: number }>();
+const grantCache = new Map<string, { value: boolean; expiresAt: number }>();
 
 const splitGrantList = (value: unknown): string[] =>
 	typeof value === 'string'
@@ -24,10 +28,16 @@ const splitGrantList = (value: unknown): string[] =>
 				.filter(Boolean)
 		: [];
 
+const hasMetadataKey = (metadata: Record<string, unknown>, key: string): boolean =>
+	Object.hasOwn(metadata, key) && metadata[key] !== null && metadata[key] !== undefined;
+
 const billingGrantTokens = (metadata: Record<string, unknown>): Set<string> => {
 	const tokens = new Set<string>();
 	for (const key of grantMetadataKeys) {
 		for (const token of splitGrantList(metadata[key])) tokens.add(token);
+	}
+	if (lifetimeGrantPresenceKeys.some((key) => hasMetadataKey(metadata, key))) {
+		tokens.add('lifetime');
 	}
 	return tokens;
 };
@@ -41,10 +51,18 @@ export const hasHouseholdBillingGrant = async (input: {
 	platform?: App.Platform;
 	householdId: string;
 }): Promise<boolean> => {
+	const cached = grantCache.get(input.householdId);
+	if (cached && cached.expiresAt > Date.now()) return cached.value;
+
 	const runtime = tryCreateAuthRuntime(input.platform);
 	if (!runtime) return false;
 	const organization = await runtime.workos.organizations.getOrganization(input.householdId);
-	return grantsHouseholdAccess(billingGrantTokens(organization.metadata ?? {}), input.householdId);
+	const value = grantsHouseholdAccess(
+		billingGrantTokens(organization.metadata ?? {}),
+		input.householdId
+	);
+	grantCache.set(input.householdId, { value, expiresAt: Date.now() + accessCacheTtlMs });
+	return value;
 };
 
 export const hasHouseholdAccess = async (input: {
@@ -52,8 +70,16 @@ export const hasHouseholdAccess = async (input: {
 	database: D1Database;
 	householdId: string;
 }): Promise<boolean> => {
-	if (await hasHouseholdBillingGrant(input).catch(() => false)) return true;
+	const cacheKey = input.householdId;
+	const cached = accessCache.get(cacheKey);
+	if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+	if (await hasHouseholdBillingGrant(input).catch(() => false)) {
+		accessCache.set(cacheKey, { value: true, expiresAt: Date.now() + accessCacheTtlMs });
+		return true;
+	}
 	const billing = await loadBillingStatus(input.database, input.householdId);
+	accessCache.set(cacheKey, { value: billing.isPaid, expiresAt: Date.now() + accessCacheTtlMs });
 	return billing.isPaid;
 };
 

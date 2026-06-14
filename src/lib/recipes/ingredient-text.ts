@@ -1,5 +1,10 @@
 export type MassUnit = 'g' | 'kg' | 'oz' | 'lb';
 export type VolumeUnit = 'ml' | 'l' | 'tsp' | 'tbsp' | 'cup' | 'fl oz';
+export type UnitConversion = {
+	baseUnitId: string;
+	toBaseFactor: number;
+	toBaseOffset: number;
+};
 export type UnitPreferences = {
 	preferredMassUnit?: MassUnit;
 	preferredMassUnitLabel?: string;
@@ -7,6 +12,10 @@ export type UnitPreferences = {
 	preferredVolumeUnit?: VolumeUnit;
 	preferredVolumeUnitLabel?: string;
 	preferredVolumeUnitPluralLabel?: string;
+	preferredTemperatureUnit?: string;
+	preferredTemperatureUnitLabel?: string;
+	unitConversions?: Record<string, UnitConversion>;
+	unitAliases?: Record<string, string>;
 	ingredientUnitOverrides?: Record<string, string>;
 	ingredientUnitLabelOverrides?: Record<string, string>;
 	ingredientUnitPluralLabelOverrides?: Record<string, string>;
@@ -467,6 +476,110 @@ export const displayIngredientAmount = (
 		return `${formatQuantity(targetQuantity)} ${displayUnitLabel(targetQuantity, label, target.pluralLabel)}`;
 	}
 	return [formatQuantity(quantity), canonicalUnit].filter(Boolean).join(' ');
+};
+
+const normalizedInstructionUnitAlias = (value: string): string =>
+	value
+		.trim()
+		.toLowerCase()
+		.replace(/[°º]\s*/gu, '')
+		.replace(/\s+/gu, ' ')
+		.replace(/[.,]+$/g, '');
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const instructionUnitPatternFor = (alias: string): string => {
+	const escaped = escapeRegExp(alias.trim()).replace(/°/gu, '[°º]');
+	return escaped.replace(/\\ /gu, '\\s+');
+};
+
+const temperatureInstructionPattern = (preferences: UnitPreferences): RegExp | null => {
+	const conversions = preferences.unitConversions ?? {};
+	const aliases = Object.entries(preferences.unitAliases ?? {})
+		.filter(([, unitId]) => conversions[unitId]?.baseUnitId === 'celsius')
+		.map(([alias]) => alias)
+		.filter(Boolean)
+		.toSorted((left, right) => right.length - left.length);
+	if (!aliases.length) return null;
+	return new RegExp(
+		`(-?\\d+(?:\\.\\d+)?)\\s*(${aliases.map(instructionUnitPatternFor).join('|')})\\b`,
+		'giu'
+	);
+};
+
+const convertTemperature = (value: number, from: UnitConversion, to: UnitConversion): number => {
+	const baseValue = value * from.toBaseFactor + from.toBaseOffset;
+	return (baseValue - to.toBaseOffset) / to.toBaseFactor;
+};
+
+const formatTemperatureValue = (value: number): string => {
+	if (Math.abs(value) >= 100) return String(Math.round(value / 5) * 5);
+	const rounded = Math.round(value);
+	return Math.abs(value - rounded) < 0.25 ? String(rounded) : formatDecimal(value);
+};
+
+export type InstructionTemperatureEvent = {
+	kind: string;
+	sourceText: string;
+	baseValue: number | null;
+	baseUnitId: string | null;
+};
+
+export const convertInstructionTemperatureEvents = (
+	instruction: string,
+	events: InstructionTemperatureEvent[] = [],
+	preferences: UnitPreferences = {}
+): string => {
+	const preferredUnit = preferences.preferredTemperatureUnit;
+	const conversions = preferences.unitConversions ?? {};
+	const targetConversion = preferredUnit ? conversions[preferredUnit] : undefined;
+	if (!preferredUnit || !targetConversion) return instruction;
+	const preferredLabel = preferences.preferredTemperatureUnitLabel ?? preferredUnit;
+	let rendered = instruction;
+	for (const event of events) {
+		if (
+			event.kind !== 'temperature' ||
+			event.baseUnitId !== targetConversion.baseUnitId ||
+			event.baseValue === null
+		) {
+			continue;
+		}
+		const targetValue =
+			(event.baseValue - targetConversion.toBaseOffset) / targetConversion.toBaseFactor;
+		rendered = rendered.replace(
+			event.sourceText,
+			`${formatTemperatureValue(targetValue)}${preferredLabel}`
+		);
+	}
+	return rendered;
+};
+
+export const convertInstructionTemperatures = (
+	instruction: string,
+	preferences: UnitPreferences = {}
+): string => {
+	const preferredUnit = preferences.preferredTemperatureUnit;
+	const conversions = preferences.unitConversions ?? {};
+	const targetConversion = preferredUnit ? conversions[preferredUnit] : undefined;
+	const pattern = temperatureInstructionPattern(preferences);
+	if (!preferredUnit || !targetConversion || !pattern) return instruction;
+	const preferredLabel = preferences.preferredTemperatureUnitLabel ?? preferredUnit;
+	const aliases = preferences.unitAliases ?? {};
+
+	return instruction.replace(pattern, (match, rawValue: string, rawUnit: string) => {
+		const sourceUnit = aliases[normalizedInstructionUnitAlias(rawUnit)];
+		const sourceConversion = sourceUnit ? conversions[sourceUnit] : undefined;
+		const value = Number(rawValue);
+		if (
+			!sourceUnit ||
+			!sourceConversion ||
+			!Number.isFinite(value) ||
+			sourceUnit === preferredUnit
+		) {
+			return match;
+		}
+		return `${formatTemperatureValue(convertTemperature(value, sourceConversion, targetConversion))}${preferredLabel}`;
+	});
 };
 
 export const scaleIngredientText = (

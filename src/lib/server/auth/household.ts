@@ -84,6 +84,17 @@ export const canManageActiveHousehold = async (
 };
 
 export type UserHousehold = { id: string; name: string };
+
+const displayUserName = (user: {
+	name?: string | null;
+	firstName?: string | null;
+	lastName?: string | null;
+	email: string;
+}): string => {
+	const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
+	return user.name?.trim() || fullName || user.email.split('@')[0] || user.email;
+};
+
 export type HouseholdMember = {
 	id: string;
 	userId: string;
@@ -236,7 +247,7 @@ export const listHouseholdMembers = async (
 				return {
 					id: membership.id,
 					userId: membership.userId,
-					name: user.name ?? user.email,
+					name: displayUserName(user),
 					email: user.email,
 					role: membership.role.slug,
 					directoryManaged: membership.directoryManaged,
@@ -267,6 +278,7 @@ export const resolveActiveHouseholdId = async (input: {
 	cookies: Cookies;
 	url: URL;
 	session: { user: { id: string }; organizationId?: string | null };
+	householdIds?: string[];
 }): Promise<{ householdId: string | null; hasAnyHousehold: boolean }> => {
 	if (input.session.organizationId) {
 		await provisionAuthSession(input.platform, {
@@ -278,7 +290,8 @@ export const resolveActiveHouseholdId = async (input: {
 	}
 
 	const cookieHouseholdId = readHouseholdCookie(input.cookies);
-	const householdIds = await listUserHouseholdIds(input.platform, input.session.user.id);
+	const householdIds =
+		input.householdIds ?? (await listUserHouseholdIds(input.platform, input.session.user.id));
 	const householdId =
 		cookieHouseholdId && householdIds.includes(cookieHouseholdId)
 			? cookieHouseholdId

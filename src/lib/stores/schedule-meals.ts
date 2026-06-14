@@ -4,6 +4,7 @@ import { moveMealToDropTarget } from '$lib/components/dashboard/schedule-dnd';
 import { isMealInPool } from '$lib/components/dashboard/schedule-ordering';
 import type { Meal, MealDropTarget } from '$lib/components/dashboard/schedule-types';
 import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+import { convertInstructionTemperatures, type UnitPreferences } from '$lib/recipes/ingredient-text';
 import { atom, computed } from 'nanostores';
 
 export type ScheduleMealChangeSource = 'drag' | 'preview' | 'hydrate' | 'external';
@@ -50,7 +51,8 @@ const recipeIngredientText = (
 const mealFromRecipe = (
 	recipe: RecipeMenuItem,
 	plannedServings: number,
-	overrides: Partial<Meal> = {}
+	overrides: Partial<Meal> = {},
+	unitPreferences: UnitPreferences = {}
 ): Meal => ({
 	id: recipe.id,
 	userRecipeId: recipe.id,
@@ -61,7 +63,9 @@ const mealFromRecipe = (
 	servingsPlanned: normalizedServings(plannedServings),
 	baseServings: normalizedServings(recipe.yield ?? plannedServings),
 	ingredients: recipe.ingredients?.map(recipeIngredientText),
-	instructions: recipe.instructions?.map((instruction) => instruction.text),
+	instructions: recipe.instructions?.map((instruction) =>
+		convertInstructionTemperatures(instruction.text, unitPreferences)
+	),
 	...overrides
 });
 
@@ -284,6 +288,21 @@ const emitChangedScheduleMealChanges = (
 	}
 };
 
+const mergePendingCreateResponse = (createdMeal: Meal, currentMeal?: Meal): Meal => {
+	if (!currentMeal) return createdMeal;
+	return {
+		...createdMeal,
+		date: currentMeal.date,
+		time: currentMeal.time,
+		day: currentMeal.day,
+		sortOrder: currentMeal.sortOrder,
+		status: currentMeal.status,
+		servingsPlanned: currentMeal.servingsPlanned,
+		plannedCookWorkosUserId: currentMeal.plannedCookWorkosUserId,
+		id: createdMeal.id
+	};
+};
+
 const persistNewScheduleMeal = (meal: Meal, previousMealId = meal.id) => {
 	if (!browser) return;
 	pendingCreateMealIds.add(previousMealId);
@@ -304,9 +323,7 @@ const persistNewScheduleMeal = (meal: Meal, previousMealId = meal.id) => {
 			const currentMeal = scheduleMealStore
 				.get()
 				.find((candidate) => candidate.id === previousMealId);
-			const reconciledMeal = currentMeal
-				? { ...body.meal, ...currentMeal, id: body.meal.id }
-				: body.meal;
+			const reconciledMeal = mergePendingCreateResponse(body.meal, currentMeal);
 			pendingCreateMealIds.delete(previousMealId);
 			replaceMeal(reconciledMeal, previousMealId);
 			if (currentMeal && scheduleFieldsChanged(currentMeal, meal)) {
@@ -323,13 +340,19 @@ const persistNewScheduleMeal = (meal: Meal, previousMealId = meal.id) => {
 export const addScheduleMealFromRecipe = (
 	recipe: RecipeMenuItem,
 	date?: string,
-	defaultServings = 1
+	defaultServings = 1,
+	unitPreferences: UnitPreferences = {}
 ) => {
-	const meal = mealFromRecipe(recipe, defaultServings, {
-		id: newLocalMealId(),
-		date,
-		day: date ? weekdayName(dateFromKey(date)) : undefined
-	});
+	const meal = mealFromRecipe(
+		recipe,
+		defaultServings,
+		{
+			id: newLocalMealId(),
+			date,
+			day: date ? weekdayName(dateFromKey(date)) : undefined
+		},
+		unitPreferences
+	);
 	scheduleMealStore.set([...scheduleMealStore.get(), cloneMeal(meal)]);
 	selectedMealIdStore.set(meal.id);
 	persistNewScheduleMeal(meal);

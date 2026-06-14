@@ -129,6 +129,16 @@ const inviteExpiryFromForm = (value: FormDataEntryValue | null): string => {
 	return new Date(Date.now() + safeDays * 24 * 60 * 60 * 1000).toISOString();
 };
 
+type HouseholdMemberRow = {
+	id: string;
+	userId: string;
+	name: string;
+	email: string;
+	role: 'admin' | 'member' | 'child';
+	directoryManaged: boolean;
+	createdAt: string | null;
+};
+
 type TaxonomyOption = { value: string; label: string; keywords?: string[] };
 
 type TaxonomyOptions = {
@@ -492,7 +502,43 @@ const requireManageHousehold = async (event: {
 	return household;
 };
 
-const loadMembers = async (platform: App.Platform | undefined, householdId: string) => {
+const canCurrentUserLeaveHousehold = (
+	members: HouseholdMemberRow[],
+	currentUserId: string
+): { canLeave: boolean; reason: string | null } => {
+	const currentMember = members.find((member) => member.userId === currentUserId);
+	if (!currentMember) return { canLeave: false, reason: 'You are not a member of this household.' };
+	const adminCount = members.filter((member) => member.role === 'admin').length;
+	if (currentMember.role === 'admin' && adminCount <= 1) {
+		return {
+			canLeave: false,
+			reason: 'You are the last manager. Add another manager or delete the household instead.'
+		};
+	}
+	return { canLeave: true, reason: null };
+};
+
+const membershipHasAdminRole = (membership: {
+	role: { slug: string };
+	roles?: Array<{ slug: string }> | null;
+}): boolean =>
+	membership.role.slug === 'admin' ||
+	Boolean(membership.roles?.some((role) => role.slug === 'admin'));
+
+const displayUserName = (user: {
+	name?: string | null;
+	firstName?: string | null;
+	lastName?: string | null;
+	email: string;
+}): string => {
+	const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
+	return user.name?.trim() || fullName || user.email.split('@')[0] || user.email;
+};
+
+const loadMembers = async (
+	platform: App.Platform | undefined,
+	householdId: string
+): Promise<HouseholdMemberRow[]> => {
 	const runtime = createAuthRuntime(platform);
 	const memberships = await runtime.workos.userManagement.listOrganizationMemberships({
 		organizationId: householdId,
@@ -507,7 +553,7 @@ const loadMembers = async (platform: App.Platform | undefined, householdId: stri
 				return {
 					id: membership.id,
 					userId: membership.userId,
-					name: user.name ?? user.email,
+					name: displayUserName(user),
 					email: user.email,
 					role: householdRoleSlug(membership.role.slug),
 					directoryManaged: membership.directoryManaged,
@@ -539,8 +585,7 @@ export const load: PageServerLoad = async (event) => {
 				createdAt: null,
 				updatedAt: null,
 				externalId: null,
-				stripeCustomerId: null,
-				metadata: {}
+				stripeCustomerId: null
 			},
 			profile: {
 				defaultServings: 4,
@@ -572,6 +617,9 @@ export const load: PageServerLoad = async (event) => {
 			],
 			currentUserId: session.user.id,
 			canManageHousehold: true,
+			canLeaveHousehold: false,
+			leaveHouseholdDisabledReason:
+				'You are the last manager. Add another manager or delete the household instead.',
 			invites: [],
 			taxonomyOptions: emptyTaxonomyOptions(),
 			displayOverrideRows: { unitOverrides: [], ingredientOverrides: [] }
@@ -616,6 +664,8 @@ export const load: PageServerLoad = async (event) => {
 		profile.locale ?? defaultLocale
 	);
 
+	const leaveState = canCurrentUserLeaveHousehold(members, session.user.id);
+
 	return {
 		household: {
 			id: organization.id,
@@ -651,6 +701,8 @@ export const load: PageServerLoad = async (event) => {
 		members,
 		currentUserId: session.user.id,
 		canManageHousehold: hasManagePermission,
+		canLeaveHousehold: leaveState.canLeave,
+		leaveHouseholdDisabledReason: leaveState.reason,
 		invites: invites.map((invite) => ({
 			id: invite.id,
 			code: invite.code,
@@ -1022,6 +1074,47 @@ export const actions: Actions = {
 			return fail(502, { message: 'Could not update appliances.' });
 		}
 	},
+	leaveHousehold: async (event) => {
+		const household = await requireActionHousehold(event);
+		const { session, householdId } = household;
+		if (smokeAuthEnabled(event.platform) && householdId === SMOKE_HOUSEHOLD_ID) {
+			return fail(400, { message: 'Smoke household cannot be left.' });
+		}
+
+		try {
+			const runtime = createAuthRuntime(event.platform);
+			const memberships = await runtime.workos.userManagement.listOrganizationMemberships({
+				organizationId: householdId,
+				statuses: ['active'],
+				limit: 100
+			});
+			const currentMembership = memberships.data.find(
+				(membership) => membership.userId === session.user.id
+			);
+			if (!currentMembership) return fail(404, { message: 'Household member not found.' });
+			if (currentMembership.directoryManaged) {
+				return fail(400, {
+					message: 'Directory-managed members must leave through the identity provider.'
+				});
+			}
+
+			const adminCount = memberships.data.filter(membershipHasAdminRole).length;
+			if (membershipHasAdminRole(currentMembership) && adminCount <= 1) {
+				return fail(400, {
+					message: 'You are the last manager. Add another manager or delete the household instead.'
+				});
+			}
+
+			await runtime.workos.userManagement.deleteOrganizationMembership(currentMembership.id);
+			clearHouseholdCookie(event.cookies);
+		} catch (cause) {
+			console.error('Failed to leave household', cause);
+			return fail(502, { message: 'Could not leave household.' });
+		}
+
+		redirect(303, '/onboarding');
+	},
+
 	removeMember: async (event) => {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;

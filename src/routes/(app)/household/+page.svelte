@@ -42,6 +42,7 @@
 	);
 	let removeMemberDialogOpen = $state(false);
 	let memberToRemove = $state<{ id: string; userId: string; name: string } | null>(null);
+	let leaveHouseholdDialogOpen = $state(false);
 	let deleteHouseholdFirstOpen = $state(false);
 	let deleteHouseholdSecondOpen = $state(false);
 	let inviteDialogOpen = $state(false);
@@ -761,10 +762,19 @@
 				{/if}
 			</section>
 
-			{#if canManageHousehold}
-				<section class="grid gap-3 border-t border-border pt-4">
-					<h2 class="text-sm font-medium">Danger zone</h2>
-					<div>
+			<section class="grid gap-3 border-t border-border pt-4">
+				<h2 class="text-sm font-medium">Danger zone</h2>
+				<div class="flex flex-wrap gap-2">
+					<Button
+						type="button"
+						variant="outline"
+						disabled={!data.canLeaveHousehold}
+						title={data.leaveHouseholdDisabledReason ?? undefined}
+						onclick={() => (leaveHouseholdDialogOpen = true)}
+					>
+						Leave household
+					</Button>
+					{#if canManageHousehold}
 						<Button
 							type="button"
 							variant="destructive"
@@ -772,9 +782,12 @@
 						>
 							Delete household
 						</Button>
-					</div>
-				</section>
-			{/if}
+					{/if}
+				</div>
+				{#if !data.canLeaveHousehold && data.leaveHouseholdDisabledReason}
+					<p class="text-xs text-muted-foreground">{data.leaveHouseholdDisabledReason}</p>
+				{/if}
+			</section>
 		</div>
 	</main>
 </div>
@@ -875,6 +888,15 @@
 	confirmLabel="Remove"
 	formAction="?/removeMember"
 	hiddenInputs={{ membershipId: memberToRemove?.id, userId: memberToRemove?.userId }}
+/>
+
+<DeleteConfirmDialog
+	bind:open={leaveHouseholdDialogOpen}
+	title="Leave household?"
+	description="You will lose access to {data.household
+		.name}. Your personal menu and check-in history stay with your account."
+	confirmLabel="Leave household"
+	formAction="?/leaveHousehold"
 />
 
 <DeleteConfirmDialog

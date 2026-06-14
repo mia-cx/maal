@@ -13,7 +13,11 @@
 	} from '$lib/components/ui/search-combobox.svelte';
 	import { parseDate, type DateValue } from '@internationalized/date';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
-	import { scaleIngredientText } from '$lib/recipes/ingredient-text';
+	import {
+		convertInstructionTemperatures,
+		scaleIngredientText,
+		type UnitPreferences
+	} from '$lib/recipes/ingredient-text';
 	import { familiarityLabels } from './meal-labels';
 	import type { HouseholdMember, Meal, MealFamiliarity } from './schedule-types';
 
@@ -30,13 +34,15 @@
 		open = $bindable(false),
 		householdMembers = [],
 		onmealchange,
-		onmealdelete
+		onmealdelete,
+		unitPreferences = {}
 	}: {
 		meal: Meal | null;
 		open?: boolean;
 		householdMembers?: HouseholdMember[];
 		onmealchange?: (meal: Meal) => void;
 		onmealdelete?: (meal: Meal) => void;
+		unitPreferences?: UnitPreferences;
 	} = $props();
 
 	let lastMealId = $state<string | null>(null);
@@ -71,7 +77,11 @@
 
 	const customMeal = $derived(Boolean(meal && !meal.userRecipeId));
 	const ingredients = $derived((meal?.ingredients ?? []).map(scaleIngredient));
-	const instructions = $derived(meal?.instructions ?? []);
+	const instructions = $derived(
+		(meal?.instructions ?? []).map((instruction) =>
+			convertInstructionTemperatures(instruction, unitPreferences)
+		)
+	);
 	const cookTimeMinutes = $derived(meal?.cookTimeMinutes ?? fallbackDurationMinutes);
 	const adjustedCookTimeMinutes = $derived(meal?.adjustedCookTimeMinutes ?? cookTimeMinutes);
 	const familiarityLabel = $derived(
