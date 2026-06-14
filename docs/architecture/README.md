@@ -11,3 +11,6 @@ Start here when adding or refactoring product code:
 - `mcp-compatibility.md` — MCP tool contract/versioning rules.
 - `accessibility-smoke-checks.md` — smoke checklist for split UI components.
 - `review-checks.md` — commands to run before review.
+- `migration-notes.md` — import and ownership changes to use while rebasing feature work.
+
+Decision records live in `docs/adr/`.
