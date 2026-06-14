@@ -23,3 +23,9 @@
 - Menu feature exports: `src/lib/components/menu/index.ts`
 - UI primitive exports: `src/lib/components/ui/index.ts`
 - Store contract exports: `src/lib/stores/index.ts`
+
+## Architecture checks
+
+- Boundary checker: `scripts/check-boundaries.mjs`
+- Semantic duplicate scanner: `scripts/find-semantic-duplicates.mjs`
+- Combined script: `pnpm architecture:check`
