@@ -13,36 +13,15 @@ import {
 	userRecipeNutritionFacts
 } from '$lib/server/db/schema';
 import { insertHouseholdMealInstructionEvents } from '$lib/server/taxonomy/instruction-events';
+import {
+	recipeClassificationToMealClassification,
+	recipeIngredientToMealIngredient,
+	recipeInstructionToMealInstruction,
+	recipeMediaToMealMedia,
+	recipeNutritionFactToMealNutritionFact
+} from './meal-sidecar-projections';
 
 type Db = ReturnType<typeof getDb>;
-
-type RecipeIngredient = typeof userRecipeIngredients.$inferSelect;
-type RecipeInstruction = typeof userRecipeInstructions.$inferSelect;
-
-const mealIngredientValues = (householdMealId: string, ingredient: RecipeIngredient) => ({
-	householdMealId,
-	lineIndex: ingredient.lineIndex,
-	originalText: ingredient.originalText,
-	sourceAmountText: ingredient.sourceAmountText,
-	sourceQuantity: ingredient.sourceQuantity,
-	sourceUnitLabel: ingredient.sourceUnitLabel,
-	sourceFoodLabel: ingredient.sourceFoodLabel,
-	baseFoodId: ingredient.baseFoodId,
-	baseQuantity: ingredient.baseQuantity,
-	baseUnitId: ingredient.baseUnitId,
-	baseUnitFamilyId: ingredient.baseUnitFamilyId,
-	optional: ingredient.optional,
-	confidence: ingredient.confidence
-});
-
-const mealInstructionValues = (householdMealId: string, instruction: RecipeInstruction) => ({
-	householdMealId,
-	stepIndex: instruction.stepIndex,
-	sectionName: instruction.sectionName,
-	text: instruction.text,
-	durationMinutes: instruction.durationMinutes,
-	confidence: instruction.confidence
-});
 
 const insertInstructionEventsForMeal = async (db: Db, householdMealId: string) => {
 	const insertedInstructions = await db
@@ -77,7 +56,7 @@ export const replaceMealRecipeSidecars = async (
 	for (const ingredient of ingredients) {
 		await db
 			.insert(householdMealIngredients)
-			.values(mealIngredientValues(householdMealId, ingredient));
+			.values(recipeIngredientToMealIngredient(householdMealId, ingredient));
 	}
 
 	await db
@@ -86,7 +65,7 @@ export const replaceMealRecipeSidecars = async (
 	for (const instruction of instructions) {
 		await db
 			.insert(householdMealInstructions)
-			.values(mealInstructionValues(householdMealId, instruction));
+			.values(recipeInstructionToMealInstruction(householdMealId, instruction));
 	}
 	await insertInstructionEventsForMeal(db, householdMealId);
 };
@@ -119,51 +98,26 @@ export const copyRecipeSidecarsToMeal = async (
 	for (const ingredient of ingredients) {
 		await db
 			.insert(householdMealIngredients)
-			.values(mealIngredientValues(householdMealId, ingredient));
+			.values(recipeIngredientToMealIngredient(householdMealId, ingredient));
 	}
 	for (const instruction of instructions) {
 		await db
 			.insert(householdMealInstructions)
-			.values(mealInstructionValues(householdMealId, instruction));
+			.values(recipeInstructionToMealInstruction(householdMealId, instruction));
 	}
 	await insertInstructionEventsForMeal(db, householdMealId);
 
 	for (const classification of classifications) {
-		await db.insert(householdMealClassifications).values({
-			householdMealId,
-			kind: classification.kind,
-			value: classification.value,
-			normalizedValue: classification.normalizedValue,
-			schemaOrgValue: classification.schemaOrgValue,
-			locale: classification.locale,
-			confidence: classification.confidence
-		});
+		await db
+			.insert(householdMealClassifications)
+			.values(recipeClassificationToMealClassification(householdMealId, classification));
 	}
 	for (const item of media) {
-		await db.insert(householdMealMedia).values({
-			householdMealId,
-			kind: item.kind,
-			position: item.position,
-			url: item.url,
-			contentUrl: item.contentUrl,
-			embedUrl: item.embedUrl,
-			thumbnailUrl: item.thumbnailUrl,
-			name: item.name,
-			caption: item.caption
-		});
+		await db.insert(householdMealMedia).values(recipeMediaToMealMedia(householdMealId, item));
 	}
 	for (const fact of nutritionFacts) {
-		await db.insert(householdMealNutritionFacts).values({
-			householdMealId,
-			nutrient: fact.nutrient,
-			schemaOrgProperty: fact.schemaOrgProperty,
-			originalText: fact.originalText,
-			amount: fact.amount,
-			unitId: fact.unitId,
-			baseAmount: fact.baseAmount,
-			baseUnitId: fact.baseUnitId,
-			locale: fact.locale,
-			confidence: fact.confidence
-		});
+		await db
+			.insert(householdMealNutritionFacts)
+			.values(recipeNutritionFactToMealNutritionFact(householdMealId, fact));
 	}
 };
