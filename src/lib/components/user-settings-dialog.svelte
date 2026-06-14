@@ -16,8 +16,15 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import { cn } from '$lib/utils';
 	import {
+		filterMcpHouseholds,
+		mcpHouseholdPickerLabel as formatMcpHouseholdPickerLabel,
 		mcpScopeGroups,
 		presetLabel,
+		selectedMcpHouseholds as selectMcpHouseholds,
+		selectedMcpScopesForLevels,
+		setMcpScopeReadLevel,
+		setMcpScopeWriteLevel,
+		toggleMcpHouseholdId,
 		type McpKey,
 		type McpScope,
 		type McpScopeLevel
@@ -297,32 +304,10 @@
 		if (open && activeCategory === 'security') void loadMfaFactors();
 	});
 
-	const selectedMcpScopes = $derived(
-		mcpScopeGroups.flatMap((group) => {
-			const level = mcpScopeLevels[group.id] ?? 'none';
-			if (level === 'none') return [];
-			if (level === 'read') return group.read ? [group.read] : [];
-			return [group.read, group.write].filter((scope): scope is McpScope => Boolean(scope));
-		})
-	);
-
-	const selectedMcpHouseholds = $derived(
-		mcpHouseholds.filter((household) => mcpKeyHouseholdIds.includes(household.id))
-	);
-	const mcpHouseholdPickerLabel = $derived(
-		selectedMcpHouseholds.length === 0
-			? 'Select households'
-			: selectedMcpHouseholds.length === 1
-				? selectedMcpHouseholds[0].name
-				: `${selectedMcpHouseholds.length} households selected`
-	);
-	const filteredMcpHouseholds = $derived(
-		mcpHouseholdQuery.trim()
-			? mcpHouseholds.filter((household) =>
-					household.name.toLowerCase().includes(mcpHouseholdQuery.trim().toLowerCase())
-				)
-			: mcpHouseholds
-	);
+	const selectedMcpScopes = $derived(selectedMcpScopesForLevels(mcpScopeLevels));
+	const selectedMcpHouseholds = $derived(selectMcpHouseholds(mcpHouseholds, mcpKeyHouseholdIds));
+	const mcpHouseholdPickerLabel = $derived(formatMcpHouseholdPickerLabel(selectedMcpHouseholds));
+	const filteredMcpHouseholds = $derived(filterMcpHouseholds(mcpHouseholds, mcpHouseholdQuery));
 
 	const loadMcpKeys = async (force = false) => {
 		if (mcpKeysBusy || (mcpKeysLoaded && !force)) return;
@@ -350,19 +335,15 @@
 	});
 
 	const toggleMcpHousehold = (householdId: string, checked: boolean) => {
-		mcpKeyHouseholdIds = checked
-			? [...new Set([...mcpKeyHouseholdIds, householdId])]
-			: mcpKeyHouseholdIds.filter((id) => id !== householdId);
+		mcpKeyHouseholdIds = toggleMcpHouseholdId(mcpKeyHouseholdIds, householdId, checked);
 	};
 
 	const setMcpScopeRead = (groupId: string, checked: boolean) => {
-		const currentLevel = mcpScopeLevels[groupId] ?? 'none';
-		if (currentLevel === 'write') return;
-		mcpScopeLevels = { ...mcpScopeLevels, [groupId]: checked ? 'read' : 'none' };
+		mcpScopeLevels = setMcpScopeReadLevel(mcpScopeLevels, groupId, checked);
 	};
 
 	const setMcpScopeWrite = (groupId: string, checked: boolean) => {
-		mcpScopeLevels = { ...mcpScopeLevels, [groupId]: checked ? 'write' : 'read' };
+		mcpScopeLevels = setMcpScopeWriteLevel(mcpScopeLevels, groupId, checked);
 	};
 
 	const createMcpAccessKey = async () => {

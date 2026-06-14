@@ -78,3 +78,59 @@ export const presetLabel = (preset?: McpKeyPreset): string => {
 	if (preset === 'full_access') return 'Full access';
 	return 'Custom';
 };
+
+export const selectedMcpScopesForLevels = (
+	scopeLevels: Record<string, McpScopeLevel>
+): McpScope[] =>
+	mcpScopeGroups.flatMap((group) => {
+		const level = scopeLevels[group.id] ?? 'none';
+		if (level === 'none') return [];
+		if (level === 'read') return group.read ? [group.read] : [];
+		return [group.read, group.write].filter((scope): scope is McpScope => Boolean(scope));
+	});
+
+export const selectedMcpHouseholds = (
+	households: SettingsHousehold[],
+	householdIds: string[]
+): SettingsHousehold[] => households.filter((household) => householdIds.includes(household.id));
+
+export const mcpHouseholdPickerLabel = (households: SettingsHousehold[]): string => {
+	if (households.length === 0) return 'Select households';
+	if (households.length === 1) return households[0].name;
+	return `${households.length} households selected`;
+};
+
+export const filterMcpHouseholds = (
+	households: SettingsHousehold[],
+	query: string
+): SettingsHousehold[] => {
+	const normalizedQuery = query.trim().toLowerCase();
+	return normalizedQuery
+		? households.filter((household) => household.name.toLowerCase().includes(normalizedQuery))
+		: households;
+};
+
+export const toggleMcpHouseholdId = (
+	householdIds: string[],
+	householdId: string,
+	checked: boolean
+): string[] =>
+	checked
+		? [...new Set([...householdIds, householdId])]
+		: householdIds.filter((id) => id !== householdId);
+
+export const setMcpScopeReadLevel = (
+	scopeLevels: Record<string, McpScopeLevel>,
+	groupId: string,
+	checked: boolean
+): Record<string, McpScopeLevel> => {
+	const currentLevel = scopeLevels[groupId] ?? 'none';
+	if (currentLevel === 'write') return scopeLevels;
+	return { ...scopeLevels, [groupId]: checked ? 'read' : 'none' };
+};
+
+export const setMcpScopeWriteLevel = (
+	scopeLevels: Record<string, McpScopeLevel>,
+	groupId: string,
+	checked: boolean
+): Record<string, McpScopeLevel> => ({ ...scopeLevels, [groupId]: checked ? 'write' : 'read' });
