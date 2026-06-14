@@ -11,18 +11,8 @@ import {
 import * as Schema from 'effect/Schema';
 import { getDb } from '$lib/server/db';
 import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
-import {
-	listUserHouseholds,
-	userHasHouseholdPermission,
-	type MaalHouseholdPermission
-} from '$lib/server/auth/household';
-import {
-	oneScopedHouseholdId,
-	scopeAllowsHousehold,
-	verifyMcpKey,
-	type MaalApiScope,
-	type McpKeyRecord
-} from '$lib/server/auth/mcp-keys';
+import { listUserHouseholds } from '$lib/server/auth/household';
+import { verifyMcpKey } from '$lib/server/auth/mcp-keys';
 import {
 	listUserRecipes,
 	getUserRecipe,
@@ -45,6 +35,12 @@ import { boundedPagination } from '$lib/shared/pagination';
 import { arrayOfStrings, isRecord, optionalNumber, text } from '$lib/server/mcp/scalars';
 import { toolError, toolResult } from '$lib/server/mcp/results';
 import { defaultPlanRange } from '$lib/server/mcp/plan-range';
+import {
+	requireScope,
+	resolveHouseholdId,
+	resolveScopedHouseholdId,
+	type McpContext
+} from '$lib/server/mcp/context';
 
 type ToolHandler = (context: McpContext, args: Record<string, unknown>) => Promise<unknown>;
 type ToolDefinition = {
@@ -55,75 +51,10 @@ type ToolDefinition = {
 	handler: ToolHandler;
 };
 
-type McpContext = {
-	platform: App.Platform | undefined;
-	key: McpKeyRecord;
-	db: ReturnType<typeof getDb>;
-};
-
 const defaultRecipeLimit = 25;
 const maxRecipeLimit = 60;
 const defaultPlanLimit = 50;
 const maxPlanLimit = 100;
-
-const requireScope = (key: McpKeyRecord, scope: MaalApiScope) => {
-	if (!key.scopes.includes(scope)) {
-		throw toolError('insufficient_scope', `This MCP key does not grant ${scope}.`);
-	}
-};
-
-const defaultHouseholdId = async (context: McpContext): Promise<string | null> => {
-	const scopedHouseholdId = oneScopedHouseholdId(context.key);
-	if (scopedHouseholdId) return scopedHouseholdId;
-	if (context.key.householdScope.kind !== 'all') return null;
-
-	const households = await listUserHouseholds(context.platform, context.key.userId);
-	return households.length === 1 ? households[0].id : null;
-};
-
-const resolveScopedHouseholdId = async (
-	context: McpContext,
-	args: Record<string, unknown>,
-	scope: MaalApiScope
-): Promise<string> => {
-	requireScope(context.key, scope);
-	const householdId = text(args.householdId) ?? (await defaultHouseholdId(context));
-	if (!householdId) {
-		throw toolError(
-			'household_required',
-			'This MCP key can access multiple households. Pass householdId.'
-		);
-	}
-	if (
-		!(await scopeAllowsHousehold({ platform: context.platform, record: context.key, householdId }))
-	) {
-		throw toolError('household_forbidden', 'This MCP key is not scoped to that household.');
-	}
-	return householdId;
-};
-
-const resolveHouseholdId = async (
-	context: McpContext,
-	args: Record<string, unknown>,
-	scope: MaalApiScope,
-	permission: MaalHouseholdPermission
-): Promise<string> => {
-	const householdId = await resolveScopedHouseholdId(context, args, scope);
-	if (
-		!(await userHasHouseholdPermission(
-			context.platform,
-			context.key.userId,
-			householdId,
-			permission
-		))
-	) {
-		throw toolError(
-			'insufficient_role_permission',
-			`The MCP key owner does not have ${permission} in that household.`
-		);
-	}
-	return householdId;
-};
 
 type InputSchema = Schema.Decoder<unknown>;
 
