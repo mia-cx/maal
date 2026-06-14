@@ -7,6 +7,10 @@ describe('password model', () => {
 		expect(passwordChangeMismatch('new-password', 'new-password')).toBeNull();
 	});
 
+	it('does not show mismatch before confirmation is entered', () => {
+		expect(passwordChangeMismatch('new-password', '')).toBeNull();
+	});
+
 	it('provides empty password fields', () => {
 		expect(emptyPasswordChangeFields()).toEqual({
 			currentPassword: '',
