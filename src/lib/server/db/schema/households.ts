@@ -1,17 +1,6 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { applianceValues } from '../../../domain/household/appliances';
 import { createdAt, id, updatedAt } from './common';
-
-const applianceValues = [
-	'oven',
-	'stovetop',
-	'microwave',
-	'air_fryer',
-	'slow_cooker',
-	'rice_cooker',
-	'blender',
-	'food_processor',
-	'grill'
-] as const;
 
 export const households = sqliteTable('households', {
 	householdId: text('household_id').primaryKey(),

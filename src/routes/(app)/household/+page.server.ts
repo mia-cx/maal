@@ -32,6 +32,7 @@ import {
 	clearHouseholdCookie,
 	resolveActiveHouseholdId
 } from '$lib/server/auth/household';
+import { applianceLabels, applianceValues, type Appliance } from '$lib/domain/household/appliances';
 import {
 	createHouseholdInvite,
 	deleteHouseholdInvite,
@@ -50,38 +51,14 @@ import {
 } from '$lib/server/auth/smoke';
 import type { Actions, PageServerLoad } from './$types';
 
-const applianceOptions = [
-	'oven',
-	'stovetop',
-	'microwave',
-	'air_fryer',
-	'slow_cooker',
-	'rice_cooker',
-	'blender',
-	'food_processor',
-	'grill'
-] as const;
-
+const applianceOptions = applianceValues;
 const weekStartDays = ['sunday', 'monday'] as const;
 const defaultLocale = 'en-US';
 const defaultTimezone = 'UTC';
 const maxHouseholdNameLength = 120;
 const inviteExpiryDays = [1, 7, 30] as const;
 
-type Appliance = (typeof applianceOptions)[number];
 type WeekStartDay = (typeof weekStartDays)[number];
-
-const applianceLabels: Record<Appliance, string> = {
-	oven: 'Oven',
-	stovetop: 'Stovetop',
-	microwave: 'Microwave',
-	air_fryer: 'Air fryer',
-	slow_cooker: 'Slow cooker',
-	rice_cooker: 'Rice cooker',
-	blender: 'Blender',
-	food_processor: 'Food processor',
-	grill: 'Grill'
-};
 
 const asWeekStartDay = (value: FormDataEntryValue | null): WeekStartDay => {
 	const raw = typeof value === 'string' ? value : '';
