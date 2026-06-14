@@ -16,6 +16,7 @@ import {
 import { loadMealPlanMeals, mealFromHouseholdMeal } from '$lib/server/db/recipe-mappers';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
+import { deleteHouseholdMeal } from '$lib/server/services/meal-plan';
 import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
 import {
 	replaceMealIngredientsFromLines,
@@ -214,14 +215,7 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 	const { db, householdId } = await requireAppContext({ cookies, locals, platform, url });
 
 	const mealId = await readMealId(request);
-	const existingMeal = await db
-		.select()
-		.from(householdMeals)
-		.where(and(eq(householdMeals.id, mealId), eq(householdMeals.householdId, householdId)))
-		.get();
-	if (!existingMeal) return json({ ok: true });
-
-	await db.delete(householdMeals).where(eq(householdMeals.id, existingMeal.id));
+	await deleteHouseholdMeal({ db, householdId, mealId });
 	return json({ ok: true });
 };
 
