@@ -12,5 +12,6 @@ Start here when adding or refactoring product code:
 - `accessibility-smoke-checks.md` — smoke checklist for split UI components.
 - `review-checks.md` — commands to run before review.
 - `migration-notes.md` — import and ownership changes to use while rebasing feature work.
+- `implementation-map.md` — current locations for shared helpers, domains, clients, and public UI surfaces.
 
 Decision records live in `docs/adr/`.
