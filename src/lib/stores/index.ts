@@ -14,5 +14,14 @@ export type {
 	ScheduleMealStoreSnapshot
 } from './schedule-meals';
 
+export { appShellUiState, updateAppShellUiState } from './app-shell-ui-state';
+export type { AppShellUiState } from './app-shell-ui-state';
+export {
+	clearScheduleDailyScroll,
+	scheduleUiState,
+	setScheduleDailyScroll,
+	updateScheduleUiState
+} from './schedule-ui-state';
+export type { ScheduleUiState } from './schedule-ui-state';
 export { setDailyScroll, uiState, updateUiState } from './ui-state';
 export type { DailyScrollState, UiState, UiStateStoreSnapshot } from './ui-state';
