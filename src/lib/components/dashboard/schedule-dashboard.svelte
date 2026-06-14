@@ -17,7 +17,7 @@
 	import { setDailyScroll, uiState, updateUiState } from '$lib/stores/ui-state';
 	import AddMealDialog from './add-meal-dialog.svelte';
 	import ContinuousSchedule from './continuous-schedule.svelte';
-	import RecipeEditSheet from '$lib/components/menu/recipe-edit-sheet.svelte';
+	import { RecipeEditSheet, type RecipeMenuItem } from '$lib/components/menu';
 	import MealCheckInDialog, { type MealCheckInPayload } from './meal-check-in-dialog.svelte';
 	import MealDragOverlay from './meal-drag-overlay.svelte';
 	import MealPreviewDialog from './meal-preview-dialog.svelte';
@@ -35,7 +35,6 @@
 		parseMealRangeError,
 		type MealRange
 	} from './schedule-ranges';
-	import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
 	import type { UnitPreferences } from '$lib/recipes/ingredient-text';
 	import type { HouseholdMember, Meal, MealDropTarget, ScheduleMode } from './schedule-types';
 

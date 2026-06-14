@@ -2,7 +2,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
-	import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+	import type { RecipeMenuItem } from '$lib/components/menu';
 
 	type PickerOption =
 		| { id: string; type: 'existing'; recipe: RecipeMenuItem }

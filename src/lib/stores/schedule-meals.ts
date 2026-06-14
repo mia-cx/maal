@@ -3,7 +3,7 @@ import { dateFromKey } from '$lib/components/dashboard/schedule-date';
 import { moveMealToDropTarget } from '$lib/components/dashboard/schedule-dnd';
 import { isMealInPool } from '$lib/components/dashboard/schedule-ordering';
 import type { Meal, MealDropTarget } from '$lib/components/dashboard/schedule-types';
-import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+import type { RecipeMenuItem } from '$lib/components/menu';
 import { convertInstructionTemperatures, type UnitPreferences } from '$lib/recipes/ingredient-text';
 import { atom, computed } from 'nanostores';
 
