@@ -17,6 +17,7 @@
 		"test:e2e": "playwright install && playwright test",
 		"duplicates:scan": "node scripts/find-semantic-duplicates.mjs",
 		"boundaries:check": "node scripts/check-boundaries.mjs",
+		"architecture:check": "pnpm boundaries:check && pnpm duplicates:scan",
 		"gen": "wrangler types",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate:local": "wrangler d1 migrations apply maal-staging --local --env staging",
