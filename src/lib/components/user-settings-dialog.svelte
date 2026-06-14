@@ -19,7 +19,6 @@
 	import * as InputOTP from '$lib/components/ui/input-otp';
 	import * as Popover from '$lib/components/ui/popover';
 	import * as RadioGroup from '$lib/components/ui/radio-group';
-	import { Separator } from '$lib/components/ui/separator';
 	import {
 		filterMcpHouseholds,
 		mcpHouseholdPickerLabel as formatMcpHouseholdPickerLabel,
