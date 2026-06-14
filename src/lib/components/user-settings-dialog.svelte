@@ -12,6 +12,7 @@
 	import AccountSettingsSection from '$lib/components/settings/account-settings-section.svelte';
 	import BillingSettingsSection from '$lib/components/settings/billing-settings-section.svelte';
 	import NotificationsSettingsSection from '$lib/components/settings/notifications-settings-section.svelte';
+	import PasswordChangeDialog from '$lib/components/settings/password-change-dialog.svelte';
 	import SecuritySettingsSection from '$lib/components/settings/security-settings-section.svelte';
 	import SettingsCategoryNav from '$lib/components/settings/settings-category-nav.svelte';
 	import SettingsSectionHeading from '$lib/components/settings/settings-section-heading.svelte';
@@ -888,56 +889,16 @@
 	</Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root bind:open={passwordChangeOpen}>
-	<Dialog.Content class="sm:max-w-[24rem]">
-		<Dialog.Header>
-			<Dialog.Title>Change password</Dialog.Title>
-			<Dialog.Description>Enter your current password before choosing a new one.</Dialog.Description
-			>
-		</Dialog.Header>
-		<div class="grid gap-3">
-			<label class="grid gap-1 text-xs font-medium">
-				Current password
-				<Input
-					bind:value={currentPassword}
-					type="password"
-					autocomplete="current-password"
-					class="h-8"
-				/>
-			</label>
-			<label class="grid gap-1 text-xs font-medium">
-				New password
-				<Input bind:value={newPassword} type="password" autocomplete="new-password" class="h-8" />
-			</label>
-			<label class="grid gap-1 text-xs font-medium">
-				Confirm new password
-				<Input
-					bind:value={confirmPassword}
-					type="password"
-					autocomplete="new-password"
-					class="h-8"
-				/>
-			</label>
-			{#if passwordMessage}<p class="text-xs text-muted-foreground">{passwordMessage}</p>{/if}
-			{#if passwordError}<p class="text-xs text-destructive">{passwordError}</p>{/if}
-			<div class="flex justify-end gap-2">
-				<Button
-					variant="ghost"
-					disabled={passwordChangeBusy}
-					onclick={() => (passwordChangeOpen = false)}
-				>
-					Cancel
-				</Button>
-				<Button
-					disabled={passwordChangeBusy || !currentPassword || !newPassword || !confirmPassword}
-					onclick={changePassword}
-				>
-					{passwordChangeBusy ? 'Saving…' : 'Save'}
-				</Button>
-			</div>
-		</div>
-	</Dialog.Content>
-</Dialog.Root>
+<PasswordChangeDialog
+	bind:open={passwordChangeOpen}
+	bind:currentPassword
+	bind:newPassword
+	bind:confirmPassword
+	{passwordMessage}
+	{passwordError}
+	{passwordChangeBusy}
+	{changePassword}
+/>
 
 <DeleteConfirmDialog
 	bind:open={mcpRevokeOpen}
