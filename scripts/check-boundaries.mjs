@@ -75,7 +75,9 @@ for (const file of sourceFiles(sourceRoot)) {
 }
 
 if (violations.length) {
-	console.error('Boundary violations found:');
+	console.error(
+		'Boundary violations found. See docs/architecture/route-adapters.md and docs/architecture/design-system-boundaries.md.'
+	);
 	for (const violation of violations) console.error(`- ${violation}`);
 	exit(1);
 }
