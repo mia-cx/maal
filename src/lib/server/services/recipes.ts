@@ -17,7 +17,7 @@ import {
 	userRecipeInstructions
 } from '$lib/server/db/schema';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
-import { insertHouseholdMealInstructionEvents } from '$lib/server/taxonomy/instruction-events';
+import { replaceMealRecipeSidecars } from '$lib/server/services/meal-sidecars';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -173,53 +173,6 @@ const linkedMealMatchesSnapshot = async (
 		JSON.stringify(mealInstructions.map((instruction) => instruction.text)) ===
 			JSON.stringify(snapshot.instructions)
 	);
-};
-
-const replaceMealRecipeSidecars = async (db: Db, mealId: string, recipeId: string) => {
-	const [ingredients, instructions] = await Promise.all([
-		orderedRecipeIngredients(db, recipeId),
-		orderedRecipeInstructions(db, recipeId)
-	]);
-
-	await db
-		.delete(householdMealIngredients)
-		.where(eq(householdMealIngredients.householdMealId, mealId));
-	for (const ingredient of ingredients) {
-		await db.insert(householdMealIngredients).values({
-			householdMealId: mealId,
-			lineIndex: ingredient.lineIndex,
-			originalText: ingredient.originalText,
-			sourceAmountText: ingredient.sourceAmountText,
-			sourceQuantity: ingredient.sourceQuantity,
-			sourceUnitLabel: ingredient.sourceUnitLabel,
-			sourceFoodLabel: ingredient.sourceFoodLabel,
-			baseFoodId: ingredient.baseFoodId,
-			baseQuantity: ingredient.baseQuantity,
-			baseUnitId: ingredient.baseUnitId,
-			baseUnitFamilyId: ingredient.baseUnitFamilyId,
-			optional: ingredient.optional,
-			confidence: ingredient.confidence
-		});
-	}
-
-	await db
-		.delete(householdMealInstructions)
-		.where(eq(householdMealInstructions.householdMealId, mealId));
-	for (const instruction of instructions) {
-		await db.insert(householdMealInstructions).values({
-			householdMealId: mealId,
-			stepIndex: instruction.stepIndex,
-			sectionName: instruction.sectionName,
-			text: instruction.text,
-			durationMinutes: instruction.durationMinutes,
-			confidence: instruction.confidence
-		});
-	}
-	const insertedInstructions = await db
-		.select({ id: householdMealInstructions.id, text: householdMealInstructions.text })
-		.from(householdMealInstructions)
-		.where(eq(householdMealInstructions.householdMealId, mealId));
-	await insertHouseholdMealInstructionEvents(db, insertedInstructions);
 };
 
 const propagateRecipeUpdateToLinkedMeals = async (
