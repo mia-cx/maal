@@ -35,6 +35,13 @@
 	} from '$lib/settings/account-model';
 	import { readSettingsError } from '$lib/settings/api-client';
 	import {
+		changePasswordRequest,
+		deleteMfaFactorRequest,
+		loadMfaFactors as requestMfaFactors,
+		startMfaSetupRequest,
+		verifyMfaSetupRequest
+	} from '$lib/settings/security-client';
+	import {
 		createMcpKey,
 		loadMcpKeys as requestMcpKeys,
 		rerollMcpKey,
@@ -288,15 +295,14 @@
 		mfaFactorsBusy = true;
 		securityError = null;
 
-		const response = await fetch(resolve('/settings/security/mfa'));
+		const result = await requestMfaFactors();
 		mfaFactorsBusy = false;
-		if (!response.ok) {
-			securityError = await readSettingsError(response, 'Could not load two-factor methods.');
+		if (!result.ok) {
+			securityError = result.error;
 			return;
 		}
 
-		const body = (await response.json()) as { factors: MfaFactor[] };
-		mfaFactors = body.factors;
+		mfaFactors = result.factors;
 		mfaFactorsLoaded = true;
 	};
 
@@ -462,23 +468,15 @@
 		securityMessage = null;
 		securityError = null;
 
-		const response = await fetch(resolve('/settings/security/mfa'), {
-			method: 'POST'
-		});
+		const result = await startMfaSetupRequest();
 
 		mfaSetupBusy = false;
-		if (!response.ok) {
-			securityError = await readSettingsError(response, 'Could not start two-factor setup.');
+		if (!result.ok) {
+			securityError = result.error;
 			return;
 		}
 
-		const body = (await response.json()) as {
-			factorId: string;
-			challengeId: string;
-			qrCode: string;
-			secret: string;
-		};
-		mfaSetup = body;
+		mfaSetup = result.setup;
 		mfaCode = '';
 		mfaSetupOpen = true;
 	};
@@ -489,24 +487,19 @@
 		securityMessage = null;
 		securityError = null;
 
-		const response = await fetch(resolve('/settings/security/mfa'), {
-			method: 'PUT',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({
-				factorId: mfaSetup.factorId,
-				challengeId: mfaSetup.challengeId,
-				code: mfaCode
-			})
+		const result = await verifyMfaSetupRequest({
+			factorId: mfaSetup.factorId,
+			challengeId: mfaSetup.challengeId,
+			code: mfaCode
 		});
 
 		mfaVerifyBusy = false;
-		if (!response.ok) {
-			securityError = await readSettingsError(response, 'That code did not match.');
+		if (!result.ok) {
+			securityError = result.error;
 			return;
 		}
 
-		const body = (await response.json()) as { factors?: MfaFactor[] };
-		mfaFactors = body.factors ?? mfaFactors;
+		mfaFactors = result.factors ?? mfaFactors;
 		mfaFactorsLoaded = true;
 		mfaSetupOpen = false;
 		mfaSetup = null;
@@ -521,20 +514,15 @@
 		securityMessage = null;
 		securityError = null;
 
-		const response = await fetch(resolve('/settings/security/mfa'), {
-			method: 'DELETE',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ factorId: factor.id })
-		});
+		const result = await deleteMfaFactorRequest(factor.id);
 
 		deletingMfaFactorId = null;
-		if (!response.ok) {
-			securityError = await readSettingsError(response, 'Could not remove two-factor method.');
+		if (!result.ok) {
+			securityError = result.error;
 			return;
 		}
 
-		const body = (await response.json()) as { factors: MfaFactor[] };
-		mfaFactors = body.factors;
+		mfaFactors = result.factors;
 		mfaDeleteOpen = false;
 		mfaFactorToDelete = null;
 		securityMessage = 'Authenticator app removed.';
@@ -567,15 +555,11 @@
 		}
 
 		passwordChangeBusy = true;
-		const response = await fetch(resolve('/settings/security/password'), {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ currentPassword, newPassword })
-		});
+		const result = await changePasswordRequest({ currentPassword, newPassword });
 
 		passwordChangeBusy = false;
-		if (!response.ok) {
-			passwordError = await readSettingsError(response, 'Could not change password.');
+		if (!result.ok) {
+			passwordError = result.error;
 			return;
 		}
 
