@@ -16,7 +16,11 @@ import {
 import { loadMealPlanMeals, mealFromHouseholdMeal } from '$lib/server/db/recipe-mappers';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
-import { deleteHouseholdMeal, listHouseholdPlanMeals } from '$lib/server/services/meal-plan';
+import {
+	createHouseholdMeal,
+	deleteHouseholdMeal,
+	listHouseholdPlanMeals
+} from '$lib/server/services/meal-plan';
 import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
 import {
 	replaceMealIngredientsFromLines,
@@ -141,73 +145,49 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 
 export const POST: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
 	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
-	const defaultMealServings = await countActiveHouseholdMembers(platform, householdId);
-
 	const meal = await readMeal(request);
-	const plannedCookWorkosUserId = meal.plannedCookWorkosUserId ?? session.user.id;
-	const householdMembers = await listHouseholdMembers(platform, householdId);
-	if (!householdMembers.some((member) => member.userId === plannedCookWorkosUserId)) {
-		error(400, { message: 'Choose an active household member as the cook.' });
-	}
-	const unitPreferences = await loadUnitPreferences(db, session.user.id, householdId);
-	const userRecipeId = meal.userRecipeId;
-	const recipe = userRecipeId ? await ownedRecipe(db, userRecipeId, session.user.id) : undefined;
-	if (userRecipeId && !recipe) error(404, { message: 'Recipe not found.' });
 
-	const householdMealId = crypto.randomUUID();
-	await db.insert(householdMeals).values({
-		id: householdMealId,
-		householdId,
-		title: recipe?.title ?? meal.title.trim() ?? 'New meal',
-		description: recipe?.description ?? meal.description ?? null,
-		imageUrl: recipe?.imageUrl ?? meal.image ?? null,
-		prepTimeMinutes: recipe?.prepTimeMinutes ?? meal.prepTimeMinutes ?? null,
-		cookTimeMinutes: recipe?.cookTimeMinutes ?? meal.cookTimeMinutes ?? null,
-		yield: recipe?.yield ?? meal.baseServings ?? defaultMealServings,
-		plannedYield: normalizeServingsPlanned(meal, defaultMealServings),
-		plannedCookWorkosUserId,
-		date: meal.date ?? null,
-		time: meal.time ?? null,
-		sortOrder: meal.sortOrder ?? null,
-		status: meal.status ?? 'planned'
-	});
-
-	if (recipe) {
-		await db.insert(householdMealUserRecipes).values({
-			householdMealId,
-			userRecipeId: recipe.id
+	try {
+		return json({
+			meal: await createHouseholdMeal({
+				platform,
+				db,
+				meal: {
+					householdId,
+					workosUserId: session.user.id,
+					userRecipeId: meal.userRecipeId,
+					date: meal.date,
+					time: meal.time,
+					sortOrder: meal.sortOrder,
+					plannedCookUserId: meal.plannedCookWorkosUserId,
+					servingsPlanned: meal.servingsPlanned,
+					customMeal: meal.userRecipeId
+						? undefined
+						: {
+								title: meal.title,
+								description: meal.description,
+								imageUrl: meal.image,
+								prepTimeMinutes: meal.prepTimeMinutes,
+								cookTimeMinutes: meal.cookTimeMinutes,
+								yield: meal.baseServings,
+								ingredients: meal.ingredients,
+								instructions: meal.instructions
+							}
+				}
+			})
 		});
+	} catch (cause) {
+		if (cause instanceof Error && cause.message === 'Recipe not found.') {
+			error(404, { message: cause.message });
+		}
+		if (
+			cause instanceof Error &&
+			cause.message === 'Choose an active household member as the cook.'
+		) {
+			error(400, { message: cause.message });
+		}
+		throw cause;
 	}
-
-	if (recipe) {
-		await copyRecipeSidecarsToMeal(db, recipe.id, householdMealId);
-	} else {
-		await replaceMealIngredientsFromLines(db, householdMealId, meal.ingredients);
-		await replaceMealInstructionsFromLines(db, householdMealId, meal.instructions);
-	}
-
-	const [createdMeal, ingredients, instructions] = await Promise.all([
-		db.select().from(householdMeals).where(eq(householdMeals.id, householdMealId)).get(),
-		db
-			.select()
-			.from(householdMealIngredients)
-			.where(eq(householdMealIngredients.householdMealId, householdMealId)),
-		db
-			.select()
-			.from(householdMealInstructions)
-			.where(eq(householdMealInstructions.householdMealId, householdMealId))
-	]);
-	const instructionEvents = await loadInstructionEvents(db, instructions);
-	return json({
-		meal: mealFromHouseholdMeal(
-			createdMeal!,
-			ingredients,
-			instructions,
-			instructionEvents,
-			recipe?.id,
-			unitPreferences
-		)
-	});
 };
 
 export const DELETE: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
