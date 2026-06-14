@@ -1,4 +1,5 @@
 export { createCheckoutRedirect } from '$lib/server/billing/checkout';
+export { createBillingPortalSession } from '$lib/server/billing/portal';
 export { requireHouseholdAccess } from '$lib/server/billing/guards';
 export {
 	firstAccessibleHouseholdId,
