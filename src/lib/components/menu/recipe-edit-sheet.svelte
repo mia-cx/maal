@@ -9,10 +9,17 @@
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 	import GripVerticalIcon from '@lucide/svelte/icons/grip-vertical';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
-	import type { RecipeIngredientItem, RecipeInstructionItem, RecipeMenuItem } from './menu-types';
-
-	type DraftIngredient = RecipeIngredientItem & { draftId: string };
-	type DraftInstruction = RecipeInstructionItem & { draftId: string };
+	import {
+		defaultIngredients,
+		defaultInstructions,
+		instructionPositionDrafts as createInstructionPositionDrafts,
+		numberText,
+		optionalNumber,
+		optionalWholeNumber,
+		type DraftIngredient,
+		type DraftInstruction
+	} from '$lib/menu/recipe-editor-model';
+	import type { RecipeInstructionItem, RecipeMenuItem } from './menu-types';
 
 	let {
 		open = $bindable(false),
@@ -74,43 +81,8 @@
 		Boolean(onimporturl && /^https?:\/\//i.test(sourceUrl.trim()))
 	);
 
-	const numberText = (value?: number): string => (value === undefined ? '' : String(value));
-	const optionalNumber = (value: string | number | null | undefined): number | undefined => {
-		if (value === null || value === undefined) return;
-		const trimmed = String(value).trim();
-		if (!trimmed) return;
-		const number = Number(trimmed);
-		return Number.isFinite(number) ? number : undefined;
-	};
-	const optionalWholeNumber = (value: string | number | null | undefined): number | undefined => {
-		const number = optionalNumber(value);
-		return number === undefined ? undefined : Math.max(1, Math.round(number));
-	};
-
-	const defaultIngredients = (nextRecipe: RecipeMenuItem): DraftIngredient[] => {
-		const recipeIngredients = nextRecipe.ingredients ?? [];
-		if (!recipeIngredients.length)
-			return [{ draftId: crypto.randomUUID(), amount: '', unit: '', item: '' }];
-		return recipeIngredients.map((ingredient) => ({
-			...ingredient,
-			unit: ingredient.unit ?? '',
-			draftId: crypto.randomUUID()
-		}));
-	};
-
-	const defaultInstructions = (nextRecipe: RecipeMenuItem): DraftInstruction[] => {
-		const recipeInstructions = nextRecipe.instructions ?? [];
-		if (!recipeInstructions.length)
-			return [{ draftId: crypto.randomUUID(), position: 1, text: '' }];
-		return recipeInstructions
-			.toSorted((left, right) => left.position - right.position)
-			.map((instruction) => ({ ...instruction, draftId: crypto.randomUUID() }));
-	};
-
 	const syncInstructionPositionDrafts = (nextInstructions: DraftInstruction[]) => {
-		instructionPositionDrafts = Object.fromEntries(
-			nextInstructions.map((instruction) => [instruction.draftId, String(instruction.position)])
-		);
+		instructionPositionDrafts = createInstructionPositionDrafts(nextInstructions);
 	};
 
 	const syncRecipe = (nextRecipe: RecipeMenuItem | null) => {
