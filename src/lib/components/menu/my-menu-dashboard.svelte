@@ -33,6 +33,7 @@
 	import RecipeMenuCard from './recipe-menu-card.svelte';
 	import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
 	import { createDraftRecipe } from '$lib/menu/recipe-draft';
+	import { toggleMenuSelection } from '$lib/menu/menu-selection';
 	import type { RecipeMenuItem } from './menu-types';
 
 	let {
@@ -215,31 +216,15 @@
 		selectMenuRecipe(null);
 	};
 
-	const applySelection = (selectedIds: string[], ids: string[], selected: boolean): string[] => {
-		if (!selected) return selectedIds.filter((id) => !ids.includes(id));
-		return [...selectedIds, ...ids.filter((id) => !selectedIds.includes(id))];
-	};
-
-	const rangeIds = (
-		items: readonly RecipeMenuItem[],
-		fromId: string | null,
-		toId: string
-	): string[] => {
-		const toIndex = items.findIndex((item) => item.id === toId);
-		const fromIndex = fromId ? items.findIndex((item) => item.id === fromId) : -1;
-		if (fromIndex < 0 || toIndex < 0) return [toId];
-		const start = Math.min(fromIndex, toIndex);
-		const end = Math.max(fromIndex, toIndex);
-		return items.slice(start, end + 1).map((item) => item.id);
-	};
-
 	const toggleRecipeSelection = (recipe: RecipeMenuItem, selected: boolean, range = false) => {
-		const useRange = range && selectedRecipeIds.length > 0;
-		selectedRecipeIds = applySelection(
-			selectedRecipeIds,
-			useRange ? rangeIds(displayedRecipes, lastSelectedRecipeId, recipe.id) : [recipe.id],
-			selected
-		);
+		selectedRecipeIds = toggleMenuSelection({
+			items: displayedRecipes,
+			selectedIds: selectedRecipeIds,
+			lastSelectedId: lastSelectedRecipeId,
+			itemId: recipe.id,
+			selected,
+			range
+		});
 		lastSelectedRecipeId = recipe.id;
 	};
 
@@ -248,12 +233,14 @@
 		selected: boolean,
 		range = false
 	) => {
-		const useRange = range && selectedArchivedRecipeIds.length > 0;
-		selectedArchivedRecipeIds = applySelection(
-			selectedArchivedRecipeIds,
-			useRange ? rangeIds(archivedRecipes, lastSelectedArchivedRecipeId, recipe.id) : [recipe.id],
-			selected
-		);
+		selectedArchivedRecipeIds = toggleMenuSelection({
+			items: archivedRecipes,
+			selectedIds: selectedArchivedRecipeIds,
+			lastSelectedId: lastSelectedArchivedRecipeId,
+			itemId: recipe.id,
+			selected,
+			range
+		});
 		lastSelectedArchivedRecipeId = recipe.id;
 	};
 
