@@ -1,3 +1,4 @@
+export { createCheckoutRedirect } from '$lib/server/billing/checkout';
 export { requireHouseholdAccess } from '$lib/server/billing/guards';
 export {
 	firstAccessibleHouseholdId,
