@@ -7,7 +7,7 @@ import {
 	clearHouseholdCookie,
 	resolveActiveHouseholdId
 } from '$lib/server/auth/household';
-import { applianceLabels, applianceValues, type Appliance } from '$lib/domain/household/appliances';
+import { applianceValues, type Appliance } from '$lib/domain/household/appliances';
 import {
 	asWeekStartDay,
 	defaultLocale,
@@ -24,19 +24,15 @@ import {
 	createHouseholdInvite,
 	deleteHouseholdInvite,
 	householdRoleSlug,
-	inviteUsable,
-	listHouseholdInvites,
 	revokeHouseholdInvite,
 	updateHouseholdInviteRole
 } from '$lib/server/auth/household-invites';
 import {
 	emptyTaxonomyOptions,
-	loadTaxonomyOptions,
 	type TaxonomyOption,
 	type TaxonomyOptions
 } from '$lib/server/taxonomy/options';
 import {
-	loadDisplayOverrideRows,
 	upsertFoodDisplayOverride,
 	upsertUnitDisplayOverride,
 	type DisplayOverrideRows,
@@ -44,11 +40,8 @@ import {
 	type UnitOverrideInput
 } from '$lib/server/taxonomy/display-overrides';
 import { createAuthRuntime } from '$lib/server/auth/workos';
-import {
-	canCurrentUserLeaveHousehold,
-	loadMembers,
-	membershipHasAdminRole
-} from '$lib/server/household/members';
+import { loadHouseholdView } from '$lib/server/household/household-view';
+import { membershipHasAdminRole } from '$lib/server/household/members';
 import { deleteHouseholdCascade } from '$lib/server/household/delete-household';
 import { SMOKE_HOUSEHOLD_ID, smokeAuthEnabled } from '$lib/server/auth/smoke';
 import { smokeHouseholdView } from '$lib/server/household/smoke-household-view';
@@ -112,96 +105,13 @@ export const load: PageServerLoad = async (event) => {
 
 	if (!event.platform?.env.DB) redirect(302, '/onboarding');
 
-	const runtime = createAuthRuntime(event.platform);
-	const [organization, householdRows, applianceRows, members, hasManagePermission, invites] =
-		await Promise.all([
-			runtime.workos.organizations.getOrganization(householdId),
-			getDb(event.platform.env.DB)
-				.select()
-				.from(households)
-				.where(eq(households.householdId, householdId))
-				.limit(1),
-			getDb(event.platform.env.DB)
-				.select()
-				.from(householdAppliances)
-				.where(eq(householdAppliances.householdId, householdId)),
-			loadMembers(event.platform, householdId),
-			canManageActiveHousehold(event.platform, session, householdId),
-			listHouseholdInvites(event.platform.env.DB, householdId)
-		]);
-
-	const profile = householdRows[0] ?? {
-		defaultPlannedYield: 1,
-		locale: defaultLocale,
-		timezone: defaultTimezone,
-		weekStartsOn: 1,
-		preferredDinnerTime: null
-	};
-	const applianceByName = new Map(applianceRows.map((row) => [row.appliance, row]));
-	const displayOverrideRows = await loadDisplayOverrideRows(
-		event.platform.env.DB,
+	return loadHouseholdView({
+		platform: event.platform,
+		database: event.platform.env.DB,
 		householdId,
-		profile.locale ?? defaultLocale
-	);
-	const taxonomyOptions = await loadTaxonomyOptions(
-		event.platform.env.DB,
-		profile.locale ?? defaultLocale
-	);
-
-	const leaveState = canCurrentUserLeaveHousehold(members, session.user.id);
-
-	return {
-		household: {
-			id: organization.id,
-			name: organization.name,
-			createdAt: organization.createdAt,
-			updatedAt: organization.updatedAt,
-			externalId: organization.externalId,
-			stripeCustomerId: organization.stripeCustomerId ?? null
-		},
-		profile: {
-			defaultServings: profile.defaultPlannedYield,
-			locale: profile.locale ?? defaultLocale,
-			timezone: profile.timezone ?? defaultTimezone,
-			weekStartsOn: weekStartDay(profile.weekStartsOn),
-			preferredMassUnit: displayOverrideRows.preferredMassUnit ?? 'g',
-			preferredVolumeUnit: displayOverrideRows.preferredVolumeUnit ?? 'ml',
-			preferredTemperatureUnit:
-				displayOverrideRows.preferredTemperatureUnit ??
-				taxonomyOptions.temperaturePresetOptions[0]?.value ??
-				'',
-			ingredientUnitOverrides: {},
-			preferredDinnerTime: profile.preferredDinnerTime
-		},
-		appliances: applianceOptions.map((appliance) => {
-			const row = applianceByName.get(appliance);
-			return {
-				appliance,
-				label: applianceLabels[appliance],
-				available: row?.available ?? false,
-				notes: row?.notes ?? ''
-			};
-		}),
-		members,
-		currentUserId: session.user.id,
-		canManageHousehold: hasManagePermission,
-		canLeaveHousehold: leaveState.canLeave,
-		leaveHouseholdDisabledReason: leaveState.reason,
-		invites: invites.map((invite) => ({
-			id: invite.id,
-			code: invite.code,
-			url: `${event.url.origin}/invite/${invite.code}`,
-			role: householdRoleSlug(invite.roleSlug),
-			maxUses: invite.maxUses,
-			usesCount: invite.usesCount,
-			expiresAt: invite.expiresAt,
-			revokedAt: invite.revokedAt,
-			createdAt: invite.createdAt,
-			usable: inviteUsable(invite)
-		})),
-		taxonomyOptions,
-		displayOverrideRows
-	};
+		session,
+		origin: event.url.origin
+	});
 };
 
 export const actions: Actions = {
