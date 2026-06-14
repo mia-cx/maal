@@ -15,14 +15,30 @@ const sourceFiles = (dir) => {
 	return entries.filter((path) => path.endsWith('.ts') || path.endsWith('.svelte'));
 };
 
+const semanticLines = (source) => {
+	const lines = [];
+	let inImport = false;
+	for (const rawLine of source.split('\n')) {
+		const line = rawLine.trim();
+		if (!line || line.startsWith('//')) continue;
+		if (inImport) {
+			if (line.includes(' from ')) inImport = false;
+			continue;
+		}
+		if (line.startsWith('import ')) {
+			if (!line.includes(' from ')) inImport = true;
+			continue;
+		}
+		lines.push(line);
+	}
+	return lines;
+};
+
 const windows = new Map();
 
 for (const file of roots.flatMap(sourceFiles)) {
 	if (file.includes('/components/ui/')) continue;
-	const lines = readFileSync(file, 'utf8')
-		.split('\n')
-		.map((line) => line.trim())
-		.filter((line) => line && !line.startsWith('//'));
+	const lines = semanticLines(readFileSync(file, 'utf8'));
 
 	for (let index = 0; index <= lines.length - windowSize; index += 1) {
 		const key = lines.slice(index, index + windowSize).join('\n');
