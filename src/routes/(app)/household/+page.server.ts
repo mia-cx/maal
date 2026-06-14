@@ -1,20 +1,13 @@
 import { fail, redirect, type Cookies } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
-import { households } from '$lib/server/db/schema';
+
 import {
 	canManageActiveHousehold,
 	clearHouseholdCookie,
 	resolveActiveHouseholdId
 } from '$lib/server/auth/household';
-import {
-	defaultLocale,
-	defaultTimezone,
-	inviteExpiryFromForm,
-	localeFromForm,
-	maxHouseholdNameLength
-} from '$lib/domain/household/settings-parsing';
-import { profileUpdateFromForm } from '$lib/domain/household/profile-settings';
+import { inviteExpiryFromForm } from '$lib/domain/household/settings-parsing';
 import {
 	createHouseholdInvite,
 	deleteHouseholdInvite,
@@ -23,30 +16,15 @@ import {
 	updateHouseholdInviteRole
 } from '$lib/server/auth/household-invites';
 
-import {
-	upsertFoodDisplayOverride,
-	upsertUnitDisplayOverride,
-	type IngredientOverrideInput,
-	type UnitOverrideInput
-} from '$lib/server/taxonomy/display-overrides';
 import { createAuthRuntime } from '$lib/server/auth/workos';
 import { loadHouseholdView } from '$lib/server/household/household-view';
 import { membershipHasAdminRole } from '$lib/server/household/members';
 import { deleteHouseholdCascade } from '$lib/server/household/delete-household';
 import { updateHouseholdAppliancesFromForm } from '$lib/server/household/appliance-settings';
+import { updateHouseholdSettingsFromForm } from '$lib/server/household/settings-command';
 import { SMOKE_HOUSEHOLD_ID, smokeAuthEnabled } from '$lib/server/auth/smoke';
 import { smokeHouseholdView } from '$lib/server/household/smoke-household-view';
 import type { Actions, PageServerLoad } from './$types';
-
-const parseJsonArray = <T>(value: FormDataEntryValue | null): T[] => {
-	if (typeof value !== 'string' || !value.trim()) return [];
-	try {
-		const parsed = JSON.parse(value) as unknown;
-		return Array.isArray(parsed) ? (parsed as T[]) : [];
-	} catch {
-		return [];
-	}
-};
 
 const requireLoadedHousehold = async ({ locals, parent }: Parameters<PageServerLoad>[0]) => {
 	if (!locals.session) redirect(302, '/auth/login');
@@ -219,116 +197,17 @@ export const actions: Actions = {
 	updateSettings: async (event) => {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
-		const { householdId } = managedHousehold;
-		const form = await event.request.formData();
-		const parsedProfileUpdate = profileUpdateFromForm(form);
-		if (!parsedProfileUpdate.ok) return fail(400, { message: parsedProfileUpdate.message });
-		const profileUpdate = parsedProfileUpdate.update;
-		const updates: Promise<unknown>[] = [];
-
-		if (form.has('name')) {
-			const name = String(form.get('name') ?? '').trim();
-			if (!name) return fail(400, { message: 'Household name is required.' });
-			if (name.length > maxHouseholdNameLength) {
-				return fail(400, { message: 'Household name is too long.' });
-			}
-			updates.push(
-				createAuthRuntime(event.platform).workos.organizations.updateOrganization({
-					organization: householdId,
-					name
-				})
-			);
-		}
-
-		if (
-			form.has('preferredMassUnit') ||
-			form.has('preferredVolumeUnit') ||
-			form.has('preferredTemperatureUnit') ||
-			form.has('unitOverrides') ||
-			form.has('ingredientOverrides')
-		) {
-			if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
-			const locale = localeFromForm(form.get('overrideLocale')) ?? defaultLocale;
-			const preferredMassUnit = String(form.get('preferredMassUnit') ?? '').trim();
-			const preferredVolumeUnit = String(form.get('preferredVolumeUnit') ?? '').trim();
-			const preferredTemperatureUnit = String(form.get('preferredTemperatureUnit') ?? '').trim();
-			if (preferredMassUnit) {
-				updates.push(
-					upsertUnitDisplayOverride({
-						database: event.platform.env.DB,
-						householdId,
-						locale,
-						baseUnitId: 'grams',
-						preferredUnitAlias: preferredMassUnit
-					})
-				);
-			}
-			if (preferredVolumeUnit) {
-				updates.push(
-					upsertUnitDisplayOverride({
-						database: event.platform.env.DB,
-						householdId,
-						locale,
-						baseUnitId: 'milliliters',
-						preferredUnitAlias: preferredVolumeUnit
-					})
-				);
-			}
-			if (preferredTemperatureUnit) {
-				updates.push(
-					upsertUnitDisplayOverride({
-						database: event.platform.env.DB,
-						householdId,
-						locale,
-						baseUnitId: 'celsius',
-						preferredUnitAlias: preferredTemperatureUnit
-					})
-				);
-			}
-			for (const row of parseJsonArray<UnitOverrideInput>(form.get('unitOverrides'))) {
-				if (!row.baseUnit || !row.preferredUnitAlias) continue;
-				updates.push(
-					upsertUnitDisplayOverride({
-						database: event.platform.env.DB,
-						householdId,
-						locale,
-						baseUnitId: row.baseUnit,
-						preferredUnitAlias: row.preferredUnitAlias
-					})
-				);
-			}
-			for (const row of parseJsonArray<IngredientOverrideInput>(form.get('ingredientOverrides'))) {
-				updates.push(
-					upsertFoodDisplayOverride({ database: event.platform.env.DB, householdId, locale, row })
-				);
-			}
-		}
-
-		if (Object.keys(profileUpdate).length > 0) {
-			if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
-			updates.push(
-				getDb(event.platform.env.DB)
-					.insert(households)
-					.values({
-						householdId,
-						defaultPlannedYield: profileUpdate.defaultPlannedYield ?? 1,
-						locale: profileUpdate.locale ?? defaultLocale,
-						timezone: profileUpdate.timezone ?? defaultTimezone,
-						weekStartsOn: profileUpdate.weekStartsOn ?? 1,
-						preferredDinnerTime: profileUpdate.preferredDinnerTime ?? null
-					})
-					.onConflictDoUpdate({
-						target: households.householdId,
-						set: { ...profileUpdate, updatedAt: new Date().toISOString() }
-					})
-			);
-		}
-
-		if (updates.length === 0) return { message: 'No changes.' };
+		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
 
 		try {
-			await Promise.all(updates);
-			return { message: 'Household saved.' };
+			const result = await updateHouseholdSettingsFromForm({
+				platform: event.platform,
+				database: event.platform.env.DB,
+				householdId: managedHousehold.householdId,
+				form: await event.request.formData()
+			});
+			if (!result.ok) return fail(result.status, { message: result.message });
+			return { message: result.message };
 		} catch (cause) {
 			console.error('Failed to update household settings', cause);
 			return fail(502, { message: 'Could not update household settings.' });
