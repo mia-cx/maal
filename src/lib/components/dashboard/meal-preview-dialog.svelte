@@ -310,7 +310,7 @@
 </script>
 
 {#snippet scheduleEditorControls()}
-	<Calendar.Calendar bind:value={scheduledDateValue} class="mx-auto p-0" />
+	<Calendar.Calendar type="single" bind:value={scheduledDateValue} class="mx-auto p-0" />
 	<Separator class="my-2" />
 	<div class="grid gap-2 sm:grid-cols-2">
 		<label class="grid gap-1">

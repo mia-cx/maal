@@ -9,13 +9,13 @@
 
 	$effect(() => {
 		void Promise.resolve(data.meals).then((resolvedMeals) => {
-			meals = resolvedMeals;
+			meals = resolvedMeals ?? [];
 		});
 	});
 
 	$effect(() => {
 		void Promise.resolve(data.householdMembers).then((resolvedMembers) => {
-			householdMembers = resolvedMembers;
+			householdMembers = resolvedMembers ?? [];
 		});
 	});
 </script>

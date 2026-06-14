@@ -14,9 +14,9 @@
 			Promise.resolve(data.archivedRecipes),
 			Promise.resolve(data.nextRecipeOffset)
 		]).then(([resolvedRecipes, resolvedArchivedRecipes, resolvedNextRecipeOffset]) => {
-			recipes = resolvedRecipes;
-			archivedRecipes = resolvedArchivedRecipes;
-			nextRecipeOffset = resolvedNextRecipeOffset;
+			recipes = resolvedRecipes ?? [];
+			archivedRecipes = resolvedArchivedRecipes ?? [];
+			nextRecipeOffset = resolvedNextRecipeOffset ?? null;
 		});
 	});
 </script>

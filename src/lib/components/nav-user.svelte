@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import type { Pathname } from '$app/types';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
@@ -20,8 +19,8 @@
 	let settingsOpen = $state(false);
 
 	const initials = $derived(localUser.name.slice(0, 2).toUpperCase());
-	const homeHref = resolve('/' as Pathname);
-	const logoutHref = resolve('/auth/logout' as Pathname);
+	const homeHref = resolve('/');
+	const logoutHref = resolve('/auth/logout');
 
 	const updateLocalUser = (updatedUser: {
 		name: string | null;
