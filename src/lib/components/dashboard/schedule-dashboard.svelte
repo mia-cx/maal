@@ -14,7 +14,7 @@
 	} from '$lib/stores/schedule-meals';
 	import { createMenuRecipe, hydrateMenuRecipes, menuRecipesStore } from '$lib/stores/menu-recipes';
 	import { fetchRecipePickerRecipes } from '$lib/menu/menu-client';
-	import { emptyRecipeMenuStats } from '$lib/menu/recipe-defaults';
+	import { createDraftRecipe } from '$lib/menu/recipe-draft';
 	import { setDailyScroll, uiState, updateUiState } from '$lib/stores/ui-state';
 	import AddMealDialog from './add-meal-dialog.svelte';
 	import ContinuousSchedule from './continuous-schedule.svelte';
@@ -302,18 +302,8 @@
 		return 'Could not add that recipe.';
 	};
 
-	const draftRecipeFromTitle = (title: string): RecipeMenuItem => ({
-		id: `draft-recipe-${crypto.randomUUID()}`,
-		title,
-		description: '',
-		ingredientCount: 0,
-		...emptyRecipeMenuStats(),
-		ingredients: [{ amount: '', item: '' }],
-		instructions: [{ position: 1, text: '' }]
-	});
-
 	const createRecipeFromTitle = (title: string) => {
-		draftRecipe = draftRecipeFromTitle(title);
+		draftRecipe = createDraftRecipe(() => crypto.randomUUID(), title);
 		addMealOpen = false;
 		recipeEditorOpen = true;
 	};
