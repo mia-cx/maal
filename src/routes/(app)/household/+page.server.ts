@@ -50,12 +50,8 @@ import {
 	membershipHasAdminRole
 } from '$lib/server/household/members';
 import { deleteHouseholdCascade } from '$lib/server/household/delete-household';
-import {
-	SMOKE_HOUSEHOLD_ID,
-	SMOKE_HOUSEHOLD_NAME,
-	SMOKE_USER_ID,
-	smokeAuthEnabled
-} from '$lib/server/auth/smoke';
+import { SMOKE_HOUSEHOLD_ID, smokeAuthEnabled } from '$lib/server/auth/smoke';
+import { smokeHouseholdView } from '$lib/server/household/smoke-household-view';
 import type { Actions, PageServerLoad } from './$types';
 
 const applianceOptions = applianceValues;
@@ -111,52 +107,7 @@ export const load: PageServerLoad = async (event) => {
 	const { session, householdId } = await requireLoadedHousehold(event);
 
 	if (smokeAuthEnabled(event.platform) && householdId === SMOKE_HOUSEHOLD_ID) {
-		return {
-			household: {
-				id: SMOKE_HOUSEHOLD_ID,
-				name: SMOKE_HOUSEHOLD_NAME,
-				createdAt: null,
-				updatedAt: null,
-				externalId: null,
-				stripeCustomerId: null
-			},
-			profile: {
-				defaultServings: 4,
-				locale: defaultLocale,
-				timezone: defaultTimezone,
-				weekStartsOn: 'monday' as const,
-				preferredMassUnit: 'g' as const,
-				preferredVolumeUnit: 'ml' as const,
-				preferredTemperatureUnit: '°C' as const,
-				ingredientUnitOverrides: {},
-				preferredDinnerTime: '18:30'
-			},
-			appliances: applianceOptions.map((appliance) => ({
-				appliance,
-				label: applianceLabels[appliance],
-				available: true,
-				notes: ''
-			})),
-			members: [
-				{
-					id: 'membership_smoke_maal',
-					userId: SMOKE_USER_ID,
-					name: 'Smoke User',
-					email: 'smoke@maal.test',
-					role: 'admin' as const,
-					directoryManaged: false,
-					createdAt: null
-				}
-			],
-			currentUserId: session.user.id,
-			canManageHousehold: true,
-			canLeaveHousehold: false,
-			leaveHouseholdDisabledReason:
-				'You are the last manager. Add another manager or delete the household instead.',
-			invites: [],
-			taxonomyOptions: emptyTaxonomyOptions(),
-			displayOverrideRows: { unitOverrides: [], ingredientOverrides: [] }
-		};
+		return smokeHouseholdView(session.user.id);
 	}
 
 	if (!event.platform?.env.DB) redirect(302, '/onboarding');
