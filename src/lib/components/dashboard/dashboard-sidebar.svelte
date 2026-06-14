@@ -9,25 +9,32 @@
 	import ListIcon from '@lucide/svelte/icons/list';
 	import ShoppingCartIcon from '@lucide/svelte/icons/shopping-cart';
 	import SoupIcon from '@lucide/svelte/icons/soup';
+	import type { FeaturePreviews } from '$lib/features/flags';
 	import type { DashboardNavItem } from './dashboard-nav';
 
 	type SidebarUser = { name: string; email: string; avatar: string; emailVerified: boolean };
 	type Household = { id: string; name: string };
 
+	const disabledFeatures: FeaturePreviews = { pantry: false, groceryRollup: false };
+
 	let {
 		user,
 		activeNav = 'meal-plan',
 		households = [],
-		activeHouseholdId = null
+		activeHouseholdId = null,
+		features = disabledFeatures
 	}: {
 		user: SidebarUser;
 		activeNav?: DashboardNavItem;
 		households?: Household[];
 		activeHouseholdId?: string | null;
+		features?: FeaturePreviews;
 	} = $props();
 
 	const planHref = resolve('/plan');
 	const menuHref = resolve('/menu');
+	const pantryHref = resolve('/pantry');
+	const groceryRollupHref = resolve('/groceries');
 	const householdHref = resolve('/household');
 </script>
 
@@ -73,22 +80,44 @@
 					</Sidebar.MenuItem>
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton
-							disabled
-							tooltipContent="Pantry coming soon"
-							class="h-9 text-muted-foreground group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
+							isActive={activeNav === 'pantry'}
+							disabled={!features.pantry}
+							tooltipContent={features.pantry ? 'Pantry' : 'Pantry preview unavailable'}
+							class={`h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2! ${features.pantry ? '' : 'text-muted-foreground'}`}
 						>
-							<SoupIcon />
-							<span>Pantry</span>
+							{#if features.pantry}
+								{#snippet child({ props })}
+									<a href={pantryHref} {...props}>
+										<SoupIcon />
+										<span>Pantry</span>
+									</a>
+								{/snippet}
+							{:else}
+								<SoupIcon />
+								<span>Pantry</span>
+							{/if}
 						</Sidebar.MenuButton>
 					</Sidebar.MenuItem>
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton
-							disabled
-							tooltipContent="Grocery rollup coming soon"
-							class="h-9 text-muted-foreground group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
+							isActive={activeNav === 'grocery-rollup'}
+							disabled={!features.groceryRollup}
+							tooltipContent={features.groceryRollup
+								? 'Grocery rollup'
+								: 'Grocery rollup preview unavailable'}
+							class={`h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2! ${features.groceryRollup ? '' : 'text-muted-foreground'}`}
 						>
-							<ShoppingCartIcon />
-							<span>Grocery rollup</span>
+							{#if features.groceryRollup}
+								{#snippet child({ props })}
+									<a href={groceryRollupHref} {...props}>
+										<ShoppingCartIcon />
+										<span>Grocery rollup</span>
+									</a>
+								{/snippet}
+							{:else}
+								<ShoppingCartIcon />
+								<span>Grocery rollup</span>
+							{/if}
 						</Sidebar.MenuButton>
 					</Sidebar.MenuItem>
 					<Sidebar.MenuItem>

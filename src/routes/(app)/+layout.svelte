@@ -5,6 +5,7 @@
 	import type { DashboardNavItem } from '$lib/components/dashboard/dashboard-nav';
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Sidebar from '$lib/components/ui/sidebar';
+	import { featurePreviews } from '$lib/features/flags';
 	import { hydrateTaxonomyPreferences } from '$lib/stores/taxonomy-preferences';
 	import { uiState, updateUiState } from '$lib/stores/ui-state';
 	import type { Snippet } from 'svelte';
@@ -21,6 +22,7 @@
 	let resizingSidebar = $state(false);
 	let exportDataPopoverOpen = $state(false);
 
+	const features = $derived(featurePreviews(data.session));
 	const sidebarUser = $derived({
 		name: data.session?.user.name ?? data.session?.user.email?.split('@')[0] ?? 'Local preview',
 		email: data.session?.user.email ?? 'Local preview',
@@ -31,9 +33,13 @@
 	const activeNav = $derived<DashboardNavItem>(
 		page.url.pathname.startsWith('/menu')
 			? 'my-menu'
-			: page.url.pathname.startsWith('/household')
-				? 'household'
-				: 'meal-plan'
+			: page.url.pathname.startsWith('/pantry')
+				? 'pantry'
+				: page.url.pathname.startsWith('/groceries')
+					? 'grocery-rollup'
+					: page.url.pathname.startsWith('/household')
+						? 'household'
+						: 'meal-plan'
 	);
 	const isSubscribePage = $derived(page.url.pathname.startsWith('/subscribe'));
 	const subscriptionLocked = $derived(
@@ -96,6 +102,7 @@
 			<DashboardSidebar
 				user={sidebarUser}
 				{activeNav}
+				{features}
 				households={data.households}
 				activeHouseholdId={data.activeHouseholdId}
 			/>
