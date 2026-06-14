@@ -1,24 +1,10 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { commitSealedSession, readSealedSession } from '$lib/server/auth/session';
 import { createAuthRuntime } from '$lib/server/auth/workos';
+import { readJsonObject } from '$lib/server/http/request';
 
 const maxEmailLength = 254;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === 'object' && value !== null;
-
-const requestBody = async (request: Request): Promise<Record<string, unknown>> => {
-	let body: unknown;
-	try {
-		body = await request.json();
-	} catch {
-		error(400, { message: 'Invalid request.' });
-	}
-
-	if (!isRecord(body)) error(400, { message: 'Invalid request.' });
-	return body;
-};
 
 const emailFromBody = (body: Record<string, unknown>): string => {
 	const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
@@ -75,7 +61,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 	const session = locals.session;
 	if (!session) error(401, { message: 'Sign in required.' });
 
-	const email = emailFromBody(await requestBody(request));
+	const email = emailFromBody(await readJsonObject(request));
 
 	try {
 		const runtime = createAuthRuntime(platform);
@@ -104,7 +90,7 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 	const session = locals.session;
 	if (!session) error(401, { message: 'Sign in required.' });
 
-	const body = await requestBody(request);
+	const body = await readJsonObject(request);
 	const code = codeFromBody(body);
 
 	try {

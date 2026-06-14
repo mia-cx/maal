@@ -1,10 +1,8 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { createAuthRuntime } from '$lib/server/auth/workos';
+import { readJsonObject } from '$lib/server/http/request';
 
 const issuer = 'Maal';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === 'object' && value !== null;
 
 type WorkOSAuthFactor = {
 	id: string;
@@ -61,18 +59,6 @@ const requireOwnedFactor = async (
 	return factor;
 };
 
-const requestBody = async (request: Request): Promise<Record<string, unknown>> => {
-	let body: unknown;
-	try {
-		body = await request.json();
-	} catch {
-		error(400, { message: 'Invalid request.' });
-	}
-
-	if (!isRecord(body)) error(400, { message: 'Invalid request.' });
-	return body;
-};
-
 const factorIdFromBody = (body: Record<string, unknown>): string => {
 	const factorId = typeof body.factorId === 'string' ? body.factorId : '';
 	if (!factorId) error(400, { message: 'Authentication factor is required.' });
@@ -82,7 +68,7 @@ const factorIdFromBody = (body: Record<string, unknown>): string => {
 const readVerification = async (
 	request: Request
 ): Promise<{ factorId: string; challengeId: string; code: string }> => {
-	const body = await requestBody(request);
+	const body = await readJsonObject(request);
 	const factorId = factorIdFromBody(body);
 	const challengeId = typeof body.challengeId === 'string' ? body.challengeId : '';
 	const code = typeof body.code === 'string' ? body.code.replace(/\D/g, '') : '';
@@ -165,7 +151,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request }) => {
 export const DELETE: RequestHandler = async ({ locals, platform, request }) => {
 	const session = locals.session;
 	if (!session) error(401, { message: 'Sign in required.' });
-	const factorId = factorIdFromBody(await requestBody(request));
+	const factorId = factorIdFromBody(await readJsonObject(request));
 
 	try {
 		await requireOwnedFactor(platform, session.user.id, factorId);

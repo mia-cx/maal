@@ -33,6 +33,7 @@ import {
 } from '$lib/recipes/ingredient-text';
 import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
 import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
+import { boundedPagination } from '$lib/shared/pagination';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { cleanImportedText } from '$lib/server/services/html-text';
 
@@ -577,11 +578,6 @@ const recipeUrlKeys = (recipe: RecipeIdentity): Set<string> => {
 	return keys;
 };
 
-const integerParam = (url: URL, key: string, fallback: number): number => {
-	const value = Number(url.searchParams.get(key));
-	return Number.isInteger(value) && value >= 0 ? value : fallback;
-};
-
 const loadHouseholdUnitPreferences = async (
 	db: ReturnType<typeof getDb>,
 	workosUserId: string,
@@ -722,8 +718,14 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 		});
 	}
 
-	const offset = integerParam(url, 'offset', 0);
-	const limit = Math.min(integerParam(url, 'limit', defaultRecipePageSize), maxRecipePageSize);
+	const { offset, limit } = boundedPagination(
+		{
+			offset: url.searchParams.get('offset'),
+			limit: url.searchParams.get('limit')
+		},
+		defaultRecipePageSize,
+		maxRecipePageSize
+	);
 	const query = url.searchParams.get('q') ?? '';
 	const picker = url.searchParams.get('picker') === 'meal';
 	const unitPreferences = await loadHouseholdUnitPreferences(db, session.user.id, householdId);

@@ -41,6 +41,8 @@ import {
 	type UpdateHouseholdMealInput
 } from '$lib/server/services/meal-plan';
 import { upsertMealCheckIn } from '$lib/server/services/check-ins';
+import { boundedPagination } from '$lib/shared/pagination';
+import { addUtcDays, dateKey, utcDateFromKey, utcDaysBetween } from '$lib/shared/utc-date';
 
 type ToolHandler = (context: McpContext, args: Record<string, unknown>) => Promise<unknown>;
 type ToolDefinition = {
@@ -73,14 +75,6 @@ const arrayOfStrings = (value: unknown): string[] | undefined =>
 		? value.filter((item): item is string => typeof item === 'string')
 		: undefined;
 
-const dateKey = (date: Date): string => date.toISOString().slice(0, 10);
-
-const addDays = (date: Date, days: number): Date => {
-	const nextDate = new Date(date);
-	nextDate.setUTCDate(nextDate.getUTCDate() + days);
-	return nextDate;
-};
-
 const defaultRecipeLimit = 25;
 const maxRecipeLimit = 60;
 const defaultPlanRangeDays = 14;
@@ -88,49 +82,33 @@ const maxPlanRangeDays = 62;
 const defaultPlanLimit = 50;
 const maxPlanLimit = 100;
 
-const daysBetween = (startDate: string, endDate: string): number => {
-	const startTime = new Date(`${startDate}T00:00:00Z`).getTime();
-	const endTime = new Date(`${endDate}T00:00:00Z`).getTime();
-	return Math.floor((endTime - startTime) / 86_400_000);
-};
-
 const defaultPlanRange = (args: Record<string, unknown>) => {
 	const startDate = text(args.startDate);
 	const endDate = text(args.endDate);
 	let range = startDate
 		? {
 				startDate,
-				endDate:
-					endDate ?? dateKey(addDays(new Date(`${startDate}T00:00:00Z`), defaultPlanRangeDays))
+				endDate: endDate ?? dateKey(addUtcDays(utcDateFromKey(startDate), defaultPlanRangeDays))
 			}
 		: endDate
 			? {
-					startDate: dateKey(addDays(new Date(`${endDate}T00:00:00Z`), -defaultPlanRangeDays)),
+					startDate: dateKey(addUtcDays(utcDateFromKey(endDate), -defaultPlanRangeDays)),
 					endDate
 				}
 			: (() => {
 					const today = new Date();
 					return {
 						startDate: dateKey(today),
-						endDate: dateKey(addDays(today, defaultPlanRangeDays))
+						endDate: dateKey(addUtcDays(today, defaultPlanRangeDays))
 					};
 				})();
-	if (daysBetween(range.startDate, range.endDate) > maxPlanRangeDays) {
+	if (utcDaysBetween(range.startDate, range.endDate) > maxPlanRangeDays) {
 		range = {
 			startDate: range.startDate,
-			endDate: dateKey(addDays(new Date(`${range.startDate}T00:00:00Z`), maxPlanRangeDays))
+			endDate: dateKey(addUtcDays(utcDateFromKey(range.startDate), maxPlanRangeDays))
 		};
 	}
 	return range;
-};
-
-const pagination = (args: Record<string, unknown>, defaultLimit: number, maxLimit: number) => {
-	const offset = Math.max(0, Math.floor(optionalNumber(args.offset) ?? 0));
-	const limit = Math.min(
-		Math.max(1, Math.floor(optionalNumber(args.limit) ?? defaultLimit)),
-		maxLimit
-	);
-	return { offset, limit };
 };
 
 const toolError = (code: string, message: string, suggestion?: string) => ({
@@ -386,7 +364,7 @@ const tools: ToolDefinition[] = [
 		annotations: { readOnlyHint: true },
 		handler: async (context, args) => {
 			const householdId = await resolveHouseholdId(context, args, 'recipes:read', 'recipes:read');
-			const { offset, limit } = pagination(args, defaultRecipeLimit, maxRecipeLimit);
+			const { offset, limit } = boundedPagination(args, defaultRecipeLimit, maxRecipeLimit);
 			const recipes = await listUserRecipes({
 				db: context.db,
 				workosUserId: context.key.userId,
@@ -498,7 +476,7 @@ const tools: ToolDefinition[] = [
 		handler: async (context, args) => {
 			const householdId = await resolveHouseholdId(context, args, 'meals:read', 'meals:read');
 			const { startDate, endDate } = defaultPlanRange(args);
-			const { offset, limit } = pagination(args, defaultPlanLimit, maxPlanLimit);
+			const { offset, limit } = boundedPagination(args, defaultPlanLimit, maxPlanLimit);
 			const meals = await listHouseholdPlanMeals({
 				platform: context.platform,
 				db: context.db,
