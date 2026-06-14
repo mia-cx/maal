@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { dateKey, isToday } from './schedule-date';
+	import { handleBlankScheduleTarget } from './schedule-interactions';
 	import ScheduledMealList from './scheduled-meal-list.svelte';
 	import type {
 		Meal,
@@ -53,17 +54,8 @@
 	);
 	const imageLayout = $derived(columnHeight >= multiDayTopImageMinHeight ? 'top' : 'side-compact');
 
-	const addMealOnBlankTarget = (event: MouseEvent) => {
-		if (
-			event.target instanceof Element &&
-			event.target.closest(
-				'button, a, input, textarea, select, [contenteditable=""], [contenteditable="true"], [data-meal-card-id]'
-			)
-		)
-			return;
-		event.stopPropagation();
-		onaddmeal?.(dayKey);
-	};
+	const addMealOnBlankTarget = (event: MouseEvent) =>
+		handleBlankScheduleTarget(event, dayKey, onaddmeal);
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
