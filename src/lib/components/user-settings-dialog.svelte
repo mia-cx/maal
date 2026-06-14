@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import type { Pathname } from '$app/types';
 	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
@@ -33,7 +32,6 @@
 		normalizedEmail,
 		verificationAttemptKey
 	} from '$lib/settings/account-model';
-	import { readSettingsError } from '$lib/settings/api-client';
 	import {
 		changePasswordRequest,
 		deleteMfaFactorRequest,
