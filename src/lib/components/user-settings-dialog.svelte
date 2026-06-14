@@ -29,6 +29,13 @@
 		type McpScope,
 		type McpScopeLevel
 	} from '$lib/settings/mcp-key-model';
+	import {
+		accountEmailChanged as hasAccountEmailChanged,
+		accountEmailVerified as isAccountEmailVerified,
+		emailVerificationRequired as needsEmailVerification,
+		normalizedEmail,
+		verificationAttemptKey
+	} from '$lib/settings/account-model';
 	import { readSettingsError } from '$lib/settings/api-client';
 	import { emptyPasswordChangeFields, passwordChangeMismatch } from '$lib/settings/password-model';
 	import type {
@@ -121,15 +128,13 @@
 	let billingError = $state<string | null>(null);
 
 	const verificationCodeMinLength = 6;
-	const normalizedAccountEmail = $derived(accountEmail.trim().toLowerCase());
-	const currentAccountEmail = $derived(user.email.trim().toLowerCase());
-	const accountEmailChanged = $derived(
-		Boolean(normalizedAccountEmail) && normalizedAccountEmail !== currentAccountEmail
+	const normalizedAccountEmail = $derived(normalizedEmail(accountEmail));
+	const currentAccountEmail = $derived(normalizedEmail(user.email));
+	const accountEmailChanged = $derived(hasAccountEmailChanged(accountEmail, user.email));
+	const accountEmailVerified = $derived(isAccountEmailVerified(accountEmail, verifiedEmail));
+	const emailVerificationRequired = $derived(
+		needsEmailVerification(accountEmail, user.email, verifiedEmail)
 	);
-	const accountEmailVerified = $derived(
-		Boolean(normalizedAccountEmail) && verifiedEmail === normalizedAccountEmail
-	);
-	const emailVerificationRequired = $derived(accountEmailChanged && !accountEmailVerified);
 	const accountCanSave = $derived(!accountSaving && !emailVerificationRequired);
 
 	const categories: SettingsCategory[] = settingsCategories;
@@ -240,7 +245,7 @@
 	};
 
 	const verifyEmailCode = async (email: string, code: string) => {
-		const attemptKey = `${email}:${code}`;
+		const attemptKey = verificationAttemptKey(email, code);
 		lastVerificationAttempt = attemptKey;
 		emailVerificationChecking = true;
 		accountMessage = null;
@@ -275,7 +280,7 @@
 			!emailVerificationRequired ||
 			verificationEmail !== email ||
 			code.length < verificationCodeMinLength ||
-			lastVerificationAttempt === `${email}:${code}`
+			lastVerificationAttempt === verificationAttemptKey(email, code)
 		) {
 			return;
 		}
