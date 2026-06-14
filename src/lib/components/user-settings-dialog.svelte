@@ -34,6 +34,11 @@
 		verificationAttemptKey
 	} from '$lib/settings/account-model';
 	import { readSettingsError } from '$lib/settings/api-client';
+	import {
+		saveAccountSettings,
+		sendAccountVerificationEmail,
+		verifyAccountEmailCode
+	} from '$lib/settings/account-client';
 	import { emptyPasswordChangeFields, passwordChangeMismatch } from '$lib/settings/password-model';
 	import type {
 		BillingStatus,
@@ -193,19 +198,13 @@
 		accountMessage = null;
 		accountError = null;
 
-		const response = await fetch(resolve('/settings/account'), {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ name: accountName, email: accountEmail })
-		});
+		const body = await saveAccountSettings({ name: accountName, email: accountEmail });
 
 		accountSaving = false;
-		if (!response.ok) {
-			accountError = await readSettingsError(response, 'Could not update account.');
+		if (!body.ok) {
+			accountError = body.error;
 			return;
 		}
-
-		const body = (await response.json()) as { user: UpdatedUser; pendingEmail?: string };
 		onuserupdate?.(body.user);
 		accountName = body.user.name ?? body.user.email;
 		accountEmail = body.pendingEmail ?? body.user.email;
@@ -222,15 +221,11 @@
 		accountMessage = null;
 		accountError = null;
 
-		const response = await fetch(resolve('/settings/account/email-verification'), {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ email: normalizedAccountEmail })
-		});
+		const result = await sendAccountVerificationEmail(normalizedAccountEmail);
 
 		emailVerificationBusy = false;
-		if (!response.ok) {
-			accountError = await readSettingsError(response, 'Could not send verification email.');
+		if (!result.ok) {
+			accountError = result.error;
 			return;
 		}
 		verificationEmail = normalizedAccountEmail;
@@ -246,19 +241,13 @@
 		accountMessage = null;
 		accountError = null;
 
-		const response = await fetch(resolve('/settings/account/email-verification'), {
-			method: 'PUT',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ email, code })
-		});
+		const body = await verifyAccountEmailCode({ email, code });
 
 		emailVerificationChecking = false;
-		if (!response.ok) {
-			accountError = await readSettingsError(response, 'That code did not match.');
+		if (!body.ok) {
+			accountError = body.error;
 			return;
 		}
-
-		const body = (await response.json()) as { user: UpdatedUser };
 		onuserupdate?.(body.user);
 		accountName = body.user.name ?? body.user.email;
 		accountEmail = body.user.email;
