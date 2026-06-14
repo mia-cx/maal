@@ -1,5 +1,5 @@
 import { browser } from '$app/environment';
-import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import {
 	archiveMenuRecipesRemote,
 	createMenuRecipeRemote,

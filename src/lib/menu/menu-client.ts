@@ -1,6 +1,6 @@
 import { resolve } from '$app/paths';
 import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
-import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+import type { RecipeMenuItem } from '$lib/menu/menu-types';
 
 export const readMenuResponseError = async (
 	response: Response,

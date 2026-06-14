@@ -1,4 +1,4 @@
-import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+import type { RecipeMenuItem } from '$lib/menu/menu-types';
 
 export const recipeFrecencyScore = (recipe: RecipeMenuItem): number => {
 	const lastCookedAt = recipe.lastCookedAt ? Date.parse(recipe.lastCookedAt) : Number.NaN;

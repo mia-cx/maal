@@ -20,7 +20,7 @@ import type {
 	RecipeIngredientItem,
 	RecipeInstructionItem,
 	RecipeMenuItem
-} from '$lib/components/menu/menu-types';
+} from '$lib/menu/menu-types';
 import {
 	canonicalIngredientUnit,
 	convertInstructionTemperatureEvents,

@@ -2,7 +2,7 @@ import type {
 	RecipeIngredientItem,
 	RecipeInstructionItem,
 	RecipeMenuItem
-} from '$lib/components/menu/menu-types';
+} from '$lib/menu/menu-types';
 
 export type DraftIngredient = RecipeIngredientItem & { draftId: string };
 export type DraftInstruction = RecipeInstructionItem & { draftId: string };

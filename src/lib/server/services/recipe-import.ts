@@ -1,4 +1,4 @@
-import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import { parseIngredientLine } from '$lib/recipes/ingredient-text';
 import { cleanImportedText } from './html-text';
 

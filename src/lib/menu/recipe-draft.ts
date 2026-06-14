@@ -1,5 +1,5 @@
 import { emptyRecipeMenuStats } from '$lib/menu/recipe-defaults';
-import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+import type { RecipeMenuItem } from '$lib/menu/menu-types';
 
 export const createDraftRecipe = (
 	createId: () => string,

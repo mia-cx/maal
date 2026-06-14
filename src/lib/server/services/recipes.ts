@@ -1,5 +1,5 @@
 import { and, eq, isNull } from 'drizzle-orm';
-import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
 import { getDb } from '$lib/server/db';
 import { households, userRecipes } from '$lib/server/db/schema';

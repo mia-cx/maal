@@ -7,7 +7,7 @@ import {
 	optionalNumber,
 	optionalWholeNumber
 } from './recipe-editor-model';
-import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+import type { RecipeMenuItem } from '$lib/menu/menu-types';
 
 const recipe = (patch: Partial<RecipeMenuItem> = {}): RecipeMenuItem => ({
 	id: 'recipe_1',

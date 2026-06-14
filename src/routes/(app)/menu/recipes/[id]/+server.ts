@@ -12,7 +12,7 @@ import {
 	updateRecipeIngredients,
 	updateRecipeInstructions
 } from '$lib/server/db/recipe-mappers';
-import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
