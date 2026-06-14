@@ -23,14 +23,8 @@ import {
 	requireActionHousehold,
 	requireManageHousehold
 } from '$lib/server/household/action-context';
+import { requireLoadedHousehold } from '$lib/server/household/load-context';
 import type { Actions, PageServerLoad } from './$types';
-
-const requireLoadedHousehold = async ({ locals, parent }: Parameters<PageServerLoad>[0]) => {
-	if (!locals.session) redirect(302, '/auth/login');
-	const layout = await parent();
-	if (!layout.activeHouseholdId) redirect(302, '/onboarding');
-	return { session: locals.session, householdId: layout.activeHouseholdId };
-};
 
 export const load: PageServerLoad = async (event) => {
 	const { session, householdId } = await requireLoadedHousehold(event);
