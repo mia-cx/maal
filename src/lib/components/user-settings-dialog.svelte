@@ -30,6 +30,7 @@
 		type McpScopeLevel
 	} from '$lib/settings/mcp-key-model';
 	import { readSettingsError } from '$lib/settings/api-client';
+	import { emptyPasswordChangeFields, passwordChangeMismatch } from '$lib/settings/password-model';
 	import type {
 		BillingStatus,
 		MfaFactor,
@@ -571,9 +572,7 @@
 	});
 
 	const openPasswordChange = () => {
-		currentPassword = '';
-		newPassword = '';
-		confirmPassword = '';
+		({ currentPassword, newPassword, confirmPassword } = emptyPasswordChangeFields());
 		passwordMessage = null;
 		passwordError = null;
 		passwordChangeOpen = true;
@@ -582,8 +581,9 @@
 	const changePassword = async () => {
 		passwordMessage = null;
 		passwordError = null;
-		if (newPassword !== confirmPassword) {
-			passwordError = 'Passwords do not match.';
+		const mismatch = passwordChangeMismatch(newPassword, confirmPassword);
+		if (mismatch) {
+			passwordError = mismatch;
 			return;
 		}
 
