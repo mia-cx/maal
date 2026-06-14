@@ -1,23 +1,18 @@
 import { fail, redirect, type Cookies } from '@sveltejs/kit';
-import { and, eq, isNull } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
-import { foods, households } from '$lib/server/db/schema';
+import { households } from '$lib/server/db/schema';
 import {
 	canManageActiveHousehold,
 	clearHouseholdCookie,
 	resolveActiveHouseholdId
 } from '$lib/server/auth/household';
-import { applianceValues } from '$lib/domain/household/appliances';
 import {
-	asWeekStartDay,
 	defaultLocale,
 	defaultTimezone,
 	inviteExpiryFromForm,
-	localeFallbacks,
 	localeFromForm,
-	maxHouseholdNameLength,
-	numberFromForm,
-	weekStartDay
+	maxHouseholdNameLength
 } from '$lib/domain/household/settings-parsing';
 import { profileUpdateFromForm } from '$lib/domain/household/profile-settings';
 import {
@@ -27,15 +22,10 @@ import {
 	revokeHouseholdInvite,
 	updateHouseholdInviteRole
 } from '$lib/server/auth/household-invites';
-import {
-	emptyTaxonomyOptions,
-	type TaxonomyOption,
-	type TaxonomyOptions
-} from '$lib/server/taxonomy/options';
+
 import {
 	upsertFoodDisplayOverride,
 	upsertUnitDisplayOverride,
-	type DisplayOverrideRows,
 	type IngredientOverrideInput,
 	type UnitOverrideInput
 } from '$lib/server/taxonomy/display-overrides';
@@ -47,8 +37,6 @@ import { updateHouseholdAppliancesFromForm } from '$lib/server/household/applian
 import { SMOKE_HOUSEHOLD_ID, smokeAuthEnabled } from '$lib/server/auth/smoke';
 import { smokeHouseholdView } from '$lib/server/household/smoke-household-view';
 import type { Actions, PageServerLoad } from './$types';
-
-const applianceOptions = applianceValues;
 
 const parseJsonArray = <T>(value: FormDataEntryValue | null): T[] => {
 	if (typeof value !== 'string' || !value.trim()) return [];
