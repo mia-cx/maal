@@ -88,12 +88,14 @@ export const parseInstructionEvents = async (
 ): Promise<InstructionEvent[]> =>
 	parseInstructionEventsWithParser(await loadTemperatureParser(db), text);
 
+type ParsedInstructionEvent = InstructionEvent & { instructionId: string };
+
 type InsertInstructionEventsParams<TInstruction> = {
 	db: WritableDb;
 	instructions: TInstruction[];
 	instructionId: (instruction: TInstruction) => string;
 	instructionText: (instruction: TInstruction) => string;
-	insert: (db: WritableDb, rows: Array<Record<string, string | number>>) => Promise<void>;
+	insert: (db: WritableDb, rows: ParsedInstructionEvent[]) => Promise<void>;
 };
 
 const hasTransaction = (db: WritableDb): db is Db => 'transaction' in db;
