@@ -67,8 +67,11 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		});
 	} catch (cause) {
 		return mapKnownError(cause, {
-			'Recipe not found.': 404,
-			'Choose an active household member as the cook.': 400
+			recipe_not_found: { status: 404, message: 'Recipe not found.' },
+			active_household_cook_required: {
+				status: 400,
+				message: 'Choose an active household member as the cook.'
+			}
 		});
 	}
 };
@@ -112,8 +115,11 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 		});
 	} catch (cause) {
 		return mapKnownError(cause, {
-			'Choose an active household member as the cook.': 400,
-			'Meal not found.': 404
+			active_household_cook_required: {
+				status: 400,
+				message: 'Choose an active household member as the cook.'
+			},
+			meal_not_found: { status: 404, message: 'Meal not found.' }
 		});
 	}
 };

@@ -10,6 +10,6 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		await upsertMealCheckIn(db, await readMealCheckInInput(request, householdId, session.user.id));
 		return json({ ok: true });
 	} catch (cause) {
-		return mapKnownError(cause, { 'Meal not found.': 404 });
+		return mapKnownError(cause, { meal_not_found: { status: 404, message: 'Meal not found.' } });
 	}
 };
