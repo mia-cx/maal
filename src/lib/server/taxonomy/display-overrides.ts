@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { localeFallbacks } from '$lib/domain/household/settings-parsing';
 import { bestAliasRowsById, localeRank } from './aliases';
@@ -235,26 +235,34 @@ export const upsertUnitDisplayOverride = async ({
 		return;
 	}
 	if (!baseUnitId) return;
-	const existingAliases = await db
-		.select({ id: unitHouseholdAliases.id })
-		.from(unitHouseholdAliases)
-		.where(
-			and(
-				eq(unitHouseholdAliases.householdId, householdId),
-				eq(unitHouseholdAliases.baseUnitId, baseUnitId),
-				eq(unitHouseholdAliases.alias, alias),
-				eq(unitHouseholdAliases.locale, locale)
-			)
-		)
-		.limit(1);
-	let aliasId = existingAliases[0]?.id;
-	if (!aliasId) {
-		const insertedAliases = await db
-			.insert(unitHouseholdAliases)
-			.values({ householdId, unitId: baseUnitId, baseUnitId, alias, locale })
-			.returning({ id: unitHouseholdAliases.id });
-		aliasId = insertedAliases[0]?.id;
-	}
+	const aliasIdentity = and(
+		eq(unitHouseholdAliases.householdId, householdId),
+		eq(unitHouseholdAliases.baseUnitId, baseUnitId),
+		eq(unitHouseholdAliases.alias, alias),
+		eq(unitHouseholdAliases.locale, locale)
+	);
+	const insertedAliases = await db
+		.insert(unitHouseholdAliases)
+		.values({ householdId, unitId: baseUnitId, baseUnitId, alias, locale })
+		.onConflictDoNothing({
+			target: [
+				unitHouseholdAliases.householdId,
+				unitHouseholdAliases.baseUnitId,
+				unitHouseholdAliases.locale,
+				unitHouseholdAliases.alias
+			]
+		})
+		.returning({ id: unitHouseholdAliases.id });
+	const aliasId =
+		insertedAliases[0]?.id ??
+		(
+			await db
+				.select({ id: unitHouseholdAliases.id })
+				.from(unitHouseholdAliases)
+				.where(aliasIdentity)
+				.orderBy(asc(unitHouseholdAliases.id))
+				.limit(1)
+		)[0]?.id;
 	if (!aliasId) return;
 	await db
 		.insert(householdUnitDisplayOverrides)
@@ -339,33 +347,41 @@ export const upsertFoodDisplayOverride = async ({
 			preferredFoodAliasScope = 'global';
 			preferredFoodAliasId = globalAlias.id;
 		} else {
-			const existingAliases = await db
-				.select({ id: foodHouseholdAliases.id })
-				.from(foodHouseholdAliases)
-				.where(
-					and(
-						eq(foodHouseholdAliases.householdId, householdId),
-						eq(foodHouseholdAliases.foodId, baseFood),
-						eq(foodHouseholdAliases.alias, alias),
-						eq(foodHouseholdAliases.locale, locale)
-					)
-				)
-				.limit(1);
-			let aliasId = existingAliases[0]?.id;
-			if (!aliasId) {
-				const insertedAliases = await db
-					.insert(foodHouseholdAliases)
-					.values({
-						householdId,
-						foodId: baseFood,
-						alias,
-						locale,
-						defaultMeasureUnitId: measureUnit?.id,
-						defaultMeasureBaseUnitId: measureUnit?.baseUnitId
-					})
-					.returning({ id: foodHouseholdAliases.id });
-				aliasId = insertedAliases[0]?.id;
-			}
+			const aliasIdentity = and(
+				eq(foodHouseholdAliases.householdId, householdId),
+				eq(foodHouseholdAliases.foodId, baseFood),
+				eq(foodHouseholdAliases.alias, alias),
+				eq(foodHouseholdAliases.locale, locale)
+			);
+			const insertedAliases = await db
+				.insert(foodHouseholdAliases)
+				.values({
+					householdId,
+					foodId: baseFood,
+					alias,
+					locale,
+					defaultMeasureUnitId: measureUnit?.id,
+					defaultMeasureBaseUnitId: measureUnit?.baseUnitId
+				})
+				.onConflictDoNothing({
+					target: [
+						foodHouseholdAliases.householdId,
+						foodHouseholdAliases.foodId,
+						foodHouseholdAliases.locale,
+						foodHouseholdAliases.alias
+					]
+				})
+				.returning({ id: foodHouseholdAliases.id });
+			const aliasId =
+				insertedAliases[0]?.id ??
+				(
+					await db
+						.select({ id: foodHouseholdAliases.id })
+						.from(foodHouseholdAliases)
+						.where(aliasIdentity)
+						.orderBy(asc(foodHouseholdAliases.id))
+						.limit(1)
+				)[0]?.id;
 			preferredFoodAliasScope = 'household';
 			preferredFoodAliasId = aliasId ?? null;
 		}
