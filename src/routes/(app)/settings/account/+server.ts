@@ -1,4 +1,4 @@
-import { error, json, type RequestHandler } from '@sveltejs/kit';
+import { error, isHttpError, json, type RequestHandler } from '@sveltejs/kit';
 import { createAuthRuntime } from '$lib/server/auth/workos';
 import { readJsonObject } from '$lib/server/http/request';
 import {
@@ -62,6 +62,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 			user: publicUser
 		});
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error('Failed to update WorkOS user', cause);
 		error(502, { message: 'Could not update account.' });
 	}

@@ -1,4 +1,4 @@
-import { error, json, type RequestHandler } from '@sveltejs/kit';
+import { error, isHttpError, json, type RequestHandler } from '@sveltejs/kit';
 import { createAuthRuntime } from '$lib/server/auth/workos';
 import { readJsonObject } from '$lib/server/http/request';
 import { isVerificationCode, normalizeVerificationCode } from '$lib/settings/verification-code';
@@ -87,6 +87,7 @@ export const GET: RequestHandler = async ({ locals, platform }) => {
 		const factors = await listTotpFactors(platform, session.user.id);
 		return json({ factors: factors.map(publicFactor) });
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error('Failed to list MFA factors', cause);
 		error(502, { message: 'Could not load two-factor methods.' });
 	}
@@ -113,6 +114,7 @@ export const POST: RequestHandler = async ({ locals, platform }) => {
 			secret: enrollment.authenticationFactor.totp.secret
 		});
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error('Failed to start MFA setup', cause);
 		error(502, { message: 'Could not start two-factor setup.' });
 	}
@@ -146,6 +148,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request }) => {
 		const refreshedFactors = await listTotpFactors(platform, session.user.id);
 		return json({ verified: true, factors: refreshedFactors.map(publicFactor) });
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error('Failed to verify MFA setup', cause);
 		error(400, { message: 'That code did not match.' });
 	}
@@ -162,6 +165,7 @@ export const DELETE: RequestHandler = async ({ locals, platform, request }) => {
 		const factors = await listTotpFactors(platform, session.user.id);
 		return json({ factors: factors.map(publicFactor) });
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error('Failed to delete MFA factor', cause);
 		error(502, { message: 'Could not remove two-factor method.' });
 	}

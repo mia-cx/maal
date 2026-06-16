@@ -60,6 +60,7 @@ export const GET: RequestHandler = async ({ locals, platform }) => {
 		]);
 		return json({ keys, households });
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error(cause);
 		error(503, { message: 'MCP key storage is not available.' });
 	}
@@ -77,10 +78,9 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 	const preset = presets.has(body.preset as McpKeyPreset)
 		? (body.preset as McpKeyPreset)
 		: undefined;
-	const householdScope = await readHouseholdScope(platform, session.user.id, body.householdScope);
-	const selectedScopes = readScopes(body.scopes);
-
 	try {
+		const householdScope = await readHouseholdScope(platform, session.user.id, body.householdScope);
+		const selectedScopes = readScopes(body.scopes);
 		const created = await createMcpKey({
 			platform,
 			userId: session.user.id,
@@ -91,6 +91,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 		});
 		return json(created, { status: 201 });
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error(cause);
 		error(503, { message: 'MCP key storage is not available.' });
 	}

@@ -1,4 +1,4 @@
-import { error, json, type RequestHandler } from '@sveltejs/kit';
+import { error, isHttpError, json, type RequestHandler } from '@sveltejs/kit';
 import { readJsonObject } from '$lib/server/http/request';
 import { isVerificationCode, normalizeVerificationCode } from '$lib/settings/verification-code';
 import {
@@ -38,6 +38,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 		await sendWorkosEmailChangeCode(platform, session.user.id, email);
 		return json({ ok: true, email });
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error('Failed to send WorkOS email change code', cause);
 		error(502, { message: 'Could not send verification email.' });
 	}
@@ -57,7 +58,8 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 
 		return json({ user: toPublicSettingsUser(user) });
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error('Failed to confirm WorkOS email change', cause);
-		error(400, { message: 'Could not verify that code.' });
+		error(502, { message: 'Could not verify that code.' });
 	}
 };
