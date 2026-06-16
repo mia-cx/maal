@@ -100,6 +100,36 @@ const validateCook = async (
 	}
 };
 
+type HouseholdMealPatch = Partial<typeof householdMeals.$inferInsert>;
+
+const mealUpdatePayload = (
+	patch: UpdateHouseholdMealInput['patch'],
+	existingMeal: typeof householdMeals.$inferSelect,
+	plannedCookWorkosUserId: string | null | undefined,
+	updatedAt: string
+): HouseholdMealPatch => {
+	const update: HouseholdMealPatch = { updatedAt };
+	if (patch.date !== undefined) update.date = patch.date;
+	if (patch.time !== undefined) update.time = patch.time;
+	if (patch.sortOrder !== undefined) update.sortOrder = patch.sortOrder;
+	if (patch.plannedCookUserId !== undefined)
+		update.plannedCookWorkosUserId = plannedCookWorkosUserId;
+	if (patch.servingsPlanned !== undefined) {
+		update.plannedYield = normalizeServingsPlanned(
+			{ servingsPlanned: patch.servingsPlanned },
+			existingMeal.plannedYield ?? 1
+		);
+	}
+	if (patch.status !== undefined) update.status = patch.status;
+	if (patch.title !== undefined) update.title = patch.title;
+	if (patch.imageUrl !== undefined) update.imageUrl = patch.imageUrl;
+	if (patch.yield !== undefined) update.yield = patch.yield;
+	if (patch.prepTimeMinutes !== undefined) update.prepTimeMinutes = patch.prepTimeMinutes;
+	if (patch.description !== undefined) update.description = patch.description;
+	if (patch.cookTimeMinutes !== undefined) update.cookTimeMinutes = patch.cookTimeMinutes;
+	return update;
+};
+
 export const defaultMealServings = async (
 	platform: App.Platform | undefined,
 	householdId: string
@@ -144,33 +174,37 @@ export const createHouseholdMeal = async (input: {
 	if (meal.userRecipeId && !recipe) throw new DomainError('recipe_not_found', 'Recipe not found.');
 
 	const householdMealId = crypto.randomUUID();
-	await db.insert(householdMeals).values({
-		id: householdMealId,
-		householdId: meal.householdId,
-		title: recipe?.title ?? meal.customMeal?.title?.trim() ?? 'New meal',
-		description: recipe?.description ?? meal.customMeal?.description ?? null,
-		imageUrl: recipe?.imageUrl ?? meal.customMeal?.imageUrl ?? null,
-		prepTimeMinutes: recipe?.prepTimeMinutes ?? meal.customMeal?.prepTimeMinutes ?? null,
-		cookTimeMinutes: recipe?.cookTimeMinutes ?? meal.customMeal?.cookTimeMinutes ?? null,
-		yield: recipe?.yield ?? meal.customMeal?.yield ?? servingsDefault,
-		plannedYield: normalizeServingsPlanned(
-			{ servingsPlanned: meal.servingsPlanned },
-			servingsDefault
-		),
-		plannedCookWorkosUserId,
-		date: meal.date ?? null,
-		time: meal.time ?? null,
-		sortOrder: meal.sortOrder ?? null,
-		status: 'planned'
-	});
+	await db.transaction(async (tx) => {
+		await tx.insert(householdMeals).values({
+			id: householdMealId,
+			householdId: meal.householdId,
+			title: recipe?.title ?? meal.customMeal?.title?.trim() ?? 'New meal',
+			description: recipe?.description ?? meal.customMeal?.description ?? null,
+			imageUrl: recipe?.imageUrl ?? meal.customMeal?.imageUrl ?? null,
+			prepTimeMinutes: recipe?.prepTimeMinutes ?? meal.customMeal?.prepTimeMinutes ?? null,
+			cookTimeMinutes: recipe?.cookTimeMinutes ?? meal.customMeal?.cookTimeMinutes ?? null,
+			yield: recipe?.yield ?? meal.customMeal?.yield ?? servingsDefault,
+			plannedYield: normalizeServingsPlanned(
+				{ servingsPlanned: meal.servingsPlanned },
+				servingsDefault
+			),
+			plannedCookWorkosUserId,
+			date: meal.date ?? null,
+			time: meal.time ?? null,
+			sortOrder: meal.sortOrder ?? null,
+			status: 'planned'
+		});
 
-	if (recipe) {
-		await db.insert(householdMealUserRecipes).values({ householdMealId, userRecipeId: recipe.id });
-		await copyRecipeSidecarsToMeal(db, recipe.id, householdMealId);
-	} else {
-		await replaceMealIngredientsFromLines(db, householdMealId, meal.customMeal?.ingredients);
-		await replaceMealInstructionsFromLines(db, householdMealId, meal.customMeal?.instructions);
-	}
+		if (recipe) {
+			await tx
+				.insert(householdMealUserRecipes)
+				.values({ householdMealId, userRecipeId: recipe.id });
+			await copyRecipeSidecarsToMeal(tx, recipe.id, householdMealId);
+		} else {
+			await replaceMealIngredientsFromLines(tx, householdMealId, meal.customMeal?.ingredients);
+			await replaceMealInstructionsFromLines(tx, householdMealId, meal.customMeal?.instructions);
+		}
+	});
 
 	return getHouseholdMeal({
 		db,
@@ -194,7 +228,8 @@ export const getHouseholdMeal = async (input: {
 	const rows = await loadMealPlanMeals(input.db, {
 		workosUserId: input.workosUserId,
 		householdId: input.householdId,
-		unitPreferences
+		unitPreferences,
+		mealId: input.mealId
 	});
 	const meal = rows.find((candidate) => candidate.id === input.mealId);
 	if (!meal) throw new DomainError('meal_not_found', 'Meal not found.');
@@ -221,43 +256,18 @@ export const updateHouseholdMeal = async (input: {
 			: meal.patch.plannedCookUserId;
 	await validateCook(input.platform, meal.householdId, plannedCookWorkosUserId);
 	const updatedAt = new Date().toISOString();
-	await db
-		.update(householdMeals)
-		.set({
-			date: meal.patch.date === undefined ? existingMeal.date : meal.patch.date,
-			time: meal.patch.time === undefined ? existingMeal.time : meal.patch.time,
-			sortOrder: meal.patch.sortOrder === undefined ? existingMeal.sortOrder : meal.patch.sortOrder,
-			plannedCookWorkosUserId,
-			plannedYield:
-				meal.patch.servingsPlanned === undefined
-					? existingMeal.plannedYield
-					: normalizeServingsPlanned(
-							{ servingsPlanned: meal.patch.servingsPlanned },
-							existingMeal.plannedYield ?? 1
-						),
-			status: meal.patch.status ?? existingMeal.status,
-			title: meal.patch.title ?? existingMeal.title,
-			imageUrl: meal.patch.imageUrl === undefined ? existingMeal.imageUrl : meal.patch.imageUrl,
-			yield: meal.patch.yield === undefined ? existingMeal.yield : meal.patch.yield,
-			prepTimeMinutes:
-				meal.patch.prepTimeMinutes === undefined
-					? existingMeal.prepTimeMinutes
-					: meal.patch.prepTimeMinutes,
-			description:
-				meal.patch.description === undefined ? existingMeal.description : meal.patch.description,
-			cookTimeMinutes:
-				meal.patch.cookTimeMinutes === undefined
-					? existingMeal.cookTimeMinutes
-					: meal.patch.cookTimeMinutes,
-			updatedAt
-		})
-		.where(eq(householdMeals.id, existingMeal.id));
-	if (meal.patch.ingredients !== undefined) {
-		await replaceMealIngredientsFromLines(db, existingMeal.id, meal.patch.ingredients);
-	}
-	if (meal.patch.instructions !== undefined) {
-		await replaceMealInstructionsFromLines(db, existingMeal.id, meal.patch.instructions);
-	}
+	await db.transaction(async (tx) => {
+		await tx
+			.update(householdMeals)
+			.set(mealUpdatePayload(meal.patch, existingMeal, plannedCookWorkosUserId, updatedAt))
+			.where(eq(householdMeals.id, existingMeal.id));
+		if (meal.patch.ingredients !== undefined) {
+			await replaceMealIngredientsFromLines(tx, existingMeal.id, meal.patch.ingredients);
+		}
+		if (meal.patch.instructions !== undefined) {
+			await replaceMealInstructionsFromLines(tx, existingMeal.id, meal.patch.instructions);
+		}
+	});
 	return getHouseholdMeal({
 		db,
 		workosUserId: meal.workosUserId,

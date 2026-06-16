@@ -14,7 +14,7 @@ import {
 	userRecipeInstructions,
 	userRecipes
 } from '$lib/server/db/schema';
-import type { MealFeedbackVerdict } from '$lib/components/dashboard/meal-labels';
+import type { MealFeedbackVerdict } from '$lib/domain/meal-feedback';
 import type { Meal } from '$lib/components/dashboard/schedule-types';
 import type {
 	RecipeIngredientItem,
@@ -536,6 +536,7 @@ export const loadMealPlanMeals = async (
 		endDate?: string;
 		unitPreferences?: UnitPreferences;
 		includeMealPool?: boolean;
+		mealId?: string;
 	}
 ) => {
 	const includeMealPool = params.includeMealPool ?? true;
@@ -556,7 +557,13 @@ export const loadMealPlanMeals = async (
 	const householdMealRows = await db
 		.select()
 		.from(householdMeals)
-		.where(and(eq(householdMeals.householdId, params.householdId), dateRangeFilter))
+		.where(
+			and(
+				eq(householdMeals.householdId, params.householdId),
+				params.mealId !== undefined ? eq(householdMeals.id, params.mealId) : undefined,
+				dateRangeFilter
+			)
+		)
 		.orderBy(
 			asc(householdMeals.date),
 			asc(householdMeals.time),
