@@ -168,7 +168,13 @@ export const startHouseholdTrial = async (input: {
 				cleanupFailures.push(cleanupCause);
 			}
 		}
-		if (subscriptionCanceled && customerDeleted) {
+		// Clear local state when no external Stripe resources remain that would
+		// need webhook reconciliation. If a subscription was created but not
+		// successfully canceled, or a customer was created but not successfully
+		// deleted, the local rollback-pending row must stay for reconciliation.
+		const noSubscriptionRemains = !subscriptionId || subscriptionCanceled;
+		const noCustomerRemains = !customerId || customerDeleted;
+		if (noSubscriptionRemains && noCustomerRemains) {
 			try {
 				await db
 					.update(users)
@@ -186,8 +192,8 @@ export const startHouseholdTrial = async (input: {
 						subscriptionId
 					});
 					localRecordDeleted = true;
-				} catch (cleanupCause) {
-					cleanupFailures.push(cleanupCause);
+			} catch (cleanupCause) {
+				cleanupFailures.push(cleanupCause);
 			}
 			}
 		}
@@ -195,8 +201,10 @@ export const startHouseholdTrial = async (input: {
 			throw new AggregateError(
 				[cause, ...cleanupFailures],
 				localRecordDeleted
-					? 'Trial start failed; local record cleaned up but some Stripe cleanup failed'
-					: 'Trial start failed and rollback was incomplete',
+					? 'Trial start failed; local record cleaned up'
+					: noSubscriptionRemains && noCustomerRemains
+						? 'Trial start failed; external cleanup succeeded but local cleanup incomplete'
+						: 'Trial start failed and rollback was incomplete',
 				{ cause }
 			);
 		}
