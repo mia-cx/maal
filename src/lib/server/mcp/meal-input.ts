@@ -5,6 +5,7 @@ import {
 } from '$lib/server/domains/planning';
 import { createUserRecipe, fetchRecipeFromUrlForImport } from '$lib/server/domains/recipes';
 import { arrayOfStrings, isRecord, optionalNumber, text } from './scalars';
+import { toolError } from './results';
 import type { McpContext } from './context';
 
 export const recipeFromArgs = (
@@ -21,11 +22,11 @@ export const recipeFromArgs = (
 	prepTimeMinutes: optionalNumber(value.prepTimeMinutes),
 	cookTimeMinutes: optionalNumber(value.cookTimeMinutes),
 	yield: optionalNumber(value.yield),
-	ingredients: (arrayOfStrings(value.ingredients) ?? []).map((line) => ({
+	ingredients: (arrayOfStrings(value.ingredients, 'ingredients') ?? []).map((line) => ({
 		amount: '',
 		item: line
 	})),
-	instructions: (arrayOfStrings(value.instructions) ?? []).map((line, index) => ({
+	instructions: (arrayOfStrings(value.instructions, 'instructions') ?? []).map((line, index) => ({
 		position: index,
 		text: line
 	})),
@@ -44,11 +45,11 @@ export const recipePatchFromArgs = (value: Record<string, unknown>): Partial<Rec
 	prepTimeMinutes: optionalNumber(value.prepTimeMinutes),
 	cookTimeMinutes: optionalNumber(value.cookTimeMinutes),
 	yield: optionalNumber(value.yield),
-	ingredients: arrayOfStrings(value.ingredients)?.map((line) => ({
+	ingredients: arrayOfStrings(value.ingredients, 'ingredients')?.map((line) => ({
 		amount: '',
 		item: line
 	})),
-	instructions: arrayOfStrings(value.instructions)?.map((line, index) => ({
+	instructions: arrayOfStrings(value.instructions, 'instructions')?.map((line, index) => ({
 		position: index,
 		text: line
 	})),
@@ -70,8 +71,8 @@ export const mealPatchFromArgs = (
 	title: text(value.title),
 	description: value.description === null ? null : text(value.description),
 	cookTimeMinutes: value.cookTimeMinutes === null ? null : optionalNumber(value.cookTimeMinutes),
-	ingredients: arrayOfStrings(value.ingredients),
-	instructions: arrayOfStrings(value.instructions)
+	ingredients: arrayOfStrings(value.ingredients, 'ingredients'),
+	instructions: arrayOfStrings(value.instructions, 'instructions')
 });
 
 const customMealFromArgs = (
@@ -83,8 +84,8 @@ const customMealFromArgs = (
 				description: text(args.customMeal.description),
 				imageUrl: text(args.customMeal.imageUrl),
 				cookTimeMinutes: optionalNumber(args.customMeal.cookTimeMinutes),
-				ingredients: arrayOfStrings(args.customMeal.ingredients),
-				instructions: arrayOfStrings(args.customMeal.instructions)
+				ingredients: arrayOfStrings(args.customMeal.ingredients, 'customMeal.ingredients'),
+				instructions: arrayOfStrings(args.customMeal.instructions, 'customMeal.instructions')
 			}
 		: undefined;
 
@@ -111,6 +112,10 @@ export const createMealResolvingRecipe = async (
 	args: Record<string, unknown>
 ): Promise<CreateHouseholdMealInput> => {
 	const url = text(args.url);
+	const sources = [url, text(args.userRecipeId), isRecord(args.recipe), isRecord(args.customMeal)].filter(Boolean);
+	if (sources.length !== 1) {
+		throw toolError('invalid_input', 'Pass exactly one meal source: url, userRecipeId, recipe, or customMeal.');
+	}
 	if (url) {
 		const recipe = await createUserRecipe({
 			db: context.db,

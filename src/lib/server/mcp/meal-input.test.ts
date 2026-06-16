@@ -15,7 +15,7 @@ describe('MCP meal input mapping', () => {
 				prepTimeMinutes: '10',
 				cookTimeMinutes: 20,
 				yield: '4',
-				ingredients: ['onion', 3, 'stock'],
+				ingredients: ['onion', 'stock'],
 				instructions: ['Chop', 'Simmer'],
 				userNotes: 'Use leftovers'
 			})

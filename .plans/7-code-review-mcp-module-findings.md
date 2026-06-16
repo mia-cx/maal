@@ -10,7 +10,7 @@ Address MCP module code-review findings by tightening input validation, permissi
 - [ ] MCP tests cover the fixed behavior and validation commands pass.
 
 ## TODOs
-- [ ] Tighten scalar, required-id, meal source, date range, and batch meal input validation.
+- [x] Tighten scalar, required-id, meal source, date range, and batch meal input validation.
 - [ ] Enforce check-in role permissions and update planning tools to use strict required IDs.
 - [ ] Harden registry, protocol cleanup, result serialization, recipe delete semantics, and pagination behavior.
 - [ ] Add or update MCP unit tests for the fixed review findings.
@@ -19,3 +19,6 @@ Address MCP module code-review findings by tightening input validation, permissi
 ## Notes
 - Created worktree from `origin/main` because the repository root had unrelated uncommitted changes.
 - Issue body validation target: `pnpm check`, `pnpm test:unit -- --run src/lib/server/mcp`, `pnpm architecture:check`.
+
+- Tightened scalar helpers, meal source exclusivity, date range validation, and batch meal validation.
+- Validation: `pnpm test:unit -- --run src/lib/server/mcp/meal-input.test.ts src/lib/server/mcp/plan-range.test.ts` passed.

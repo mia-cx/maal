@@ -1,15 +1,30 @@
+import { toolError } from './results';
+
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === 'object' && value !== null;
+	typeof value === 'object' && value !== null && !Array.isArray(value);
 
 export const text = (value: unknown): string | undefined =>
 	typeof value === 'string' && value.trim() ? value.trim() : undefined;
 
+export const requireNonEmptyText = (value: unknown, name: string): string => {
+	const result = text(value);
+	if (!result) throw toolError('invalid_input', `${name} is required.`);
+	return result;
+};
+
 export const optionalNumber = (value: unknown): number | undefined => {
+	if (value === undefined) return undefined;
+	if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+	if (typeof value !== 'string' || !value.trim()) return undefined;
 	const number = Number(value);
 	return Number.isFinite(number) ? number : undefined;
 };
 
-export const arrayOfStrings = (value: unknown): string[] | undefined =>
-	Array.isArray(value)
-		? value.filter((item): item is string => typeof item === 'string')
-		: undefined;
+export const arrayOfStrings = (value: unknown, name = 'array'): string[] | undefined => {
+	if (value === undefined) return undefined;
+	if (!Array.isArray(value)) throw toolError('invalid_input', `${name} must be an array of strings.`);
+	if (value.some((item) => typeof item !== 'string')) {
+		throw toolError('invalid_input', `${name} must contain only strings.`);
+	}
+	return value;
+};
