@@ -7,7 +7,18 @@ const recipeImportHeaders = {
 
 const maxRedirects = 3;
 const requestTimeoutMs = 8_000;
+const dnsTimeoutMs = 3_000;
 const blockedHostnameSuffixes = ['.localhost', '.local', '.internal', '.lan', '.home', '.corp'];
+
+export type DnsResolver = (hostname: string) => Promise<string[]>;
+
+export type RecipeImportFetchOptions = {
+	fetcher?: typeof fetch;
+	resolveHostname?: DnsResolver;
+};
+
+type DnsJsonAnswer = { data?: unknown };
+type DnsJsonResponse = { Answer?: DnsJsonAnswer[] };
 
 export class RecipeImportFetchError extends Error {
 	constructor(message: string) {
@@ -32,6 +43,15 @@ const parseRecipeImportUrl = (url: string): URL => {
 
 const normalizedHostname = (hostname: string): string =>
 	hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '').replace(/\.$/, '');
+
+const isIpv4Hostname = (hostname: string): boolean => parseIpv4(hostname) !== undefined;
+
+const isIpv6Hostname = (hostname: string): boolean => hostname.includes(':');
+
+const hostnameRequiresDnsResolution = (hostname: string): boolean => {
+	const normalized = normalizedHostname(hostname);
+	return !isIpv4Hostname(normalized) && !isIpv6Hostname(normalized);
+};
 
 const assertPublicHostname = (hostname: string) => {
 	const normalized = normalizedHostname(hostname);
@@ -70,14 +90,17 @@ const parseIpv4 = (hostname: string): [number, number, number, number] | undefin
 	return parsed as [number, number, number, number];
 };
 
-const isPublicIpv4 = ([a, b]: [number, number, number, number]): boolean => {
+const isPublicIpv4 = ([a, b, c]: [number, number, number, number]): boolean => {
 	if (a === 0 || a === 10 || a === 127) return false;
 	if (a === 100 && b >= 64 && b <= 127) return false;
 	if (a === 169 && b === 254) return false;
 	if (a === 172 && b >= 16 && b <= 31) return false;
 	if (a === 192 && b === 168) return false;
 	if (a === 192 && b === 0) return false;
+	if (a === 192 && b === 2) return false;
+	if (a === 198 && b === 51 && c === 100) return false;
 	if (a === 198 && (b === 18 || b === 19)) return false;
+	if (a === 203 && b === 0 && c === 113) return false;
 	if (a >= 224) return false;
 	return true;
 };
@@ -132,6 +155,55 @@ const readLimitedText = async (response: Response, maxBytes: number): Promise<st
 	return new TextDecoder().decode(bytes);
 };
 
+const fetchJsonWithTimeout = async <T>(url: URL): Promise<T> => {
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), dnsTimeoutMs);
+	try {
+		const response = await fetch(url, {
+			headers: { accept: 'application/dns-json' },
+			signal: controller.signal
+		});
+		if (!response.ok) throw new RecipeImportFetchError('Could not resolve recipe URL host.');
+		return (await response.json()) as T;
+	} catch (cause) {
+		if (cause instanceof RecipeImportFetchError) throw cause;
+		throw new RecipeImportFetchError('Could not resolve recipe URL host.');
+	} finally {
+		clearTimeout(timeout);
+	}
+};
+
+const dnsJsonUrl = (hostname: string, type: 'A' | 'AAAA'): URL => {
+	const url = new URL('https://cloudflare-dns.com/dns-query');
+	url.searchParams.set('name', hostname);
+	url.searchParams.set('type', type);
+	return url;
+};
+
+const resolvedAddressesFromDnsJson = (response: DnsJsonResponse): string[] =>
+	(response.Answer ?? [])
+		.map((answer) => answer.data)
+		.filter((data): data is string => typeof data === 'string')
+		.map(normalizedHostname)
+		.filter((address) => isIpv4Hostname(address) || isIpv6Hostname(address));
+
+const resolveHostnameAddresses: DnsResolver = async (hostname) => {
+	const [a, aaaa] = await Promise.all([
+		fetchJsonWithTimeout<DnsJsonResponse>(dnsJsonUrl(hostname, 'A')),
+		fetchJsonWithTimeout<DnsJsonResponse>(dnsJsonUrl(hostname, 'AAAA'))
+	]);
+	return [...resolvedAddressesFromDnsJson(a), ...resolvedAddressesFromDnsJson(aaaa)];
+};
+
+const assertResolvedHostnameIsPublic = async (hostname: string, resolveHostname: DnsResolver) => {
+	if (!hostnameRequiresDnsResolution(hostname)) return;
+	const addresses = await resolveHostname(normalizedHostname(hostname));
+	if (!addresses.length) throw new RecipeImportFetchError('Could not resolve recipe URL host.');
+	for (const address of addresses) {
+		assertPublicHostname(address);
+	}
+};
+
 const fetchWithTimeout = async (url: URL, fetcher: typeof fetch): Promise<Response> => {
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
@@ -149,12 +221,13 @@ const fetchWithTimeout = async (url: URL, fetcher: typeof fetch): Promise<Respon
 export const fetchRecipeImportPage = async (
 	url: string,
 	maxBytes: number,
-	fetcher: typeof fetch = fetch
+	{ fetcher = fetch, resolveHostname = resolveHostnameAddresses }: RecipeImportFetchOptions = {}
 ): Promise<{ html: string; finalUrl: string }> => {
 	let currentUrl = parseRecipeImportUrl(url);
 	for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
 		let response: Response;
 		try {
+			await assertResolvedHostnameIsPublic(currentUrl.hostname, resolveHostname);
 			response = await fetchWithTimeout(currentUrl, fetcher);
 		} catch (cause) {
 			if (cause instanceof RecipeImportFetchError) throw cause;
