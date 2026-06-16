@@ -20,7 +20,7 @@ Fix billing review findings around Stripe price policy, trial cleanup, webhook s
 - [x] Centralize billing price policy and trial default pagination.
 - [x] Harden trial rollback for created Stripe resources and cleanup failures.
 - [x] Skip non-subscription checkout completion webhooks and separate webhook config errors.
-- [ ] Clean up entitlements cache/API and period-end conversion.
+- [x] Clean up entitlements cache/API and period-end conversion.
 - [ ] Replace Stripe pricing test casts with typed fixture helpers.
 - [ ] Run final billing validation.
 
@@ -34,3 +34,6 @@ Fix billing review findings around Stripe price policy, trial cleanup, webhook s
 - Validation: `pnpm check` failed before typechecking because `worker-configuration.d.ts` is missing; will regenerate/check in final validation.
 - Checkout completion webhooks now return without upserting unless the session is subscription-mode with a present subscription. Webhook secret is resolved before signature verification so server config errors are not caught as bad signatures.
 - Validation: `pnpm exec tsc --noEmit --skipLibCheck` also stops on missing `worker-configuration.d.ts`; final validation will regenerate it.
+- Entitlement grant cache now deletes expired entries on read; entitlements APIs no longer accept unused `database`; removed dead status-view import; period end conversion handles timestamp `0`.
+- While validating, fixed the paginated trial price call to use Stripe's typed `autoPagingEach` and tightened the pricing option type guard.
+- Validation: `pnpm gen` regenerated/checks worker types, then `pnpm check` passed.

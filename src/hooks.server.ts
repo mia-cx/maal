@@ -62,7 +62,7 @@ const activeSubscribedHouseholdId = async (
 	session: NonNullable<App.Locals['session']>
 ): Promise<string | null> => {
 	const households = await listUserHouseholds(platform, session.user.id).catch(() => []);
-	return firstAccessibleHouseholdId({ platform, database: platform.env.DB, households });
+	return firstAccessibleHouseholdId({ platform, households });
 };
 
 const handleSubscriptionGate: Handle = async ({ event, resolve }) => {
@@ -86,7 +86,6 @@ const handleSubscriptionGate: Handle = async ({ event, resolve }) => {
 
 	const hasAccess = await hasHouseholdAccess({
 		platform: event.platform,
-		database: event.platform.env.DB,
 		householdId
 	});
 	if (!hasAccess) {

@@ -19,6 +19,14 @@ const lifetimeGrantPresenceKeys = ['lifetime_grant', 'maal_lifetime_grant'];
 const grantCacheTtlMs = 60_000;
 const grantCache = new Map<string, { value: boolean; expiresAt: number }>();
 
+const cachedGrant = (householdId: string): boolean | null => {
+	const cached = grantCache.get(householdId);
+	if (!cached) return null;
+	if (cached.expiresAt > Date.now()) return cached.value;
+	grantCache.delete(householdId);
+	return null;
+};
+
 const splitGrantList = (value: unknown): string[] =>
 	typeof value === 'string'
 		? value
@@ -50,8 +58,8 @@ export const hasHouseholdBillingGrant = async (input: {
 	platform?: App.Platform;
 	householdId: string;
 }): Promise<boolean> => {
-	const cached = grantCache.get(input.householdId);
-	if (cached && cached.expiresAt > Date.now()) return cached.value;
+	const cached = cachedGrant(input.householdId);
+	if (cached !== null) return cached;
 
 	const runtime = tryCreateAuthRuntime(input.platform);
 	if (!runtime) return false;
@@ -66,7 +74,6 @@ export const hasHouseholdBillingGrant = async (input: {
 
 export const hasHouseholdAccess = async (input: {
 	platform?: App.Platform;
-	database: D1Database;
 	householdId: string;
 }): Promise<boolean> => {
 	if (await hasHouseholdBillingGrant(input).catch(() => false)) return true;
@@ -75,7 +82,6 @@ export const hasHouseholdAccess = async (input: {
 
 export const firstAccessibleHouseholdId = async (input: {
 	platform?: App.Platform;
-	database: D1Database;
 	households: Array<{ id: string }>;
 }): Promise<string | null> => {
 	for (const household of input.households) {

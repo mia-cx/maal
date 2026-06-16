@@ -20,14 +20,11 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 
 	const activeHouseholdHasAccess = await hasHouseholdAccess({
 		platform,
-		database: platform.env.DB,
 		householdId
 	});
 	if (!activeHouseholdHasAccess) {
 		const households = await listUserHouseholds(platform, session.user.id).catch(() => []);
-		householdId =
-			(await firstAccessibleHouseholdId({ platform, database: platform.env.DB, households })) ??
-			householdId;
+		householdId = (await firstAccessibleHouseholdId({ platform, households })) ?? householdId;
 	}
 	commitHouseholdCookie(cookies, householdId, url);
 

@@ -8,6 +8,7 @@ export const requireHouseholdAccess = async (input: {
 	session: AuthSession;
 	householdId: string;
 }): Promise<void> => {
-	if (await hasHouseholdAccess(input)) return;
+	if (await hasHouseholdAccess({ platform: input.platform, householdId: input.householdId }))
+		return;
 	error(402, { message: 'An active Maal plan is required for this household.' });
 };

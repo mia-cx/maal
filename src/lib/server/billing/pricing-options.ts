@@ -83,7 +83,7 @@ export const paidRecurringPricingOptionsForProduct = (
 ): PricingOption[] =>
 	prices
 		.map((price) => pricingOptionForProductPrice(price, productId))
-		.filter((option): option is PricingOption => Boolean(option) && option.amount > 0);
+		.filter((option): option is PricingOption => option !== null && option.amount > 0);
 
 export const trialDefaultPricingOptionFromPrices = (
 	prices: Stripe.Price[],
@@ -91,6 +91,5 @@ export const trialDefaultPricingOptionFromPrices = (
 ): PricingOption | null =>
 	paidRecurringPricingOptionsForProduct(prices, productId).sort(
 		(left, right) =>
-			(trialDefaultOrder.get(left.interval) ?? 99) -
-			(trialDefaultOrder.get(right.interval) ?? 99)
+			(trialDefaultOrder.get(left.interval) ?? 99) - (trialDefaultOrder.get(right.interval) ?? 99)
 	)[0] ?? null;

@@ -18,11 +18,11 @@ const trialDays = (): number => {
 
 const findDefaultTrialPriceId = async (stripe: Stripe, productId: string): Promise<string> => {
 	const prices: Stripe.Price[] = [];
-	for await (const price of stripe.prices
+	await stripe.prices
 		.list({ product: productId, active: true, limit: 100 })
-		.autoPagingIterable()) {
-		prices.push(price);
-	}
+		.autoPagingEach((price) => {
+			prices.push(price);
+		});
 
 	const priceId = trialDefaultPricingOptionFromPrices(prices, productId)?.id;
 	if (!priceId) throw new Error('No paid recurring Stripe price is configured for trials.');
