@@ -148,6 +148,10 @@ const startMembershipMutationLockRenewal = ({
 	};
 };
 
+type MembershipMutationContext = {
+	ensureLockActive: () => Promise<boolean>;
+};
+
 const runSerializedMembershipMutation = async <T>({
 	database,
 	householdId,
@@ -156,16 +160,20 @@ const runSerializedMembershipMutation = async <T>({
 }: {
 	database: D1Database;
 	householdId: string;
-	mutation: () => Promise<T>;
+	mutation: (context: MembershipMutationContext) => Promise<T>;
 	busyResult: T;
 }): Promise<T> => {
 	const ownerToken = await acquireMembershipMutationLock({ database, householdId });
 	if (!ownerToken) return busyResult;
 
 	const renewal = startMembershipMutationLockRenewal({ database, householdId, ownerToken });
+	const ensureLockActive = async () => {
+		if (renewal.getError()) return false;
+		return renewMembershipMutationLock({ database, householdId, ownerToken });
+	};
 
 	try {
-		return await mutation();
+		return await mutation({ ensureLockActive });
 	} finally {
 		renewal.stop();
 		await releaseMembershipMutationLock({ database, householdId, ownerToken });
@@ -201,7 +209,7 @@ export const updateMemberRoleFromForm = async ({
 			status: 409,
 			message: 'Household membership is changing. Try again in a moment.'
 		},
-		mutation: async () => {
+		mutation: async ({ ensureLockActive }) => {
 			const runtime = createAuthRuntime(platform);
 			const memberships = await listActiveHouseholdMemberships(platform, householdId);
 			const actorMembership = memberships.find(
@@ -234,6 +242,13 @@ export const updateMemberRoleFromForm = async ({
 			) {
 				return { ok: false, status: 400, message: lastManagerMessage };
 			}
+			if (!(await ensureLockActive())) {
+				return {
+					ok: false,
+					status: 409,
+					message: 'Household membership is changing. Try again in a moment.'
+				};
+			}
 
 			await runtime.workos.userManagement.updateOrganizationMembership(membershipId, { roleSlug });
 			return { ok: true, message: 'Member role updated.' };
@@ -260,7 +275,7 @@ export const leaveHouseholdMembership = async ({
 			status: 409,
 			message: 'Household membership is changing. Try again in a moment.'
 		},
-		mutation: async () => {
+		mutation: async ({ ensureLockActive }) => {
 			const runtime = createAuthRuntime(platform);
 			const memberships = await listActiveHouseholdMemberships(platform, householdId);
 			const currentMembership = memberships.find(
@@ -279,6 +294,13 @@ export const leaveHouseholdMembership = async ({
 			const adminCount = memberships.filter(membershipHasAdminRole).length;
 			if (isLastAdmin({ isAdmin: membershipHasAdminRole(currentMembership), adminCount })) {
 				return { ok: false, status: 400, message: lastManagerMessage };
+			}
+			if (!(await ensureLockActive())) {
+				return {
+					ok: false,
+					status: 409,
+					message: 'Household membership is changing. Try again in a moment.'
+				};
 			}
 
 			await runtime.workos.userManagement.deleteOrganizationMembership(currentMembership.id);
@@ -314,7 +336,7 @@ export const removeMemberFromForm = async ({
 			status: 409,
 			message: 'Household membership is changing. Try again in a moment.'
 		},
-		mutation: async () => {
+		mutation: async ({ ensureLockActive }) => {
 			const runtime = createAuthRuntime(platform);
 			const memberships = await listActiveHouseholdMemberships(platform, householdId);
 			const actorMembership = memberships.find(
@@ -339,6 +361,13 @@ export const removeMemberFromForm = async ({
 			const adminCount = memberships.filter(membershipHasAdminRole).length;
 			if (isLastAdmin({ isAdmin: membershipHasAdminRole(membership), adminCount })) {
 				return { ok: false, status: 400, message: lastManagerMessage };
+			}
+			if (!(await ensureLockActive())) {
+				return {
+					ok: false,
+					status: 409,
+					message: 'Household membership is changing. Try again in a moment.'
+				};
 			}
 
 			await runtime.workos.userManagement.deleteOrganizationMembership(membershipId);
