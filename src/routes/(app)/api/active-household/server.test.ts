@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAuthSession } from '$lib/server/auth/session-test-fixtures';
 
-const activateRequestedHouseholdId = vi.fn();
-const resolveActiveHouseholdId = vi.fn();
+const activateRequiredHouseholdId = vi.fn();
+const resolveRequiredActiveHouseholdId = vi.fn();
 
-vi.mock('$lib/server/auth/household', () => ({
-	activateRequestedHouseholdId,
-	resolveActiveHouseholdId
+vi.mock('$lib/server/http/app-context', () => ({
+	activateRequiredHouseholdId,
+	resolveRequiredActiveHouseholdId
 }));
 
 const { GET, POST } = await import('./+server');
@@ -44,15 +44,8 @@ const readJson = async (response: Response) => response.json() as Promise<Record
 describe('active-household API', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		resolveActiveHouseholdId.mockResolvedValue({
-			householdId: 'household_1',
-			hasAnyHousehold: true
-		});
-		activateRequestedHouseholdId.mockResolvedValue({
-			status: 'activated',
-			householdId: 'household_1',
-			hasAnyHousehold: true
-		});
+		resolveRequiredActiveHouseholdId.mockResolvedValue('household_1');
+		activateRequiredHouseholdId.mockResolvedValue('household_1');
 	});
 
 	it('returns the resolved active household', async () => {
@@ -60,7 +53,7 @@ describe('active-household API', () => {
 
 		expect(response.status).toBe(200);
 		await expect(readJson(response)).resolves.toEqual({ householdId: 'household_1' });
-		expect(resolveActiveHouseholdId).toHaveBeenCalledWith({
+		expect(resolveRequiredActiveHouseholdId).toHaveBeenCalledWith({
 			platform,
 			cookies,
 			url,
@@ -76,7 +69,12 @@ describe('active-household API', () => {
 	});
 
 	it('distinguishes users with no households', async () => {
-		resolveActiveHouseholdId.mockResolvedValue({ householdId: null, hasAnyHousehold: false });
+		resolveRequiredActiveHouseholdId.mockRejectedValue(
+			Object.assign(new Error('No households available.'), {
+				status: 404,
+				body: { message: 'No households available.' }
+			})
+		);
 
 		await expect(GET(event())).rejects.toMatchObject({
 			status: 404,
@@ -109,11 +107,12 @@ describe('active-household API', () => {
 	});
 
 	it('rejects inaccessible household activation', async () => {
-		activateRequestedHouseholdId.mockResolvedValue({
-			status: 'inaccessible',
-			householdId: 'household_2',
-			hasAnyHousehold: true
-		});
+		activateRequiredHouseholdId.mockRejectedValue(
+			Object.assign(new Error('Household is not accessible.'), {
+				status: 403,
+				body: { message: 'Household is not accessible.' }
+			})
+		);
 
 		await expect(
 			POST(
@@ -129,7 +128,7 @@ describe('active-household API', () => {
 			status: 403,
 			body: { message: 'Household is not accessible.' }
 		});
-		expect(activateRequestedHouseholdId).toHaveBeenCalledWith({
+		expect(activateRequiredHouseholdId).toHaveBeenCalledWith({
 			platform,
 			cookies,
 			url,
