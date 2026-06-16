@@ -15,7 +15,8 @@ export type HouseholdMemberCommandResult =
 	| { ok: true; message: string; clearHousehold?: boolean }
 	| { ok: false; status: number; message: string };
 
-const lockLeaseMilliseconds = 30_000;
+const lockLeaseMilliseconds = 120_000;
+const lockRenewalMilliseconds = 30_000;
 const lockAcquireTimeoutMilliseconds = 5_000;
 const lockRetryMilliseconds = 100;
 
@@ -60,6 +61,32 @@ const acquireMembershipMutationLock = async ({
 	return null;
 };
 
+const renewMembershipMutationLock = async ({
+	database,
+	householdId,
+	ownerToken
+}: {
+	database: D1Database;
+	householdId: string;
+	ownerToken: string;
+}): Promise<boolean> => {
+	const [lock] = await getDb(database)
+		.update(householdMembershipMutationLocks)
+		.set({
+			expiresAt: new Date(Date.now() + lockLeaseMilliseconds).toISOString(),
+			updatedAt: new Date().toISOString()
+		})
+		.where(
+			and(
+				eq(householdMembershipMutationLocks.householdId, householdId),
+				eq(householdMembershipMutationLocks.ownerToken, ownerToken)
+			)
+		)
+		.returning({ ownerToken: householdMembershipMutationLocks.ownerToken });
+
+	return Boolean(lock);
+};
+
 const releaseMembershipMutationLock = async ({
 	database,
 	householdId,
@@ -79,6 +106,44 @@ const releaseMembershipMutationLock = async ({
 		);
 };
 
+const startMembershipMutationLockRenewal = ({
+	database,
+	householdId,
+	ownerToken
+}: {
+	database: D1Database;
+	householdId: string;
+	ownerToken: string;
+}) => {
+	let renewing = true;
+	let renewalError: Error | null = null;
+
+	const done = (async () => {
+		while (renewing) {
+			await delay(lockRenewalMilliseconds);
+			if (!renewing) break;
+			const renewed = await renewMembershipMutationLock({ database, householdId, ownerToken });
+			if (!renewed) {
+				renewalError = new Error('Household membership mutation lock was lost.');
+				renewing = false;
+			}
+		}
+
+		return renewalError;
+	})().catch((error: unknown) =>
+		error instanceof Error ? error : new Error('Household membership mutation lock renewal failed.')
+	);
+
+	void done;
+
+	return {
+		stop: () => {
+			renewing = false;
+		},
+		getError: () => renewalError
+	};
+};
+
 const runSerializedMembershipMutation = async <T>({
 	database,
 	householdId,
@@ -93,10 +158,15 @@ const runSerializedMembershipMutation = async <T>({
 	const ownerToken = await acquireMembershipMutationLock({ database, householdId });
 	if (!ownerToken) return busyResult;
 
+	const renewal = startMembershipMutationLockRenewal({ database, householdId, ownerToken });
+
 	try {
 		return await mutation();
 	} finally {
+		renewal.stop();
 		await releaseMembershipMutationLock({ database, householdId, ownerToken });
+		const renewalError = renewal.getError();
+		if (renewalError) throw renewalError;
 	}
 };
 
