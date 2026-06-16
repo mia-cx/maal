@@ -34,7 +34,7 @@ export const updateHouseholdAppliancesFromForm = async ({
 			.values({ householdId, appliance, available, notes: notes.value })
 			.onConflictDoUpdate({
 				target: [householdAppliances.householdId, householdAppliances.appliance],
-				set: { available, notes, updatedAt: now }
+				set: { available, notes: notes.value, updatedAt: now }
 			});
 	}
 

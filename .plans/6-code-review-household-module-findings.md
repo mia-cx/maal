@@ -18,7 +18,7 @@ Address household module review findings around cross-system consistency, strict
 - [x] Add WorkOS membership pagination helpers and centralize last-manager rule behavior.
 - [x] Sequence/validate household settings updates with DB work before WorkOS updates and strict override schemas.
 - [x] Make household deletion cleanup transactional before WorkOS deletion.
-- [ ] Optimize household view independent reads and run validation.
+- [x] Optimize household view independent reads and run validation.
 
 ## Notes
 - Issue source: GitHub #6.
@@ -27,3 +27,5 @@ Address household module review findings around cross-system consistency, strict
 - Member list and leave/remove flows now use WorkOS autoPagination and shared last-manager copy/logic.
 - Household settings now validates JSON override rows and performs local DB updates before WorkOS organization changes.
 - Household delete now computes dependent ids first, deletes local rows in one transaction, then deletes the WorkOS organization.
+- Ran `pnpm exec wrangler types`, generated Paraglide files for local check, `pnpm check` passed after fixing appliance notes typing.
+- Ran `pnpm test:unit -- --run src/lib/server/household src/lib/domain/household` and `pnpm architecture:check`; both passed.

@@ -58,12 +58,11 @@ export const loadHouseholdView = async ({
 		preferredDinnerTime: null
 	};
 	const applianceByName = new Map(applianceRows.map((row) => [row.appliance, row]));
-	const displayOverrideRows = await loadDisplayOverrideRows(
-		database,
-		householdId,
-		profile.locale ?? defaultLocale
-	);
-	const taxonomyOptions = await loadTaxonomyOptions(database, profile.locale ?? defaultLocale);
+	const locale = profile.locale ?? defaultLocale;
+	const [displayOverrideRows, taxonomyOptions] = await Promise.all([
+		loadDisplayOverrideRows(database, householdId, locale),
+		loadTaxonomyOptions(database, locale)
+	]);
 
 	const leaveState = canCurrentUserLeaveHousehold(members, session.user.id);
 
