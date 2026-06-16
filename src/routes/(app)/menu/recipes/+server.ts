@@ -36,6 +36,10 @@ import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
 import { boundedPagination } from '$lib/shared/pagination';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { cleanImportedText } from '$lib/server/services/html-text';
+import {
+	fetchRecipeImportPage,
+	RecipeImportFetchError
+} from '$lib/server/services/recipe-import-fetch';
 
 const fallbackTitle = 'Untitled recipe';
 const maxTitleLength = 160;
@@ -273,38 +277,20 @@ const siteNameFromUrl = (url: string): string | undefined => {
 };
 
 const fetchRecipeFromUrl = async (url: string) => {
-	let parsedUrl: URL;
+	let html: string;
+	let finalUrl: string;
 	try {
-		parsedUrl = new URL(url);
-	} catch {
-		error(400, { message: 'Enter a valid recipe URL.' });
-	}
-	if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-		error(400, { message: 'Enter a valid recipe URL.' });
-	}
-
-	let response: Response;
-	try {
-		response = await fetch(parsedUrl, {
-			headers: {
-				accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-				'accept-language': 'nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
-				'user-agent':
-					'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36'
-			}
-		});
-	} catch {
+		({ html, finalUrl } = await fetchRecipeImportPage(url, maxImportBytes));
+	} catch (cause) {
+		if (cause instanceof RecipeImportFetchError && cause.message === 'Invalid recipe URL.') {
+			error(400, { message: 'Enter a valid recipe URL.' });
+		}
+		if (cause instanceof RecipeImportFetchError) {
+			error(502, { message: cause.message });
+		}
 		error(502, { message: 'Could not fetch that recipe page.' });
 	}
-	if (!response.ok) error(502, { message: 'Could not fetch that recipe page.' });
-
-	let html: string;
-	try {
-		html = (await response.text()).slice(0, maxImportBytes);
-	} catch {
-		error(502, { message: 'Could not read that recipe page.' });
-	}
-	const imported = recipeFromJsonLd(html, url);
+	const imported = recipeFromJsonLd(html, finalUrl);
 	if (!imported) error(422, { message: 'No schema.org Recipe data found on that page.' });
 
 	const recipe = imported.recipe;
@@ -312,11 +298,11 @@ const fetchRecipeFromUrl = async (url: string) => {
 	const sourcePublisherName = namedReference(recipe.publisher, imported.nodes);
 	return {
 		recipe,
-		sourceSiteName: sourcePublisherName ?? siteNameFromUrl(url),
+		sourceSiteName: sourcePublisherName ?? siteNameFromUrl(finalUrl),
 		sourceAuthorName,
 		sourcePublisherName,
 		sourceIsBasedOnUrl: firstString(recipe.isBasedOn),
-		sourceUrl: url
+		sourceUrl: finalUrl
 	};
 };
 

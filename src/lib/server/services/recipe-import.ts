@@ -1,5 +1,6 @@
 import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import { parseIngredientLine } from '$lib/recipes/ingredient-text';
+import { fetchRecipeImportPage } from './recipe-import-fetch';
 import { cleanImportedText } from './html-text';
 
 const maxImportBytes = 1_500_000;
@@ -117,36 +118,7 @@ const siteNameFromUrl = (url: string): string | undefined => {
 };
 
 export const fetchRecipeFromUrlForImport = async (url: string): Promise<RecipeMenuItem> => {
-	let parsedUrl: URL;
-	try {
-		parsedUrl = new URL(url);
-	} catch {
-		throw new Error('Invalid recipe URL.');
-	}
-	if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('Invalid recipe URL.');
-
-	let response: Response;
-	try {
-		response = await fetch(parsedUrl, {
-			headers: {
-				accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-				'accept-language': 'nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
-				'user-agent':
-					'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36'
-			}
-		});
-	} catch {
-		throw new Error('Could not fetch recipe page.');
-	}
-	if (!response.ok) throw new Error(`Could not fetch recipe page: HTTP ${response.status}.`);
-
-	let html: string;
-	try {
-		html = (await response.text()).slice(0, maxImportBytes);
-	} catch {
-		throw new Error('Could not read recipe page.');
-	}
-
+	const { html, finalUrl } = await fetchRecipeImportPage(url, maxImportBytes);
 	const nodes = parseJsonLdScripts(html).flatMap(flattenJsonLd);
 	const recipe = nodes.find((node) => recipeType(node['@type']));
 	if (!recipe) throw new Error('No schema.org JSON-LD Recipe data found on that page.');
@@ -161,8 +133,8 @@ export const fetchRecipeFromUrlForImport = async (url: string): Promise<RecipeMe
 		title: firstString(recipe.name, recipe.headline) ?? 'Imported recipe',
 		description: stringValue(recipe.description) ?? '',
 		image: firstString(recipe.image),
-		sourceUrl: url,
-		sourceSiteName: siteNameFromUrl(url),
+		sourceUrl: finalUrl,
+		sourceSiteName: siteNameFromUrl(finalUrl),
 		sourceClaimedMinutes: cookMinutesFromRecipe(recipe),
 		parseConfidence: 1,
 		ingredientConfidence: 1,
