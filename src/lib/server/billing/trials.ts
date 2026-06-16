@@ -130,6 +130,7 @@ export const startHouseholdTrial = async (input: {
 		return subscription;
 	} catch (cause) {
 		const cleanupFailures: unknown[] = [];
+		let localRecordDeleted = false;
 		if (customerId && subscriptionId) {
 			try {
 				await markSubscriptionRollbackPending({
@@ -142,6 +143,7 @@ export const startHouseholdTrial = async (input: {
 				cleanupFailures.push(cleanupCause);
 			}
 		}
+		let subscriptionCanceled = false;
 		if (stripe && subscriptionId) {
 			try {
 				await stripe.subscriptions.update(subscriptionId, {
@@ -152,44 +154,50 @@ export const startHouseholdTrial = async (input: {
 			}
 			try {
 				await stripe.subscriptions.cancel(subscriptionId);
+				subscriptionCanceled = true;
 			} catch (cleanupCause) {
 				cleanupFailures.push(cleanupCause);
 			}
 		}
+		let customerDeleted = false;
 		if (stripe && customerId) {
 			try {
 				await stripe.customers.del(customerId);
+				customerDeleted = true;
 			} catch (cleanupCause) {
 				cleanupFailures.push(cleanupCause);
 			}
 		}
-		try {
-			await db
-				.update(users)
-				.set({ trialHouseholdId: null, trialStartedAt: null })
-				.where(eq(users.workosUserId, input.user.id));
-		} catch (cleanupCause) {
-			cleanupFailures.push(cleanupCause);
-		}
-		if (customerId && subscriptionId) {
+		if (subscriptionCanceled && customerDeleted) {
 			try {
-				await deleteSubscriptionRecord({
-					database: input.platform.env.DB,
-					householdId: input.householdId,
-					customerId,
-					subscriptionId
-				});
+				await db
+					.update(users)
+					.set({ trialHouseholdId: null, trialStartedAt: null })
+					.where(eq(users.workosUserId, input.user.id));
 			} catch (cleanupCause) {
 				cleanupFailures.push(cleanupCause);
+			}
+			if (customerId && subscriptionId) {
+				try {
+					await deleteSubscriptionRecord({
+						database: input.platform.env.DB,
+						householdId: input.householdId,
+						customerId,
+						subscriptionId
+					});
+					localRecordDeleted = true;
+				} catch (cleanupCause) {
+					cleanupFailures.push(cleanupCause);
+			}
 			}
 		}
 		if (cleanupFailures.length) {
 			throw new AggregateError(
 				[cause, ...cleanupFailures],
-				'Trial start failed and rollback was incomplete',
-				{
-					cause
-				}
+				localRecordDeleted
+					? 'Trial start failed; local record cleaned up but some Stripe cleanup failed'
+					: 'Trial start failed and rollback was incomplete',
+				{ cause }
 			);
 		}
 		throw cause;
