@@ -178,7 +178,9 @@ const runSerializedMembershipMutation = async <T>({
 		renewal.stop();
 		await releaseMembershipMutationLock({ database, householdId, ownerToken });
 		const renewalError = renewal.getError();
-		if (renewalError) throw renewalError;
+		if (renewalError) {
+			console.error('Household membership mutation lock renewal failed', renewalError);
+		}
 	}
 };
 

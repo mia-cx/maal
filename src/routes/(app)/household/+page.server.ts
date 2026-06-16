@@ -179,12 +179,13 @@ export const actions: Actions = {
 	updateMemberRole: async (event) => {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
+		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
 
 		try {
 			return memberCommandResponse(
 				await updateMemberRoleFromForm({
 					platform: event.platform,
-					database: event.platform!.env.DB,
+					database: event.platform.env.DB,
 					householdId: managedHousehold.householdId,
 					session: managedHousehold.session,
 					form: await event.request.formData()
