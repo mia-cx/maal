@@ -22,7 +22,7 @@ Harden `src/lib/server/auth` against the high- and medium-priority review findin
 - [x] Fix household authorization/member helpers: shared smoke manage gate, WorkOS membership pagination, real active member counts, and cookie option reuse.
 - [x] Harden MCP key validation, expiration parsing, and stale-index recovery.
 - [x] Address small WorkOS runtime cleanups for cookie password length and cache key safety.
-- [ ] Run auth-focused tests/checks and fix any regressions.
+- [x] Run auth-focused tests/checks and fix any regressions.
 - [ ] File a PR targeting `main` with the executed plan and validation results.
 
 ## Notes
@@ -31,7 +31,8 @@ Harden `src/lib/server/auth` against the high- and medium-priority review findin
 - Household helper changes: added shared smoke-household gate, `autoPagination()` for active memberships, real active member counts, and aligned household cookie delete options. Meal serving defaults now apply their own minimum of 1 at call sites.
 - MCP key changes: records now require valid shape before use, malformed timestamps fail validation, verification uses shared expiry parsing, and user indexes are reconciled from canonical key scans.
 - WorkOS cleanup: named the minimum cookie password length and switched local cache keys to a serialized tuple.
-- Validation: `pnpm exec tsc --noEmit --pretty false --skipLibCheck` could not run because `worker-configuration.d.ts` is absent until Wrangler type generation.
+- Validation: initial `pnpm check` failed because `worker-configuration.d.ts` and generated Paraglide files were absent in the fresh worktree; generated them before rerunning checks.
+- Validation passed: `pnpm exec paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide && node scripts/patch-paraglide-types.mjs && pnpm check && pnpm test:unit -- --run src/lib/server/auth && pnpm architecture:check`.
 - Issue source: https://github.com/mia-cx/maal/issues/3
 - Worktree: `.worktrees/code-review-auth-fixes`
 - Branch: `fix/code-review-auth-findings`
