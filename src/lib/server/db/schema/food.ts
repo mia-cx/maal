@@ -13,7 +13,7 @@ import { households } from './households';
 import { units } from './units';
 import { users } from './users';
 
-const adoptionStatusValues = ['pending_review', 'accepted', 'rejected'] as const;
+import { adoptionStatusValues, DEFAULT_ADOPTION_STATUS } from './adoption-status';
 
 export const foods = sqliteTable(
 	'foods',
@@ -79,7 +79,7 @@ const scopedFoodAliasColumns = () => ({
 	sourceDomain: text('source_domain'),
 	adoptionStatus: text('adoption_status', { enum: adoptionStatusValues })
 		.notNull()
-		.default('pending_review'),
+		.default(DEFAULT_ADOPTION_STATUS),
 	defaultMeasureUnitId: text('default_measure_unit_id'),
 	defaultMeasureBaseUnitId: text('default_measure_base_unit_id')
 });
@@ -146,7 +146,7 @@ const scopedFoodEntryColumns = () => ({
 	defaultMeasureBaseUnitId: text('default_measure_base_unit_id'),
 	adoptionStatus: text('adoption_status', { enum: adoptionStatusValues })
 		.notNull()
-		.default('pending_review')
+		.default(DEFAULT_ADOPTION_STATUS)
 });
 
 export const foodUserEntries = sqliteTable(
