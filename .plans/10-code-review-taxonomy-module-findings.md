@@ -1,0 +1,25 @@
+# #10 Code review: taxonomy module findings
+
+## Summary
+Address taxonomy review findings by making alias resolution locale-aware and deterministic, making scoped alias writes idempotent/atomic, batching instruction-event insertion, and cleaning up duplicated/inefficient helpers.
+
+## Acceptance criteria
+- [ ] Alias lookups respect active locale → language fallback → default locale precedence.
+- [ ] Scoped household alias writes are deterministic and atomic with display override updates.
+- [ ] Duplicate aliases resolve by explicit scope/locale precedence instead of array order.
+- [ ] Instruction event insertion parses batches once and commits atomically.
+- [ ] Temperature aliases with flexible whitespace parse correctly.
+- [ ] Malformed display override rows do not crash server-side upserts.
+- [ ] Taxonomy option cleanup keeps behavior while avoiding quadratic grouping and duplicated preset keys.
+
+## TODOs
+- [ ] Add shared taxonomy alias/locale helpers and use deterministic locale-aware alias maps.
+- [ ] Make display override upserts validate input and atomically lookup-or-create scoped aliases.
+- [ ] Batch and de-duplicate instruction event parsing/insertion with flexible alias patterns.
+- [ ] Clean up taxonomy options grouping and preset constants.
+- [ ] Add focused tests for locale precedence, idempotent alias writes, and instruction parsing.
+- [ ] Run final validation (`pnpm check`, focused unit tests, `pnpm architecture:check`).
+
+## Notes
+- Issue body reviewed with `gh issue view 10 --json number,title,body,labels,state`.
+- Worktree created from `origin/main` at `.worktrees/10-code-review-taxonomy-module-findings` because parent checkout has unrelated uncommitted changes.
