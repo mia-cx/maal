@@ -74,7 +74,7 @@ export const requireAppContext = async (
 			})
 		);
 	} catch (cause) {
-		mapHouseholdResolutionFailure(cause);
+		return mapHouseholdResolutionFailure(cause);
 	}
 
 	return { session, householdId, database, db: getDb(database) };
@@ -89,7 +89,7 @@ export const resolveRequiredActiveHouseholdId = async (input: {
 	try {
 		return requireResolvedHouseholdId(await resolveActiveHouseholdId(input));
 	} catch (cause) {
-		mapHouseholdResolutionFailure(cause);
+		return mapHouseholdResolutionFailure(cause);
 	}
 };
 
@@ -103,7 +103,7 @@ export const activateRequiredHouseholdId = async (input: {
 	try {
 		return requireActivatedHousehold(await activateRequestedHouseholdId(input));
 	} catch (cause) {
-		mapHouseholdActivationFailure(cause);
+		return mapHouseholdActivationFailure(cause);
 	}
 };
 

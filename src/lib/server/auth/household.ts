@@ -311,8 +311,7 @@ export const resolveActiveHouseholdId = async (input: {
 
 export type RequestedHouseholdActivation =
 	| { status: 'activated'; householdId: string; hasAnyHousehold: true }
-	| { status: 'inaccessible'; householdId: string; hasAnyHousehold: boolean }
-	| { status: 'none'; householdId: null; hasAnyHousehold: false };
+	| { status: 'inaccessible'; householdId: string; hasAnyHousehold: boolean };
 
 export const activateRequestedHouseholdId = async (input: {
 	platform: App.Platform | undefined;
