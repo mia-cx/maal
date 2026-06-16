@@ -180,6 +180,13 @@ const consumeHouseholdInvite = async (
 	return consumed ?? null;
 };
 
+const releaseHouseholdInviteUse = async (database: D1Database, inviteId: string): Promise<void> => {
+	await getDb(database)
+		.update(householdInvites)
+		.set({ usesCount: sql`${householdInvites.usesCount} - 1` })
+		.where(and(eq(householdInvites.id, inviteId), gt(householdInvites.usesCount, 0)));
+};
+
 export const joinHouseholdFromInvite = async (input: {
 	platform: App.Platform;
 	cookies: Cookies;
@@ -202,11 +209,16 @@ export const joinHouseholdFromInvite = async (input: {
 		const consumedInvite = await consumeHouseholdInvite(input.platform.env.DB, invite);
 		if (!consumedInvite) throw new Error('Invite not found.');
 
-		await runtime.workos.userManagement.createOrganizationMembership({
-			organizationId: consumedInvite.householdId,
-			userId: input.userId,
-			roleSlug: householdRoleSlug(consumedInvite.roleSlug)
-		});
+		try {
+			await runtime.workos.userManagement.createOrganizationMembership({
+				organizationId: consumedInvite.householdId,
+				userId: input.userId,
+				roleSlug: householdRoleSlug(consumedInvite.roleSlug)
+			});
+		} catch (cause) {
+			await releaseHouseholdInviteUse(input.platform.env.DB, consumedInvite.id);
+			throw cause;
+		}
 	}
 
 	await provisionAuthSession(input.platform, {
