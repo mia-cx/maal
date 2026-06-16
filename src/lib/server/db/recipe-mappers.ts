@@ -34,8 +34,8 @@ import { cleanImportedText } from '$lib/server/services/html-text';
 import { insertUserRecipeInstructionEvents } from '$lib/server/taxonomy/instruction-events';
 
 type Db = DrizzleD1Database<typeof schema>;
-type Transaction = Parameters<Parameters<Db['transaction']>[0]>[0];
-type WritableDb = Db | Transaction;
+export type Transaction = Parameters<Parameters<Db['transaction']>[0]>[0];
+export type WritableDb = Db | Transaction;
 type UserRecipeRow = typeof userRecipes.$inferSelect;
 type UserRecipeIngredientRow = typeof userRecipeIngredients.$inferSelect;
 type UserRecipeInstructionRow = typeof userRecipeInstructions.$inferSelect;
@@ -623,7 +623,7 @@ export const loadMealPlanMeals = async (
 	return scheduledMeals;
 };
 
-const replaceRecipeIngredients = async (
+export const replaceRecipeIngredients = async (
 	db: WritableDb,
 	recipeId: string,
 	ingredients: RecipeIngredientItem[]
@@ -659,7 +659,7 @@ export const updateRecipeIngredients = async (
 	ingredients: RecipeIngredientItem[]
 ) => db.transaction((tx) => replaceRecipeIngredients(tx, recipeId, ingredients));
 
-const replaceRecipeInstructions = async (
+export const replaceRecipeInstructions = async (
 	db: WritableDb,
 	recipeId: string,
 	instructions: RecipeInstructionItem[]

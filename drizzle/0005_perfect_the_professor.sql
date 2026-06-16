@@ -13,10 +13,9 @@ CREATE TABLE `__new_household_meal_classifications` (
 	CONSTRAINT "household_meal_classifications_confidence_range" CHECK("__new_household_meal_classifications"."confidence" IS NULL OR ("__new_household_meal_classifications"."confidence" >= 0 AND "__new_household_meal_classifications"."confidence" <= 1))
 );
 --> statement-breakpoint
-INSERT INTO `__new_household_meal_classifications`("id", "household_meal_id", "kind", "value", "normalized_value", "schema_org_value", "locale", "confidence", "created_at") SELECT "id", "household_meal_id", "kind", "value", "normalized_value", "schema_org_value", "locale", "confidence", "created_at" FROM `household_meal_classifications`;--> statement-breakpoint
+INSERT INTO `__new_household_meal_classifications`("id", "household_meal_id", "kind", "value", "normalized_value", "schema_org_value", "locale", "confidence", "created_at") SELECT "id", "household_meal_id", "kind", "value", "normalized_value", "schema_org_value", COALESCE("locale", 'en-US'), "confidence", "created_at" FROM `household_meal_classifications` AS source WHERE NOT EXISTS (SELECT 1 FROM `household_meal_classifications` AS duplicate WHERE duplicate."household_meal_id" = source."household_meal_id" AND duplicate."kind" = source."kind" AND duplicate."normalized_value" = source."normalized_value" AND COALESCE(duplicate."locale", 'en-US') = COALESCE(source."locale", 'en-US') AND duplicate.rowid < source.rowid);--> statement-breakpoint
 DROP TABLE `household_meal_classifications`;--> statement-breakpoint
 ALTER TABLE `__new_household_meal_classifications` RENAME TO `household_meal_classifications`;--> statement-breakpoint
-PRAGMA foreign_keys=ON;--> statement-breakpoint
 CREATE UNIQUE INDEX `household_meal_classifications_unique` ON `household_meal_classifications` (`household_meal_id`,`kind`,`normalized_value`,`locale`);--> statement-breakpoint
 CREATE INDEX `household_meal_classifications_meal_id_idx` ON `household_meal_classifications` (`household_meal_id`);--> statement-breakpoint
 CREATE INDEX `household_meal_classifications_kind_value_idx` ON `household_meal_classifications` (`kind`,`normalized_value`);--> statement-breakpoint
@@ -40,7 +39,7 @@ CREATE TABLE `__new_household_meal_nutrition_facts` (
 	CONSTRAINT "household_meal_nutrition_facts_confidence_range" CHECK("__new_household_meal_nutrition_facts"."confidence" IS NULL OR ("__new_household_meal_nutrition_facts"."confidence" >= 0 AND "__new_household_meal_nutrition_facts"."confidence" <= 1))
 );
 --> statement-breakpoint
-INSERT INTO `__new_household_meal_nutrition_facts`("id", "household_meal_id", "nutrient", "schema_org_property", "original_text", "amount", "unit_id", "base_amount", "base_unit_id", "locale", "confidence", "created_at", "updated_at") SELECT "id", "household_meal_id", "nutrient", "schema_org_property", "original_text", "amount", "unit_id", "base_amount", "base_unit_id", "locale", "confidence", "created_at", "updated_at" FROM `household_meal_nutrition_facts`;--> statement-breakpoint
+INSERT INTO `__new_household_meal_nutrition_facts`("id", "household_meal_id", "nutrient", "schema_org_property", "original_text", "amount", "unit_id", "base_amount", "base_unit_id", "locale", "confidence", "created_at", "updated_at") SELECT "id", "household_meal_id", "nutrient", "schema_org_property", "original_text", "amount", "unit_id", "base_amount", "base_unit_id", COALESCE("locale", 'en-US'), "confidence", "created_at", "updated_at" FROM `household_meal_nutrition_facts`;--> statement-breakpoint
 DROP TABLE `household_meal_nutrition_facts`;--> statement-breakpoint
 ALTER TABLE `__new_household_meal_nutrition_facts` RENAME TO `household_meal_nutrition_facts`;--> statement-breakpoint
 CREATE UNIQUE INDEX `household_meal_nutrition_facts_unique` ON `household_meal_nutrition_facts` (`household_meal_id`,`schema_org_property`);--> statement-breakpoint
@@ -60,7 +59,7 @@ CREATE TABLE `__new_user_recipe_classifications` (
 	CONSTRAINT "user_recipe_classifications_confidence_range" CHECK("__new_user_recipe_classifications"."confidence" IS NULL OR ("__new_user_recipe_classifications"."confidence" >= 0 AND "__new_user_recipe_classifications"."confidence" <= 1))
 );
 --> statement-breakpoint
-INSERT INTO `__new_user_recipe_classifications`("id", "user_recipe_id", "kind", "value", "normalized_value", "schema_org_value", "locale", "confidence", "created_at") SELECT "id", "user_recipe_id", "kind", "value", "normalized_value", "schema_org_value", "locale", "confidence", "created_at" FROM `user_recipe_classifications`;--> statement-breakpoint
+INSERT INTO `__new_user_recipe_classifications`("id", "user_recipe_id", "kind", "value", "normalized_value", "schema_org_value", "locale", "confidence", "created_at") SELECT "id", "user_recipe_id", "kind", "value", "normalized_value", "schema_org_value", COALESCE("locale", 'en-US'), "confidence", "created_at" FROM `user_recipe_classifications` AS source WHERE NOT EXISTS (SELECT 1 FROM `user_recipe_classifications` AS duplicate WHERE duplicate."user_recipe_id" = source."user_recipe_id" AND duplicate."kind" = source."kind" AND duplicate."normalized_value" = source."normalized_value" AND COALESCE(duplicate."locale", 'en-US') = COALESCE(source."locale", 'en-US') AND duplicate.rowid < source.rowid);--> statement-breakpoint
 DROP TABLE `user_recipe_classifications`;--> statement-breakpoint
 ALTER TABLE `__new_user_recipe_classifications` RENAME TO `user_recipe_classifications`;--> statement-breakpoint
 CREATE UNIQUE INDEX `user_recipe_classifications_unique` ON `user_recipe_classifications` (`user_recipe_id`,`kind`,`normalized_value`,`locale`);--> statement-breakpoint
@@ -86,7 +85,7 @@ CREATE TABLE `__new_user_recipe_nutrition_facts` (
 	CONSTRAINT "user_recipe_nutrition_facts_confidence_range" CHECK("__new_user_recipe_nutrition_facts"."confidence" IS NULL OR ("__new_user_recipe_nutrition_facts"."confidence" >= 0 AND "__new_user_recipe_nutrition_facts"."confidence" <= 1))
 );
 --> statement-breakpoint
-INSERT INTO `__new_user_recipe_nutrition_facts`("id", "user_recipe_id", "nutrient", "schema_org_property", "original_text", "amount", "unit_id", "base_amount", "base_unit_id", "locale", "confidence", "created_at", "updated_at") SELECT "id", "user_recipe_id", "nutrient", "schema_org_property", "original_text", "amount", "unit_id", "base_amount", "base_unit_id", "locale", "confidence", "created_at", "updated_at" FROM `user_recipe_nutrition_facts`;--> statement-breakpoint
+INSERT INTO `__new_user_recipe_nutrition_facts`("id", "user_recipe_id", "nutrient", "schema_org_property", "original_text", "amount", "unit_id", "base_amount", "base_unit_id", "locale", "confidence", "created_at", "updated_at") SELECT "id", "user_recipe_id", "nutrient", "schema_org_property", "original_text", "amount", "unit_id", "base_amount", "base_unit_id", COALESCE("locale", 'en-US'), "confidence", "created_at", "updated_at" FROM `user_recipe_nutrition_facts`;--> statement-breakpoint
 DROP TABLE `user_recipe_nutrition_facts`;--> statement-breakpoint
 ALTER TABLE `__new_user_recipe_nutrition_facts` RENAME TO `user_recipe_nutrition_facts`;--> statement-breakpoint
 CREATE UNIQUE INDEX `user_recipe_nutrition_facts_unique` ON `user_recipe_nutrition_facts` (`user_recipe_id`,`schema_org_property`);--> statement-breakpoint
@@ -435,4 +434,5 @@ CREATE INDEX `user_recipes_user_visible_idx` ON `user_recipes` (`workos_user_id`
 CREATE INDEX `user_recipes_saved_from_household_id_idx` ON `user_recipes` (`saved_from_household_id`);--> statement-breakpoint
 CREATE INDEX `user_recipes_source_url_idx` ON `user_recipes` (`source_url`);--> statement-breakpoint
 CREATE INDEX `user_recipes_source_html_hash_idx` ON `user_recipes` (`source_html_hash`);--> statement-breakpoint
-CREATE INDEX `user_recipes_deleted_at_idx` ON `user_recipes` (`deleted_at`);
+CREATE INDEX `user_recipes_deleted_at_idx` ON `user_recipes` (`deleted_at`);PRAGMA foreign_key_check;--> statement-breakpoint
+PRAGMA foreign_keys=ON;--> statement-breakpoint
