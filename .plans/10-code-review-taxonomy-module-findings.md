@@ -16,7 +16,7 @@ Address taxonomy review findings by making alias resolution locale-aware and det
 - [x] Add shared taxonomy alias/locale helpers and use deterministic locale-aware alias maps.
 - [x] Make display override upserts validate input and atomically lookup-or-create scoped aliases.
 - [x] Batch and de-duplicate instruction event parsing/insertion with flexible alias patterns.
-- [ ] Clean up taxonomy options grouping and preset constants.
+- [x] Clean up taxonomy options grouping and preset constants.
 - [ ] Add focused tests for locale precedence, idempotent alias writes, and instruction parsing.
 - [ ] Run final validation (`pnpm check`, focused unit tests, `pnpm architecture:check`).
 
@@ -29,3 +29,5 @@ Address taxonomy review findings by making alias resolution locale-aware and det
 - Validation: `pnpm exec eslint src/lib/server/taxonomy/display-overrides.ts src/lib/server/taxonomy/effective-preferences.ts src/lib/server/taxonomy/aliases.ts` passed.
 - Instruction event insertion now loads the temperature parser once per batch, parses before writing, writes root DB calls in a transaction, and shares flexible whitespace alias regex generation.
 - Validation: `pnpm exec eslint src/lib/server/taxonomy/instruction-events.ts src/lib/server/taxonomy/aliases.ts` passed.
+- Taxonomy options now push into alias buckets instead of recreating arrays and derive preset filters from one typed constant.
+- Validation: `pnpm exec eslint src/lib/server/taxonomy/options.ts` passed.
