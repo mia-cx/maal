@@ -160,7 +160,7 @@ export const PATCH: RequestHandler = async ({ cookies, locals, params, platform,
 };
 
 export const DELETE: RequestHandler = async ({ cookies, locals, params, platform, url }) => {
-	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
+	const { db, session } = await requireBillingAppContext({ cookies, locals, platform, url });
 	const recipeId = params.id;
 	if (!recipeId) error(400, { message: 'Recipe is required.' });
 

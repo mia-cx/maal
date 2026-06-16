@@ -921,7 +921,7 @@ export const PATCH: RequestHandler = async ({ cookies, locals, platform, request
 };
 
 export const DELETE: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
+	const { db, session } = await requireBillingAppContext({ cookies, locals, platform, url });
 
 	const { recipeIds, permanent } = await readBulkBody(request);
 	const existingRows = await db
