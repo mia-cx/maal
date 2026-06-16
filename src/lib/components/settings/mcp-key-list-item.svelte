@@ -14,8 +14,8 @@
 		keyRecord: McpKey;
 		rerollingMcpKeyId: string | null;
 		revokingMcpKeyId: string | null;
-		rerollMcpAccessKey: (key: McpKey) => void;
-		confirmRevokeMcpKey: (key: McpKey) => void;
+		rerollMcpAccessKey: (key: McpKey) => void | Promise<void>;
+		confirmRevokeMcpKey: (key: McpKey) => void | Promise<void>;
 	} = $props();
 </script>
 

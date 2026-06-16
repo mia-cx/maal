@@ -13,8 +13,10 @@ export type McpScope =
 	| 'food_profile:write';
 export type McpKeyPreset = 'read_only_planner' | 'meal_planner' | 'full_access';
 export type McpScopeLevel = 'none' | 'read' | 'write';
+export type McpScopeGroupId = 'households' | 'recipes' | 'meals' | 'checkIns' | 'foodProfile';
+export type McpScopeLevels = Partial<Record<McpScopeGroupId, McpScopeLevel>>;
 export type McpScopeGroup = {
-	id: string;
+	id: McpScopeGroupId;
 	label: string;
 	description: string;
 	read?: McpScope;
@@ -34,7 +36,7 @@ export type McpKey = {
 	households?: SettingsHousehold[];
 };
 
-export const mcpScopeGroups: McpScopeGroup[] = [
+export const mcpScopeGroups = [
 	{
 		id: 'households',
 		label: 'Households',
@@ -70,7 +72,10 @@ export const mcpScopeGroups: McpScopeGroup[] = [
 		read: 'food_profile:read',
 		write: 'food_profile:write'
 	}
-];
+] satisfies McpScopeGroup[];
+
+const isMcpScopeGroupId = (groupId: string): groupId is McpScopeGroupId =>
+	mcpScopeGroups.some((group) => group.id === groupId);
 
 export const presetLabel = (preset?: McpKeyPreset): string => {
 	if (preset === 'read_only_planner') return 'Read-only planner';
@@ -80,7 +85,7 @@ export const presetLabel = (preset?: McpKeyPreset): string => {
 };
 
 export const selectedMcpScopesForLevels = (
-	scopeLevels: Record<string, McpScopeLevel>
+	scopeLevels: McpScopeLevels
 ): McpScope[] =>
 	mcpScopeGroups.flatMap((group) => {
 		const level = scopeLevels[group.id] ?? 'none';
@@ -120,17 +125,21 @@ export const toggleMcpHouseholdId = (
 		: householdIds.filter((id) => id !== householdId);
 
 export const setMcpScopeReadLevel = (
-	scopeLevels: Record<string, McpScopeLevel>,
-	groupId: string,
+	scopeLevels: McpScopeLevels,
+	groupId: McpScopeGroupId,
 	checked: boolean
-): Record<string, McpScopeLevel> => {
+): McpScopeLevels => {
+	if (!isMcpScopeGroupId(groupId)) return scopeLevels;
 	const currentLevel = scopeLevels[groupId] ?? 'none';
 	if (currentLevel === 'write') return scopeLevels;
 	return { ...scopeLevels, [groupId]: checked ? 'read' : 'none' };
 };
 
 export const setMcpScopeWriteLevel = (
-	scopeLevels: Record<string, McpScopeLevel>,
-	groupId: string,
+	scopeLevels: McpScopeLevels,
+	groupId: McpScopeGroupId,
 	checked: boolean
-): Record<string, McpScopeLevel> => ({ ...scopeLevels, [groupId]: checked ? 'write' : 'read' });
+): McpScopeLevels => {
+	if (!isMcpScopeGroupId(groupId)) return scopeLevels;
+	return { ...scopeLevels, [groupId]: checked ? 'write' : 'read' };
+};

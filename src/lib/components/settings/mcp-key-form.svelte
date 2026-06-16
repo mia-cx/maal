@@ -3,7 +3,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import McpHouseholdAccessPicker from '$lib/components/settings/mcp-household-access-picker.svelte';
 	import McpPermissionsEditor from '$lib/components/settings/mcp-permissions-editor.svelte';
-	import type { McpScope, McpScopeLevel } from '$lib/settings/mcp-key-model';
+	import type { McpScope, McpScopeGroupId, McpScopeLevels } from '$lib/settings/mcp-key-model';
 	import type { SettingsHousehold } from '$lib/settings/types';
 
 	let {
@@ -30,14 +30,14 @@
 		mcpKeyCreating: boolean;
 		selectedMcpScopes: McpScope[];
 		mcpKeyHouseholdIds: string[];
-		mcpScopeLevels: Record<string, McpScopeLevel>;
+		mcpScopeLevels: McpScopeLevels;
 		mcpHouseholdPickerLabel: string;
 		filteredMcpHouseholds: SettingsHousehold[];
-		setMcpScopeRead: (groupId: string, checked: boolean) => void;
-		setMcpScopeWrite: (groupId: string, checked: boolean) => void;
+		setMcpScopeRead: (groupId: McpScopeGroupId, checked: boolean) => void;
+		setMcpScopeWrite: (groupId: McpScopeGroupId, checked: boolean) => void;
 		toggleMcpHousehold: (householdId: string, checked: boolean) => void;
 		cancel: () => void;
-		createMcpAccessKey: () => void;
+		createMcpAccessKey: () => void | Promise<void>;
 	} = $props();
 </script>
 

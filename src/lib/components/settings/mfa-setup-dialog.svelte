@@ -23,7 +23,7 @@
 		mfaSetup: MfaSetup | null;
 		mfaVerifyBusy: boolean;
 		verificationCodeMinLength: number;
-		verifyMfaSetup: () => void;
+		verifyMfaSetup: () => void | Promise<void>;
 	} = $props();
 </script>
 

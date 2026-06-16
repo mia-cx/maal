@@ -35,8 +35,8 @@
 		accountSaving: boolean;
 		accountMessage: string | null;
 		accountError: string | null;
-		saveAccount: (event: SubmitEvent) => void;
-		sendVerificationEmail: () => void;
+		saveAccount: (event: SubmitEvent) => void | Promise<void>;
+		sendVerificationEmail: () => void | Promise<void>;
 	} = $props();
 </script>
 

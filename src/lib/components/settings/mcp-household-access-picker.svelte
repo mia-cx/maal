@@ -60,9 +60,9 @@
 							{#each filteredMcpHouseholds as household (household.id)}
 								{@const checked = mcpKeyHouseholdIds.includes(household.id)}
 								<Command.Item
-									value={household.name}
+									value={household.id}
 									data-checked={checked}
-									onselect={() => toggleMcpHousehold(household.id, !checked)}
+									onSelect={() => toggleMcpHousehold(household.id, !checked)}
 								>
 									<Checkbox {checked} class="pointer-events-none" />
 									<span class="truncate">{household.name}</span>

@@ -23,7 +23,8 @@
 		toggleMcpHouseholdId,
 		type McpKey,
 		type McpScope,
-		type McpScopeLevel
+		type McpScopeGroupId,
+		type McpScopeLevels
 	} from '$lib/settings/mcp-key-model';
 	import {
 		accountEmailChanged as hasAccountEmailChanged,
@@ -119,7 +120,7 @@
 	let mcpKeyCreating = $state(false);
 	let mcpKeyFormOpen = $state(false);
 	let mcpKeyLabel = $state('');
-	let mcpScopeLevels = $state<Record<string, McpScopeLevel>>({
+	let mcpScopeLevels = $state<McpScopeLevels>({
 		households: 'read',
 		recipes: 'read',
 		meals: 'read',
@@ -342,11 +343,11 @@
 		mcpKeyHouseholdIds = toggleMcpHouseholdId(mcpKeyHouseholdIds, householdId, checked);
 	};
 
-	const setMcpScopeRead = (groupId: string, checked: boolean) => {
+	const setMcpScopeRead = (groupId: McpScopeGroupId, checked: boolean) => {
 		mcpScopeLevels = setMcpScopeReadLevel(mcpScopeLevels, groupId, checked);
 	};
 
-	const setMcpScopeWrite = (groupId: string, checked: boolean) => {
+	const setMcpScopeWrite = (groupId: McpScopeGroupId, checked: boolean) => {
 		mcpScopeLevels = setMcpScopeWriteLevel(mcpScopeLevels, groupId, checked);
 	};
 
