@@ -35,3 +35,5 @@ Address MCP module code-review findings by tightening input validation, permissi
 - Final validation passed: `pnpm check`; `pnpm test:unit -- --run src/lib/server/mcp`; `pnpm architecture:check`.
 - PR review follow-up: scoped recipe mutations now allow owner-owned unlinked recipes while still blocking recipes linked outside the resolved household; optional number fields now reject provided malformed values with `invalid_input` instead of silently dropping them.
 - Validation: `pnpm test:unit -- --run src/lib/server/mcp/scalars.test.ts src/lib/server/mcp/meal-input.test.ts`; `pnpm check`; `pnpm architecture:check` passed.
+- PR review follow-up: registry decode failures now return `invalid_input` before handler execution, preserving the MCP boundary error contract for malformed schema-level inputs.
+- Validation: `pnpm test:unit -- --run src/lib/server/mcp/registry.test.ts`; `pnpm check`; `pnpm test:unit -- --run src/lib/server/mcp`; `pnpm architecture:check` passed.

@@ -29,6 +29,12 @@ export const schemaForToolList = (schema: InputSchema): Tool['inputSchema'] => {
 	return jsonSchema as Tool['inputSchema'];
 };
 
+const invalidInputFromDecodeFailure = (cause: unknown) =>
+	toolError(
+		'invalid_input',
+		cause instanceof Error ? cause.message : 'Tool arguments are invalid.'
+	);
+
 export const registerToolHandlers = (
 	server: Server,
 	context: McpContext,
@@ -54,9 +60,22 @@ export const registerToolHandlers = (
 		if (!tool) {
 			return { isError: true, ...toolResult(toolError('unknown_tool', 'Unknown tool.')) };
 		}
+		let args: Record<string, unknown>;
 		try {
-			const args = Schema.decodeUnknownSync(tool.inputSchema)(request.params.arguments ?? {});
-			if (!isRecord(args)) throw toolError('invalid_input', 'Tool arguments must be an object.');
+			const decodedArgs = Schema.decodeUnknownSync(tool.inputSchema)(
+				request.params.arguments ?? {}
+			);
+			if (!isRecord(decodedArgs))
+				throw toolError('invalid_input', 'Tool arguments must be an object.');
+			args = decodedArgs;
+		} catch (cause) {
+			const data =
+				isRecord(cause) && typeof cause.code === 'string'
+					? cause
+					: invalidInputFromDecodeFailure(cause);
+			return { isError: true, ...toolResult(data) };
+		}
+		try {
 			return toolResult(await tool.handler(context, args));
 		} catch (cause) {
 			const data =

@@ -12,10 +12,46 @@ const tool = (name: string): ToolDefinition => ({
 	handler: async () => ({ ok: true })
 });
 
+type CapturedServer = {
+	_requestHandlers: Map<
+		string,
+		(request: { method: string; params: Record<string, unknown> }) => Promise<unknown>
+	>;
+};
+
 describe('MCP registry', () => {
 	it('rejects duplicate tool names at registration time', () => {
-		expect(() => registerToolHandlers(new Server({ name: 'test', version: '0' }), context, [tool('x'), tool('x')])).toThrow(
-			'Duplicate MCP tool name: x'
+		expect(() =>
+			registerToolHandlers(new Server({ name: 'test', version: '0' }), context, [
+				tool('x'),
+				tool('x')
+			])
+		).toThrow('Duplicate MCP tool name: x');
+	});
+
+	it('returns invalid_input for schema decode failures', async () => {
+		const server = new Server({ name: 'test', version: '0' }, { capabilities: { tools: {} } });
+		registerToolHandlers(server, context, [
+			{
+				name: 'plan',
+				description: 'plan',
+				inputSchema: Schema.Struct({ servingsPlanned: Schema.optional(Schema.Number) }),
+				handler: async () => ({ ok: true })
+			}
+		]);
+
+		const callToolHandler = (server as unknown as CapturedServer)._requestHandlers.get(
+			'tools/call'
 		);
+		expect(callToolHandler).toBeDefined();
+		await expect(
+			callToolHandler?.({
+				method: 'tools/call',
+				params: { name: 'plan', arguments: { servingsPlanned: 'many' } }
+			})
+		).resolves.toMatchObject({
+			isError: true,
+			structuredContent: { code: 'invalid_input' }
+		});
 	});
 });
