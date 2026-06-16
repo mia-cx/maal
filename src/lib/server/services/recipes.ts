@@ -175,6 +175,24 @@ const linkedMealMatchesSnapshot = async (
 	);
 };
 
+
+const requireRecipeOnlyVisibleInHousehold = async (input: {
+	db: Db;
+	recipeId: string;
+	householdId?: string | null;
+}) => {
+	if (!input.householdId) return;
+	const linkedHouseholds = await input.db
+		.select({ householdId: householdMeals.householdId })
+		.from(householdMealUserRecipes)
+		.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
+		.where(eq(householdMealUserRecipes.userRecipeId, input.recipeId));
+	const householdIds = new Set(linkedHouseholds.map((link) => link.householdId));
+	if (householdIds.size !== 1 || !householdIds.has(input.householdId)) {
+		throw new Error('Recipe not found.');
+	}
+};
+
 const propagateRecipeUpdateToLinkedMeals = async (
 	db: Db,
 	recipeId: string,
@@ -220,6 +238,7 @@ const propagateRecipeUpdateToLinkedMeals = async (
 export const updateUserRecipe = async (input: {
 	db: Db;
 	workosUserId: string;
+	householdId?: string | null;
 	recipeId: string;
 	patch: Partial<RecipeMenuItem>;
 }): Promise<RecipeMenuItem> => {
@@ -231,6 +250,11 @@ export const updateUserRecipe = async (input: {
 		)
 		.get();
 	if (!existing) throw new Error('Recipe not found.');
+	await requireRecipeOnlyVisibleInHousehold({
+		db: input.db,
+		recipeId: input.recipeId,
+		householdId: input.householdId
+	});
 	const propagationSnapshot: RecipePropagationSnapshot = {
 		recipe: existing,
 		ingredients: (await orderedRecipeIngredients(input.db, input.recipeId)).map(
@@ -293,6 +317,7 @@ export const updateUserRecipe = async (input: {
 	return getUserRecipe({
 		db: input.db,
 		workosUserId: input.workosUserId,
+		householdId: input.householdId,
 		recipeId: input.recipeId
 	});
 };
@@ -300,8 +325,14 @@ export const updateUserRecipe = async (input: {
 export const deleteUserRecipe = async (input: {
 	db: Db;
 	workosUserId: string;
+	householdId?: string | null;
 	recipeId: string;
 }) => {
+	await requireRecipeOnlyVisibleInHousehold({
+		db: input.db,
+		recipeId: input.recipeId,
+		householdId: input.householdId
+	});
 	const deletedAt = new Date().toISOString();
 	const deleted = await input.db
 		.update(userRecipes)

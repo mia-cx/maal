@@ -101,12 +101,13 @@ export const recipeTools: ToolDefinition[] = [
 		}),
 		annotations: { readOnlyHint: false },
 		handler: async (context, args) => {
-			await resolveHouseholdId(context, args, 'recipes:write', 'recipes:write');
+			const householdId = await resolveHouseholdId(context, args, 'recipes:write', 'recipes:write');
 			if (!isRecord(args.patch)) throw toolError('invalid_input', 'Recipe patch is required.');
 			return {
 				recipe: await updateUserRecipe({
 					db: context.db,
 					workosUserId: context.key.userId,
+					householdId,
 					recipeId: requireNonEmptyText(args.recipeId, 'recipeId'),
 					patch: recipePatchFromArgs(args.patch)
 				})
@@ -120,10 +121,11 @@ export const recipeTools: ToolDefinition[] = [
 		inputSchema: Schema.Struct({ ...optionalHouseholdInput, recipeId: Schema.String }),
 		annotations: { readOnlyHint: false, destructiveHint: true },
 		handler: async (context, args) => {
-			await resolveHouseholdId(context, args, 'recipes:write', 'recipes:write');
+			const householdId = await resolveHouseholdId(context, args, 'recipes:write', 'recipes:write');
 			return await deleteUserRecipe({
 				db: context.db,
 				workosUserId: context.key.userId,
+				householdId,
 				recipeId: requireNonEmptyText(args.recipeId, 'recipeId')
 			});
 		}
