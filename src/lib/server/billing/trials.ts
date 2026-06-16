@@ -92,8 +92,11 @@ export const startHouseholdTrial = async (input: {
 		.returning({ workosUserId: users.workosUserId });
 	if (!claimed.length) throw new Error('Trial has already been used.');
 
+	const stripe = createStripeClient(input.platform);
+	let customerId: string | null = null;
+	let subscriptionId: string | null = null;
+
 	try {
-		const stripe = createStripeClient(input.platform);
 		const priceId =
 			input.priceId ?? (await findDefaultTrialPriceId(stripe, getStripeProductId(input.platform)));
 		const customer = await stripe.customers.create({
@@ -101,6 +104,7 @@ export const startHouseholdTrial = async (input: {
 			name: input.user.name ?? undefined,
 			metadata: { householdId: input.householdId, workosUserId: input.user.id }
 		});
+		customerId = customer.id;
 		const subscription = await stripe.subscriptions.create({
 			customer: customer.id,
 			items: [{ price: priceId }],
@@ -108,6 +112,7 @@ export const startHouseholdTrial = async (input: {
 			trial_period_days: trialDays(),
 			trial_settings: { end_behavior: { missing_payment_method: 'cancel' } }
 		});
+		subscriptionId = subscription.id;
 
 		await upsertSubscription({
 			database: input.platform.env.DB,
@@ -118,13 +123,41 @@ export const startHouseholdTrial = async (input: {
 		});
 		return subscription;
 	} catch (cause) {
-		await db
-			.update(users)
-			.set({ trialHouseholdId: null, trialStartedAt: null })
-			.where(eq(users.workosUserId, input.user.id));
-		await db
-			.delete(billingSubscriptions)
-			.where(eq(billingSubscriptions.householdId, input.householdId));
+		const cleanupFailures: unknown[] = [];
+		if (subscriptionId) {
+			try {
+				await stripe.subscriptions.cancel(subscriptionId);
+			} catch (cleanupCause) {
+				cleanupFailures.push(cleanupCause);
+			}
+		}
+		if (customerId) {
+			try {
+				await stripe.customers.del(customerId);
+			} catch (cleanupCause) {
+				cleanupFailures.push(cleanupCause);
+			}
+		}
+		try {
+			await db
+				.update(users)
+				.set({ trialHouseholdId: null, trialStartedAt: null })
+				.where(eq(users.workosUserId, input.user.id));
+			await db
+				.delete(billingSubscriptions)
+				.where(eq(billingSubscriptions.householdId, input.householdId));
+		} catch (cleanupCause) {
+			cleanupFailures.push(cleanupCause);
+		}
+		if (cleanupFailures.length) {
+			throw new AggregateError(
+				[cause, ...cleanupFailures],
+				'Trial start failed and rollback was incomplete',
+				{
+					cause
+				}
+			);
+		}
 		throw cause;
 	}
 };
