@@ -14,6 +14,16 @@ export const households = sqliteTable('households', {
 	updatedAt: updatedAt()
 });
 
+export const householdMembershipMutationLocks = sqliteTable('household_membership_mutation_locks', {
+	householdId: text('household_id')
+		.primaryKey()
+		.references(() => households.householdId, { onDelete: 'cascade' }),
+	ownerToken: text('owner_token').notNull(),
+	expiresAt: text('expires_at').notNull(),
+	createdAt: createdAt(),
+	updatedAt: updatedAt()
+});
+
 export const householdAppliances = sqliteTable(
 	'household_appliances',
 	{

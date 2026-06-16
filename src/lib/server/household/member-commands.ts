@@ -2,8 +2,8 @@ import { householdRoleSlug } from '$lib/server/auth/household-invites';
 import type { AuthSession } from '$lib/server/auth/session';
 import { createAuthRuntime } from '$lib/server/auth/workos';
 import { getDb } from '$lib/server/db';
-import { households } from '$lib/server/db/schema';
-import { eq } from 'drizzle-orm';
+import { householdMembershipMutationLocks } from '$lib/server/db/schema';
+import { and, eq, lt } from 'drizzle-orm';
 import {
 	isLastAdmin,
 	lastManagerMessage,
@@ -15,22 +15,90 @@ export type HouseholdMemberCommandResult =
 	| { ok: true; message: string; clearHousehold?: boolean }
 	| { ok: false; status: number; message: string };
 
+const lockLeaseMilliseconds = 30_000;
+const lockAcquireTimeoutMilliseconds = 5_000;
+const lockRetryMilliseconds = 100;
+
+const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+const acquireMembershipMutationLock = async ({
+	database,
+	householdId
+}: {
+	database: D1Database;
+	householdId: string;
+}): Promise<string | null> => {
+	const db = getDb(database);
+	const ownerToken = crypto.randomUUID();
+	const deadline = Date.now() + lockAcquireTimeoutMilliseconds;
+
+	while (Date.now() < deadline) {
+		const now = new Date().toISOString();
+		await db
+			.delete(householdMembershipMutationLocks)
+			.where(
+				and(
+					eq(householdMembershipMutationLocks.householdId, householdId),
+					lt(householdMembershipMutationLocks.expiresAt, now)
+				)
+			);
+
+		const [lock] = await db
+			.insert(householdMembershipMutationLocks)
+			.values({
+				householdId,
+				ownerToken,
+				expiresAt: new Date(Date.now() + lockLeaseMilliseconds).toISOString()
+			})
+			.onConflictDoNothing()
+			.returning({ ownerToken: householdMembershipMutationLocks.ownerToken });
+		if (lock) return ownerToken;
+
+		await delay(lockRetryMilliseconds);
+	}
+
+	return null;
+};
+
+const releaseMembershipMutationLock = async ({
+	database,
+	householdId,
+	ownerToken
+}: {
+	database: D1Database;
+	householdId: string;
+	ownerToken: string;
+}) => {
+	await getDb(database)
+		.delete(householdMembershipMutationLocks)
+		.where(
+			and(
+				eq(householdMembershipMutationLocks.householdId, householdId),
+				eq(householdMembershipMutationLocks.ownerToken, ownerToken)
+			)
+		);
+};
+
 const runSerializedMembershipMutation = async <T>({
 	database,
 	householdId,
-	mutation
+	mutation,
+	busyResult
 }: {
 	database: D1Database;
 	householdId: string;
 	mutation: () => Promise<T>;
-}): Promise<T> =>
-	getDb(database).transaction(async (tx) => {
-		await tx
-			.update(households)
-			.set({ updatedAt: new Date().toISOString() })
-			.where(eq(households.householdId, householdId));
-		return mutation();
-	});
+	busyResult: T;
+}): Promise<T> => {
+	const ownerToken = await acquireMembershipMutationLock({ database, householdId });
+	if (!ownerToken) return busyResult;
+
+	try {
+		return await mutation();
+	} finally {
+		await releaseMembershipMutationLock({ database, householdId, ownerToken });
+	}
+};
 
 export const updateMemberRoleFromForm = async ({
 	platform,
@@ -82,6 +150,11 @@ export const leaveHouseholdMembership = async ({
 	runSerializedMembershipMutation({
 		database,
 		householdId,
+		busyResult: {
+			ok: false,
+			status: 409,
+			message: 'Household membership is changing. Try again in a moment.'
+		},
 		mutation: async () => {
 			const runtime = createAuthRuntime(platform);
 			const memberships = await listActiveHouseholdMemberships(platform, householdId);
@@ -131,6 +204,11 @@ export const removeMemberFromForm = async ({
 	return runSerializedMembershipMutation({
 		database,
 		householdId,
+		busyResult: {
+			ok: false,
+			status: 409,
+			message: 'Household membership is changing. Try again in a moment.'
+		},
 		mutation: async () => {
 			const runtime = createAuthRuntime(platform);
 			const membership =
