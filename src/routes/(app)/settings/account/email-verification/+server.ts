@@ -2,6 +2,7 @@ import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { commitSealedSession, readSealedSession } from '$lib/server/auth/session';
 import { createAuthRuntime } from '$lib/server/auth/workos';
 import { readJsonObject } from '$lib/server/http/request';
+import { isVerificationCode, normalizeVerificationCode } from '$lib/settings/verification-code';
 
 const maxEmailLength = 254;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -15,8 +16,8 @@ const emailFromBody = (body: Record<string, unknown>): string => {
 };
 
 const codeFromBody = (body: Record<string, unknown>): string => {
-	const code = typeof body.code === 'string' ? body.code.replace(/\D/g, '') : '';
-	if (code.length < 6) error(400, { message: 'Verification code is required.' });
+	const code = normalizeVerificationCode(body.code);
+	if (!isVerificationCode(code)) error(400, { message: 'Enter the 6-digit verification code.' });
 	return code;
 };
 

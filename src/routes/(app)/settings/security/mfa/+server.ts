@@ -1,6 +1,7 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { createAuthRuntime } from '$lib/server/auth/workos';
 import { readJsonObject } from '$lib/server/http/request';
+import { isVerificationCode, normalizeVerificationCode } from '$lib/settings/verification-code';
 
 const issuer = 'Maal';
 
@@ -71,8 +72,10 @@ const readVerification = async (
 	const body = await readJsonObject(request);
 	const factorId = factorIdFromBody(body);
 	const challengeId = typeof body.challengeId === 'string' ? body.challengeId : '';
-	const code = typeof body.code === 'string' ? body.code.replace(/\D/g, '') : '';
-	if (!challengeId || code.length < 6) error(400, { message: 'Verification code is required.' });
+	if (!challengeId) error(400, { message: 'Authenticator setup session is required.' });
+
+	const code = normalizeVerificationCode(body.code);
+	if (!isVerificationCode(code)) error(400, { message: 'Enter the 6-digit verification code.' });
 	return { factorId, challengeId, code };
 };
 

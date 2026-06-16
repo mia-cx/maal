@@ -15,7 +15,7 @@ Fix settings UI and route findings together: make async settings actions awaitab
 
 ## TODOs
 - [x] Fix MCP settings UI selection, async handler contracts, strict scope state, and clipboard error feedback.
-- [ ] Extract shared OTP input and exact verification-code validation for account/MFA settings.
+- [x] Extract shared OTP input and exact verification-code validation for account/MFA settings.
 - [ ] Centralize settings route category, WorkOS email-change, public user, and session refresh helpers.
 - [ ] Update settings route handlers to preserve HttpErrors, avoid swallowed refresh failures/partial account updates, and use shared helpers.
 - [ ] Add or update focused tests for settings model/helper behavior.
@@ -27,3 +27,5 @@ Fix settings UI and route findings together: make async settings actions awaitab
 - Fixed MCP picker to use `onSelect` with household ids, tightened MCP scope state to `McpScopeGroupId`, widened async component handlers to `void | Promise<void>`, and surfaced clipboard copy failure text.
 - Validation: `pnpm gen && rm -rf .svelte-kit/cloudflare .svelte-kit/cloudflare-tmp .svelte-kit/output && pnpm check` passed after clearing generated Cloudflare output.
 - Svelte MCP server was unavailable in this session, so `svelte-autofixer` could not be run.
+- Extracted `VerificationCodeInput`, made MFA setup copy/maxlength derive from configured length, and added shared exact six-digit verification-code validation for email/MFA routes.
+- Validation: `pnpm check` passed.
