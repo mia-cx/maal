@@ -7,18 +7,11 @@ const recipeImportHeaders = {
 
 const maxRedirects = 3;
 const requestTimeoutMs = 8_000;
-const dnsTimeoutMs = 3_000;
 const blockedHostnameSuffixes = ['.localhost', '.local', '.internal', '.lan', '.home', '.corp'];
-
-export type DnsResolver = (hostname: string) => Promise<string[]>;
 
 export type RecipeImportFetchOptions = {
 	fetcher?: typeof fetch;
-	resolveHostname?: DnsResolver;
 };
-
-type DnsJsonAnswer = { data?: unknown };
-type DnsJsonResponse = { Answer?: DnsJsonAnswer[] };
 
 export class RecipeImportFetchError extends Error {
 	constructor(message: string) {
@@ -46,7 +39,7 @@ const normalizedHostname = (hostname: string): string =>
 
 const isIpv4Hostname = (hostname: string): boolean => parseIpv4(hostname) !== undefined;
 
-const isIpv6Hostname = (hostname: string): boolean => hostname.includes(':');
+const isIpv6Hostname = (hostname: string): boolean => normalizedHostname(hostname).includes(':');
 
 const hostnameRequiresDnsResolution = (hostname: string): boolean => {
 	const normalized = normalizedHostname(hostname);
@@ -80,6 +73,11 @@ const assertPublicHostname = (hostname: string) => {
 	if (!normalized.includes('.')) {
 		throw new RecipeImportFetchError('Recipe URL must point to a public website.');
 	}
+};
+
+const assertRuntimeFetchCanTargetUrl = (url: URL) => {
+	if (!hostnameRequiresDnsResolution(url.hostname)) return;
+	throw new RecipeImportFetchError('Recipe URL host cannot be fetched safely.');
 };
 
 const parseIpv4 = (hostname: string): [number, number, number, number] | undefined => {
@@ -155,55 +153,6 @@ const readLimitedText = async (response: Response, maxBytes: number): Promise<st
 	return new TextDecoder().decode(bytes);
 };
 
-const fetchJsonWithTimeout = async <T>(url: URL): Promise<T> => {
-	const controller = new AbortController();
-	const timeout = setTimeout(() => controller.abort(), dnsTimeoutMs);
-	try {
-		const response = await fetch(url, {
-			headers: { accept: 'application/dns-json' },
-			signal: controller.signal
-		});
-		if (!response.ok) throw new RecipeImportFetchError('Could not resolve recipe URL host.');
-		return (await response.json()) as T;
-	} catch (cause) {
-		if (cause instanceof RecipeImportFetchError) throw cause;
-		throw new RecipeImportFetchError('Could not resolve recipe URL host.');
-	} finally {
-		clearTimeout(timeout);
-	}
-};
-
-const dnsJsonUrl = (hostname: string, type: 'A' | 'AAAA'): URL => {
-	const url = new URL('https://cloudflare-dns.com/dns-query');
-	url.searchParams.set('name', hostname);
-	url.searchParams.set('type', type);
-	return url;
-};
-
-const resolvedAddressesFromDnsJson = (response: DnsJsonResponse): string[] =>
-	(response.Answer ?? [])
-		.map((answer) => answer.data)
-		.filter((data): data is string => typeof data === 'string')
-		.map(normalizedHostname)
-		.filter((address) => isIpv4Hostname(address) || isIpv6Hostname(address));
-
-const resolveHostnameAddresses: DnsResolver = async (hostname) => {
-	const [a, aaaa] = await Promise.all([
-		fetchJsonWithTimeout<DnsJsonResponse>(dnsJsonUrl(hostname, 'A')),
-		fetchJsonWithTimeout<DnsJsonResponse>(dnsJsonUrl(hostname, 'AAAA'))
-	]);
-	return [...resolvedAddressesFromDnsJson(a), ...resolvedAddressesFromDnsJson(aaaa)];
-};
-
-const assertResolvedHostnameIsPublic = async (hostname: string, resolveHostname: DnsResolver) => {
-	if (!hostnameRequiresDnsResolution(hostname)) return;
-	const addresses = await resolveHostname(normalizedHostname(hostname));
-	if (!addresses.length) throw new RecipeImportFetchError('Could not resolve recipe URL host.');
-	for (const address of addresses) {
-		assertPublicHostname(address);
-	}
-};
-
 const fetchWithTimeout = async (url: URL, fetcher: typeof fetch): Promise<Response> => {
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
@@ -221,13 +170,13 @@ const fetchWithTimeout = async (url: URL, fetcher: typeof fetch): Promise<Respon
 export const fetchRecipeImportPage = async (
 	url: string,
 	maxBytes: number,
-	{ fetcher = fetch, resolveHostname = resolveHostnameAddresses }: RecipeImportFetchOptions = {}
+	{ fetcher = fetch }: RecipeImportFetchOptions = {}
 ): Promise<{ html: string; finalUrl: string }> => {
 	let currentUrl = parseRecipeImportUrl(url);
 	for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
 		let response: Response;
 		try {
-			await assertResolvedHostnameIsPublic(currentUrl.hostname, resolveHostname);
+			assertRuntimeFetchCanTargetUrl(currentUrl);
 			response = await fetchWithTimeout(currentUrl, fetcher);
 		} catch (cause) {
 			if (cause instanceof RecipeImportFetchError) throw cause;

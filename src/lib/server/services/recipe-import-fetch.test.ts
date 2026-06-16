@@ -2,16 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	assertRecipeImportUrlForTest,
 	fetchRecipeImportPage,
-	RecipeImportFetchError,
-	type DnsResolver
+	RecipeImportFetchError
 } from './recipe-import-fetch';
 
 const expectBlocked = (url: string) =>
 	expect(() => assertRecipeImportUrlForTest(url)).toThrow(
 		'Recipe URL must point to a public website.'
 	);
-
-const publicResolver: DnsResolver = async () => ['93.184.216.34'];
 
 describe('recipe import fetch boundary', () => {
 	it('rejects non-HTTP URLs', () => {
@@ -39,21 +36,32 @@ describe('recipe import fetch boundary', () => {
 		}
 	});
 
-	it('allows public HTTP and HTTPS recipe hosts', () => {
+	it('allows public-looking recipe hosts at parse time', () => {
 		expect(assertRecipeImportUrlForTest('https://example.com/recipe').hostname).toBe('example.com');
 		expect(assertRecipeImportUrlForTest('http://93.184.216.34/recipe').hostname).toBe(
 			'93.184.216.34'
 		);
 	});
 
-	it('rejects public-looking hostnames that resolve to private addresses before fetching', async () => {
+	it('fails closed for DNS hostnames because runtime fetch cannot pin the resolved address', async () => {
 		const fetcher = vi.fn(async () => new Response('<html>recipe</html>', { status: 200 }));
-		const resolveHostname = vi.fn(async () => ['169.254.169.254']);
 
 		await expect(
-			fetchRecipeImportPage('https://attacker.example/recipe', 1000, { fetcher, resolveHostname })
-		).rejects.toThrow('Recipe URL must point to a public website.');
+			fetchRecipeImportPage('https://attacker.example/recipe', 1000, { fetcher })
+		).rejects.toThrow('Recipe URL host cannot be fetched safely.');
 		expect(fetcher).not.toHaveBeenCalled();
+	});
+
+	it('rejects redirects to DNS hostnames before following them', async () => {
+		const fetcher = vi.fn(
+			async () =>
+				new Response('', { status: 302, headers: { location: 'https://example.com/admin' } })
+		) as unknown as typeof fetch;
+
+		await expect(
+			fetchRecipeImportPage('http://93.184.216.34/recipe', 1000, { fetcher })
+		).rejects.toThrow('Recipe URL host cannot be fetched safely.');
+		expect(fetcher).toHaveBeenCalledTimes(1);
 	});
 
 	it('rejects redirects to private hosts before following them', async () => {
@@ -62,10 +70,7 @@ describe('recipe import fetch boundary', () => {
 		) as unknown as typeof fetch;
 
 		await expect(
-			fetchRecipeImportPage('https://example.com/recipe', 1000, {
-				fetcher,
-				resolveHostname: publicResolver
-			})
+			fetchRecipeImportPage('http://93.184.216.34/recipe', 1000, { fetcher })
 		).rejects.toThrow('Recipe URL must point to a public website.');
 		expect(fetcher).toHaveBeenCalledTimes(1);
 	});
@@ -76,10 +81,7 @@ describe('recipe import fetch boundary', () => {
 		) as unknown as typeof fetch;
 
 		await expect(
-			fetchRecipeImportPage('https://example.com/recipe', 8, {
-				fetcher,
-				resolveHostname: publicResolver
-			})
+			fetchRecipeImportPage('http://93.184.216.34/recipe', 8, { fetcher })
 		).rejects.toThrow('Recipe page is too large.');
 	});
 
@@ -87,31 +89,25 @@ describe('recipe import fetch boundary', () => {
 		const fetcher = vi
 			.fn()
 			.mockResolvedValueOnce(
-				new Response('', { status: 301, headers: { location: 'https://recipes.example/cards' } })
+				new Response('', { status: 301, headers: { location: 'http://93.184.216.35/cards' } })
 			)
 			.mockResolvedValueOnce(
 				new Response('<html>recipe</html>', { status: 200 })
 			) as unknown as typeof fetch;
-		const resolveHostname = vi.fn(async () => ['93.184.216.34']);
 
 		await expect(
-			fetchRecipeImportPage('https://example.com/recipe', 1000, { fetcher, resolveHostname })
+			fetchRecipeImportPage('http://93.184.216.34/recipe', 1000, { fetcher })
 		).resolves.toEqual({
 			html: '<html>recipe</html>',
-			finalUrl: 'https://recipes.example/cards'
+			finalUrl: 'http://93.184.216.35/cards'
 		});
-		expect(resolveHostname).toHaveBeenCalledWith('example.com');
-		expect(resolveHostname).toHaveBeenCalledWith('recipes.example');
 	});
 
 	it('uses a typed fetch error for failed responses', async () => {
 		const fetcher = vi.fn(async () => new Response('', { status: 404 })) as unknown as typeof fetch;
 
 		await expect(
-			fetchRecipeImportPage('https://example.com/missing', 1000, {
-				fetcher,
-				resolveHostname: publicResolver
-			})
+			fetchRecipeImportPage('http://93.184.216.34/missing', 1000, { fetcher })
 		).rejects.toBeInstanceOf(RecipeImportFetchError);
 	});
 });

@@ -4,6 +4,14 @@ import { boundedPagination } from './pagination';
 describe('boundedPagination', () => {
 	it('uses default values when input is missing', () => {
 		expect(boundedPagination({}, 25, 60)).toEqual({ offset: 0, limit: 25 });
+		expect(boundedPagination({ offset: null, limit: null }, 25, 60)).toEqual({
+			offset: 0,
+			limit: 25
+		});
+		expect(boundedPagination({ offset: '', limit: '' }, 25, 60)).toEqual({
+			offset: 0,
+			limit: 25
+		});
 	});
 
 	it('floors fractional values', () => {

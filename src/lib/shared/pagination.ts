@@ -9,6 +9,7 @@ export const boundedPagination = (
 	maxLimit: number
 ): Pagination => {
 	const numberValue = (input: unknown): number | undefined => {
+		if (input === null || input === undefined || input === '') return;
 		const number = Number(input);
 		return Number.isFinite(number) ? number : undefined;
 	};
