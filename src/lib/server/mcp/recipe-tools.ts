@@ -38,15 +38,15 @@ export const recipeTools: ToolDefinition[] = [
 				workosUserId: context.key.userId,
 				householdId,
 				query: text(args.query),
-				limit,
+				limit: limit + 1,
 				offset,
 				includeArchived: args.includeArchived === true
 			});
 			return {
 				limit,
 				offset,
-				nextOffset: recipes.length === limit ? offset + limit : null,
-				recipes
+				nextOffset: recipes.length > limit ? offset + limit : null,
+				recipes: recipes.slice(0, limit)
 			};
 		}
 	},

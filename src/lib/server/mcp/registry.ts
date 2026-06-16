@@ -34,7 +34,11 @@ export const registerToolHandlers = (
 	context: McpContext,
 	tools: ToolDefinition[]
 ) => {
-	const toolMap = new Map(tools.map((tool) => [tool.name, tool]));
+	const toolMap = new Map<string, ToolDefinition>();
+	for (const tool of tools) {
+		if (toolMap.has(tool.name)) throw new Error(`Duplicate MCP tool name: ${tool.name}`);
+		toolMap.set(tool.name, tool);
+	}
 
 	server.setRequestHandler(ListToolsRequestSchema, () => ({
 		tools: tools.map((tool) => ({
@@ -51,9 +55,8 @@ export const registerToolHandlers = (
 			return { isError: true, ...toolResult(toolError('unknown_tool', 'Unknown tool.')) };
 		}
 		try {
-			const args = Schema.decodeUnknownSync(tool.inputSchema)(
-				request.params.arguments ?? {}
-			) as Record<string, unknown>;
+			const args = Schema.decodeUnknownSync(tool.inputSchema)(request.params.arguments ?? {});
+			if (!isRecord(args)) throw toolError('invalid_input', 'Tool arguments must be an object.');
 			return toolResult(await tool.handler(context, args));
 		} catch (cause) {
 			const data =

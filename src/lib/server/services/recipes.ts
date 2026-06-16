@@ -303,7 +303,7 @@ export const deleteUserRecipe = async (input: {
 	recipeId: string;
 }) => {
 	const deletedAt = new Date().toISOString();
-	await input.db
+	const deleted = await input.db
 		.update(userRecipes)
 		.set({ deletedAt, updatedAt: deletedAt })
 		.where(
@@ -312,6 +312,8 @@ export const deleteUserRecipe = async (input: {
 				eq(userRecipes.workosUserId, input.workosUserId),
 				isNull(userRecipes.deletedAt)
 			)
-		);
+		)
+		.returning({ id: userRecipes.id });
+	if (!deleted.length) throw new Error('Recipe not found.');
 	return { deleted: true, deletedAt };
 };
