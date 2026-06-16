@@ -48,6 +48,18 @@ describe('MCP meal input mapping', () => {
 		);
 	});
 
+	it('rejects malformed provided number fields', () => {
+		expect(() => recipeFromArgs({ title: 'Soup', yield: 'many' })).toThrow(
+			expect.objectContaining({ code: 'invalid_input', message: 'yield must be a finite number.' })
+		);
+		expect(() => mealPatchFromArgs({ servingsPlanned: true })).toThrow(
+			expect.objectContaining({
+				code: 'invalid_input',
+				message: 'servingsPlanned must be a finite number.'
+			})
+		);
+	});
+
 	it('maps nullable meal patch fields', () => {
 		expect(
 			mealPatchFromArgs({

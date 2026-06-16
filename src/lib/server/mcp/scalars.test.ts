@@ -9,11 +9,17 @@ describe('MCP scalar helpers', () => {
 	});
 
 	it('accepts finite numbers and numeric strings only', () => {
-		expect(optionalNumber(3)).toBe(3);
-		expect(optionalNumber('4')).toBe(4);
-		expect(optionalNumber(true)).toBeUndefined();
-		expect(optionalNumber('')).toBeUndefined();
-		expect(optionalNumber(null)).toBeUndefined();
+		expect(optionalNumber(3, 'servingsPlanned')).toBe(3);
+		expect(optionalNumber('4', 'servingsPlanned')).toBe(4);
+		expect(optionalNumber(undefined, 'servingsPlanned')).toBeUndefined();
+		for (const value of [true, '', null, Number.POSITIVE_INFINITY, 'many']) {
+			expect(() => optionalNumber(value, 'servingsPlanned')).toThrow(
+				expect.objectContaining({
+					code: 'invalid_input',
+					message: 'servingsPlanned must be a finite number.'
+				})
+			);
+		}
 	});
 
 	it('rejects empty required text and heterogeneous string arrays', () => {

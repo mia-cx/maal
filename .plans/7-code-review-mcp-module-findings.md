@@ -1,15 +1,18 @@
 # #7 Code review: MCP module findings
 
 ## Summary
+
 Address MCP module code-review findings by tightening input validation, permission checks, registry behavior, cleanup, result serialization, pagination, delete semantics, and tests.
 
 ## Acceptance criteria
+
 - [x] MCP write tools enforce both key scope and household role permissions where required.
 - [x] MCP boundary helpers reject malformed scalar/object/date/source/batch inputs with `invalid_input` instead of silently normalizing or failing generically.
 - [x] Registry, protocol, result serialization, pagination, and delete semantics match the review findings.
 - [x] MCP tests cover the fixed behavior and validation commands pass.
 
 ## TODOs
+
 - [x] Tighten scalar, required-id, meal source, date range, and batch meal input validation.
 - [x] Enforce check-in role permissions and update planning tools to use strict required IDs.
 - [x] Harden registry, protocol cleanup, result serialization, recipe delete semantics, and pagination behavior.
@@ -17,6 +20,7 @@ Address MCP module code-review findings by tightening input validation, permissi
 - [x] Run final validation and file the PR.
 
 ## Notes
+
 - Created worktree from `origin/main` because the repository root had unrelated uncommitted changes.
 - Issue body validation target: `pnpm check`, `pnpm test:unit -- --run src/lib/server/mcp`, `pnpm architecture:check`.
 
@@ -29,3 +33,5 @@ Address MCP module code-review findings by tightening input validation, permissi
 - Added scalar and registry tests; updated result, date range, meal input, and context tests for stricter behavior.
 - Validation: `pnpm test:unit -- --run src/lib/server/mcp` passed.
 - Final validation passed: `pnpm check`; `pnpm test:unit -- --run src/lib/server/mcp`; `pnpm architecture:check`.
+- PR review follow-up: scoped recipe mutations now allow owner-owned unlinked recipes while still blocking recipes linked outside the resolved household; optional number fields now reject provided malformed values with `invalid_input` instead of silently dropping them.
+- Validation: `pnpm test:unit -- --run src/lib/server/mcp/scalars.test.ts src/lib/server/mcp/meal-input.test.ts`; `pnpm check`; `pnpm architecture:check` passed.

@@ -175,8 +175,7 @@ const linkedMealMatchesSnapshot = async (
 	);
 };
 
-
-const requireRecipeOnlyVisibleInHousehold = async (input: {
+const requireRecipeMutableInHousehold = async (input: {
 	db: Db;
 	recipeId: string;
 	householdId?: string | null;
@@ -188,9 +187,10 @@ const requireRecipeOnlyVisibleInHousehold = async (input: {
 		.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
 		.where(eq(householdMealUserRecipes.userRecipeId, input.recipeId));
 	const householdIds = new Set(linkedHouseholds.map((link) => link.householdId));
-	if (householdIds.size !== 1 || !householdIds.has(input.householdId)) {
-		throw new Error('Recipe not found.');
+	if (householdIds.size === 0 || (householdIds.size === 1 && householdIds.has(input.householdId))) {
+		return;
 	}
+	throw new Error('Recipe not found.');
 };
 
 const propagateRecipeUpdateToLinkedMeals = async (
@@ -250,7 +250,7 @@ export const updateUserRecipe = async (input: {
 		)
 		.get();
 	if (!existing) throw new Error('Recipe not found.');
-	await requireRecipeOnlyVisibleInHousehold({
+	await requireRecipeMutableInHousehold({
 		db: input.db,
 		recipeId: input.recipeId,
 		householdId: input.householdId
@@ -328,7 +328,7 @@ export const deleteUserRecipe = async (input: {
 	householdId?: string | null;
 	recipeId: string;
 }) => {
-	await requireRecipeOnlyVisibleInHousehold({
+	await requireRecipeMutableInHousehold({
 		db: input.db,
 		recipeId: input.recipeId,
 		householdId: input.householdId
