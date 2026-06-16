@@ -1,5 +1,9 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
+
+type TaxonomyDb = ReturnType<typeof getDb>;
+type TaxonomyTransaction = Parameters<Parameters<TaxonomyDb['transaction']>[0]>[0];
+type DisplayOverrideDb = TaxonomyDb | TaxonomyTransaction;
 import {
 	foodAliases,
 	foodHouseholdAliases,
@@ -114,11 +118,10 @@ type UnitAliasMatch = {
 };
 
 export const unitByAlias = async (
-	database: D1Database,
+	db: DisplayOverrideDb,
 	alias: string,
 	baseUnitId?: string
 ): Promise<UnitAliasMatch | null> => {
-	const db = getDb(database);
 	const rows = await db
 		.select()
 		.from(unitAliases)
@@ -138,12 +141,14 @@ export const unitByAlias = async (
 
 export const upsertUnitDisplayOverride = async ({
 	database,
+	db: inputDb,
 	householdId,
 	locale,
 	baseUnitId,
 	preferredUnitAlias
 }: {
 	database: D1Database;
+	db?: DisplayOverrideDb;
 	householdId: string;
 	locale: string;
 	baseUnitId?: string;
@@ -151,8 +156,8 @@ export const upsertUnitDisplayOverride = async ({
 }) => {
 	const alias = preferredUnitAlias.trim();
 	if (!alias) return;
-	const db = getDb(database);
-	const globalAlias = await unitByAlias(database, alias, baseUnitId);
+	const db = inputDb ?? getDb(database);
+	const globalAlias = await unitByAlias(db, alias, baseUnitId);
 	if (globalAlias) {
 		await db
 			.insert(householdUnitDisplayOverrides)
@@ -213,17 +218,19 @@ export const upsertUnitDisplayOverride = async ({
 
 export const upsertFoodDisplayOverride = async ({
 	database,
+	db: inputDb,
 	householdId,
 	locale,
 	row
 }: {
 	database: D1Database;
+	db?: DisplayOverrideDb;
 	householdId: string;
 	locale: string;
 	row: IngredientOverrideInput;
 }) => {
 	if (!row.baseFood) return;
-	const db = getDb(database);
+	const db = inputDb ?? getDb(database);
 	const unitRows = row.preferredMeasureUnit
 		? await db.select().from(units).where(eq(units.id, row.preferredMeasureUnit)).limit(1)
 		: [];

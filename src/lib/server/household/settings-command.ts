@@ -20,6 +20,11 @@ export type HouseholdSettingsUpdateResult =
 	| { ok: true; message: string }
 	| { ok: false; status: number; message: string };
 
+type HouseholdSettingsDb = ReturnType<typeof getDb>;
+type HouseholdSettingsTransaction = Parameters<
+	Parameters<HouseholdSettingsDb['transaction']>[0]
+>[0];
+
 const isStringRecord = (value: unknown): value is Record<string, string> =>
 	Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
@@ -49,7 +54,7 @@ export const updateHouseholdSettingsFromForm = async ({
 	if (!parsedProfileUpdate.ok)
 		return { ok: false, status: 400, message: parsedProfileUpdate.message };
 	const profileUpdate = parsedProfileUpdate.update;
-	const dbUpdates: Array<() => Promise<unknown>> = [];
+	const dbUpdates: Array<(tx: HouseholdSettingsTransaction) => Promise<unknown>> = [];
 	const workosUpdates: Array<() => Promise<unknown>> = [];
 
 	if (form.has('name')) {
@@ -95,9 +100,10 @@ export const updateHouseholdSettingsFromForm = async ({
 		if (!preferredTemperatureUnit.ok)
 			return { ok: false, status: 400, message: preferredTemperatureUnit.message };
 		if (preferredMassUnit.value) {
-			dbUpdates.push(() =>
+			dbUpdates.push((tx) =>
 				upsertUnitDisplayOverride({
 					database,
+					db: tx,
 					householdId,
 					locale,
 					baseUnitId: 'grams',
@@ -106,9 +112,10 @@ export const updateHouseholdSettingsFromForm = async ({
 			);
 		}
 		if (preferredVolumeUnit.value) {
-			dbUpdates.push(() =>
+			dbUpdates.push((tx) =>
 				upsertUnitDisplayOverride({
 					database,
+					db: tx,
 					householdId,
 					locale,
 					baseUnitId: 'milliliters',
@@ -117,9 +124,10 @@ export const updateHouseholdSettingsFromForm = async ({
 			);
 		}
 		if (preferredTemperatureUnit.value) {
-			dbUpdates.push(() =>
+			dbUpdates.push((tx) =>
 				upsertUnitDisplayOverride({
 					database,
+					db: tx,
 					householdId,
 					locale,
 					baseUnitId: 'celsius',
@@ -139,9 +147,10 @@ export const updateHouseholdSettingsFromForm = async ({
 			if (!baseUnitId || !preferredUnitAlias) {
 				return { ok: false, status: 400, message: 'Unit override rows must include units.' };
 			}
-			dbUpdates.push(() =>
+			dbUpdates.push((tx) =>
 				upsertUnitDisplayOverride({
 					database,
+					db: tx,
 					householdId,
 					locale,
 					baseUnitId,
@@ -170,15 +179,15 @@ export const updateHouseholdSettingsFromForm = async ({
 			) {
 				return { ok: false, status: 400, message: 'Ingredient override rows must be complete.' };
 			}
-			dbUpdates.push(() =>
-				upsertFoodDisplayOverride({ database, householdId, locale, row: trimmedRow })
+			dbUpdates.push((tx) =>
+				upsertFoodDisplayOverride({ database, db: tx, householdId, locale, row: trimmedRow })
 			);
 		}
 	}
 
 	if (Object.keys(profileUpdate).length > 0) {
-		dbUpdates.push(() =>
-			getDb(database)
+		dbUpdates.push((tx) =>
+			tx
 				.insert(households)
 				.values({
 					householdId,
@@ -197,7 +206,11 @@ export const updateHouseholdSettingsFromForm = async ({
 
 	if (dbUpdates.length === 0 && workosUpdates.length === 0)
 		return { ok: true, message: 'No changes.' };
-	for (const update of dbUpdates) await update();
+	if (dbUpdates.length > 0) {
+		await getDb(database).transaction(async (tx) => {
+			for (const update of dbUpdates) await update(tx);
+		});
+	}
 	for (const update of workosUpdates) await update();
 	return { ok: true, message: 'Household saved.' };
 };
