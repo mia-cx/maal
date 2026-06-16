@@ -560,7 +560,7 @@ export const loadMealPlanMeals = async (
 		.where(
 			and(
 				eq(householdMeals.householdId, params.householdId),
-				params.mealId ? eq(householdMeals.id, params.mealId) : undefined,
+				params.mealId !== undefined ? eq(householdMeals.id, params.mealId) : undefined,
 				dateRangeFilter
 			)
 		)
