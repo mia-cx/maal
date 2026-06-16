@@ -162,7 +162,9 @@ export const createHouseholdMeal = async (input: {
 		});
 
 		if (recipe) {
-			await tx.insert(householdMealUserRecipes).values({ householdMealId, userRecipeId: recipe.id });
+			await tx
+				.insert(householdMealUserRecipes)
+				.values({ householdMealId, userRecipeId: recipe.id });
 			await copyRecipeSidecarsToMeal(tx, recipe.id, householdMealId);
 		} else {
 			await replaceMealIngredientsFromLines(tx, householdMealId, meal.customMeal?.ingredients);
@@ -226,7 +228,8 @@ export const updateHouseholdMeal = async (input: {
 			.set({
 				date: meal.patch.date === undefined ? existingMeal.date : meal.patch.date,
 				time: meal.patch.time === undefined ? existingMeal.time : meal.patch.time,
-				sortOrder: meal.patch.sortOrder === undefined ? existingMeal.sortOrder : meal.patch.sortOrder,
+				sortOrder:
+					meal.patch.sortOrder === undefined ? existingMeal.sortOrder : meal.patch.sortOrder,
 				plannedCookWorkosUserId,
 				plannedYield:
 					meal.patch.servingsPlanned === undefined

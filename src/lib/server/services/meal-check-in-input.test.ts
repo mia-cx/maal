@@ -35,7 +35,11 @@ describe('readMealCheckInInput', () => {
 
 	it('defaults cooked to true and rejects coercive values', async () => {
 		await expect(
-			readMealCheckInInput(jsonRequest({ mealId: 'meal_1', verdict: 'neutral' }), 'household_1', 'user_1')
+			readMealCheckInInput(
+				jsonRequest({ mealId: 'meal_1', verdict: 'neutral' }),
+				'household_1',
+				'user_1'
+			)
 		).resolves.toMatchObject({ cooked: true, cookTime: null });
 		await expect(
 			readMealCheckInInput(

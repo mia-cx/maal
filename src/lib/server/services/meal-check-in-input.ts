@@ -21,7 +21,12 @@ export const readMealCheckInInput = async (
 	if (!mealId) error(400, { message: 'Meal is required.' });
 	if (!verdict) error(400, { message: 'Verdict is required.' });
 	if (cooked === null) error(400, { message: 'Cooked must be true or false.' });
-	if (body.cookTime !== undefined && body.cookTime !== null && body.cookTime !== '' && cookTime === null) {
+	if (
+		body.cookTime !== undefined &&
+		body.cookTime !== null &&
+		body.cookTime !== '' &&
+		cookTime === null
+	) {
 		error(400, { message: 'Cook time must be a positive whole number.' });
 	}
 	return {
