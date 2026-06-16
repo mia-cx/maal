@@ -8,7 +8,12 @@ const requireHouseholdAccess = vi.fn();
 vi.mock('$lib/server/auth/household', () => ({ resolveActiveHouseholdId }));
 vi.mock('$lib/server/domains/billing', () => ({ requireHouseholdAccess }));
 
-const { requireAppContext, requireBillingAppContext } = await import('./app-context');
+const {
+	requireActivatedHousehold,
+	requireAppContext,
+	requireBillingAppContext,
+	requireResolvedHouseholdId
+} = await import('./app-context');
 
 const session = createAuthSession();
 const database = {} as D1Database;
@@ -28,6 +33,62 @@ const input = (overrides: Partial<AppContextInput> = {}): AppContextInput => ({
 	platform,
 	url,
 	...overrides
+});
+
+describe('requireResolvedHouseholdId', () => {
+	it('returns a resolved household id', () => {
+		expect(requireResolvedHouseholdId({ householdId: 'household_1', hasAnyHousehold: true })).toBe(
+			'household_1'
+		);
+	});
+
+	it('rejects users with no households', () => {
+		expect(() => requireResolvedHouseholdId({ householdId: null, hasAnyHousehold: false })).toThrow(
+			expect.objectContaining({ status: 404, body: { message: 'No households available.' } })
+		);
+	});
+
+	it('rejects unresolved active households', () => {
+		expect(() => requireResolvedHouseholdId({ householdId: null, hasAnyHousehold: true })).toThrow(
+			expect.objectContaining({ status: 400, body: { message: 'Household is required.' } })
+		);
+	});
+});
+
+describe('requireActivatedHousehold', () => {
+	it('returns an activated household id', () => {
+		expect(
+			requireActivatedHousehold({
+				status: 'activated',
+				householdId: 'household_1',
+				hasAnyHousehold: true
+			})
+		).toBe('household_1');
+	});
+
+	it('rejects inaccessible households when the user has none', () => {
+		expect(() =>
+			requireActivatedHousehold({
+				status: 'inaccessible',
+				householdId: 'household_2',
+				hasAnyHousehold: false
+			})
+		).toThrow(
+			expect.objectContaining({ status: 404, body: { message: 'No households available.' } })
+		);
+	});
+
+	it('rejects inaccessible households when the user has others', () => {
+		expect(() =>
+			requireActivatedHousehold({
+				status: 'inaccessible',
+				householdId: 'household_2',
+				hasAnyHousehold: true
+			})
+		).toThrow(
+			expect.objectContaining({ status: 403, body: { message: 'Household is not accessible.' } })
+		);
+	});
 });
 
 describe('requireAppContext', () => {
@@ -141,5 +202,77 @@ describe('requireBillingAppContext', () => {
 			session,
 			householdId: 'household_1'
 		});
+	});
+});
+
+describe('requireResolvedHouseholdId', () => {
+	it('returns the resolved household id', () => {
+		expect(requireResolvedHouseholdId({ householdId: 'household_1', hasAnyHousehold: true })).toBe(
+			'household_1'
+		);
+	});
+
+	it('rejects users with no households', () => {
+		expect(() =>
+			requireResolvedHouseholdId({ householdId: null, hasAnyHousehold: false })
+		).toThrowError(
+			expect.objectContaining({
+				status: 404,
+				body: { message: 'No households available.' }
+			})
+		);
+	});
+
+	it('rejects missing active households when households exist', () => {
+		expect(() =>
+			requireResolvedHouseholdId({ householdId: null, hasAnyHousehold: true })
+		).toThrowError(
+			expect.objectContaining({
+				status: 400,
+				body: { message: 'Household is required.' }
+			})
+		);
+	});
+});
+
+describe('requireActivatedHousehold', () => {
+	it('returns activated household ids', () => {
+		expect(
+			requireActivatedHousehold({
+				status: 'activated',
+				householdId: 'household_1',
+				hasAnyHousehold: true
+			})
+		).toBe('household_1');
+	});
+
+	it('rejects inaccessible households when the user has none', () => {
+		expect(() =>
+			requireActivatedHousehold({
+				status: 'inaccessible',
+				householdId: 'household_2',
+				hasAnyHousehold: false
+			})
+		).toThrowError(
+			expect.objectContaining({
+				status: 404,
+				body: { message: 'No households available.' }
+			})
+		);
+	});
+
+	it('rejects inaccessible households when others exist', () => {
+		expect(() =>
+			requireActivatedHousehold({
+				status: 'inaccessible',
+				householdId: 'household_2',
+				hasAnyHousehold: true
+			})
+		).toThrowError(
+			expect.objectContaining({
+				status: 403,
+				body: { message: 'Household is not accessible.' }
+			})
+		);
 	});
 });
