@@ -24,10 +24,13 @@ export const defaultPlanRange = (args: Record<string, unknown>) => {
 					: dateKey(addUtcDays(utcDateFromKey(startDate), defaultPlanRangeDays))
 			}
 		: endDate
-			? {
-					startDate: dateKey(addUtcDays(utcDateFromKey(endDate), -defaultPlanRangeDays)),
-					endDate: parseDateKey(endDate, 'endDate')
-				}
+			? (() => {
+					const validEndDate = parseDateKey(endDate, 'endDate');
+					return {
+						startDate: dateKey(addUtcDays(utcDateFromKey(validEndDate), -defaultPlanRangeDays)),
+						endDate: validEndDate
+					};
+				})()
 			: (() => {
 					const today = new Date();
 					return {
