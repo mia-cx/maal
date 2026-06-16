@@ -202,6 +202,11 @@ const scanRecordsForUser = async (
 	return userRecords;
 };
 
+const recordsForUser = async (store: KVNamespace, userId: string): Promise<KeyedMcpRecord[]> => {
+	const indexed = await indexedRecordsForUser(store, userId);
+	return indexed.needsRepair ? scanRecordsForUser(store, userId) : indexed.records;
+};
+
 const findRecordForUser = async (
 	store: KVNamespace,
 	userId: string,
@@ -275,7 +280,7 @@ export const listMcpKeys = async (input: {
 	userId: string;
 }): Promise<PublicMcpKey[]> => {
 	const store = getMcpKeyStore(input.platform);
-	const userRecords = (await scanRecordsForUser(store, input.userId))
+	const userRecords = (await recordsForUser(store, input.userId))
 		.map((entry) => entry.record)
 		.toSorted((left, right) => right.createdAt.localeCompare(left.createdAt));
 	const households = await listUserHouseholds(input.platform, input.userId).catch(() => []);

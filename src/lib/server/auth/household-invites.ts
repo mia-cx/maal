@@ -216,7 +216,14 @@ export const joinHouseholdFromInvite = async (input: {
 				roleSlug: householdRoleSlug(consumedInvite.roleSlug)
 			});
 		} catch (cause) {
-			await releaseHouseholdInviteUse(input.platform.env.DB, consumedInvite.id);
+			try {
+				await releaseHouseholdInviteUse(input.platform.env.DB, consumedInvite.id);
+			} catch (releaseCause) {
+				console.error('Failed to release household invite use after membership creation failed', {
+					inviteId: consumedInvite.id,
+					cause: releaseCause
+				});
+			}
 			throw cause;
 		}
 	}

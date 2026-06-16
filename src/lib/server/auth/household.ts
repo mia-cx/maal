@@ -237,8 +237,7 @@ export const listHouseholdMembers = async (
 	const memberships = await (
 		await runtime.workos.userManagement.listOrganizationMemberships({
 			organizationId: householdId,
-			statuses: ['active'],
-			limit: 100
+			statuses: ['active']
 		})
 	).autoPagination();
 
