@@ -435,5 +435,10 @@ CREATE INDEX `user_recipes_saved_from_household_id_idx` ON `user_recipes` (`save
 CREATE INDEX `user_recipes_source_url_idx` ON `user_recipes` (`source_url`);--> statement-breakpoint
 CREATE INDEX `user_recipes_source_html_hash_idx` ON `user_recipes` (`source_html_hash`);--> statement-breakpoint
 CREATE INDEX `user_recipes_deleted_at_idx` ON `user_recipes` (`deleted_at`);--> statement-breakpoint
-PRAGMA foreign_key_check;--> statement-breakpoint
+CREATE TABLE `__migration_foreign_key_violations` (
+	`violation_count` integer NOT NULL,
+	CONSTRAINT "migration_foreign_key_check_passed" CHECK(`violation_count` = 0)
+);--> statement-breakpoint
+INSERT INTO `__migration_foreign_key_violations`(`violation_count`) SELECT COUNT(*) FROM pragma_foreign_key_check;--> statement-breakpoint
+DROP TABLE `__migration_foreign_key_violations`;--> statement-breakpoint
 PRAGMA foreign_keys=ON;--> statement-breakpoint
