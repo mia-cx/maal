@@ -140,6 +140,21 @@ export const findHouseholdIdForStripeSubscriptionId = async (input: {
 	return rows[0]?.householdId ?? null;
 };
 
+export const findStripeCustomerSubscription = async (input: {
+	database: D1Database;
+	customerId: string;
+}): Promise<{ householdId: string; subscriptionId: string | null } | null> => {
+	const rows = await getDb(input.database)
+		.select({
+			householdId: billingSubscriptions.householdId,
+			subscriptionId: billingSubscriptions.stripeSubscriptionId
+		})
+		.from(billingSubscriptions)
+		.where(eq(billingSubscriptions.stripeCustomerId, input.customerId))
+		.limit(1);
+	return rows[0] ?? null;
+};
+
 export const findHouseholdIdForStripeSubscription = async (input: {
 	database: D1Database;
 	customerId?: string | null;

@@ -3,8 +3,8 @@ import Stripe from 'stripe';
 import { createStripeClient, getStripeWebhookSecret } from './stripe';
 import {
 	deleteSubscriptionRecord,
-	findHouseholdIdForStripeSubscription,
 	findHouseholdIdForStripeSubscriptionId,
+	findStripeCustomerSubscription,
 	upsertSubscription
 } from './subscriptions';
 
@@ -42,6 +42,18 @@ export const shouldIgnoreUnknownDeletedSubscription = (input: {
 	existingHouseholdId: string | null;
 }): boolean =>
 	deletedSubscriptionRequiresExactMatch(input.eventType) && input.existingHouseholdId === null;
+
+export const householdIdForSubscriptionEvent = (input: {
+	exactSubscriptionHouseholdId: string | null;
+	customerSubscription: { householdId: string; subscriptionId: string | null } | null;
+	metadataHouseholdId?: string | null;
+}): string | null => {
+	if (input.exactSubscriptionHouseholdId) return input.exactSubscriptionHouseholdId;
+	if (input.customerSubscription?.subscriptionId === null)
+		return input.customerSubscription.householdId;
+	if (input.customerSubscription) return null;
+	return input.metadataHouseholdId ?? null;
+};
 
 const stripeEventFromRequest = async (platform: App.Platform, request: Request) => {
 	const stripe = createStripeClient(platform);
@@ -96,17 +108,25 @@ export const handleStripeWebhook = async (platform: App.Platform | undefined, re
 	) {
 		const subscription = event.data.object as Stripe.Subscription;
 		const customerId = stringId(subscription.customer);
+		const exactSubscriptionHouseholdId = await findHouseholdIdForStripeSubscriptionId({
+			database: platform.env.DB,
+			subscriptionId: subscription.id
+		});
+		const customerSubscription =
+			!exactSubscriptionHouseholdId && customerId
+				? await findStripeCustomerSubscription({
+						database: platform.env.DB,
+						customerId
+					})
+				: null;
 		const existingHouseholdId = deletedSubscriptionRequiresExactMatch(event.type)
-			? await findHouseholdIdForStripeSubscriptionId({
-					database: platform.env.DB,
-					subscriptionId: subscription.id
-				})
-			: await findHouseholdIdForStripeSubscription({
-					database: platform.env.DB,
-					customerId,
-					subscriptionId: subscription.id
+			? exactSubscriptionHouseholdId
+			: householdIdForSubscriptionEvent({
+					exactSubscriptionHouseholdId,
+					customerSubscription,
+					metadataHouseholdId: subscription.metadata.householdId
 				});
-		const householdId = existingHouseholdId ?? subscription.metadata.householdId;
+		const householdId = existingHouseholdId;
 		if (shouldIgnoreUnknownDeletedSubscription({ eventType: event.type, existingHouseholdId }))
 			return;
 		if (customerId && isRollbackMarkedTrialSubscription(subscription)) {
