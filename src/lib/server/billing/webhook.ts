@@ -4,6 +4,7 @@ import { createStripeClient, getStripeWebhookSecret } from './stripe';
 import {
 	deleteSubscriptionRecord,
 	findHouseholdIdForStripeSubscription,
+	findHouseholdIdForStripeSubscriptionId,
 	upsertSubscription
 } from './subscriptions';
 
@@ -33,11 +34,14 @@ export const isTerminalRolledBackTrialSubscription = (subscription: Stripe.Subsc
 	isRollbackMarkedTrialSubscription(subscription) &&
 	terminalSubscriptionStatuses.has(subscription.status);
 
+export const deletedSubscriptionRequiresExactMatch = (eventType: Stripe.Event.Type): boolean =>
+	eventType === 'customer.subscription.deleted';
+
 export const shouldIgnoreUnknownDeletedSubscription = (input: {
 	eventType: Stripe.Event.Type;
 	existingHouseholdId: string | null;
 }): boolean =>
-	input.eventType === 'customer.subscription.deleted' && input.existingHouseholdId === null;
+	deletedSubscriptionRequiresExactMatch(input.eventType) && input.existingHouseholdId === null;
 
 const stripeEventFromRequest = async (platform: App.Platform, request: Request) => {
 	const stripe = createStripeClient(platform);
@@ -92,11 +96,16 @@ export const handleStripeWebhook = async (platform: App.Platform | undefined, re
 	) {
 		const subscription = event.data.object as Stripe.Subscription;
 		const customerId = stringId(subscription.customer);
-		const existingHouseholdId = await findHouseholdIdForStripeSubscription({
-			database: platform.env.DB,
-			customerId,
-			subscriptionId: subscription.id
-		});
+		const existingHouseholdId = deletedSubscriptionRequiresExactMatch(event.type)
+			? await findHouseholdIdForStripeSubscriptionId({
+					database: platform.env.DB,
+					subscriptionId: subscription.id
+				})
+			: await findHouseholdIdForStripeSubscription({
+					database: platform.env.DB,
+					customerId,
+					subscriptionId: subscription.id
+				});
 		const householdId = existingHouseholdId ?? subscription.metadata.householdId;
 		if (shouldIgnoreUnknownDeletedSubscription({ eventType: event.type, existingHouseholdId }))
 			return;

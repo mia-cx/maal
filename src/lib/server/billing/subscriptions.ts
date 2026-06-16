@@ -128,6 +128,18 @@ export const deleteSubscriptionRecord = async (input: {
 		);
 };
 
+export const findHouseholdIdForStripeSubscriptionId = async (input: {
+	database: D1Database;
+	subscriptionId: string;
+}): Promise<string | null> => {
+	const rows = await getDb(input.database)
+		.select({ householdId: billingSubscriptions.householdId })
+		.from(billingSubscriptions)
+		.where(eq(billingSubscriptions.stripeSubscriptionId, input.subscriptionId))
+		.limit(1);
+	return rows[0]?.householdId ?? null;
+};
+
 export const findHouseholdIdForStripeSubscription = async (input: {
 	database: D1Database;
 	customerId?: string | null;

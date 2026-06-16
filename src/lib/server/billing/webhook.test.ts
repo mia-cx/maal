@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type Stripe from 'stripe';
 import {
+	deletedSubscriptionRequiresExactMatch,
 	isRollbackMarkedTrialSubscription,
 	isTerminalRolledBackTrialSubscription,
 	shouldIgnoreUnknownDeletedSubscription
@@ -29,7 +30,10 @@ describe('rolled-back trial subscriptions', () => {
 		expect(isTerminalRolledBackTrialSubscription(markedTrialing)).toBe(false);
 	});
 
-	it('ignores deleted subscriptions that no longer match local billing state', () => {
+	it('requires deleted subscription events to match an existing local subscription', () => {
+		expect(deletedSubscriptionRequiresExactMatch('customer.subscription.deleted')).toBe(true);
+		expect(deletedSubscriptionRequiresExactMatch('customer.subscription.updated')).toBe(false);
+
 		expect(
 			shouldIgnoreUnknownDeletedSubscription({
 				eventType: 'customer.subscription.deleted',
