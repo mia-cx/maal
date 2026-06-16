@@ -100,8 +100,8 @@ export const updateHouseholdInviteRole = async (input: {
 	householdId: string;
 	inviteId: string;
 	roleSlug: HouseholdRoleSlug;
-}): Promise<void> => {
-	await getDb(input.database)
+}): Promise<number> => {
+	const rows = await getDb(input.database)
 		.update(householdInvites)
 		.set({ roleSlug: input.roleSlug })
 		.where(
@@ -109,15 +109,17 @@ export const updateHouseholdInviteRole = async (input: {
 				eq(householdInvites.id, input.inviteId),
 				eq(householdInvites.householdId, input.householdId)
 			)
-		);
+		)
+		.returning({ id: householdInvites.id });
+	return rows.length;
 };
 
 export const revokeHouseholdInvite = async (input: {
 	database: D1Database;
 	householdId: string;
 	inviteId: string;
-}): Promise<void> => {
-	await getDb(input.database)
+}): Promise<number> => {
+	const rows = await getDb(input.database)
 		.update(householdInvites)
 		.set({ revokedAt: new Date().toISOString() })
 		.where(
@@ -125,22 +127,26 @@ export const revokeHouseholdInvite = async (input: {
 				eq(householdInvites.id, input.inviteId),
 				eq(householdInvites.householdId, input.householdId)
 			)
-		);
+		)
+		.returning({ id: householdInvites.id });
+	return rows.length;
 };
 
 export const deleteHouseholdInvite = async (input: {
 	database: D1Database;
 	householdId: string;
 	inviteId: string;
-}): Promise<void> => {
-	await getDb(input.database)
+}): Promise<number> => {
+	const rows = await getDb(input.database)
 		.delete(householdInvites)
 		.where(
 			and(
 				eq(householdInvites.id, input.inviteId),
 				eq(householdInvites.householdId, input.householdId)
 			)
-		);
+		)
+		.returning({ id: householdInvites.id });
+	return rows.length;
 };
 
 export const loadHouseholdInviteByCode = async (
