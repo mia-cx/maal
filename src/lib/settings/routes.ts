@@ -1,6 +1,13 @@
 export const defaultSettingsCategory = 'account';
-export const settingsCategories = ['account', 'security', 'notifications', 'billing'] as const;
-export type SettingsCategoryId = (typeof settingsCategories)[number];
+import type { SettingsCategoryId } from './types';
+
+export const settingsCategories = [
+	'account',
+	'security',
+	'mcp',
+	'notifications',
+	'billing'
+] as const satisfies SettingsCategoryId[];
 
 export const isSettingsCategory = (value: string): value is SettingsCategoryId =>
 	settingsCategories.includes(value as SettingsCategoryId);

@@ -55,7 +55,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		});
 		session.user = syncSessionUser(session.user, publicUser);
 
-		if (email === currentEmail) await refreshSessionCookie(cookies, platform, url);
+		await refreshSessionCookie(cookies, platform, url);
 
 		return json({
 			...(email !== currentEmail ? { pendingEmail: email } : {}),

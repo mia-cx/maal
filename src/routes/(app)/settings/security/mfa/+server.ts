@@ -150,7 +150,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request }) => {
 	} catch (cause) {
 		if (isHttpError(cause)) throw cause;
 		console.error('Failed to verify MFA setup', cause);
-		error(400, { message: 'That code did not match.' });
+		error(502, { message: 'Could not verify two-factor setup.' });
 	}
 };
 

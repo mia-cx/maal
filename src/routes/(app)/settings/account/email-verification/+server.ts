@@ -8,6 +8,7 @@ import {
 } from '$lib/server/settings/account-session';
 import {
 	confirmWorkosEmailChangeCode,
+	isInvalidEmailChangeCode,
 	sendWorkosEmailChangeCode
 } from '$lib/server/settings/workos-email-change';
 
@@ -59,6 +60,9 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 		return json({ user: toPublicSettingsUser(user) });
 	} catch (cause) {
 		if (isHttpError(cause)) throw cause;
+		if (isInvalidEmailChangeCode(cause)) {
+			error(400, { message: 'Could not verify that code.' });
+		}
 		console.error('Failed to confirm WorkOS email change', cause);
 		error(502, { message: 'Could not verify that code.' });
 	}

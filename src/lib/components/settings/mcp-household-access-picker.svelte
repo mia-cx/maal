@@ -51,7 +51,7 @@
 				</Button>
 			</Popover.Trigger>
 			<Popover.Content align="start" class="w-[22rem] max-w-[calc(100vw-2rem)] p-1">
-				<Command.Root>
+				<Command.Root shouldFilter={false}>
 					<Command.Input bind:value={mcpHouseholdQuery} placeholder="Search households…" />
 					<Command.List class="max-h-56 overflow-y-auto p-1">
 						{#if filteredMcpHouseholds.length === 0}
