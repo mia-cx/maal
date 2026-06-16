@@ -6,13 +6,13 @@ Address household module review findings around cross-system consistency, strict
 
 ## Acceptance criteria
 
-- [ ] Household deletion performs local cleanup transactionally before external WorkOS deletion.
-- [ ] Household settings updates validate payloads strictly and avoid concurrent DB/WorkOS partial updates.
-- [ ] Member commands and member listing do not truncate after one WorkOS page.
-- [ ] Household form payloads reject malformed strings/integers/JSON before mutation.
-- [ ] Invite mutation commands report 404 when no invite row changed.
-- [ ] Last-manager rule and household view reads are centralized/optimized where practical.
-- [ ] Relevant household checks pass.
+- [x] Household deletion performs local cleanup transactionally before external WorkOS deletion.
+- [x] Household settings updates validate payloads strictly and avoid concurrent DB/WorkOS partial updates.
+- [x] Member commands and member listing do not truncate after one WorkOS page.
+- [x] Household form payloads reject malformed strings/integers/JSON before mutation.
+- [x] Invite mutation commands report 404 when no invite row changed.
+- [x] Last-manager rule and household view reads are centralized/optimized where practical.
+- [x] Relevant household checks pass.
 
 ## TODOs
 

@@ -238,9 +238,12 @@ export const actions: Actions = {
 			return fail(400, { message: 'Smoke household cannot be left.' });
 		}
 
+		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
+
 		try {
 			const result = await leaveHouseholdMembership({
 				platform: event.platform,
+				database: event.platform.env.DB,
 				householdId,
 				session
 			});
@@ -257,10 +260,13 @@ export const actions: Actions = {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
 
+		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
+
 		try {
 			return memberCommandResponse(
 				await removeMemberFromForm({
 					platform: event.platform,
+					database: event.platform.env.DB,
 					householdId: managedHousehold.householdId,
 					session: managedHousehold.session,
 					form: await event.request.formData()

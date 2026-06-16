@@ -34,20 +34,21 @@ export const deleteHouseholdCascade = async ({
 	householdId: string;
 }) => {
 	const db = getDb(database);
-	const mealRows = await db
-		.select({ id: householdMeals.id })
-		.from(householdMeals)
-		.where(eq(householdMeals.householdId, householdId));
-	const mealIds = mealRows.map((meal) => meal.id);
-	const instructionRows = mealIds.length
-		? await db
-				.select({ id: householdMealInstructions.id })
-				.from(householdMealInstructions)
-				.where(inArray(householdMealInstructions.householdMealId, mealIds))
-		: [];
-	const instructionIds = instructionRows.map((instruction) => instruction.id);
 
 	await db.transaction(async (tx) => {
+		const mealRows = await tx
+			.select({ id: householdMeals.id })
+			.from(householdMeals)
+			.where(eq(householdMeals.householdId, householdId));
+		const mealIds = mealRows.map((meal) => meal.id);
+		const instructionRows = mealIds.length
+			? await tx
+					.select({ id: householdMealInstructions.id })
+					.from(householdMealInstructions)
+					.where(inArray(householdMealInstructions.householdMealId, mealIds))
+			: [];
+		const instructionIds = instructionRows.map((instruction) => instruction.id);
+
 		if (instructionIds.length > 0) {
 			await tx
 				.delete(householdMealInstructionEvents)

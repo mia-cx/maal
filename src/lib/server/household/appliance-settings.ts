@@ -16,11 +16,14 @@ export const updateHouseholdAppliancesFromForm = async ({
 > => {
 	const db = getDb(database);
 	const now = new Date().toISOString();
-	let changedCount = 0;
+	const parsedUpdates: Array<{
+		appliance: (typeof applianceValues)[number];
+		available: boolean;
+		notes: string | null;
+	}> = [];
 
 	for (const appliance of applianceValues) {
 		if (!form.has(`available:${appliance}`) && !form.has(`notes:${appliance}`)) continue;
-		changedCount += 1;
 		const availableValue = form.get(`available:${appliance}`);
 		if (availableValue !== null && availableValue !== 'on') {
 			return { ok: false, status: 400, message: 'Invalid appliance availability value.' };
@@ -31,14 +34,25 @@ export const updateHouseholdAppliancesFromForm = async ({
 			'Appliance notes must be text.'
 		);
 		if (!notes.ok) return { ok: false, status: 400, message: notes.message };
-		await db
-			.insert(householdAppliances)
-			.values({ householdId, appliance, available, notes: notes.value })
-			.onConflictDoUpdate({
-				target: [householdAppliances.householdId, householdAppliances.appliance],
-				set: { available, notes: notes.value, updatedAt: now }
-			});
+		parsedUpdates.push({ appliance, available, notes: notes.value });
 	}
 
-	return { ok: true, changedCount };
+	await db.transaction(async (tx) => {
+		for (const row of parsedUpdates) {
+			await tx
+				.insert(householdAppliances)
+				.values({
+					householdId,
+					appliance: row.appliance,
+					available: row.available,
+					notes: row.notes
+				})
+				.onConflictDoUpdate({
+					target: [householdAppliances.householdId, householdAppliances.appliance],
+					set: { available: row.available, notes: row.notes, updatedAt: now }
+				});
+		}
+	});
+
+	return { ok: true, changedCount: parsedUpdates.length };
 };
