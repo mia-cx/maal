@@ -12,7 +12,7 @@ Address the remaining service-module review findings by removing UI type couplin
 - [ ] Focused service tests and repo validation pass.
 
 ## TODOs
-- [ ] Add shared meal feedback/check-in validation types and update imports away from UI modules.
+- [x] Add shared meal feedback/check-in validation types and update imports away from UI modules.
 - [ ] Tighten check-in input/service validation and tests.
 - [ ] Wrap remaining meal check-in/meal-plan multi-write mutations in transactions.
 - [ ] Add exact meal loading support and use it from `getHouseholdMeal`.
@@ -22,3 +22,4 @@ Address the remaining service-module review findings by removing UI type couplin
 ## Notes
 - Initial repo had uncommitted changes in the parent worktree; this work is isolated in `.worktrees/8-code-review-services-module-findings` from `main`.
 - Existing `main` already contains several fixes from the issue: recipe import SSRF/byte-limit protection, transactions in recipe create/update, and unused `mealFromHouseholdMeal` import removal.
+- Added `$lib/domain/meal-feedback` for shared verdict/capacity types so server code no longer imports UI label modules.

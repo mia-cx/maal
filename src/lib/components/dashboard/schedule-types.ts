@@ -1,6 +1,6 @@
 export type ScheduleMode = 'daily' | 'multi-day' | 'monthly';
 
-import type { MealFeedbackVerdict } from './meal-labels';
+import type { MealFeedbackVerdict } from '$lib/domain/meal-feedback';
 
 export type MealFamiliarity = 'safe' | 'exploration' | 'wildcard';
 export type MealStatus = 'planned' | 'cooked' | 'skipped';

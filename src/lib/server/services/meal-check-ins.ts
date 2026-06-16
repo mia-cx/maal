@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import type { MealFeedbackVerdict } from '$lib/components/dashboard/meal-labels';
+import type { MealFeedbackVerdict } from '$lib/domain/meal-feedback';
 import { getDb } from '$lib/server/db';
 import { householdMeals, mealCheckIns } from '$lib/server/db/schema';
 

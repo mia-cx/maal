@@ -1,4 +1,4 @@
-import type { MealFeedbackVerdict } from '$lib/components/dashboard/meal-labels';
+import type { MealFeedbackVerdict } from '$lib/domain/meal-feedback';
 import { getDb } from '$lib/server/db';
 import { upsertMealCheckIn as upsertMealCheckInCore } from './meal-check-ins';
 

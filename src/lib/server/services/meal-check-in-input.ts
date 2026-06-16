@@ -1,5 +1,5 @@
 import { error } from '@sveltejs/kit';
-import type { MealFeedbackVerdict } from '$lib/components/dashboard/meal-labels';
+import type { MealFeedbackVerdict } from '$lib/domain/meal-feedback';
 import { readJsonObject } from '$lib/server/http/request';
 import type { MealCheckInInput } from './meal-check-ins';
 
