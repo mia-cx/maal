@@ -6,12 +6,12 @@ Harden database persistence after the db module code review: make recipe child-r
 
 ## Acceptance criteria
 
-- [ ] Recipe ingredient/instruction replacement runs atomically.
-- [ ] Invalid instruction-event payloads, empty media rows, and out-of-range confidence values are rejected by schema checks.
-- [ ] Classification uniqueness is not bypassed by null locales.
-- [ ] Billing subscription statuses and taxonomy/adoption enums are centralized.
-- [ ] Meal-plan loading order is deterministic and dead mapper parameters/cleanup issues are removed.
-- [ ] Relevant checks pass or residual risks are recorded.
+- [x] Recipe ingredient/instruction replacement runs atomically.
+- [x] Invalid instruction-event payloads, empty media rows, and out-of-range confidence values are rejected by schema checks.
+- [x] Classification uniqueness is not bypassed by null locales.
+- [x] Billing subscription statuses and taxonomy/adoption enums are centralized.
+- [x] Meal-plan loading order is deterministic and dead mapper parameters/cleanup issues are removed.
+- [x] Relevant checks pass or residual risks are recorded.
 
 ## TODOs
 
@@ -19,7 +19,7 @@ Harden database persistence after the db module code review: make recipe child-r
 - [x] Add schema invariants for confidence ranges, instruction-event payloads, non-empty media, and classification locales.
 - [x] Centralize billing status, taxonomy enum, and adoption-status constants.
 - [x] Stabilize and simplify meal-plan mapper loading helpers.
-- [~] Run final validation and file the PR.
+- [x] Run final validation and file the PR.
 
 ## Notes
 
