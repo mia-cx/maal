@@ -3,7 +3,7 @@ import Stripe from 'stripe';
 import { createStripeClient, getStripeWebhookSecret } from './stripe';
 import {
 	deleteSubscriptionRecord,
-	findHouseholdIdForStripeSubscriptionId,
+	findStripeSubscriptionRecordBySubscriptionId,
 	findStripeCustomerSubscription,
 	upsertSubscription
 } from './subscriptions';
@@ -30,9 +30,11 @@ const terminalSubscriptionStatuses = new Set<Stripe.Subscription.Status>([
 export const isRollbackMarkedTrialSubscription = (subscription: Stripe.Subscription): boolean =>
 	subscription.metadata.maal_trial_rollback === 'start_failed';
 
-export const isTerminalRolledBackTrialSubscription = (subscription: Stripe.Subscription): boolean =>
-	isRollbackMarkedTrialSubscription(subscription) &&
+export const isTerminalSubscription = (subscription: Stripe.Subscription): boolean =>
 	terminalSubscriptionStatuses.has(subscription.status);
+
+export const isTerminalRolledBackTrialSubscription = (subscription: Stripe.Subscription): boolean =>
+	isRollbackMarkedTrialSubscription(subscription) && isTerminalSubscription(subscription);
 
 export const deletedSubscriptionRequiresExactMatch = (eventType: Stripe.Event.Type): boolean =>
 	eventType === 'customer.subscription.deleted';
@@ -44,6 +46,7 @@ export const shouldIgnoreUnknownDeletedSubscription = (input: {
 	deletedSubscriptionRequiresExactMatch(input.eventType) && input.existingHouseholdId === null;
 
 export const householdIdForSubscriptionEvent = (input: {
+	eventType: Stripe.Event.Type;
 	exactSubscriptionHouseholdId: string | null;
 	customerSubscription: { householdId: string; subscriptionId: string | null } | null;
 	metadataHouseholdId?: string | null;
@@ -51,9 +54,25 @@ export const householdIdForSubscriptionEvent = (input: {
 	if (input.exactSubscriptionHouseholdId) return input.exactSubscriptionHouseholdId;
 	if (input.customerSubscription?.subscriptionId === null)
 		return input.customerSubscription.householdId;
+	if (input.eventType === 'customer.subscription.created') {
+		return input.metadataHouseholdId ?? input.customerSubscription?.householdId ?? null;
+	}
 	if (input.customerSubscription) return null;
 	return input.metadataHouseholdId ?? null;
 };
+
+export const shouldDeleteRollbackSubscription = (input: {
+	subscription: Stripe.Subscription;
+	localStatus?: string | null;
+}): boolean =>
+	isTerminalSubscription(input.subscription) &&
+	(input.localStatus === 'trial_rollback_pending' ||
+		isRollbackMarkedTrialSubscription(input.subscription));
+
+export const shouldSuppressRollbackSubscription = (input: {
+	subscription: Stripe.Subscription;
+	localStatus?: string | null;
+}): boolean => shouldDeleteRollbackSubscription(input);
 
 const stripeEventFromRequest = async (platform: App.Platform, request: Request) => {
 	const stripe = createStripeClient(platform);
@@ -108,10 +127,11 @@ export const handleStripeWebhook = async (platform: App.Platform | undefined, re
 	) {
 		const subscription = event.data.object as Stripe.Subscription;
 		const customerId = stringId(subscription.customer);
-		const exactSubscriptionHouseholdId = await findHouseholdIdForStripeSubscriptionId({
+		const exactSubscriptionRecord = await findStripeSubscriptionRecordBySubscriptionId({
 			database: platform.env.DB,
 			subscriptionId: subscription.id
 		});
+		const exactSubscriptionHouseholdId = exactSubscriptionRecord?.householdId ?? null;
 		const customerSubscription =
 			!exactSubscriptionHouseholdId && customerId
 				? await findStripeCustomerSubscription({
@@ -122,6 +142,7 @@ export const handleStripeWebhook = async (platform: App.Platform | undefined, re
 		const existingHouseholdId = deletedSubscriptionRequiresExactMatch(event.type)
 			? exactSubscriptionHouseholdId
 			: householdIdForSubscriptionEvent({
+					eventType: event.type,
 					exactSubscriptionHouseholdId,
 					customerSubscription,
 					metadataHouseholdId: subscription.metadata.householdId
@@ -129,15 +150,19 @@ export const handleStripeWebhook = async (platform: App.Platform | undefined, re
 		const householdId = existingHouseholdId;
 		if (shouldIgnoreUnknownDeletedSubscription({ eventType: event.type, existingHouseholdId }))
 			return;
-		if (customerId && isRollbackMarkedTrialSubscription(subscription)) {
-			if (isTerminalRolledBackTrialSubscription(subscription)) {
-				await deleteSubscriptionRecord({
-					database: platform.env.DB,
-					householdId,
-					customerId,
-					subscriptionId: subscription.id
-				});
-			}
+		if (
+			customerId &&
+			shouldDeleteRollbackSubscription({
+				subscription,
+				localStatus: exactSubscriptionRecord?.status
+			})
+		) {
+			await deleteSubscriptionRecord({
+				database: platform.env.DB,
+				householdId,
+				customerId,
+				subscriptionId: subscription.id
+			});
 			return;
 		}
 		if (householdId && customerId) {

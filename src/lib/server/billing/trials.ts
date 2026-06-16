@@ -5,7 +5,12 @@ import { getDb } from '$lib/server/db';
 import { households, users } from '$lib/server/db/schema';
 import { trialDefaultPricingOptionFromPrices } from './pricing-options';
 import { createStripeClient, getStripeProductId } from './stripe';
-import { deleteSubscriptionRecord, loadBillingStatus, upsertSubscription } from './subscriptions';
+import {
+	deleteSubscriptionRecord,
+	loadBillingStatus,
+	markSubscriptionRollbackPending,
+	upsertSubscription
+} from './subscriptions';
 
 const defaultTrialDays = 30;
 
@@ -125,6 +130,18 @@ export const startHouseholdTrial = async (input: {
 		return subscription;
 	} catch (cause) {
 		const cleanupFailures: unknown[] = [];
+		if (customerId && subscriptionId) {
+			try {
+				await markSubscriptionRollbackPending({
+					database: input.platform.env.DB,
+					householdId: input.householdId,
+					customerId,
+					subscriptionId
+				});
+			} catch (cleanupCause) {
+				cleanupFailures.push(cleanupCause);
+			}
+		}
 		if (stripe && subscriptionId) {
 			try {
 				await stripe.subscriptions.update(subscriptionId, {
