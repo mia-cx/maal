@@ -42,6 +42,8 @@ describe('requireAppContext', () => {
 			status: 401,
 			body: { message: 'Sign in required.' }
 		});
+		expect(resolveActiveHouseholdId).not.toHaveBeenCalled();
+		expect(requireHouseholdAccess).not.toHaveBeenCalled();
 	});
 
 	it('rejects requests without a database binding', async () => {
@@ -51,6 +53,8 @@ describe('requireAppContext', () => {
 				body: { message: 'Database unavailable.' }
 			}
 		);
+		expect(resolveActiveHouseholdId).not.toHaveBeenCalled();
+		expect(requireHouseholdAccess).not.toHaveBeenCalled();
 	});
 
 	it('rejects requests without an active household', async () => {
@@ -60,6 +64,8 @@ describe('requireAppContext', () => {
 			status: 400,
 			body: { message: 'Household is required.' }
 		});
+		expect(resolveActiveHouseholdId).toHaveBeenCalledTimes(1);
+		expect(requireHouseholdAccess).not.toHaveBeenCalled();
 	});
 
 	it('returns the authenticated context without billing access checks', async () => {

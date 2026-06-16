@@ -8,14 +8,14 @@ Address the HTTP module review findings by tightening JSON object parsing, split
 - [x] Routes can require authenticated household context without implicitly enforcing billing access.
 - [x] Billing-gated routes opt in to entitlement checks through a dedicated helper.
 - [x] Known domain error translation uses typed identifiers or explicit key lookups and remains integrated with routes.
-- [ ] HTTP helper tests clear mocks and assert billing calls precisely without broad fixture casts where practical.
+- [x] HTTP helper tests clear mocks and assert billing calls precisely without broad fixture casts where practical.
 - [ ] Validation commands from the issue pass or residual risks are documented.
 
 ## TODOs
 - [x] Tighten `readJsonObject` plain-object validation and add request regression tests.
 - [x] Split app context into base and billing-gated helpers, then update routes to opt in intentionally.
 - [x] Replace brittle known-error mapping with typed domain error codes and update route/service call sites.
-- [ ] Harden app-context tests by clearing mocks, asserting call counts, and using shaped test doubles.
+- [x] Harden app-context tests by clearing mocks, asserting call counts, and using shaped test doubles.
 - [ ] Run final HTTP/module validation and file the PR.
 
 ## Notes
@@ -24,3 +24,4 @@ Address the HTTP module review findings by tightening JSON object parsing, split
 - `pnpm test:unit -- --run src/lib/server/http/request.test.ts` passed (Vitest ran the configured suite: 38 files, 141 tests).
 - `pnpm test:unit -- --run src/lib/server/http/app-context.test.ts` passed (Vitest ran the configured suite: 38 files, 142 tests).
 - `pnpm test:unit -- --run src/lib/server/http/domain-errors.test.ts src/lib/server/services/meal-route-input.test.ts src/lib/server/services/meal-check-in-input.test.ts` passed (Vitest ran the configured suite: 39 files, 145 tests).
+- `pnpm test:unit -- --run src/lib/server/http/app-context.test.ts` passed after mock-history assertions (Vitest ran the configured suite: 39 files, 145 tests).
