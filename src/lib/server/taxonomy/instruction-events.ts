@@ -9,6 +9,7 @@ import {
 	userRecipeInstructionEvents,
 	userRecipeInstructions
 } from '$lib/server/db/schema';
+import { aliasPattern, normalizedAlias } from './aliases';
 
 type Db = DrizzleD1Database<typeof schema>;
 type Transaction = Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -25,23 +26,9 @@ type InstructionEvent = {
 };
 type UserInstruction = Pick<typeof userRecipeInstructions.$inferSelect, 'id' | 'text'>;
 type MealInstruction = Pick<typeof householdMealInstructions.$inferSelect, 'id' | 'text'>;
+type TemperatureParser = Awaited<ReturnType<typeof loadTemperatureParser>>;
 
 const temperatureBaseUnitId = 'celsius';
-
-const normalizedAlias = (value: string): string =>
-	value
-		.trim()
-		.toLowerCase()
-		.replace(/[°º]\s*/gu, '')
-		.replace(/\s+/gu, ' ')
-		.replace(/[.,]+$/g, '');
-
-const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-const aliasPattern = (alias: string): string => {
-	const escaped = escapeRegExp(alias.trim()).replace(/°/gu, '[°º]');
-	return escaped.replace(/\\ /gu, '\\s+');
-};
 
 const sourceToBase = (value: number, unit: UnitRow): number =>
 	value * unit.toBaseFactor + unit.toBaseOffset;
@@ -69,14 +56,11 @@ const loadTemperatureParser = async (db: WritableDb) => {
 	return { unitById, aliasToUnit, pattern };
 };
 
-export const parseInstructionEvents = async (
-	db: WritableDb,
+const parseInstructionEventsWithParser = (
+	parser: TemperatureParser,
 	text: string
-): Promise<InstructionEvent[]> => {
-	const parser = await loadTemperatureParser(db);
-	if (!parser.pattern) {
-		return [];
-	}
+): InstructionEvent[] => {
+	if (!parser.pattern) return [];
 	const events: InstructionEvent[] = [];
 	for (const match of text.matchAll(parser.pattern)) {
 		const sourceText = match[0];
@@ -84,55 +68,95 @@ export const parseInstructionEvents = async (
 		const rawUnit = match[2] ?? '';
 		const unitId = parser.aliasToUnit.get(normalizedAlias(rawUnit));
 		const unit = unitId ? parser.unitById.get(unitId) : undefined;
-		if (!unit || !Number.isFinite(value)) {
-			continue;
-		}
-		const event = {
-			kind: 'temperature' as const,
+		if (!unit || !Number.isFinite(value)) continue;
+		events.push({
+			kind: 'temperature',
 			sourceText,
 			value,
 			unitId: unit.id,
 			baseValue: sourceToBase(value, unit),
 			baseUnitId: unit.baseUnitId,
 			confidence: 0.9
-		};
-		events.push(event);
+		});
 	}
 	return events;
+};
+
+export const parseInstructionEvents = async (
+	db: WritableDb,
+	text: string
+): Promise<InstructionEvent[]> =>
+	parseInstructionEventsWithParser(await loadTemperatureParser(db), text);
+
+type InsertInstructionEventsParams<TInstruction> = {
+	db: WritableDb;
+	instructions: TInstruction[];
+	instructionId: (instruction: TInstruction) => string;
+	instructionText: (instruction: TInstruction) => string;
+	insert: (db: WritableDb, rows: Array<Record<string, string | number>>) => Promise<void>;
+};
+
+const hasTransaction = (db: WritableDb): db is Db => 'transaction' in db;
+
+const insertInstructionEvents = async <TInstruction>({
+	db,
+	instructions,
+	instructionId,
+	instructionText,
+	insert
+}: InsertInstructionEventsParams<TInstruction>): Promise<void> => {
+	const parser = await loadTemperatureParser(db);
+	const rows = instructions.flatMap((instruction) =>
+		parseInstructionEventsWithParser(parser, instructionText(instruction)).map((event) => ({
+			instructionId: instructionId(instruction),
+			...event
+		}))
+	);
+	if (!rows.length) return;
+	const write = (targetDb: WritableDb) => insert(targetDb, rows);
+	if (hasTransaction(db)) {
+		await db.transaction((tx) => write(tx));
+		return;
+	}
+	await write(db);
 };
 
 export const insertUserRecipeInstructionEvents = async (
 	db: WritableDb,
 	instructions: UserInstruction[]
 ): Promise<void> => {
-	for (const instruction of instructions) {
-		const events = await parseInstructionEvents(db, instruction.text);
-		if (!events.length) {
-			continue;
+	await insertInstructionEvents({
+		db,
+		instructions,
+		instructionId: (instruction) => instruction.id,
+		instructionText: (instruction) => instruction.text,
+		insert: async (targetDb, rows) => {
+			await targetDb.insert(userRecipeInstructionEvents).values(
+				rows.map(({ instructionId, ...event }) => ({
+					userRecipeInstructionId: String(instructionId),
+					...event
+				}))
+			);
 		}
-		await db.insert(userRecipeInstructionEvents).values(
-			events.map((event) => ({
-				userRecipeInstructionId: instruction.id,
-				...event
-			}))
-		);
-	}
+	});
 };
 
 export const insertHouseholdMealInstructionEvents = async (
 	db: WritableDb,
 	instructions: MealInstruction[]
 ): Promise<void> => {
-	for (const instruction of instructions) {
-		const events = await parseInstructionEvents(db, instruction.text);
-		if (!events.length) {
-			continue;
+	await insertInstructionEvents({
+		db,
+		instructions,
+		instructionId: (instruction) => instruction.id,
+		instructionText: (instruction) => instruction.text,
+		insert: async (targetDb, rows) => {
+			await targetDb.insert(householdMealInstructionEvents).values(
+				rows.map(({ instructionId, ...event }) => ({
+					householdMealInstructionId: String(instructionId),
+					...event
+				}))
+			);
 		}
-		await db.insert(householdMealInstructionEvents).values(
-			events.map((event) => ({
-				householdMealInstructionId: instruction.id,
-				...event
-			}))
-		);
-	}
+	});
 };
