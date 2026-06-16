@@ -1,7 +1,11 @@
 import { error } from '@sveltejs/kit';
 import Stripe from 'stripe';
 import { createStripeClient, getStripeWebhookSecret } from './stripe';
-import { findHouseholdIdForStripeSubscription, upsertSubscription } from './subscriptions';
+import {
+	deleteSubscriptionRecord,
+	findHouseholdIdForStripeSubscription,
+	upsertSubscription
+} from './subscriptions';
 
 const stringId = (value: string | { id: string } | null | undefined): string | null => {
 	if (!value) return null;
@@ -16,6 +20,9 @@ const subscriptionFromCheckout = async (
 	if (!subscriptionId) return null;
 	return stripe.subscriptions.retrieve(subscriptionId, { expand: ['items.data.price'] });
 };
+
+const isRolledBackTrialSubscription = (subscription: Stripe.Subscription): boolean =>
+	subscription.metadata.maal_trial_rollback === 'start_failed';
 
 const stripeEventFromRequest = async (platform: App.Platform, request: Request) => {
 	const stripe = createStripeClient(platform);
@@ -77,6 +84,15 @@ export const handleStripeWebhook = async (platform: App.Platform | undefined, re
 				customerId,
 				subscriptionId: subscription.id
 			}));
+		if (customerId && isRolledBackTrialSubscription(subscription)) {
+			await deleteSubscriptionRecord({
+				database: platform.env.DB,
+				householdId,
+				customerId,
+				subscriptionId: subscription.id
+			});
+			return;
+		}
 		if (householdId && customerId) {
 			await upsertSubscription({
 				database: platform.env.DB,

@@ -1,4 +1,4 @@
-import { eq, or } from 'drizzle-orm';
+import { and, eq, or } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { getDb } from '$lib/server/db';
 import { billingSubscriptions } from '$lib/server/db/schema';
@@ -109,6 +109,23 @@ export const upsertSubscription = async (input: {
 				updatedAt: now
 			}
 		});
+};
+
+export const deleteSubscriptionRecord = async (input: {
+	database: D1Database;
+	householdId?: string | null;
+	customerId: string;
+	subscriptionId: string;
+}) => {
+	await getDb(input.database)
+		.delete(billingSubscriptions)
+		.where(
+			and(
+				...(input.householdId ? [eq(billingSubscriptions.householdId, input.householdId)] : []),
+				eq(billingSubscriptions.stripeCustomerId, input.customerId),
+				eq(billingSubscriptions.stripeSubscriptionId, input.subscriptionId)
+			)
+		);
 };
 
 export const findHouseholdIdForStripeSubscription = async (input: {

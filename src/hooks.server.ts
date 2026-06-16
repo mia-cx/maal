@@ -70,7 +70,7 @@ const handleSubscriptionGate: Handle = async ({ event, resolve }) => {
 		!event.locals.session ||
 		event.request.method !== 'GET' ||
 		subscriptionExemptPath(event.url.pathname) ||
-		!event.request.headers.get('accept')?.includes('text/html') ||
+		(!event.isDataRequest && !event.request.headers.get('accept')?.includes('text/html')) ||
 		!event.platform?.env.DB
 	) {
 		return resolve(event);

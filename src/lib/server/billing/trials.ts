@@ -2,10 +2,10 @@ import { env as privateEnv } from '$env/dynamic/private';
 import { and, eq, isNull } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { getDb } from '$lib/server/db';
-import { billingSubscriptions, households, users } from '$lib/server/db/schema';
+import { households, users } from '$lib/server/db/schema';
 import { trialDefaultPricingOptionFromPrices } from './pricing-options';
 import { createStripeClient, getStripeProductId } from './stripe';
-import { loadBillingStatus, upsertSubscription } from './subscriptions';
+import { deleteSubscriptionRecord, loadBillingStatus, upsertSubscription } from './subscriptions';
 
 const defaultTrialDays = 30;
 
@@ -127,6 +127,13 @@ export const startHouseholdTrial = async (input: {
 		const cleanupFailures: unknown[] = [];
 		if (stripe && subscriptionId) {
 			try {
+				await stripe.subscriptions.update(subscriptionId, {
+					metadata: { maal_trial_rollback: 'start_failed' }
+				});
+			} catch (cleanupCause) {
+				cleanupFailures.push(cleanupCause);
+			}
+			try {
 				await stripe.subscriptions.cancel(subscriptionId);
 			} catch (cleanupCause) {
 				cleanupFailures.push(cleanupCause);
@@ -149,15 +156,12 @@ export const startHouseholdTrial = async (input: {
 		}
 		if (customerId && subscriptionId) {
 			try {
-				await db
-					.delete(billingSubscriptions)
-					.where(
-						and(
-							eq(billingSubscriptions.householdId, input.householdId),
-							eq(billingSubscriptions.stripeCustomerId, customerId),
-							eq(billingSubscriptions.stripeSubscriptionId, subscriptionId)
-						)
-					);
+				await deleteSubscriptionRecord({
+					database: input.platform.env.DB,
+					householdId: input.householdId,
+					customerId,
+					subscriptionId
+				});
 			} catch (cleanupCause) {
 				cleanupFailures.push(cleanupCause);
 			}
