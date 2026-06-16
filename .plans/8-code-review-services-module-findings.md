@@ -16,7 +16,7 @@ Address the remaining service-module review findings by removing UI type couplin
 - [x] Tighten check-in input/service validation and tests.
 - [x] Wrap remaining meal check-in/meal-plan multi-write mutations in transactions.
 - [x] Add exact meal loading support and use it from `getHouseholdMeal`.
-- [ ] Preserve `sourceClaimedMinutes` and make recipe delete no-ops observable.
+- [x] Preserve `sourceClaimedMinutes` and make recipe delete no-ops observable.
 - [ ] Run focused and repo validation, then file PR.
 
 ## Notes
@@ -26,3 +26,4 @@ Address the remaining service-module review findings by removing UI type couplin
 - Check-in parsing now rejects non-boolean `cooked` values and non-integer cook times instead of coercing them.
 - Wrapped meal creation/update sidecar writes and check-in status updates in transactions.
 - `loadMealPlanMeals` now accepts an optional exact `mealId`, and `getHouseholdMeal` uses it instead of loading all plan meals.
+- Recipe creation now prefers explicit `sourceClaimedMinutes`; archive updates return `deleted: false` with `deletedAt: null` when no active row matched.
