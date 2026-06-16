@@ -1,0 +1,26 @@
+# #14 + #21 Settings actions awaitable and error-safe
+
+## Summary
+Fix settings UI and route findings together: make async settings actions awaitable, tighten MCP scope/key state, improve OTP handling, preserve HTTP/provider error semantics, and reduce duplicated WorkOS/session helpers.
+
+## Acceptance criteria
+- [ ] MCP household picker toggles by household id and avoids name collisions.
+- [ ] Mutating settings UI handlers are typed/awaited consistently, including clipboard copy failure feedback.
+- [ ] MCP scope state only accepts known scope group ids.
+- [ ] OTP UI and route validation use exact configured code length/format.
+- [ ] Settings routes preserve SvelteKit `HttpError`s, use consistent provider error mapping, and avoid partial-success session refresh behavior.
+- [ ] WorkOS email-change/session helper logic is centralized and validates returned user payloads.
+- [ ] Settings redirects share default/category policy and throw redirects explicitly.
+- [ ] Required validation passes or residual risks are documented.
+
+## TODOs
+- [ ] Fix MCP settings UI selection, async handler contracts, strict scope state, and clipboard error feedback.
+- [ ] Extract shared OTP input and exact verification-code validation for account/MFA settings.
+- [ ] Centralize settings route category, WorkOS email-change, public user, and session refresh helpers.
+- [ ] Update settings route handlers to preserve HttpErrors, avoid swallowed refresh failures/partial account updates, and use shared helpers.
+- [ ] Add or update focused tests for settings model/helper behavior.
+- [ ] Run final validation and file PR.
+
+## Notes
+- Issues read: #14 and #21.
+- Initial relevant files inspected with `rg` and `sed`.
