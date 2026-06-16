@@ -6,7 +6,8 @@ export const isRecord = (value: unknown): value is Record<string, unknown> =>
 	!Array.isArray(value) &&
 	Object.getPrototypeOf(value) === Object.prototype;
 
-const contentType = (request: Request) => request.headers.get('content-type')?.split(';')[0].trim();
+const contentType = (request: Request) =>
+	request.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
 
 export const readJsonObject = async (request: Request): Promise<Record<string, unknown>> => {
 	if (contentType(request) !== 'application/json') {

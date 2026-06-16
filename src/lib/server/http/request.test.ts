@@ -13,6 +13,16 @@ describe('readJsonObject', () => {
 		await expect(readJsonObject(jsonRequest('{"name":"Maal"}'))).resolves.toEqual({ name: 'Maal' });
 	});
 
+	it('accepts case-insensitive JSON content types', async () => {
+		const request = new Request('https://maal.test', {
+			method: 'POST',
+			body: '{"name":"Maal"}',
+			headers: { 'content-type': 'Application/JSON; charset=utf-8' }
+		});
+
+		await expect(readJsonObject(request)).resolves.toEqual({ name: 'Maal' });
+	});
+
 	it('rejects unsupported JSON content types', async () => {
 		await expect(readJsonObject(new Request('https://maal.test'))).rejects.toMatchObject({
 			status: 415,
@@ -50,7 +60,8 @@ describe('readFormData', () => {
 			headers: { 'content-type': 'application/x-www-form-urlencoded' }
 		});
 
-		await expect(readFormData(request)).resolves.toMatchObject({});
+		const form = await readFormData(request);
+		expect(form.get('priceId')).toBe('price_123');
 	});
 
 	it('rejects unsupported form content types', async () => {
