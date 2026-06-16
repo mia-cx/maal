@@ -14,7 +14,11 @@ export const readJsonObject = async (
 	try {
 		body = await request.json();
 	} catch (cause) {
-		options.onParseError?.(cause);
+		try {
+			options.onParseError?.(cause);
+		} catch {
+			// Ignore parse-error hook failures to preserve the HTTP contract.
+		}
 		error(400, { message: 'Invalid request.' });
 	}
 
