@@ -219,12 +219,13 @@ export const actions: Actions = {
 		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
 
 		try {
-			const changedCount = await updateHouseholdAppliancesFromForm({
+			const result = await updateHouseholdAppliancesFromForm({
 				database: event.platform.env.DB,
 				householdId: managedHousehold.householdId,
 				form: await event.request.formData()
 			});
-			return { message: changedCount > 0 ? 'Appliances saved.' : 'No changes.' };
+			if (!result.ok) return fail(result.status, { message: result.message });
+			return { message: result.changedCount > 0 ? 'Appliances saved.' : 'No changes.' };
 		} catch (cause) {
 			console.error('Failed to update household appliances', cause);
 			return fail(502, { message: 'Could not update appliances.' });

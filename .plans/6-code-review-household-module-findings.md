@@ -13,7 +13,7 @@ Address household module review findings around cross-system consistency, strict
 - [ ] Relevant household checks pass.
 
 ## TODOs
-- [ ] Add shared strict household form parsing helpers and apply them to invite/settings/appliance parsing.
+- [x] Add shared strict household form parsing helpers and apply them to invite/settings/appliance parsing.
 - [ ] Make invite mutation DAOs return affected-row counts and map zero-row mutations to 404.
 - [ ] Add WorkOS membership pagination helpers and centralize last-manager rule behavior.
 - [ ] Sequence/validate household settings updates with DB work before WorkOS updates and strict override schemas.
@@ -22,3 +22,4 @@ Address household module review findings around cross-system consistency, strict
 
 ## Notes
 - Issue source: GitHub #6.
+- Added strict form parsing helpers and applied them to invite and appliance inputs. Settings strict override parsing follows in the settings TODO.

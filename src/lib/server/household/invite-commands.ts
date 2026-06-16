@@ -6,7 +6,8 @@ import {
 	revokeHouseholdInvite,
 	updateHouseholdInviteRole
 } from '$lib/server/auth/household-invites';
-import { inviteExpiryFromForm } from '$lib/domain/household/settings-parsing';
+import { optionalIntegerFromForm, stringFromForm } from '$lib/domain/household/form-parsing';
+import { inviteExpiryDays, inviteExpiryFromDays } from '$lib/domain/household/settings-parsing';
 
 export type HouseholdInviteCommandResult =
 	| { ok: true; message: string }
@@ -24,19 +25,30 @@ export const createInviteFromForm = async ({
 	form: FormData;
 }): Promise<HouseholdInviteCommandResult> => {
 	const roleSlug = householdRoleSlug(form.get('role'));
-	const maxUsesRaw = String(form.get('maxUses') ?? '').trim();
-	const maxUses = maxUsesRaw ? Math.max(1, Math.min(100, Number.parseInt(maxUsesRaw, 10))) : null;
-	const expiresAt = inviteExpiryFromForm(form.get('expiresInDays'));
-	if (maxUsesRaw && !Number.isFinite(maxUses)) {
-		return { ok: false, status: 400, message: 'Max uses must be a number.' };
+	const maxUses = optionalIntegerFromForm({
+		value: form.get('maxUses'),
+		message: 'Max uses must be a whole number from 1 to 100.',
+		min: 1,
+		max: 100
+	});
+	if (!maxUses.ok) return { ok: false, status: 400, message: maxUses.message };
+	const expiresInDays = optionalIntegerFromForm({
+		value: form.get('expiresInDays'),
+		message: 'Invite expiry must be 1, 7, or 30 days.'
+	});
+	if (!expiresInDays.ok) return { ok: false, status: 400, message: expiresInDays.message };
+	const safeExpiryDays = expiresInDays.value ?? 7;
+	if (!inviteExpiryDays.includes(safeExpiryDays as (typeof inviteExpiryDays)[number])) {
+		return { ok: false, status: 400, message: 'Invite expiry must be 1, 7, or 30 days.' };
 	}
+	const expiresAt = inviteExpiryFromDays(safeExpiryDays as (typeof inviteExpiryDays)[number]);
 
 	await createHouseholdInvite({
 		database,
 		householdId,
 		createdByUserId: session.user.id,
 		roleSlug,
-		maxUses,
+		maxUses: maxUses.value,
 		expiresAt
 	});
 	return { ok: true, message: 'Invite link created.' };
@@ -46,8 +58,9 @@ const inviteIdFromForm = (
 	form: FormData,
 	missingMessage: string
 ): { ok: true; inviteId: string } | { ok: false; status: number; message: string } => {
-	const inviteId = String(form.get('inviteId') ?? '').trim();
-	return inviteId ? { ok: true, inviteId } : { ok: false, status: 400, message: missingMessage };
+	const parsed = stringFromForm(form.get('inviteId'), missingMessage);
+	if (!parsed.ok || !parsed.value) return { ok: false, status: 400, message: missingMessage };
+	return { ok: true, inviteId: parsed.value };
 };
 
 export const revokeInviteFromForm = async ({

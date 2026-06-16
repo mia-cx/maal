@@ -37,9 +37,9 @@ export const timezoneFromForm = (value: FormDataEntryValue | null): string | nul
 };
 
 export const numberFromForm = (value: FormDataEntryValue | null, fallback: number): number => {
-	if (typeof value !== 'string') return fallback;
-	const parsed = Number.parseInt(value, 10);
-	return Number.isFinite(parsed) ? parsed : fallback;
+	if (typeof value !== 'string' || !/^-?\d+$/.test(value.trim())) return fallback;
+	const parsed = Number(value.trim());
+	return Number.isSafeInteger(parsed) ? parsed : fallback;
 };
 
 export const timeFromForm = (value: FormDataEntryValue | null): string | null => {
@@ -48,10 +48,14 @@ export const timeFromForm = (value: FormDataEntryValue | null): string | null =>
 	return /^\d{2}:\d{2}$/.test(trimmed) ? trimmed : null;
 };
 
+export const inviteExpiryFromDays = (days: (typeof inviteExpiryDays)[number]): string =>
+	new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+
 export const inviteExpiryFromForm = (value: FormDataEntryValue | null): string => {
-	const days = Number.parseInt(String(value ?? '7'), 10);
+	if (typeof value !== 'string' || !/^\d+$/.test(value.trim())) return inviteExpiryFromDays(7);
+	const days = Number(value.trim());
 	const safeDays = inviteExpiryDays.includes(days as (typeof inviteExpiryDays)[number]) ? days : 7;
-	return new Date(Date.now() + safeDays * 24 * 60 * 60 * 1000).toISOString();
+	return inviteExpiryFromDays(safeDays as (typeof inviteExpiryDays)[number]);
 };
 
 export const localeFallbacks = (locale: string): string[] => {
