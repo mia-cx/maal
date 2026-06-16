@@ -1,7 +1,12 @@
 import { householdRoleSlug } from '$lib/server/auth/household-invites';
 import type { AuthSession } from '$lib/server/auth/session';
 import { createAuthRuntime } from '$lib/server/auth/workos';
-import { membershipHasAdminRole } from '$lib/server/household/members';
+import {
+	isLastAdmin,
+	lastManagerMessage,
+	listActiveHouseholdMemberships,
+	membershipHasAdminRole
+} from '$lib/server/household/members';
 
 export type HouseholdMemberCommandResult =
 	| { ok: true; message: string; clearHousehold?: boolean }
@@ -53,12 +58,8 @@ export const leaveHouseholdMembership = async ({
 	session: AuthSession;
 }): Promise<HouseholdMemberCommandResult> => {
 	const runtime = createAuthRuntime(platform);
-	const memberships = await runtime.workos.userManagement.listOrganizationMemberships({
-		organizationId: householdId,
-		statuses: ['active'],
-		limit: 100
-	});
-	const currentMembership = memberships.data.find(
+	const memberships = await listActiveHouseholdMemberships(platform, householdId);
+	const currentMembership = memberships.find(
 		(membership) => membership.userId === session.user.id
 	);
 	if (!currentMembership) return { ok: false, status: 404, message: 'Household member not found.' };
@@ -70,13 +71,9 @@ export const leaveHouseholdMembership = async ({
 		};
 	}
 
-	const adminCount = memberships.data.filter(membershipHasAdminRole).length;
-	if (membershipHasAdminRole(currentMembership) && adminCount <= 1) {
-		return {
-			ok: false,
-			status: 400,
-			message: 'You are the last manager. Add another manager or delete the household instead.'
-		};
+	const adminCount = memberships.filter(membershipHasAdminRole).length;
+	if (isLastAdmin({ isAdmin: membershipHasAdminRole(currentMembership), adminCount })) {
+		return { ok: false, status: 400, message: lastManagerMessage };
 	}
 
 	await runtime.workos.userManagement.deleteOrganizationMembership(currentMembership.id);
@@ -113,6 +110,12 @@ export const removeMemberFromForm = async ({
 			message: 'Directory-managed members must be removed in the identity provider.'
 		};
 	}
+	const memberships = await listActiveHouseholdMemberships(platform, householdId);
+	const adminCount = memberships.filter(membershipHasAdminRole).length;
+	if (isLastAdmin({ isAdmin: membershipHasAdminRole(membership), adminCount })) {
+		return { ok: false, status: 400, message: lastManagerMessage };
+	}
+
 	await runtime.workos.userManagement.deleteOrganizationMembership(membershipId);
 	return { ok: true, message: 'Member removed.' };
 };
