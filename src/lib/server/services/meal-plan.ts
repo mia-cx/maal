@@ -9,7 +9,7 @@ import {
 	userRecipes
 } from '$lib/server/db/schema';
 import { loadMealPlanMeals } from '$lib/server/db/recipe-mappers';
-import { DomainError } from '$lib/server/http/domain-errors';
+import { DomainError } from '$lib/server/domain-errors';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
 import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DomainError, mapKnownError } from './domain-errors';
+import { DomainError } from '$lib/server/domain-errors';
+import { mapKnownError } from './domain-errors';
 
 describe('mapKnownError', () => {
 	it('maps known domain error codes to HTTP errors', () => {

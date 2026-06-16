@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import type { MealFeedbackVerdict } from '$lib/components/dashboard/meal-labels';
 import { getDb } from '$lib/server/db';
-import { DomainError } from '$lib/server/http/domain-errors';
+import { DomainError } from '$lib/server/domain-errors';
 import { householdMeals, mealCheckIns } from '$lib/server/db/schema';
 
 export type MealCheckInInput = {
