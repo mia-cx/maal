@@ -250,7 +250,7 @@ export const actions: Actions = {
 				session
 			});
 			if (!result.ok) return fail(result.status, { message: result.message });
-			if (result.clearHousehold) clearHouseholdCookie(event.cookies);
+			if (result.clearHousehold) clearHouseholdCookie(event.cookies, event.url);
 		} catch (cause) {
 			console.error('Failed to leave household', cause);
 			return fail(502, { message: 'Could not leave household.' });
@@ -294,7 +294,7 @@ export const actions: Actions = {
 				platform: event.platform,
 				householdId
 			});
-			clearHouseholdCookie(event.cookies);
+			clearHouseholdCookie(event.cookies, event.url);
 		} catch (cause) {
 			console.error('Failed to delete household', cause);
 			return fail(502, { message: 'Could not delete household.' });

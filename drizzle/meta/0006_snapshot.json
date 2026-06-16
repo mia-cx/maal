@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d68dbba3-fc4b-4379-8450-3f333ea1946f",
-  "prevId": "e6ffed25-1fd6-47e2-b070-818385cbcc9e",
+  "id": "a5046b72-f289-47f1-8abd-82b607aae7f2",
+  "prevId": "d68dbba3-fc4b-4379-8450-3f333ea1946f",
   "tables": {
     "billing_subscriptions": {
       "name": "billing_subscriptions",
@@ -2666,6 +2666,67 @@
         "household_appliances_household_id_households_household_id_fk": {
           "name": "household_appliances_household_id_households_household_id_fk",
           "tableFrom": "household_appliances",
+          "tableTo": "households",
+          "columnsFrom": [
+            "household_id"
+          ],
+          "columnsTo": [
+            "household_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "household_membership_mutation_locks": {
+      "name": "household_membership_mutation_locks",
+      "columns": {
+        "household_id": {
+          "name": "household_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_token": {
+          "name": "owner_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "household_membership_mutation_locks_household_id_households_household_id_fk": {
+          "name": "household_membership_mutation_locks_household_id_households_household_id_fk",
+          "tableFrom": "household_membership_mutation_locks",
           "tableTo": "households",
           "columnsFrom": [
             "household_id"

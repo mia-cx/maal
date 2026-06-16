@@ -1,13 +1,13 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq } from 'drizzle-orm';
 import type { Meal } from '$lib/components/dashboard/schedule-types';
-import { countActiveHouseholdMembers } from '$lib/server/auth/household';
 import { requireAppContext } from '$lib/server/http/app-context';
 import { mapKnownError } from '$lib/server/http/domain-errors';
 import { readJsonObject } from '$lib/server/http/request';
 import { householdMeals } from '$lib/server/db/schema';
 import {
 	createHouseholdMeal,
+	defaultMealServings,
 	deleteHouseholdMeal,
 	listHouseholdPlanMeals,
 	updateHouseholdMeal
@@ -106,7 +106,7 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 					householdId,
 					session.user.id,
 					existingMeal,
-					await countActiveHouseholdMembers(platform, householdId)
+					await defaultMealServings(platform, householdId)
 				)
 			})
 		});

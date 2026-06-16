@@ -8,7 +8,7 @@ import {
 	households,
 	userRecipes
 } from '$lib/server/db/schema';
-import { loadMealPlanMeals, mealFromHouseholdMeal } from '$lib/server/db/recipe-mappers';
+import { loadMealPlanMeals } from '$lib/server/db/recipe-mappers';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
 import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
@@ -96,6 +96,11 @@ const validateCook = async (
 	}
 };
 
+export const defaultMealServings = async (
+	platform: App.Platform | undefined,
+	householdId: string
+) => Math.max(1, await countActiveHouseholdMembers(platform, householdId));
+
 export const listHouseholdPlanMeals = async (input: {
 	platform: App.Platform | undefined;
 	db: Db;
@@ -113,7 +118,6 @@ export const listHouseholdPlanMeals = async (input: {
 	return loadMealPlanMeals(input.db, {
 		workosUserId: input.workosUserId,
 		householdId: input.householdId,
-		defaultMealServings: await countActiveHouseholdMembers(input.platform, input.householdId),
 		startDate: input.startDate,
 		endDate: input.endDate,
 		includeMealPool: input.includeFloating ?? true,
@@ -127,10 +131,9 @@ export const createHouseholdMeal = async (input: {
 	meal: CreateHouseholdMealInput;
 }): Promise<Meal> => {
 	const { db, meal } = input;
-	const defaultMealServings = await countActiveHouseholdMembers(input.platform, meal.householdId);
+	const servingsDefault = await defaultMealServings(input.platform, meal.householdId);
 	const plannedCookWorkosUserId = meal.plannedCookUserId ?? meal.workosUserId;
 	await validateCook(input.platform, meal.householdId, plannedCookWorkosUserId);
-	const unitPreferences = await loadUnitPreferences(db, meal.workosUserId, meal.householdId);
 	const recipe = meal.userRecipeId
 		? await ownedRecipe(db, meal.userRecipeId, meal.workosUserId)
 		: undefined;
@@ -145,10 +148,10 @@ export const createHouseholdMeal = async (input: {
 		imageUrl: recipe?.imageUrl ?? meal.customMeal?.imageUrl ?? null,
 		prepTimeMinutes: recipe?.prepTimeMinutes ?? meal.customMeal?.prepTimeMinutes ?? null,
 		cookTimeMinutes: recipe?.cookTimeMinutes ?? meal.customMeal?.cookTimeMinutes ?? null,
-		yield: recipe?.yield ?? meal.customMeal?.yield ?? defaultMealServings,
+		yield: recipe?.yield ?? meal.customMeal?.yield ?? servingsDefault,
 		plannedYield: normalizeServingsPlanned(
 			{ servingsPlanned: meal.servingsPlanned },
-			defaultMealServings
+			servingsDefault
 		),
 		plannedCookWorkosUserId,
 		date: meal.date ?? null,

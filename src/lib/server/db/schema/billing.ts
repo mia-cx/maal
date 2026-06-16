@@ -1,4 +1,5 @@
 import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { billingStatusValues } from '$lib/server/billing/status';
 import { createdAt, updatedAt } from './common';
 import { households } from './households';
 
@@ -12,7 +13,7 @@ export const billingSubscriptions = sqliteTable(
 		subscriberUserId: text('subscriber_user_id'),
 		stripeSubscriptionId: text('stripe_subscription_id'),
 		stripePriceId: text('stripe_price_id'),
-		status: text('status').notNull(),
+		status: text('status', { enum: billingStatusValues }).notNull(),
 		currentPeriodEnd: text('current_period_end'),
 		cancelAtPeriodEnd: integer('cancel_at_period_end', { mode: 'boolean' })
 			.notNull()
