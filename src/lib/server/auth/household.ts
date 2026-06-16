@@ -24,6 +24,20 @@ const householdCookieOptions = (url: URL) => ({
 	maxAge: 60 * 60 * 24 * 365
 });
 
+const householdCookieDeleteOptions = (url?: URL) => ({
+	path: '/',
+	httpOnly: false,
+	sameSite: 'lax' as const,
+	...(url ? { secure: url.protocol === 'https:' } : {})
+});
+
+const smokeUserCanAccessHousehold = (
+	platform: App.Platform | undefined,
+	userId: string,
+	householdId: string
+): boolean =>
+	smokeAuthEnabled(platform) && userId === SMOKE_USER_ID && householdId === SMOKE_HOUSEHOLD_ID;
+
 export const readHouseholdCookie = (cookies: Cookies): string | null =>
 	cookies.get(HOUSEHOLD_COOKIE_NAME) ?? null;
 
@@ -31,8 +45,8 @@ export const commitHouseholdCookie = (cookies: Cookies, householdId: string, url
 	cookies.set(HOUSEHOLD_COOKIE_NAME, householdId, householdCookieOptions(url));
 };
 
-export const clearHouseholdCookie = (cookies: Cookies): void => {
-	cookies.delete(HOUSEHOLD_COOKIE_NAME, { path: '/' });
+export const clearHouseholdCookie = (cookies: Cookies, url?: URL): void => {
+	cookies.delete(HOUSEHOLD_COOKIE_NAME, householdCookieDeleteOptions(url));
 };
 
 export const canManageHousehold = (
@@ -52,7 +66,7 @@ export const canManageActiveHousehold = async (
 	householdId: string
 ): Promise<boolean> => {
 	if (canManageHousehold(session, householdId)) return true;
-	if (smokeAuthEnabled(platform) && session.user.id === SMOKE_USER_ID) return true;
+	if (smokeUserCanAccessHousehold(platform, session.user.id, householdId)) return true;
 
 	try {
 		const runtime = createAuthRuntime(platform);
@@ -146,13 +160,7 @@ export const userHasHouseholdPermission = async (
 	householdId: string,
 	permission: MaalHouseholdPermission
 ): Promise<boolean> => {
-	if (
-		smokeAuthEnabled(platform) &&
-		userId === SMOKE_USER_ID &&
-		householdId === SMOKE_HOUSEHOLD_ID
-	) {
-		return true;
-	}
+	if (smokeUserCanAccessHousehold(platform, userId, householdId)) return true;
 
 	try {
 		const runtime = createAuthRuntime(platform);
@@ -226,14 +234,16 @@ export const listHouseholdMembers = async (
 	}
 
 	const runtime = createAuthRuntime(platform);
-	const memberships = await runtime.workos.userManagement.listOrganizationMemberships({
-		organizationId: householdId,
-		statuses: ['active'],
-		limit: 100
-	});
+	const memberships = await (
+		await runtime.workos.userManagement.listOrganizationMemberships({
+			organizationId: householdId,
+			statuses: ['active'],
+			limit: 100
+		})
+	).autoPagination();
 
 	return Promise.all(
-		memberships.data.map(async (membership) => {
+		memberships.map(async (membership) => {
 			try {
 				const user = await runtime.workos.userManagement.getUser(membership.userId);
 				return {
@@ -263,7 +273,7 @@ export const listHouseholdMembers = async (
 export const countActiveHouseholdMembers = async (
 	platform: App.Platform | undefined,
 	householdId: string
-): Promise<number> => Math.max(1, (await listHouseholdMembers(platform, householdId)).length);
+): Promise<number> => (await listHouseholdMembers(platform, householdId)).length;
 
 export const selectActiveHouseholdId = (input: {
 	cookieHouseholdId?: string | null;

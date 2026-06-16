@@ -19,7 +19,7 @@ Harden `src/lib/server/auth` against the high- and medium-priority review findin
 ## TODOs
 
 - [x] Harden invite expiry parsing, atomic invite consumption, and invite creation retry behavior.
-- [ ] Fix household authorization/member helpers: shared smoke manage gate, WorkOS membership pagination, real active member counts, and cookie option reuse.
+- [x] Fix household authorization/member helpers: shared smoke manage gate, WorkOS membership pagination, real active member counts, and cookie option reuse.
 - [ ] Harden MCP key validation, expiration parsing, and stale-index recovery.
 - [ ] Address small WorkOS runtime cleanups for cookie password length and cache key safety.
 - [ ] Run auth-focused tests/checks and fix any regressions.
@@ -28,6 +28,7 @@ Harden `src/lib/server/auth` against the high- and medium-priority review findin
 ## Notes
 
 - Hardened invites with shared expiry parsing, conditional `usesCount` update, and uniqueness-only create retries.
+- Household helper changes: added shared smoke-household gate, `autoPagination()` for active memberships, real active member counts, and aligned household cookie delete options. Meal serving defaults now apply their own minimum of 1 at call sites.
 - Validation: deferred full checks until auth helper changes are complete.
 - Issue source: https://github.com/mia-cx/maal/issues/3
 - Worktree: `.worktrees/code-review-auth-fixes`

@@ -106,7 +106,7 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 					householdId,
 					session.user.id,
 					existingMeal,
-					await countActiveHouseholdMembers(platform, householdId)
+					Math.max(1, await countActiveHouseholdMembers(platform, householdId))
 				)
 			})
 		});
