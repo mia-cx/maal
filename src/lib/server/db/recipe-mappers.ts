@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNotNull, isNull, lte, or } from 'drizzle-orm';
+import { asc, and, eq, gte, inArray, isNotNull, isNull, lte, or } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import type * as schema from '$lib/server/db/schema';
 import {
@@ -52,8 +52,7 @@ type RecipeJson = Record<string, unknown>;
 const displayInstructionText = (
 	text: string,
 	unitPreferences?: UnitPreferences,
-	events: InstructionTemperatureEvent[] = [],
-	context: Record<string, unknown> = {}
+	events: InstructionTemperatureEvent[] = []
 ): string => {
 	const cleaned = cleanImportedText(text);
 	const eventRendered = convertInstructionTemperatureEvents(cleaned, events, unitPreferences);
@@ -191,7 +190,9 @@ const latestUserMealCheckIn = (
 const groupByRecipeId = <T extends { userRecipeId: string }>(rows: T[]): Map<string, T[]> => {
 	const grouped = new Map<string, T[]>();
 	for (const row of rows) {
-		grouped.set(row.userRecipeId, [...(grouped.get(row.userRecipeId) ?? []), row]);
+		const bucket = grouped.get(row.userRecipeId);
+		if (bucket) bucket.push(row);
+		else grouped.set(row.userRecipeId, [row]);
 	}
 	return grouped;
 };
@@ -295,8 +296,7 @@ export const menuItemFromRecipe = (params: {
 				text: displayInstructionText(
 					instruction.text,
 					unitPreferences,
-					params.instructionEvents?.get(instruction.id),
-					{ surface: 'menu-recipe', recipeId: recipe.id, instructionId: instruction.id }
+					params.instructionEvents?.get(instruction.id)
 				)
 			})),
 		ingredientCount: ingredients.length,
@@ -448,13 +448,7 @@ export const mealFromMenuRecipe = (
 	ingredients: recipe.ingredients?.map((ingredient) =>
 		cleanImportedText(fullIngredientText(ingredient))
 	),
-	instructions: recipe.instructions?.map((instruction) =>
-		displayInstructionText(instruction.text, undefined, [], {
-			surface: 'meal-from-menu-recipe',
-			recipeId: recipe.id,
-			position: instruction.position
-		})
-	),
+	instructions: recipe.instructions?.map((instruction) => displayInstructionText(instruction.text)),
 	...overrides
 });
 
@@ -514,7 +508,9 @@ const groupInstructionEvents = <T extends InstructionEventRow>(rows: T[]): Map<s
 			'userRecipeInstructionId' in row
 				? row.userRecipeInstructionId
 				: row.householdMealInstructionId;
-		grouped.set(instructionId, [...(grouped.get(instructionId) ?? []), row]);
+		const bucket = grouped.get(instructionId);
+		if (bucket) bucket.push(row);
+		else grouped.set(instructionId, [row]);
 	}
 	return grouped;
 };
@@ -525,7 +521,9 @@ const groupByMealId = <T extends { householdMealId: string | null }>(
 	const grouped = new Map<string, T[]>();
 	for (const row of rows) {
 		if (!row.householdMealId) continue;
-		grouped.set(row.householdMealId, [...(grouped.get(row.householdMealId) ?? []), row]);
+		const bucket = grouped.get(row.householdMealId);
+		if (bucket) bucket.push(row);
+		else grouped.set(row.householdMealId, [row]);
 	}
 	return grouped;
 };
@@ -535,10 +533,8 @@ export const loadMealPlanMeals = async (
 	params: {
 		workosUserId: string;
 		householdId: string;
-		defaultMealServings?: number;
 		startDate?: string;
 		endDate?: string;
-		menuRecipes?: RecipeMenuItem[];
 		unitPreferences?: UnitPreferences;
 		includeMealPool?: boolean;
 	}
@@ -561,7 +557,14 @@ export const loadMealPlanMeals = async (
 	const householdMealRows = await db
 		.select()
 		.from(householdMeals)
-		.where(and(eq(householdMeals.householdId, params.householdId), dateRangeFilter));
+		.where(and(eq(householdMeals.householdId, params.householdId), dateRangeFilter))
+		.orderBy(
+			asc(householdMeals.date),
+			asc(householdMeals.time),
+			asc(householdMeals.sortOrder),
+			asc(householdMeals.createdAt),
+			asc(householdMeals.id)
+		);
 	const householdMealIds = householdMealRows.map((meal) => meal.id);
 	const [mealIngredientRows, mealInstructionRows, mealInstructionEventRows, mealLinks, checkIns] =
 		householdMealIds.length
