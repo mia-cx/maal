@@ -147,12 +147,20 @@ export const startHouseholdTrial = async (input: {
 		} catch (cleanupCause) {
 			cleanupFailures.push(cleanupCause);
 		}
-		try {
-			await db
-				.delete(billingSubscriptions)
-				.where(eq(billingSubscriptions.householdId, input.householdId));
-		} catch (cleanupCause) {
-			cleanupFailures.push(cleanupCause);
+		if (customerId && subscriptionId) {
+			try {
+				await db
+					.delete(billingSubscriptions)
+					.where(
+						and(
+							eq(billingSubscriptions.householdId, input.householdId),
+							eq(billingSubscriptions.stripeCustomerId, customerId),
+							eq(billingSubscriptions.stripeSubscriptionId, subscriptionId)
+						)
+					);
+			} catch (cleanupCause) {
+				cleanupFailures.push(cleanupCause);
+			}
 		}
 		if (cleanupFailures.length) {
 			throw new AggregateError(

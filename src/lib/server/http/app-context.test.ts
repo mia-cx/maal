@@ -76,8 +76,6 @@ describe('requireAppContext', () => {
 		expect(context.db).toBeDefined();
 		expect(requireHouseholdAccess).toHaveBeenCalledWith({
 			platform: input().platform,
-			database,
-			session,
 			householdId: 'household_1'
 		});
 	});

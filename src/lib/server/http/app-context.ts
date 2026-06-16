@@ -32,8 +32,6 @@ export const requireAppContext = async (input: {
 
 	await requireHouseholdAccess({
 		platform: input.platform,
-		database,
-		session,
 		householdId
 	});
 

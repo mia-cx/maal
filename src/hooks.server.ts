@@ -1,4 +1,4 @@
-import type { Handle } from '@sveltejs/kit';
+import { redirect, type Handle } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { getTextDirection } from '$lib/paraglide/runtime';
 import { paraglideMiddleware } from '$lib/paraglide/server';
@@ -88,25 +88,25 @@ const handleSubscriptionGate: Handle = async ({ event, resolve }) => {
 		platform: event.platform,
 		householdId
 	});
-	if (!hasAccess) {
-		const canManageSubscription = await canManageActiveHousehold(
-			event.platform,
-			event.locals.session,
-			householdId
-		);
-		if (canManageSubscription) return resolve(event);
+	if (hasAccess) return resolve(event);
 
-		const subscribedHouseholdId = await activeSubscribedHouseholdId(
-			event.platform,
-			event.locals.session
-		);
-		if (subscribedHouseholdId) {
-			commitHouseholdCookie(event.cookies, subscribedHouseholdId, event.url);
-			return resolve(event);
-		}
+	const canManageSubscription = await canManageActiveHousehold(
+		event.platform,
+		event.locals.session,
+		householdId
+	);
+	if (canManageSubscription) return resolve(event);
+
+	const subscribedHouseholdId = await activeSubscribedHouseholdId(
+		event.platform,
+		event.locals.session
+	);
+	if (subscribedHouseholdId) {
+		commitHouseholdCookie(event.cookies, subscribedHouseholdId, event.url);
+		return resolve(event);
 	}
 
-	return resolve(event);
+	redirect(303, '/subscribe');
 };
 
 const handleParaglide: Handle = ({ event, resolve }) =>

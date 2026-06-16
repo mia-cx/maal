@@ -24,7 +24,9 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 	});
 	if (!activeHouseholdHasAccess) {
 		const households = await listUserHouseholds(platform, session.user.id).catch(() => []);
-		householdId = (await firstAccessibleHouseholdId({ platform, households })) ?? householdId;
+		const accessibleHouseholdId = await firstAccessibleHouseholdId({ platform, households });
+		if (!accessibleHouseholdId) redirect(303, '/subscribe');
+		householdId = accessibleHouseholdId;
 	}
 	commitHouseholdCookie(cookies, householdId, url);
 
