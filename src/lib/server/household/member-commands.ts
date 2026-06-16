@@ -59,9 +59,7 @@ export const leaveHouseholdMembership = async ({
 }): Promise<HouseholdMemberCommandResult> => {
 	const runtime = createAuthRuntime(platform);
 	const memberships = await listActiveHouseholdMemberships(platform, householdId);
-	const currentMembership = memberships.find(
-		(membership) => membership.userId === session.user.id
-	);
+	const currentMembership = memberships.find((membership) => membership.userId === session.user.id);
 	if (!currentMembership) return { ok: false, status: 404, message: 'Household member not found.' };
 	if (currentMembership.directoryManaged) {
 		return {

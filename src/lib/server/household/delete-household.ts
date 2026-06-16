@@ -70,7 +70,9 @@ export const deleteHouseholdCascade = async ({
 			await tx
 				.delete(householdMealClassifications)
 				.where(inArray(householdMealClassifications.householdMealId, mealIds));
-			await tx.delete(householdMealMedia).where(inArray(householdMealMedia.householdMealId, mealIds));
+			await tx
+				.delete(householdMealMedia)
+				.where(inArray(householdMealMedia.householdMealId, mealIds));
 			await tx
 				.delete(householdMealNutritionFacts)
 				.where(inArray(householdMealNutritionFacts.householdMealId, mealIds));

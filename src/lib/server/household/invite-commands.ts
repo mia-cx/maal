@@ -74,7 +74,11 @@ export const revokeInviteFromForm = async ({
 }): Promise<HouseholdInviteCommandResult> => {
 	const parsed = inviteIdFromForm(form, 'Choose an invite to revoke.');
 	if (!parsed.ok) return parsed;
-	const changedCount = await revokeHouseholdInvite({ database, householdId, inviteId: parsed.inviteId });
+	const changedCount = await revokeHouseholdInvite({
+		database,
+		householdId,
+		inviteId: parsed.inviteId
+	});
 	if (changedCount === 0) return { ok: false, status: 404, message: 'Invite not found.' };
 	return { ok: true, message: 'Invite revoked.' };
 };
@@ -90,7 +94,11 @@ export const deleteInviteFromForm = async ({
 }): Promise<HouseholdInviteCommandResult> => {
 	const parsed = inviteIdFromForm(form, 'Choose an invite to delete.');
 	if (!parsed.ok) return parsed;
-	const changedCount = await deleteHouseholdInvite({ database, householdId, inviteId: parsed.inviteId });
+	const changedCount = await deleteHouseholdInvite({
+		database,
+		householdId,
+		inviteId: parsed.inviteId
+	});
 	if (changedCount === 0) return { ok: false, status: 404, message: 'Invite not found.' };
 	return { ok: true, message: 'Invite deleted.' };
 };

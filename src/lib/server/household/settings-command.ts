@@ -24,7 +24,9 @@ const isStringRecord = (value: unknown): value is Record<string, string> =>
 	Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
 const isUnitOverrideInput = (value: unknown): value is UnitOverrideInput =>
-	isStringRecord(value) && typeof value.baseUnit === 'string' && typeof value.preferredUnitAlias === 'string';
+	isStringRecord(value) &&
+	typeof value.baseUnit === 'string' &&
+	typeof value.preferredUnitAlias === 'string';
 
 const isIngredientOverrideInput = (value: unknown): value is IngredientOverrideInput =>
 	isStringRecord(value) &&
@@ -74,7 +76,10 @@ export const updateHouseholdSettingsFromForm = async ({
 		form.has('ingredientOverrides')
 	) {
 		const locale = localeFromForm(form.get('overrideLocale')) ?? defaultLocale;
-		const preferredMassUnit = stringFromForm(form.get('preferredMassUnit') ?? '', 'Mass unit must be text.');
+		const preferredMassUnit = stringFromForm(
+			form.get('preferredMassUnit') ?? '',
+			'Mass unit must be text.'
+		);
 		const preferredVolumeUnit = stringFromForm(
 			form.get('preferredVolumeUnit') ?? '',
 			'Volume unit must be text.'
@@ -83,8 +88,10 @@ export const updateHouseholdSettingsFromForm = async ({
 			form.get('preferredTemperatureUnit') ?? '',
 			'Temperature unit must be text.'
 		);
-		if (!preferredMassUnit.ok) return { ok: false, status: 400, message: preferredMassUnit.message };
-		if (!preferredVolumeUnit.ok) return { ok: false, status: 400, message: preferredVolumeUnit.message };
+		if (!preferredMassUnit.ok)
+			return { ok: false, status: 400, message: preferredMassUnit.message };
+		if (!preferredVolumeUnit.ok)
+			return { ok: false, status: 400, message: preferredVolumeUnit.message };
 		if (!preferredTemperatureUnit.ok)
 			return { ok: false, status: 400, message: preferredTemperatureUnit.message };
 		if (preferredMassUnit.value) {
@@ -156,10 +163,16 @@ export const updateHouseholdSettingsFromForm = async ({
 				preferredFoodAlias: row.preferredFoodAlias.trim(),
 				preferredMeasureUnit: row.preferredMeasureUnit.trim()
 			};
-			if (!trimmedRow.baseFood || !trimmedRow.preferredFoodAlias || !trimmedRow.preferredMeasureUnit) {
+			if (
+				!trimmedRow.baseFood ||
+				!trimmedRow.preferredFoodAlias ||
+				!trimmedRow.preferredMeasureUnit
+			) {
 				return { ok: false, status: 400, message: 'Ingredient override rows must be complete.' };
 			}
-			dbUpdates.push(() => upsertFoodDisplayOverride({ database, householdId, locale, row: trimmedRow }));
+			dbUpdates.push(() =>
+				upsertFoodDisplayOverride({ database, householdId, locale, row: trimmedRow })
+			);
 		}
 	}
 
@@ -182,7 +195,8 @@ export const updateHouseholdSettingsFromForm = async ({
 		);
 	}
 
-	if (dbUpdates.length === 0 && workosUpdates.length === 0) return { ok: true, message: 'No changes.' };
+	if (dbUpdates.length === 0 && workosUpdates.length === 0)
+		return { ok: true, message: 'No changes.' };
 	for (const update of dbUpdates) await update();
 	for (const update of workosUpdates) await update();
 	return { ok: true, message: 'Household saved.' };

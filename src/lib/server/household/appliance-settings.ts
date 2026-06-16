@@ -11,7 +11,9 @@ export const updateHouseholdAppliancesFromForm = async ({
 	database: D1Database;
 	householdId: string;
 	form: FormData;
-}): Promise<{ ok: true; changedCount: number } | { ok: false; status: number; message: string }> => {
+}): Promise<
+	{ ok: true; changedCount: number } | { ok: false; status: number; message: string }
+> => {
 	const db = getDb(database);
 	const now = new Date().toISOString();
 	let changedCount = 0;

@@ -1,9 +1,11 @@
 # #6 Code review: household module findings
 
 ## Summary
+
 Address household module review findings around cross-system consistency, strict form parsing, WorkOS pagination/lookup behavior, invite mutation results, duplicated last-manager rules, and small view-loading cleanup.
 
 ## Acceptance criteria
+
 - [ ] Household deletion performs local cleanup transactionally before external WorkOS deletion.
 - [ ] Household settings updates validate payloads strictly and avoid concurrent DB/WorkOS partial updates.
 - [ ] Member commands and member listing do not truncate after one WorkOS page.
@@ -13,6 +15,7 @@ Address household module review findings around cross-system consistency, strict
 - [ ] Relevant household checks pass.
 
 ## TODOs
+
 - [x] Add shared strict household form parsing helpers and apply them to invite/settings/appliance parsing.
 - [x] Make invite mutation DAOs return affected-row counts and map zero-row mutations to 404.
 - [x] Add WorkOS membership pagination helpers and centralize last-manager rule behavior.
@@ -21,6 +24,7 @@ Address household module review findings around cross-system consistency, strict
 - [x] Optimize household view independent reads and run validation.
 
 ## Notes
+
 - Issue source: GitHub #6.
 - Added strict form parsing helpers and applied them to invite and appliance inputs. Settings strict override parsing follows in the settings TODO.
 - Invite update, revoke, and delete now return affected row counts and 404 for missing invite ids.
