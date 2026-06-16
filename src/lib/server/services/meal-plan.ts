@@ -192,9 +192,10 @@ export const getHouseholdMeal = async (input: {
 	const rows = await loadMealPlanMeals(input.db, {
 		workosUserId: input.workosUserId,
 		householdId: input.householdId,
-		unitPreferences
+		unitPreferences,
+		mealId: input.mealId
 	});
-	const meal = rows.find((candidate) => candidate.id === input.mealId);
+	const meal = rows[0];
 	if (!meal) throw new Error('Meal not found.');
 	return meal;
 };
