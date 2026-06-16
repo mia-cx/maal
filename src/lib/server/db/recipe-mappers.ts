@@ -492,8 +492,7 @@ export const mealFromHouseholdMeal = (
 				displayInstructionText(
 					instruction.text,
 					unitPreferences,
-					instructionEvents.get(instruction.id),
-					{ surface: 'household-meal', mealId: meal.id, instructionId: instruction.id }
+					instructionEvents.get(instruction.id)
 				)
 			),
 		latestVerdict,
