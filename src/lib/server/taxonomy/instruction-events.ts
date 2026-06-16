@@ -11,6 +11,8 @@ import {
 } from '$lib/server/db/schema';
 
 type Db = DrizzleD1Database<typeof schema>;
+type Transaction = Parameters<Parameters<Db['transaction']>[0]>[0];
+type WritableDb = Db | Transaction;
 type UnitRow = typeof units.$inferSelect;
 type InstructionEvent = {
 	kind: 'temperature';
@@ -44,7 +46,7 @@ const aliasPattern = (alias: string): string => {
 const sourceToBase = (value: number, unit: UnitRow): number =>
 	value * unit.toBaseFactor + unit.toBaseOffset;
 
-const loadTemperatureParser = async (db: Db) => {
+const loadTemperatureParser = async (db: WritableDb) => {
 	const [unitRows, aliasRows] = await Promise.all([
 		db.select().from(units).where(eq(units.baseUnitId, temperatureBaseUnitId)),
 		db
@@ -67,7 +69,10 @@ const loadTemperatureParser = async (db: Db) => {
 	return { unitById, aliasToUnit, pattern };
 };
 
-export const parseInstructionEvents = async (db: Db, text: string): Promise<InstructionEvent[]> => {
+export const parseInstructionEvents = async (
+	db: WritableDb,
+	text: string
+): Promise<InstructionEvent[]> => {
 	const parser = await loadTemperatureParser(db);
 	if (!parser.pattern) {
 		return [];
@@ -97,7 +102,7 @@ export const parseInstructionEvents = async (db: Db, text: string): Promise<Inst
 };
 
 export const insertUserRecipeInstructionEvents = async (
-	db: Db,
+	db: WritableDb,
 	instructions: UserInstruction[]
 ): Promise<void> => {
 	for (const instruction of instructions) {
@@ -115,7 +120,7 @@ export const insertUserRecipeInstructionEvents = async (
 };
 
 export const insertHouseholdMealInstructionEvents = async (
-	db: Db,
+	db: WritableDb,
 	instructions: MealInstruction[]
 ): Promise<void> => {
 	for (const instruction of instructions) {

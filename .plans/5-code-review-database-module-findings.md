@@ -16,7 +16,7 @@ Harden database persistence after the db module code review: make recipe child-r
 ## TODOs
 
 - [x] Make recipe child-row replacement transactional.
-- [ ] Add schema invariants for confidence ranges, instruction-event payloads, non-empty media, and classification locales.
+- [x] Add schema invariants for confidence ranges, instruction-event payloads, non-empty media, and classification locales.
 - [ ] Centralize billing status, taxonomy enum, and adoption-status constants.
 - [ ] Stabilize and simplify meal-plan mapper loading helpers.
 - [ ] Run final validation and file the PR.
