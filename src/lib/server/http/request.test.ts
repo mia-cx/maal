@@ -26,4 +26,11 @@ describe('readJsonObject', () => {
 			body: { message: 'Invalid request.' }
 		});
 	});
+
+	it('rejects array JSON', async () => {
+		await expect(readJsonObject(jsonRequest('[{"name":"Maal"}]'))).rejects.toMatchObject({
+			status: 400,
+			body: { message: 'Invalid request.' }
+		});
+	});
 });

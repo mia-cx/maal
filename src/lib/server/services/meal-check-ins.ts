@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import type { MealFeedbackVerdict } from '$lib/domain/meal-feedback';
 import { getDb } from '$lib/server/db';
+import { DomainError } from '$lib/server/domain-errors';
 import { householdMeals, mealCheckIns } from '$lib/server/db/schema';
 
 export type MealCheckInInput = {
@@ -23,7 +24,7 @@ export const upsertMealCheckIn = async (db: Db, input: MealCheckInInput) => {
 			and(eq(householdMeals.id, input.mealId), eq(householdMeals.householdId, input.householdId))
 		)
 		.get();
-	if (!existingMeal) throw new Error('Meal not found.');
+	if (!existingMeal) throw new DomainError('meal_not_found', 'Meal not found.');
 
 	const cookTime =
 		input.cooked && existingMeal.plannedCookWorkosUserId === input.workosUserId

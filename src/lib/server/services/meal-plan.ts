@@ -9,6 +9,7 @@ import {
 	userRecipes
 } from '$lib/server/db/schema';
 import { loadMealPlanMeals } from '$lib/server/db/recipe-mappers';
+import { DomainError } from '$lib/server/domain-errors';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
 import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
@@ -92,7 +93,10 @@ const validateCook = async (
 	if (!plannedCookWorkosUserId) return;
 	const householdMembers = await listHouseholdMembers(platform, householdId);
 	if (!householdMembers.some((member) => member.userId === plannedCookWorkosUserId)) {
-		throw new Error('Choose an active household member as the cook.');
+		throw new DomainError(
+			'active_household_cook_required',
+			'Choose an active household member as the cook.'
+		);
 	}
 };
 
@@ -167,7 +171,7 @@ export const createHouseholdMeal = async (input: {
 	const recipe = meal.userRecipeId
 		? await ownedRecipe(db, meal.userRecipeId, meal.workosUserId)
 		: undefined;
-	if (meal.userRecipeId && !recipe) throw new Error('Recipe not found.');
+	if (meal.userRecipeId && !recipe) throw new DomainError('recipe_not_found', 'Recipe not found.');
 
 	const householdMealId = crypto.randomUUID();
 	await db.transaction(async (tx) => {
@@ -227,8 +231,8 @@ export const getHouseholdMeal = async (input: {
 		unitPreferences,
 		mealId: input.mealId
 	});
-	const meal = rows[0];
-	if (!meal) throw new Error('Meal not found.');
+	const meal = rows.find((candidate) => candidate.id === input.mealId);
+	if (!meal) throw new DomainError('meal_not_found', 'Meal not found.');
 	return meal;
 };
 
@@ -245,7 +249,7 @@ export const updateHouseholdMeal = async (input: {
 			and(eq(householdMeals.id, meal.mealId), eq(householdMeals.householdId, meal.householdId))
 		)
 		.get();
-	if (!existingMeal) throw new Error('Meal not found.');
+	if (!existingMeal) throw new DomainError('meal_not_found', 'Meal not found.');
 	const plannedCookWorkosUserId =
 		meal.patch.plannedCookUserId === undefined
 			? existingMeal.plannedCookWorkosUserId
