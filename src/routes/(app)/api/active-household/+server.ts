@@ -1,35 +1,61 @@
-import { error, json, type RequestHandler } from '@sveltejs/kit';
+import { error, isHttpError, json, type RequestHandler } from '@sveltejs/kit';
 import {
-	commitHouseholdCookie,
-	listUserHouseholdIds,
-	readHouseholdCookie
+	activateRequestedHouseholdId,
+	resolveActiveHouseholdId
 } from '$lib/server/auth/household';
+import { readJsonObject } from '$lib/server/http/request';
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === 'object' && value !== null;
+export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
+	const session = locals.session;
+	if (!session) error(401, { message: 'Sign in required.' });
 
-export const GET: RequestHandler = async ({ cookies }) => {
-	return json({ householdId: readHouseholdCookie(cookies) });
+	try {
+		const { householdId, hasAnyHousehold } = await resolveActiveHouseholdId({
+			platform,
+			cookies,
+			url,
+			session
+		});
+		if (!householdId && !hasAnyHousehold) error(404, { message: 'No households available.' });
+		if (!householdId) error(400, { message: 'Household is required.' });
+		return json({ householdId });
+	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
+		console.error('Failed to load active household', cause);
+		error(503, { message: 'Household service unavailable.' });
+	}
 };
 
 export const POST: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
 	const session = locals.session;
 	if (!session) error(401, { message: 'Sign in required.' });
 
-	let body: unknown;
-	try {
-		body = await request.json();
-	} catch {
-		error(400, { message: 'Invalid request.' });
-	}
-
+	const body = await readJsonObject(request, {
+		onParseError: (cause) => console.warn('Invalid active-household request body', cause)
+	});
 	const householdId =
-		isRecord(body) && typeof body.householdId === 'string' ? body.householdId : null;
+		typeof body.householdId === 'string' && body.householdId.trim() ? body.householdId.trim() : null;
 	if (!householdId) error(400, { message: 'Household ID is required.' });
 
-	const householdIds = await listUserHouseholdIds(platform, session.user.id);
-	if (!householdIds.includes(householdId)) error(403, { message: 'Household is not accessible.' });
+	try {
+		const activation = await activateRequestedHouseholdId({
+			platform,
+			cookies,
+			url,
+			session,
+			householdId
+		});
+		if (activation.status === 'inaccessible' && !activation.hasAnyHousehold) {
+			error(404, { message: 'No households available.' });
+		}
+		if (activation.status !== 'activated') {
+			error(403, { message: 'Household is not accessible.' });
+		}
 
-	commitHouseholdCookie(cookies, householdId, url);
-	return json({ householdId });
+		return json({ householdId: activation.householdId });
+	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
+		console.error('Failed to activate household', cause);
+		error(503, { message: 'Household service unavailable.' });
+	}
 };
