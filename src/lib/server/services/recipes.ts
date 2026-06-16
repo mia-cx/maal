@@ -51,7 +51,7 @@ export const listUserRecipes = async (input: {
 		archive: input.includeArchived ? 'all' : 'active'
 	});
 	const ranked = rankRecipesByRelevance(recipes, input.query?.trim() ?? '');
-	return ranked.slice(input.offset ?? 0, (input.offset ?? 0) + Math.min(input.limit ?? 25, 60));
+	return ranked.slice(input.offset ?? 0, (input.offset ?? 0) + Math.min(input.limit ?? 25, 61));
 };
 
 export const getUserRecipe = async (input: {

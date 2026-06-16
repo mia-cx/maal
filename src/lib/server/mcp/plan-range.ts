@@ -7,7 +7,8 @@ const maxPlanRangeDays = 62;
 const dateKeyPattern = /^\d{4}-\d{2}-\d{2}$/;
 
 const parseDateKey = (value: string, name: string): string => {
-	if (!dateKeyPattern.test(value) || dateKey(utcDateFromKey(value)) !== value) {
+	const date = utcDateFromKey(value);
+	if (!dateKeyPattern.test(value) || Number.isNaN(date.getTime()) || dateKey(date) !== value) {
 		throw toolError('invalid_input', `${name} must be a valid YYYY-MM-DD date.`);
 	}
 	return value;

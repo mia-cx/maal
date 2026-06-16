@@ -35,12 +35,13 @@ export const createBatchHouseholdMeals = async (
 			);
 		} catch (cause) {
 			const mealUrl = text(mealArgs.url);
+			const causeMessage = isRecord(cause) ? text(cause.message) : undefined;
 			errors.push({
 				index,
 				meal: mealFailureLabel(mealArgs, index),
 				url: mealUrl,
 				code: mealUrl ? 'import_or_create_failed' : 'create_failed',
-				message: cause instanceof Error ? cause.message : 'Could not create meal.'
+				message: cause instanceof Error ? cause.message : (causeMessage ?? 'Could not create meal.')
 			});
 		}
 	}
