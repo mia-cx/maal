@@ -3,7 +3,12 @@
 	import McpKeyForm from '$lib/components/settings/mcp-key-form.svelte';
 	import McpKeyList from '$lib/components/settings/mcp-key-list.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import type { McpKey, McpScope, McpScopeGroupId, McpScopeLevels } from '$lib/settings/mcp-key-model';
+	import type {
+		McpKey,
+		McpScope,
+		McpScopeGroupId,
+		McpScopeLevels
+	} from '$lib/settings/mcp-key-model';
 	import type { SettingsHousehold } from '$lib/settings/types';
 
 	let {

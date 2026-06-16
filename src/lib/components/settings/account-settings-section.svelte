@@ -68,7 +68,7 @@
 			</div>
 			{#if emailVerificationRequired}
 				<div class="grid gap-1">
-								<VerificationCodeInput
+					<VerificationCodeInput
 						length={6}
 						bind:value={emailVerificationCode}
 						disabled={emailVerificationBusy || verificationEmail !== normalizedAccountEmail}

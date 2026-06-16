@@ -84,9 +84,7 @@ export const presetLabel = (preset?: McpKeyPreset): string => {
 	return 'Custom';
 };
 
-export const selectedMcpScopesForLevels = (
-	scopeLevels: McpScopeLevels
-): McpScope[] =>
+export const selectedMcpScopesForLevels = (scopeLevels: McpScopeLevels): McpScope[] =>
 	mcpScopeGroups.flatMap((group) => {
 		const level = scopeLevels[group.id] ?? 'none';
 		if (level === 'none') return [];

@@ -1,6 +1,10 @@
 <script lang="ts">
 	import { Checkbox } from '$lib/components/ui/checkbox';
-	import { mcpScopeGroups, type McpScopeGroupId, type McpScopeLevels } from '$lib/settings/mcp-key-model';
+	import {
+		mcpScopeGroups,
+		type McpScopeGroupId,
+		type McpScopeLevels
+	} from '$lib/settings/mcp-key-model';
 
 	let {
 		mcpScopeLevels,
