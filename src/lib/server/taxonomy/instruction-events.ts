@@ -15,7 +15,7 @@ type Db = DrizzleD1Database<typeof schema>;
 type Transaction = Parameters<Parameters<Db['transaction']>[0]>[0];
 type WritableDb = Db | Transaction;
 type UnitRow = typeof units.$inferSelect;
-type InstructionEvent = {
+export type InstructionEvent = {
 	kind: 'temperature';
 	sourceText: string;
 	value: number;
@@ -88,7 +88,7 @@ export const parseInstructionEvents = async (
 ): Promise<InstructionEvent[]> =>
 	parseInstructionEventsWithParser(await loadTemperatureParser(db), text);
 
-type ParsedInstructionEvent = InstructionEvent & { instructionId: string };
+export type ParsedInstructionEvent = InstructionEvent & { instructionId: string };
 
 type InsertInstructionEventsParams<TInstruction> = {
 	db: WritableDb;
@@ -100,6 +100,28 @@ type InsertInstructionEventsParams<TInstruction> = {
 
 const hasTransaction = (db: WritableDb): db is Db => 'transaction' in db;
 
+const instructionEventKey = (event: ParsedInstructionEvent): string =>
+	[
+		event.instructionId,
+		event.kind,
+		event.sourceText,
+		event.value,
+		event.unitId,
+		event.baseValue,
+		event.baseUnitId
+	].join('\u001f');
+
+export const uniqueInstructionEvents = (
+	events: ParsedInstructionEvent[]
+): ParsedInstructionEvent[] => {
+	const result = new Map<string, ParsedInstructionEvent>();
+	for (const event of events) {
+		const key = instructionEventKey(event);
+		if (!result.has(key)) result.set(key, event);
+	}
+	return [...result.values()];
+};
+
 const insertInstructionEvents = async <TInstruction>({
 	db,
 	instructions,
@@ -108,11 +130,13 @@ const insertInstructionEvents = async <TInstruction>({
 	insert
 }: InsertInstructionEventsParams<TInstruction>): Promise<void> => {
 	const parser = await loadTemperatureParser(db);
-	const rows = instructions.flatMap((instruction) =>
-		parseInstructionEventsWithParser(parser, instructionText(instruction)).map((event) => ({
-			instructionId: instructionId(instruction),
-			...event
-		}))
+	const rows = uniqueInstructionEvents(
+		instructions.flatMap((instruction) =>
+			parseInstructionEventsWithParser(parser, instructionText(instruction)).map((event) => ({
+				instructionId: instructionId(instruction),
+				...event
+			}))
+		)
 	);
 	if (!rows.length) return;
 	const write = (targetDb: WritableDb) => insert(targetDb, rows);

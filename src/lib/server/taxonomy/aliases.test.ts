@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { aliasPattern, bestAliasLookup, bestAliasRowsById, localeRank } from './aliases';
+import {
+	aliasPattern,
+	bestAliasLookup,
+	bestAliasRowsById,
+	byLocalePreference,
+	localeRank
+} from './aliases';
 
 describe('taxonomy alias helpers', () => {
 	it('prefers active locale before language and default fallbacks', () => {
@@ -29,6 +35,21 @@ describe('taxonomy alias helpers', () => {
 
 		expect(lookup.get('C')).toBe('celsius');
 		expect(lookup.get('c')).toBe('celsius');
+	});
+
+	it('preserves caller-provided scope precedence across locale fallbacks', () => {
+		const ranks = localeRank('en-US');
+		const lookup = bestAliasLookup(
+			[
+				{ alias: 'C', locale: 'en-US', unitId: 'celsius', scopeRank: 2 },
+				{ alias: 'C', locale: 'en', unitId: 'custom_cup', scopeRank: 0 }
+			],
+			ranks,
+			(row) => row.unitId,
+			(left, right) => left.scopeRank - right.scopeRank || byLocalePreference(ranks)(left, right)
+		);
+
+		expect(lookup.get('C')).toBe('custom_cup');
 	});
 
 	it('matches aliases with flexible whitespace', () => {

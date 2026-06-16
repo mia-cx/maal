@@ -2,7 +2,7 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import type { UnitPreferences } from '$lib/recipes/ingredient-text';
 import type { EffectiveTaxonomyPreferences } from '$lib/taxonomy/preferences';
-import { bestAliasLookup, bestAliasRowsById, localeRank } from './aliases';
+import { bestAliasLookup, bestAliasRowsById, byLocalePreference, localeRank } from './aliases';
 import { localeFallbacks } from '$lib/domain/household/settings-parsing';
 import {
 	foodAliases,
@@ -288,13 +288,10 @@ export const loadEffectiveTaxonomyPreferences = async (
 					...globalUnitAliases.map((alias) => ({ ...alias, scopeRank: 2 })),
 					...householdScopedUnitAliases.map((alias) => ({ ...alias, scopeRank: 1 })),
 					...userScopedUnitAliases.map((alias) => ({ ...alias, scopeRank: 0 }))
-				].toSorted(
-					(left, right) =>
-						left.scopeRank - right.scopeRank ||
-						(ranks.get(left.locale) ?? 100) - (ranks.get(right.locale) ?? 100)
-				),
+				],
 				ranks,
-				(alias) => alias.unitId
+				(alias) => alias.unitId,
+				(left, right) => left.scopeRank - right.scopeRank || byLocalePreference(ranks)(left, right)
 			)
 		),
 		ingredientUnitOverrides: {},
