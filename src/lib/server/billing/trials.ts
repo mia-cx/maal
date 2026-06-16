@@ -3,6 +3,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { getDb } from '$lib/server/db';
 import { billingSubscriptions, households, users } from '$lib/server/db/schema';
+import { trialDefaultPricingOptionFromPrices } from './pricing-options';
 import { createStripeClient, getStripeProductId } from './stripe';
 import { loadBillingStatus, upsertSubscription } from './subscriptions';
 
@@ -15,21 +16,15 @@ const trialDays = (): number => {
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultTrialDays;
 };
 
-const pricePriority = (price: Stripe.Price): number => {
-	if (price.recurring?.interval === 'month') return 1;
-	if (price.recurring?.interval === 'week') return 2;
-	if (price.recurring?.interval === 'year') return 3;
-	return 99;
-};
-
 const findDefaultTrialPriceId = async (stripe: Stripe, productId: string): Promise<string> => {
-	const prices = await stripe.prices.list({ product: productId, active: true, limit: 20 });
-	const paidRecurringPrices = prices.data
-		.filter(
-			(price) => price.type === 'recurring' && price.recurring && (price.unit_amount ?? 0) > 0
-		)
-		.sort((left, right) => pricePriority(left) - pricePriority(right));
-	const priceId = paidRecurringPrices[0]?.id;
+	const prices: Stripe.Price[] = [];
+	for await (const price of stripe.prices
+		.list({ product: productId, active: true, limit: 100 })
+		.autoPagingIterable()) {
+		prices.push(price);
+	}
+
+	const priceId = trialDefaultPricingOptionFromPrices(prices, productId)?.id;
 	if (!priceId) throw new Error('No paid recurring Stripe price is configured for trials.');
 	return priceId;
 };

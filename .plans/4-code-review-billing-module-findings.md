@@ -14,7 +14,7 @@ Fix billing review findings around Stripe price policy, trial cleanup, webhook s
 - [ ] Low-priority cleanups are applied and billing checks pass.
 
 ## TODOs
-- [ ] Centralize billing price policy and trial default pagination.
+- [x] Centralize billing price policy and trial default pagination.
 - [ ] Harden trial rollback for created Stripe resources and cleanup failures.
 - [ ] Skip non-subscription checkout completion webhooks and separate webhook config errors.
 - [ ] Clean up entitlements cache/API and period-end conversion.
@@ -24,3 +24,5 @@ Fix billing review findings around Stripe price policy, trial cleanup, webhook s
 ## Notes
 - Created worktree `.worktrees/4-code-review-billing-module-findings` from `origin/main` to leave existing root changes untouched.
 - Issue #4 includes many findings; current `main` already retrieves checkout prices directly and rejects `unit_amount === null`, but trial defaults, cleanup, webhook skip semantics, config masking, cache eviction, API cleanup, timestamp conversion, and fixture casts still need work.
+- Centralized trial default selection through pricing option policy and switched Stripe price listing to auto-pagination.
+- Validation: `pnpm test:unit -- --run src/lib/server/billing/pricing-options.test.ts` passed (Vitest ran the configured suite plus the targeted file).

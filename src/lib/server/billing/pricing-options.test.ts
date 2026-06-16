@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type Stripe from 'stripe';
-import { pricingOptionForProductPrice, pricingOptionsFromPrices } from './pricing-options';
+import {
+	pricingOptionForProductPrice,
+	pricingOptionsFromPrices,
+	trialDefaultPricingOptionFromPrices
+} from './pricing-options';
 
 const price = (overrides: Partial<Stripe.Price>): Stripe.Price =>
 	({
@@ -84,5 +88,19 @@ describe('pricingOptionsFromPrices', () => {
 		expect(
 			pricingOptionForProductPrice(price({ id: 'inactive', active: false }), 'prod_maal')
 		).toBeNull();
+	});
+
+	it('uses the shared paid recurring policy for trial defaults', () => {
+		expect(
+			trialDefaultPricingOptionFromPrices(
+				[
+					price({ id: 'free-weekly', unit_amount: 0 }),
+					price({ id: 'yearly', recurring: { interval: 'year', interval_count: 1 } as Stripe.Price.Recurring }),
+					price({ id: 'monthly', recurring: { interval: 'month', interval_count: 1 } as Stripe.Price.Recurring }),
+					price({ id: 'wrong-product', product: 'prod_other' })
+				],
+				'prod_maal'
+			)?.id
+		).toBe('monthly');
 	});
 });

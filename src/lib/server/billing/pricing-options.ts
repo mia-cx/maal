@@ -31,6 +31,12 @@ const optionOrder = new Map<PricingOption['label'], number>([
 	['Trial', 4]
 ]);
 
+const trialDefaultOrder = new Map<PricingOption['interval'], number>([
+	['month', 1],
+	['week', 2],
+	['year', 3]
+]);
+
 const priceProductId = (price: Stripe.Price): string | null => {
 	if (typeof price.product === 'string') return price.product;
 	if (price.product && !price.product.deleted) return price.product.id;
@@ -70,3 +76,21 @@ export const pricingOptionForProductPrice = (
 	if (priceProductId(price) !== productId) return null;
 	return priceToPricingOption(price);
 };
+
+export const paidRecurringPricingOptionsForProduct = (
+	prices: Stripe.Price[],
+	productId: string
+): PricingOption[] =>
+	prices
+		.map((price) => pricingOptionForProductPrice(price, productId))
+		.filter((option): option is PricingOption => Boolean(option) && option.amount > 0);
+
+export const trialDefaultPricingOptionFromPrices = (
+	prices: Stripe.Price[],
+	productId: string
+): PricingOption | null =>
+	paidRecurringPricingOptionsForProduct(prices, productId).sort(
+		(left, right) =>
+			(trialDefaultOrder.get(left.interval) ?? 99) -
+			(trialDefaultOrder.get(right.interval) ?? 99)
+	)[0] ?? null;
