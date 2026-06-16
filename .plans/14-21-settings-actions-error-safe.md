@@ -18,7 +18,7 @@ Fix settings UI and route findings together: make async settings actions awaitab
 - [x] Extract shared OTP input and exact verification-code validation for account/MFA settings.
 - [x] Centralize settings route category, WorkOS email-change, public user, and session refresh helpers.
 - [x] Update settings route handlers to preserve HttpErrors, avoid swallowed refresh failures/partial account updates, and use shared helpers.
-- [ ] Add or update focused tests for settings model/helper behavior.
+- [x] Add or update focused tests for settings model/helper behavior.
 - [ ] Run final validation and file PR.
 
 ## Notes
@@ -29,6 +29,8 @@ Fix settings UI and route findings together: make async settings actions awaitab
 - Svelte MCP server was unavailable in this session, so `svelte-autofixer` could not be run.
 - Extracted `VerificationCodeInput`, made MFA setup copy/maxlength derive from configured length, and added shared exact six-digit verification-code validation for email/MFA routes.
 - Validation: `pnpm check` passed.
+- Added focused tests for exact verification code helpers and unknown MCP scope ids.
+- Validation: `pnpm test:unit -- --run src/lib/settings && pnpm check` passed.
 - Moved MCP household-scope lookup into POST error handling, rethrow SvelteKit HttpErrors in settings route catches, require session refresh success for account/email success paths, and send email-change before profile update to avoid partial email-change failures after profile mutation.
 - Validation: `pnpm check` passed.
 - Added shared settings route category helpers, account/session helpers, WorkOS email-change helpers with encoded user ids, and runtime validation for returned public user payloads. Account/email routes now consume shared helpers.
