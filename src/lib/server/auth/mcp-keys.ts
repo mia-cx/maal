@@ -1,3 +1,4 @@
+import { timestampExpired } from './expiry';
 import { listUserHouseholds, type UserHousehold } from '$lib/server/auth/household';
 
 export type MaalApiScope =
@@ -56,6 +57,8 @@ export type CreatedMcpKey = {
 };
 
 const encoder = new TextEncoder();
+const maalApiScopeSet = new Set<string>(MAAL_API_SCOPES);
+const mcpKeyPresets = new Set<string>(['read_only_planner', 'meal_planner', 'full_access']);
 
 const bytesToBase64Url = (bytes: Uint8Array): string => {
 	let binary = '';
@@ -84,10 +87,43 @@ const getMcpKeyStore = (platform: App.Platform | undefined): KVNamespace => {
 	return store;
 };
 
+const stringArray = (value: unknown): value is string[] =>
+	Array.isArray(value) && value.every((item) => typeof item === 'string');
+
+const validHouseholdScope = (value: unknown): value is McpKeyHouseholdScope => {
+	if (!value || typeof value !== 'object') return false;
+	const scope = value as { kind?: unknown; householdIds?: unknown };
+	if (scope.kind === 'all') return true;
+	return scope.kind === 'households' && stringArray(scope.householdIds);
+};
+
+const validTimestamp = (value: unknown): value is string | null | undefined =>
+	value === undefined ||
+	value === null ||
+	(typeof value === 'string' && !timestampExpired(value, 0));
+
+const validMcpRecord = (record: unknown): record is McpKeyRecord => {
+	if (!record || typeof record !== 'object') return false;
+	const candidate = record as Partial<McpKeyRecord>;
+	return (
+		typeof candidate.id === 'string' &&
+		typeof candidate.userId === 'string' &&
+		typeof candidate.label === 'string' &&
+		validHouseholdScope(candidate.householdScope) &&
+		Array.isArray(candidate.scopes) &&
+		candidate.scopes.every((scope) => maalApiScopeSet.has(scope)) &&
+		(candidate.preset === undefined || mcpKeyPresets.has(candidate.preset)) &&
+		typeof candidate.createdAt === 'string' &&
+		validTimestamp(candidate.createdAt) &&
+		validTimestamp(candidate.expiresAt) &&
+		validTimestamp(candidate.revokedAt) &&
+		validTimestamp(candidate.lastUsedAt)
+	);
+};
+
 const readRecord = async (store: KVNamespace, key: string): Promise<McpKeyRecord | null> => {
-	const record = await store.get<McpKeyRecord>(key, 'json');
-	if (!record || typeof record.id !== 'string' || typeof record.userId !== 'string') return null;
-	return record;
+	const record = await store.get<unknown>(key, 'json');
+	return validMcpRecord(record) ? record : null;
 };
 
 const listRecordKeys = async (store: KVNamespace): Promise<string[]> => {
@@ -101,23 +137,103 @@ const listRecordKeys = async (store: KVNamespace): Promise<string[]> => {
 	return names;
 };
 
-type McpKeyUserIndex = { keyNames: string[] };
+type McpKeyUserIndex = { keyNames: string[]; version?: 1; rebuiltAt?: string };
+type KeyedMcpRecord = { keyName: string; record: McpKeyRecord };
 
 const userIndexKey = (userId: string): string => `${MCP_KEY_USER_INDEX_PREFIX}${userId}`;
 
-const readUserIndex = async (store: KVNamespace, userId: string): Promise<string[]> => {
+const readUserIndex = async (
+	store: KVNamespace,
+	userId: string
+): Promise<{ isComplete: boolean; keyNames: string[] }> => {
 	const index = await store.get<McpKeyUserIndex>(userIndexKey(userId), 'json');
-	return Array.isArray(index?.keyNames)
-		? index.keyNames.filter((keyName): keyName is string => typeof keyName === 'string')
-		: [];
+	return {
+		isComplete: index?.version === 1 && Array.isArray(index.keyNames),
+		keyNames: Array.isArray(index?.keyNames)
+			? index.keyNames.filter((keyName): keyName is string => typeof keyName === 'string')
+			: []
+	};
 };
 
-const writeUserIndex = async (store: KVNamespace, userId: string, keyNames: string[]) => {
-	await store.put(userIndexKey(userId), JSON.stringify({ keyNames: [...new Set(keyNames)] }));
+const writeUserIndex = async (
+	store: KVNamespace,
+	userId: string,
+	keyNames: string[],
+	options: { complete: boolean }
+) => {
+	await store.put(
+		userIndexKey(userId),
+		JSON.stringify({
+			keyNames: [...new Set(keyNames)],
+			...(options.complete ? { version: 1 as const, rebuiltAt: new Date().toISOString() } : {})
+		})
+	);
 };
 
 const addToUserIndex = async (store: KVNamespace, userId: string, keyName: string) => {
-	await writeUserIndex(store, userId, [...(await readUserIndex(store, userId)), keyName]);
+	const index = await readUserIndex(store, userId);
+	await writeUserIndex(store, userId, [...index.keyNames, keyName], {
+		complete: index.isComplete
+	});
+};
+
+const indexedRecordsForUser = async (
+	store: KVNamespace,
+	userId: string
+): Promise<{ records: KeyedMcpRecord[]; needsRepair: boolean }> => {
+	const index = await readUserIndex(store, userId);
+	const { keyNames } = index;
+	const indexedRecords = await Promise.all(
+		keyNames.map(async (keyName) => ({ keyName, record: await readRecord(store, keyName) }))
+	);
+	const records = indexedRecords.filter(
+		(entry): entry is KeyedMcpRecord => entry.record?.userId === userId
+	);
+	return { records, needsRepair: !index.isComplete || records.length !== keyNames.length };
+};
+
+const scanRecordsForUser = async (
+	store: KVNamespace,
+	userId: string
+): Promise<KeyedMcpRecord[]> => {
+	const allRecords = await Promise.all(
+		(await listRecordKeys(store)).map(async (keyName) => ({
+			keyName,
+			record: await readRecord(store, keyName)
+		}))
+	);
+	const userRecords = allRecords.filter(
+		(entry): entry is KeyedMcpRecord => entry.record?.userId === userId
+	);
+	await writeUserIndex(
+		store,
+		userId,
+		userRecords.map((entry) => entry.keyName),
+		{ complete: true }
+	);
+	return userRecords;
+};
+
+const recordsForUser = async (store: KVNamespace, userId: string): Promise<KeyedMcpRecord[]> => {
+	const indexed = await indexedRecordsForUser(store, userId);
+	return indexed.needsRepair ? scanRecordsForUser(store, userId) : indexed.records;
+};
+
+const findRecordForUser = async (
+	store: KVNamespace,
+	userId: string,
+	keyId: string
+): Promise<{ records: KeyedMcpRecord[]; match: KeyedMcpRecord | null }> => {
+	const indexed = await indexedRecordsForUser(store, userId);
+	const indexedMatch = indexed.records.find((entry) => entry.record.id === keyId);
+	if (indexedMatch && !indexed.needsRepair)
+		return { records: indexed.records, match: indexedMatch };
+
+	const repairedRecords = await scanRecordsForUser(store, userId);
+	return {
+		records: repairedRecords,
+		match: repairedRecords.find((entry) => entry.record.id === keyId) ?? null
+	};
 };
 
 export const presetScopes = (preset: McpKeyPreset): MaalApiScope[] => {
@@ -166,7 +282,7 @@ export const verifyMcpKey = async (input: {
 	const key = await kvKeyForRawKey(input.rawKey);
 	const record = await readRecord(store, key);
 	if (!record || record.revokedAt) return null;
-	if (record.expiresAt && new Date(record.expiresAt).getTime() <= Date.now()) return null;
+	if (timestampExpired(record.expiresAt)) return null;
 	await store.put(key, JSON.stringify({ ...record, lastUsedAt: new Date().toISOString() }));
 	return record;
 };
@@ -176,28 +292,9 @@ export const listMcpKeys = async (input: {
 	userId: string;
 }): Promise<PublicMcpKey[]> => {
 	const store = getMcpKeyStore(input.platform);
-	let keyNames = await readUserIndex(store, input.userId);
-	let records = await Promise.all(keyNames.map((keyName) => readRecord(store, keyName)));
-	let userRecords = records.filter(
-		(record): record is McpKeyRecord => record !== null && record.userId === input.userId
-	);
-	if (!userRecords.length) {
-		keyNames = await listRecordKeys(store);
-		records = await Promise.all(keyNames.map((keyName) => readRecord(store, keyName)));
-		userRecords = records.filter(
-			(record): record is McpKeyRecord => record !== null && record.userId === input.userId
-		);
-		if (userRecords.length) {
-			await writeUserIndex(
-				store,
-				input.userId,
-				keyNames.filter((keyName, index) => records[index]?.userId === input.userId)
-			);
-		}
-	}
-	userRecords = userRecords.toSorted((left, right) =>
-		right.createdAt.localeCompare(left.createdAt)
-	);
+	const userRecords = (await recordsForUser(store, input.userId))
+		.map((entry) => entry.record)
+		.toSorted((left, right) => right.createdAt.localeCompare(left.createdAt));
 	const households = await listUserHouseholds(input.platform, input.userId).catch(() => []);
 	const householdById = new Map(households.map((household) => [household.id, household]));
 	return userRecords.map((record) =>
@@ -218,26 +315,22 @@ export const rerollMcpKey = async (input: {
 	keyId: string;
 }): Promise<CreatedMcpKey | null> => {
 	const store = getMcpKeyStore(input.platform);
-	const indexedKeyNames = await readUserIndex(store, input.userId);
-	for (const keyName of indexedKeyNames.length ? indexedKeyNames : await listRecordKeys(store)) {
-		const record = await readRecord(store, keyName);
-		if (!record || record.userId !== input.userId || record.id !== input.keyId) continue;
-		if (record.revokedAt) return null;
-		const rawKey = `${MCP_KEY_PREFIX}${randomSecret()}`;
-		const nextKeyName = await kvKeyForRawKey(rawKey);
-		const nextRecord = { ...record, lastUsedAt: null };
-		await store.put(nextKeyName, JSON.stringify(nextRecord));
-		await store.delete(keyName);
-		await writeUserIndex(
-			store,
-			input.userId,
-			(await readUserIndex(store, input.userId)).map((indexedKeyName) =>
-				indexedKeyName === keyName ? nextKeyName : indexedKeyName
-			)
-		);
-		return { key: rawKey, record: toPublicMcpKey(nextRecord) };
-	}
-	return null;
+	const { records, match } = await findRecordForUser(store, input.userId, input.keyId);
+	if (!match) return null;
+	if (match.record.revokedAt) return null;
+
+	const rawKey = `${MCP_KEY_PREFIX}${randomSecret()}`;
+	const nextKeyName = await kvKeyForRawKey(rawKey);
+	const nextRecord = { ...match.record, lastUsedAt: null };
+	await store.put(nextKeyName, JSON.stringify(nextRecord));
+	await store.delete(match.keyName);
+	await writeUserIndex(
+		store,
+		input.userId,
+		records.map((entry) => (entry.keyName === match.keyName ? nextKeyName : entry.keyName)),
+		{ complete: true }
+	);
+	return { key: rawKey, record: toPublicMcpKey(nextRecord) };
 };
 
 export const revokeMcpKey = async (input: {
@@ -246,14 +339,13 @@ export const revokeMcpKey = async (input: {
 	keyId: string;
 }): Promise<boolean> => {
 	const store = getMcpKeyStore(input.platform);
-	const indexedKeyNames = await readUserIndex(store, input.userId);
-	for (const keyName of indexedKeyNames.length ? indexedKeyNames : await listRecordKeys(store)) {
-		const record = await readRecord(store, keyName);
-		if (!record || record.userId !== input.userId || record.id !== input.keyId) continue;
-		await store.put(keyName, JSON.stringify({ ...record, revokedAt: new Date().toISOString() }));
-		return true;
-	}
-	return false;
+	const { match } = await findRecordForUser(store, input.userId, input.keyId);
+	if (!match) return false;
+	await store.put(
+		match.keyName,
+		JSON.stringify({ ...match.record, revokedAt: new Date().toISOString() })
+	);
+	return true;
 };
 
 export const toPublicMcpKey = (
