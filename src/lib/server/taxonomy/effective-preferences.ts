@@ -2,7 +2,7 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import type { UnitPreferences } from '$lib/recipes/ingredient-text';
 import type { EffectiveTaxonomyPreferences } from '$lib/taxonomy/preferences';
-import { bestAliasLookup, bestAliasRowsById, localeRank, normalizedAlias } from './aliases';
+import { bestAliasLookup, bestAliasRowsById, localeRank } from './aliases';
 import { localeFallbacks } from '$lib/domain/household/settings-parsing';
 import {
 	foodAliases,

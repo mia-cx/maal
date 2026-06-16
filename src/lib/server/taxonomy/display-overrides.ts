@@ -1,5 +1,7 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
+import { localeFallbacks } from '$lib/domain/household/settings-parsing';
+import { bestAliasRowsById, localeRank } from './aliases';
 
 type TaxonomyDb = ReturnType<typeof getDb>;
 type TaxonomyTransaction = Parameters<Parameters<TaxonomyDb['transaction']>[0]>[0];
@@ -60,18 +62,45 @@ export const loadDisplayOverrideRows = async (
 					eq(householdFoodDisplayOverrides.locale, locale)
 				)
 			),
-		db.select().from(unitAliases),
-		db.select().from(unitHouseholdAliases).where(eq(unitHouseholdAliases.householdId, householdId)),
-		db.select().from(foodAliases),
-		db.select().from(foodHouseholdAliases).where(eq(foodHouseholdAliases.householdId, householdId))
+		db
+			.select()
+			.from(unitAliases)
+			.where(inArray(unitAliases.locale, localeFallbacks(locale))),
+		db
+			.select()
+			.from(unitHouseholdAliases)
+			.where(
+				and(
+					eq(unitHouseholdAliases.householdId, householdId),
+					inArray(unitHouseholdAliases.locale, localeFallbacks(locale))
+				)
+			),
+		db
+			.select()
+			.from(foodAliases)
+			.where(inArray(foodAliases.locale, localeFallbacks(locale))),
+		db
+			.select()
+			.from(foodHouseholdAliases)
+			.where(
+				and(
+					eq(foodHouseholdAliases.householdId, householdId),
+					inArray(foodHouseholdAliases.locale, localeFallbacks(locale))
+				)
+			)
 	]);
-	const globalUnitAliasById = new Map(globalUnitAliases.map((alias) => [alias.id, alias.alias]));
-	const householdUnitAliasById = new Map(
-		householdUnitAliases.map((alias) => [alias.id, alias.alias])
+	const ranks = localeRank(locale);
+	const globalUnitAliasById = new Map(
+		[...bestAliasRowsById(globalUnitAliases, ranks)].map(([id, alias]) => [id, alias.alias])
 	);
-	const globalFoodAliasById = new Map(globalFoodAliases.map((alias) => [alias.id, alias.alias]));
+	const householdUnitAliasById = new Map(
+		[...bestAliasRowsById(householdUnitAliases, ranks)].map(([id, alias]) => [id, alias.alias])
+	);
+	const globalFoodAliasById = new Map(
+		[...bestAliasRowsById(globalFoodAliases, ranks)].map(([id, alias]) => [id, alias.alias])
+	);
 	const householdFoodAliasById = new Map(
-		householdFoodAliases.map((alias) => [alias.id, alias.alias])
+		[...bestAliasRowsById(householdFoodAliases, ranks)].map(([id, alias]) => [id, alias.alias])
 	);
 	const unitAliasFor = (scope: string | null, id: string | null) => {
 		if (!id) return '';
@@ -120,24 +149,31 @@ type UnitAliasMatch = {
 export const unitByAlias = async (
 	db: DisplayOverrideDb,
 	alias: string,
+	locale: string,
 	baseUnitId?: string
 ): Promise<UnitAliasMatch | null> => {
+	const ranks = localeRank(locale);
 	const rows = await db
 		.select()
 		.from(unitAliases)
 		.where(
 			and(
 				eq(unitAliases.alias, alias),
+				inArray(unitAliases.locale, localeFallbacks(locale)),
 				isNull(unitAliases.sourceDomain),
 				baseUnitId ? eq(unitAliases.baseUnitId, baseUnitId) : undefined
 			)
-		)
-		.limit(1);
-	const row = rows[0];
+		);
+	const row = rows.toSorted(
+		(left, right) => (ranks.get(left.locale) ?? 100) - (ranks.get(right.locale) ?? 100)
+	)[0];
 	return row
 		? { unitId: row.unitId, baseUnitId: row.baseUnitId, aliasScope: 'global', aliasId: row.id }
 		: null;
 };
+
+const stringField = (value: unknown): string | undefined =>
+	typeof value === 'string' ? value.trim() : undefined;
 
 export const upsertUnitDisplayOverride = async ({
 	database,
@@ -154,10 +190,24 @@ export const upsertUnitDisplayOverride = async ({
 	baseUnitId?: string;
 	preferredUnitAlias: string;
 }) => {
-	const alias = preferredUnitAlias.trim();
+	const alias = stringField(preferredUnitAlias);
 	if (!alias) return;
-	const db = inputDb ?? getDb(database);
-	const globalAlias = await unitByAlias(db, alias, baseUnitId);
+	const rootDb = getDb(database);
+	if (!inputDb) {
+		await rootDb.transaction((tx) =>
+			upsertUnitDisplayOverride({
+				database,
+				db: tx,
+				householdId,
+				locale,
+				baseUnitId,
+				preferredUnitAlias: alias
+			})
+		);
+		return;
+	}
+	const db = inputDb;
+	const globalAlias = await unitByAlias(db, alias, locale, baseUnitId);
 	if (globalAlias) {
 		await db
 			.insert(householdUnitDisplayOverrides)
@@ -185,11 +235,26 @@ export const upsertUnitDisplayOverride = async ({
 		return;
 	}
 	if (!baseUnitId) return;
-	const insertedAliases = await db
-		.insert(unitHouseholdAliases)
-		.values({ householdId, unitId: baseUnitId, baseUnitId, alias, locale })
-		.returning({ id: unitHouseholdAliases.id });
-	const aliasId = insertedAliases[0]?.id;
+	const existingAliases = await db
+		.select({ id: unitHouseholdAliases.id })
+		.from(unitHouseholdAliases)
+		.where(
+			and(
+				eq(unitHouseholdAliases.householdId, householdId),
+				eq(unitHouseholdAliases.baseUnitId, baseUnitId),
+				eq(unitHouseholdAliases.alias, alias),
+				eq(unitHouseholdAliases.locale, locale)
+			)
+		)
+		.limit(1);
+	let aliasId = existingAliases[0]?.id;
+	if (!aliasId) {
+		const insertedAliases = await db
+			.insert(unitHouseholdAliases)
+			.values({ householdId, unitId: baseUnitId, baseUnitId, alias, locale })
+			.returning({ id: unitHouseholdAliases.id });
+		aliasId = insertedAliases[0]?.id;
+	}
 	if (!aliasId) return;
 	await db
 		.insert(householdUnitDisplayOverrides)
@@ -229,52 +294,87 @@ export const upsertFoodDisplayOverride = async ({
 	locale: string;
 	row: IngredientOverrideInput;
 }) => {
-	if (!row.baseFood) return;
-	const db = inputDb ?? getDb(database);
-	const unitRows = row.preferredMeasureUnit
-		? await db.select().from(units).where(eq(units.id, row.preferredMeasureUnit)).limit(1)
+	const baseFood = stringField(row.baseFood);
+	const preferredFoodAlias = stringField(row.preferredFoodAlias) ?? '';
+	const preferredMeasureUnit = stringField(row.preferredMeasureUnit) ?? '';
+	if (!baseFood) return;
+	const rootDb = getDb(database);
+	if (!inputDb) {
+		await rootDb.transaction((tx) =>
+			upsertFoodDisplayOverride({
+				database,
+				db: tx,
+				householdId,
+				locale,
+				row: { baseFood, preferredFoodAlias, preferredMeasureUnit }
+			})
+		);
+		return;
+	}
+	const db = inputDb;
+	const unitRows = preferredMeasureUnit
+		? await db.select().from(units).where(eq(units.id, preferredMeasureUnit)).limit(1)
 		: [];
 	const measureUnit = unitRows[0];
 	let preferredFoodAliasScope: 'global' | 'household' | null = null;
 	let preferredFoodAliasId: string | null = null;
-	const alias = row.preferredFoodAlias.trim();
+	const alias = preferredFoodAlias;
 	if (alias) {
 		const globalAliases = await db
 			.select()
 			.from(foodAliases)
 			.where(
 				and(
-					eq(foodAliases.foodId, row.baseFood),
+					eq(foodAliases.foodId, baseFood),
 					eq(foodAliases.alias, alias),
+					inArray(foodAliases.locale, localeFallbacks(locale)),
 					isNull(foodAliases.sourceDomain)
 				)
-			)
-			.limit(1);
-		const globalAlias = globalAliases[0];
+			);
+		const ranks = localeRank(locale);
+		const globalAlias = globalAliases.toSorted(
+			(left, right) => (ranks.get(left.locale) ?? 100) - (ranks.get(right.locale) ?? 100)
+		)[0];
 		if (globalAlias) {
 			preferredFoodAliasScope = 'global';
 			preferredFoodAliasId = globalAlias.id;
 		} else {
-			const insertedAliases = await db
-				.insert(foodHouseholdAliases)
-				.values({
-					householdId,
-					foodId: row.baseFood,
-					alias,
-					locale,
-					defaultMeasureUnitId: measureUnit?.id,
-					defaultMeasureBaseUnitId: measureUnit?.baseUnitId
-				})
-				.returning({ id: foodHouseholdAliases.id });
+			const existingAliases = await db
+				.select({ id: foodHouseholdAliases.id })
+				.from(foodHouseholdAliases)
+				.where(
+					and(
+						eq(foodHouseholdAliases.householdId, householdId),
+						eq(foodHouseholdAliases.foodId, baseFood),
+						eq(foodHouseholdAliases.alias, alias),
+						eq(foodHouseholdAliases.locale, locale)
+					)
+				)
+				.limit(1);
+			let aliasId = existingAliases[0]?.id;
+			if (!aliasId) {
+				const insertedAliases = await db
+					.insert(foodHouseholdAliases)
+					.values({
+						householdId,
+						foodId: baseFood,
+						alias,
+						locale,
+						defaultMeasureUnitId: measureUnit?.id,
+						defaultMeasureBaseUnitId: measureUnit?.baseUnitId
+					})
+					.returning({ id: foodHouseholdAliases.id });
+				aliasId = insertedAliases[0]?.id;
+			}
 			preferredFoodAliasScope = 'household';
-			preferredFoodAliasId = insertedAliases[0]?.id ?? null;
+			preferredFoodAliasId = aliasId ?? null;
 		}
 	}
 	await db
 		.insert(householdFoodDisplayOverrides)
 		.values({
 			householdId,
-			foodId: row.baseFood,
+			foodId: baseFood,
 			locale,
 			preferredFoodAliasScope,
 			preferredFoodAliasId,
