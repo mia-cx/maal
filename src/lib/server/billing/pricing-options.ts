@@ -38,13 +38,22 @@ const priceProductId = (price: Stripe.Price): string | null => {
 };
 
 export const priceToPricingOption = (price: Stripe.Price): PricingOption | null => {
+	const amount = price.unit_amount;
 	const label = optionLabel(price);
 	const interval = price.recurring ? supportedInterval(price.recurring.interval) : null;
-	if (!price.active || price.type !== 'recurring' || !label || !price.recurring || !interval) {
+	if (
+		!price.active ||
+		price.type !== 'recurring' ||
+		price.billing_scheme !== 'per_unit' ||
+		price.recurring?.usage_type !== 'licensed' ||
+		amount === null ||
+		!Number.isFinite(amount) ||
+		!label ||
+		!price.recurring ||
+		!interval
+	) {
 		return null;
 	}
-	const amount = price.unit_amount;
-	if (amount === null || !Number.isFinite(amount)) return null;
 	return {
 		id: price.id,
 		label,

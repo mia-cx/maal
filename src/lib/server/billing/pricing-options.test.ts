@@ -2,17 +2,26 @@ import { describe, expect, it } from 'vitest';
 import type Stripe from 'stripe';
 import { pricingOptionForProductPrice, pricingOptionsFromPrices } from './pricing-options';
 
-const price = (overrides: Partial<Stripe.Price>): Stripe.Price =>
-	({
+const price = (overrides: Partial<Stripe.Price>): Stripe.Price => {
+	const { recurring: recurringOverride, ...priceOverrides } = overrides;
+	const recurring = {
+		interval: 'month',
+		interval_count: 1,
+		usage_type: 'licensed',
+		...(recurringOverride ?? {})
+	} as Stripe.Price.Recurring;
+	return {
 		id: 'price_1',
 		type: 'recurring',
 		active: true,
 		unit_amount: 100,
 		currency: 'gbp',
 		product: 'prod_maal',
-		recurring: { interval: 'month', interval_count: 1 },
-		...overrides
-	}) as Stripe.Price;
+		billing_scheme: 'per_unit',
+		recurring: recurringOverride === null ? null : recurring,
+		...priceOverrides
+	} as Stripe.Price;
+};
 
 describe('pricingOptionsFromPrices', () => {
 	it('projects supported recurring prices in display order', () => {
@@ -42,11 +51,13 @@ describe('pricingOptionsFromPrices', () => {
 		).toEqual(['Weekly', 'Monthly', 'Yearly', 'Trial']);
 	});
 
-	it('drops inactive, one-time, and unsupported recurring prices', () => {
+	it('drops inactive, one-time, metered, tiered, and unsupported recurring prices', () => {
 		expect(
 			pricingOptionsFromPrices([
 				price({ active: false }),
 				price({ type: 'one_time', recurring: null }),
+				price({ billing_scheme: 'tiered' }),
+				price({ recurring: { interval: 'month', interval_count: 1, usage_type: 'metered' } as Stripe.Price.Recurring }),
 				price({ recurring: { interval: 'day', interval_count: 1 } as Stripe.Price.Recurring })
 			])
 		).toEqual([]);

@@ -34,19 +34,44 @@ const priceOrder = new Map<LandingPrice['label'], number>([
 	['Yearly', 3]
 ]);
 
-const paidLandingPrice = (price: Stripe.Price): LandingPrice | null => {
+export const paidLandingPrice = (price: Stripe.Price): LandingPrice | null => {
+	const amount = price.unit_amount;
 	const label = labelFor(price);
 	const interval = price.recurring ? intervalFor(price.recurring.interval) : null;
-	if (!label || !price.recurring || !interval) return null;
+	if (
+		!price.active ||
+		price.type !== 'recurring' ||
+		price.billing_scheme !== 'per_unit' ||
+		price.recurring?.usage_type !== 'licensed' ||
+		amount === null ||
+		!Number.isFinite(amount) ||
+		!label ||
+		!price.recurring ||
+		!interval
+	) {
+		return null;
+	}
 	return {
 		id: price.id,
 		label,
-		amount: price.unit_amount ?? 0,
+		amount,
 		currency: price.currency,
 		interval,
 		intervalCount: price.recurring.interval_count
 	};
 };
+
+export const trialPriceIdFromPrices = (prices: Stripe.Price[]): string | null =>
+	prices.find((price) => priceToTrialPriceId(price))?.id ?? null;
+
+const priceToTrialPriceId = (price: Stripe.Price): string | null =>
+	price.active &&
+	price.type === 'recurring' &&
+	price.billing_scheme === 'per_unit' &&
+	price.recurring?.usage_type === 'licensed' &&
+	price.unit_amount === 0
+		? price.id
+		: null;
 
 const findProduct = async (stripe: Stripe, configuredProductId: string) => {
 	if (configuredProductId) return stripe.products.retrieve(configuredProductId);
@@ -72,7 +97,7 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 			.sort(
 				(left, right) => (priceOrder.get(left.label) ?? 99) - (priceOrder.get(right.label) ?? 99)
 			);
-		const trialPriceId = prices.data.find((price) => price.unit_amount === 0)?.id ?? null;
+		const trialPriceId = trialPriceIdFromPrices(prices.data);
 		let trialAvailable = false;
 		if (locals.session && platform?.env.DB && trialPriceId) {
 			const { householdId } = await resolveActiveHouseholdId({

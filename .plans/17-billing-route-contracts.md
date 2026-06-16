@@ -14,8 +14,8 @@ Harden billing route behavior at the SvelteKit route boundary: make checkout sid
 ## TODOs
 - [x] Add shared billing route request parsing helpers and make checkout/portal POSTs reject malformed or unsupported bodies while GET checkout stays side-effect free.
 - [x] Make billing status expose household-list degradation instead of masking failures as no households.
-- [ ] Harden landing pricing conversion and trial-price selection against unsupported nullable/non-recurring Stripe prices.
-- [ ] Add focused tests for billing route parsers, degraded billing status, and landing pricing conversion.
+- [x] Harden landing pricing conversion and trial-price selection against unsupported nullable/non-recurring Stripe prices.
+- [x] Add focused tests for billing route parsers, degraded billing status, and landing pricing conversion.
 - [ ] Run focused and repo validation, then file a PR.
 
 ## Notes
@@ -25,3 +25,5 @@ Harden billing route behavior at the SvelteKit route boundary: make checkout sid
 - Validation: `pnpm test:unit -- --run src/lib/server/http/request.test.ts` passed (Vitest ran full configured unit suite: 43 files, 159 tests).
 - Completed billing status degradation TODO: household-list failures are logged and exposed as `householdListDegraded: true` while retaining the active household billing status fallback.
 - Validation: first `pnpm test:unit -- --run src/lib/server/billing/status-view.test.ts` failed due Vitest mock hoisting; fixed with `vi.hoisted`. Re-run passed (44 files, 161 tests).
+- Completed pricing hardening TODO: landing and billing pricing now accept only active fixed recurring licensed prices with finite unit amounts; trial ID selection applies the same fixed-recurring guard to zero-amount prices.
+- Validation: first `pnpm test:unit -- --run src/lib/server/billing/pricing-options.test.ts src/routes/page.server.test.ts` failed because existing test price overrides replaced `usage_type`; fixed test fixture merge. Re-run passed (45 files, 164 tests).
