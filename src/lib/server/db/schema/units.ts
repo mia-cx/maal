@@ -122,6 +122,12 @@ export const unitHouseholdAliases = sqliteTable(
 		}).onDelete('cascade'),
 		index('unit_household_aliases_household_idx').on(table.householdId),
 		index('unit_household_aliases_unit_idx').on(table.unitId),
+		uniqueIndex('unit_household_aliases_identity_unique').on(
+			table.householdId,
+			table.baseUnitId,
+			table.locale,
+			table.alias
+		),
 		index('unit_household_aliases_lookup_idx').on(table.householdId, table.locale, table.alias),
 		index('unit_household_aliases_adoption_idx').on(table.adoptionStatus)
 	]
