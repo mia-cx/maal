@@ -8,7 +8,7 @@ import {
 	households,
 	userRecipes
 } from '$lib/server/db/schema';
-import { loadMealPlanMeals, mealFromHouseholdMeal } from '$lib/server/db/recipe-mappers';
+import { loadMealPlanMeals } from '$lib/server/db/recipe-mappers';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
 import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
@@ -118,7 +118,6 @@ export const listHouseholdPlanMeals = async (input: {
 	return loadMealPlanMeals(input.db, {
 		workosUserId: input.workosUserId,
 		householdId: input.householdId,
-		defaultMealServings: await defaultMealServings(input.platform, input.householdId),
 		startDate: input.startDate,
 		endDate: input.endDate,
 		includeMealPool: input.includeFloating ?? true,
@@ -135,7 +134,6 @@ export const createHouseholdMeal = async (input: {
 	const servingsDefault = await defaultMealServings(input.platform, meal.householdId);
 	const plannedCookWorkosUserId = meal.plannedCookUserId ?? meal.workosUserId;
 	await validateCook(input.platform, meal.householdId, plannedCookWorkosUserId);
-	const unitPreferences = await loadUnitPreferences(db, meal.workosUserId, meal.householdId);
 	const recipe = meal.userRecipeId
 		? await ownedRecipe(db, meal.userRecipeId, meal.workosUserId)
 		: undefined;

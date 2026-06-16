@@ -10,6 +10,7 @@ import {
 	uniqueIndex
 } from 'drizzle-orm/sqlite-core';
 import { applianceValues } from '../../../domain/household/appliances';
+import { confidenceRange, instructionEventPayload, nonEmptyMediaPayload } from './checks';
 import { createdAt, id, updatedAt } from './common';
 import { foods } from './food';
 import { households } from './households';
@@ -17,25 +18,13 @@ import { units } from './units';
 import { userRecipes } from './user-recipes';
 import { users } from './users';
 
-const applianceSourceValues = ['schema_org', 'instruction_heuristic', 'user'] as const;
-const classificationKindValues = ['category', 'cuisine', 'keyword', 'diet'] as const;
-const mediaKindValues = ['image', 'video'] as const;
-const eventKindValues = ['temperature', 'duration', 'appliance', 'action'] as const;
-const nutrientValues = [
-	'calories',
-	'carbohydrate',
-	'cholesterol',
-	'fat',
-	'fiber',
-	'protein',
-	'saturated_fat',
-	'serving_size',
-	'sodium',
-	'sugar',
-	'trans_fat',
-	'unsaturated_fat',
-	'other'
-] as const;
+import {
+	applianceSourceValues,
+	classificationKindValues,
+	eventKindValues,
+	mediaKindValues,
+	nutrientValues
+} from './recipe-taxonomy';
 
 export const householdMeals = sqliteTable(
 	'household_meals',
@@ -95,7 +84,17 @@ export const householdMeals = sqliteTable(
 			table.sortOrder
 		),
 		index('household_meals_planned_cook_idx').on(table.plannedCookWorkosUserId),
-		index('household_meals_sort_order_idx').on(table.sortOrder)
+		index('household_meals_sort_order_idx').on(table.sortOrder),
+		check('household_meals_parse_confidence_range', confidenceRange(table.parseConfidence)),
+		check(
+			'household_meals_ingredient_confidence_range',
+			confidenceRange(table.ingredientConfidence)
+		),
+		check(
+			'household_meals_instruction_confidence_range',
+			confidenceRange(table.instructionConfidence)
+		),
+		check('household_meals_nutrition_confidence_range', confidenceRange(table.nutritionConfidence))
 	]
 );
 
@@ -156,7 +155,8 @@ export const householdMealIngredients = sqliteTable(
 		check(
 			'household_meal_ingredients_base_unit_pair_check',
 			sql`(${table.baseUnitId} IS NULL AND ${table.baseUnitFamilyId} IS NULL) OR (${table.baseUnitId} IS NOT NULL AND ${table.baseUnitFamilyId} IS NOT NULL)`
-		)
+		),
+		check('household_meal_ingredients_confidence_range', confidenceRange(table.confidence))
 	]
 );
 
@@ -180,7 +180,8 @@ export const householdMealInstructions = sqliteTable(
 			table.householdMealId,
 			table.stepIndex
 		),
-		index('household_meal_instructions_household_meal_id_idx').on(table.householdMealId)
+		index('household_meal_instructions_household_meal_id_idx').on(table.householdMealId),
+		check('household_meal_instructions_confidence_range', confidenceRange(table.confidence))
 	]
 );
 
@@ -212,7 +213,9 @@ export const householdMealInstructionEvents = sqliteTable(
 		check(
 			'household_meal_instruction_events_unit_pair_check',
 			sql`(${table.unitId} IS NULL AND ${table.baseUnitId} IS NULL) OR (${table.unitId} IS NOT NULL AND ${table.baseUnitId} IS NOT NULL)`
-		)
+		),
+		check('household_meal_instruction_events_payload_check', instructionEventPayload(table)),
+		check('household_meal_instruction_events_confidence_range', confidenceRange(table.confidence))
 	]
 );
 
@@ -239,7 +242,11 @@ export const householdMealApplianceRequirements = sqliteTable(
 			table.appliance
 		),
 		index('household_meal_appliance_requirements_household_meal_id_idx').on(table.householdMealId),
-		index('household_meal_appliance_requirements_appliance_idx').on(table.appliance)
+		index('household_meal_appliance_requirements_appliance_idx').on(table.appliance),
+		check(
+			'household_meal_appliance_requirements_confidence_range',
+			confidenceRange(table.confidence)
+		)
 	]
 );
 
@@ -254,7 +261,7 @@ export const householdMealClassifications = sqliteTable(
 		value: text('value').notNull(),
 		normalizedValue: text('normalized_value').notNull(),
 		schemaOrgValue: text('schema_org_value'),
-		locale: text('locale'),
+		locale: text('locale').notNull().default('en-US'),
 		confidence: real('confidence').notNull().default(1),
 		createdAt: createdAt()
 	},
@@ -266,7 +273,8 @@ export const householdMealClassifications = sqliteTable(
 			table.locale
 		),
 		index('household_meal_classifications_meal_id_idx').on(table.householdMealId),
-		index('household_meal_classifications_kind_value_idx').on(table.kind, table.normalizedValue)
+		index('household_meal_classifications_kind_value_idx').on(table.kind, table.normalizedValue),
+		check('household_meal_classifications_confidence_range', confidenceRange(table.confidence))
 	]
 );
 
@@ -289,7 +297,8 @@ export const householdMealMedia = sqliteTable(
 	},
 	(table) => [
 		index('household_meal_media_meal_id_idx').on(table.householdMealId),
-		index('household_meal_media_kind_idx').on(table.kind)
+		index('household_meal_media_kind_idx').on(table.kind),
+		check('household_meal_media_payload_check', nonEmptyMediaPayload(table))
 	]
 );
 
@@ -307,7 +316,7 @@ export const householdMealNutritionFacts = sqliteTable(
 		unitId: text('unit_id'),
 		baseAmount: real('base_amount'),
 		baseUnitId: text('base_unit_id'),
-		locale: text('locale'),
+		locale: text('locale').notNull().default('en-US'),
 		confidence: real('confidence').notNull().default(0),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()
@@ -327,6 +336,7 @@ export const householdMealNutritionFacts = sqliteTable(
 		check(
 			'household_meal_nutrition_facts_unit_pair_check',
 			sql`(${table.unitId} IS NULL AND ${table.baseUnitId} IS NULL) OR (${table.unitId} IS NOT NULL AND ${table.baseUnitId} IS NOT NULL)`
-		)
+		),
+		check('household_meal_nutrition_facts_confidence_range', confidenceRange(table.confidence))
 	]
 );

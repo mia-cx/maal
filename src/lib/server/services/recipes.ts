@@ -5,8 +5,9 @@ import { getDb } from '$lib/server/db';
 import { households, userRecipes } from '$lib/server/db/schema';
 import {
 	loadMenuRecipes,
-	updateRecipeIngredients,
-	updateRecipeInstructions
+	replaceRecipeIngredients,
+	replaceRecipeInstructions,
+	type WritableDb
 } from '$lib/server/db/recipe-mappers';
 import {
 	householdMealIngredients,
@@ -78,28 +79,30 @@ export const createUserRecipe = async (input: {
 }): Promise<RecipeMenuItem> => {
 	const id = crypto.randomUUID();
 	const now = new Date().toISOString();
-	await input.db.insert(userRecipes).values({
-		id,
-		workosUserId: input.workosUserId,
-		title: input.recipe.title.trim() || 'Untitled recipe',
-		description: input.recipe.description ?? null,
-		imageUrl: input.recipe.image ?? null,
-		prepTimeMinutes: input.recipe.prepTimeMinutes ?? null,
-		cookTimeMinutes: input.recipe.cookTimeMinutes ?? null,
-		totalTimeMinutes: input.recipe.totalTimeMinutes ?? null,
-		yield: input.recipe.yield ?? null,
-		sourceUrl: input.recipe.sourceUrl ?? null,
-		sourceSiteName: input.recipe.sourceSiteName ?? null,
-		sourceAuthorName: input.recipe.sourceAuthorName ?? null,
-		sourcePublisherName: input.recipe.sourcePublisherName ?? null,
-		sourceIsBasedOnUrl: input.recipe.sourceIsBasedOnUrl ?? null,
-		sourceClaimedMinutes: input.recipe.cookTimeMinutes ?? null,
-		userNotes: input.recipe.userNotes ?? null,
-		createdAt: now,
-		updatedAt: now
+	await input.db.transaction(async (tx) => {
+		await tx.insert(userRecipes).values({
+			id,
+			workosUserId: input.workosUserId,
+			title: input.recipe.title.trim() || 'Untitled recipe',
+			description: input.recipe.description ?? null,
+			imageUrl: input.recipe.image ?? null,
+			prepTimeMinutes: input.recipe.prepTimeMinutes ?? null,
+			cookTimeMinutes: input.recipe.cookTimeMinutes ?? null,
+			totalTimeMinutes: input.recipe.totalTimeMinutes ?? null,
+			yield: input.recipe.yield ?? null,
+			sourceUrl: input.recipe.sourceUrl ?? null,
+			sourceSiteName: input.recipe.sourceSiteName ?? null,
+			sourceAuthorName: input.recipe.sourceAuthorName ?? null,
+			sourcePublisherName: input.recipe.sourcePublisherName ?? null,
+			sourceIsBasedOnUrl: input.recipe.sourceIsBasedOnUrl ?? null,
+			sourceClaimedMinutes: input.recipe.cookTimeMinutes ?? null,
+			userNotes: input.recipe.userNotes ?? null,
+			createdAt: now,
+			updatedAt: now
+		});
+		await replaceRecipeIngredients(tx, id, input.recipe.ingredients ?? []);
+		await replaceRecipeInstructions(tx, id, input.recipe.instructions ?? []);
 	});
-	await updateRecipeIngredients(input.db, id, input.recipe.ingredients ?? []);
-	await updateRecipeInstructions(input.db, id, input.recipe.instructions ?? []);
 	return getUserRecipe({ db: input.db, workosUserId: input.workosUserId, recipeId: id });
 };
 
@@ -109,7 +112,7 @@ type RecipePropagationSnapshot = {
 	instructions: string[];
 };
 
-const orderedRecipeIngredients = async (db: Db, recipeId: string) =>
+const orderedRecipeIngredients = async (db: WritableDb, recipeId: string) =>
 	(
 		await db
 			.select()
@@ -117,7 +120,7 @@ const orderedRecipeIngredients = async (db: Db, recipeId: string) =>
 			.where(eq(userRecipeIngredients.userRecipeId, recipeId))
 	).toSorted((left, right) => left.lineIndex - right.lineIndex);
 
-const orderedRecipeInstructions = async (db: Db, recipeId: string) =>
+const orderedRecipeInstructions = async (db: WritableDb, recipeId: string) =>
 	(
 		await db
 			.select()
@@ -126,7 +129,7 @@ const orderedRecipeInstructions = async (db: Db, recipeId: string) =>
 	).toSorted((left, right) => left.stepIndex - right.stepIndex);
 
 const linkedMealMatchesSnapshot = async (
-	db: Db,
+	db: WritableDb,
 	meal: typeof householdMeals.$inferSelect,
 	snapshot: RecipePropagationSnapshot
 ): Promise<boolean> => {
@@ -176,7 +179,7 @@ const linkedMealMatchesSnapshot = async (
 };
 
 const propagateRecipeUpdateToLinkedMeals = async (
-	db: Db,
+	db: WritableDb,
 	recipeId: string,
 	snapshot: RecipePropagationSnapshot
 ) => {
@@ -240,56 +243,58 @@ export const updateUserRecipe = async (input: {
 			(instruction) => instruction.text
 		)
 	};
-	await input.db
-		.update(userRecipes)
-		.set({
-			title: input.patch.title ?? existing.title,
-			description:
-				input.patch.description === undefined ? existing.description : input.patch.description,
-			imageUrl: input.patch.image === undefined ? existing.imageUrl : input.patch.image,
-			prepTimeMinutes:
-				input.patch.prepTimeMinutes === undefined
-					? existing.prepTimeMinutes
-					: input.patch.prepTimeMinutes,
-			cookTimeMinutes:
-				input.patch.cookTimeMinutes === undefined
-					? existing.cookTimeMinutes
-					: input.patch.cookTimeMinutes,
-			totalTimeMinutes:
-				input.patch.totalTimeMinutes === undefined
-					? existing.totalTimeMinutes
-					: input.patch.totalTimeMinutes,
-			yield: input.patch.yield === undefined ? existing.yield : input.patch.yield,
-			sourceUrl: input.patch.sourceUrl === undefined ? existing.sourceUrl : input.patch.sourceUrl,
-			sourceSiteName:
-				input.patch.sourceSiteName === undefined
-					? existing.sourceSiteName
-					: input.patch.sourceSiteName,
-			sourceAuthorName:
-				input.patch.sourceAuthorName === undefined
-					? existing.sourceAuthorName
-					: input.patch.sourceAuthorName,
-			sourcePublisherName:
-				input.patch.sourcePublisherName === undefined
-					? existing.sourcePublisherName
-					: input.patch.sourcePublisherName,
-			sourceIsBasedOnUrl:
-				input.patch.sourceIsBasedOnUrl === undefined
-					? existing.sourceIsBasedOnUrl
-					: input.patch.sourceIsBasedOnUrl,
-			userNotes: input.patch.userNotes === undefined ? existing.userNotes : input.patch.userNotes,
-			updatedAt: new Date().toISOString()
-		})
-		.where(
-			and(eq(userRecipes.id, input.recipeId), eq(userRecipes.workosUserId, input.workosUserId))
-		);
-	if (input.patch.ingredients !== undefined) {
-		await updateRecipeIngredients(input.db, input.recipeId, input.patch.ingredients);
-	}
-	if (input.patch.instructions !== undefined) {
-		await updateRecipeInstructions(input.db, input.recipeId, input.patch.instructions);
-	}
-	await propagateRecipeUpdateToLinkedMeals(input.db, input.recipeId, propagationSnapshot);
+	await input.db.transaction(async (tx) => {
+		await tx
+			.update(userRecipes)
+			.set({
+				title: input.patch.title ?? existing.title,
+				description:
+					input.patch.description === undefined ? existing.description : input.patch.description,
+				imageUrl: input.patch.image === undefined ? existing.imageUrl : input.patch.image,
+				prepTimeMinutes:
+					input.patch.prepTimeMinutes === undefined
+						? existing.prepTimeMinutes
+						: input.patch.prepTimeMinutes,
+				cookTimeMinutes:
+					input.patch.cookTimeMinutes === undefined
+						? existing.cookTimeMinutes
+						: input.patch.cookTimeMinutes,
+				totalTimeMinutes:
+					input.patch.totalTimeMinutes === undefined
+						? existing.totalTimeMinutes
+						: input.patch.totalTimeMinutes,
+				yield: input.patch.yield === undefined ? existing.yield : input.patch.yield,
+				sourceUrl: input.patch.sourceUrl === undefined ? existing.sourceUrl : input.patch.sourceUrl,
+				sourceSiteName:
+					input.patch.sourceSiteName === undefined
+						? existing.sourceSiteName
+						: input.patch.sourceSiteName,
+				sourceAuthorName:
+					input.patch.sourceAuthorName === undefined
+						? existing.sourceAuthorName
+						: input.patch.sourceAuthorName,
+				sourcePublisherName:
+					input.patch.sourcePublisherName === undefined
+						? existing.sourcePublisherName
+						: input.patch.sourcePublisherName,
+				sourceIsBasedOnUrl:
+					input.patch.sourceIsBasedOnUrl === undefined
+						? existing.sourceIsBasedOnUrl
+						: input.patch.sourceIsBasedOnUrl,
+				userNotes: input.patch.userNotes === undefined ? existing.userNotes : input.patch.userNotes,
+				updatedAt: new Date().toISOString()
+			})
+			.where(
+				and(eq(userRecipes.id, input.recipeId), eq(userRecipes.workosUserId, input.workosUserId))
+			);
+		if (input.patch.ingredients !== undefined) {
+			await replaceRecipeIngredients(tx, input.recipeId, input.patch.ingredients);
+		}
+		if (input.patch.instructions !== undefined) {
+			await replaceRecipeInstructions(tx, input.recipeId, input.patch.instructions);
+		}
+		await propagateRecipeUpdateToLinkedMeals(tx, input.recipeId, propagationSnapshot);
+	});
 	return getUserRecipe({
 		db: input.db,
 		workosUserId: input.workosUserId,
