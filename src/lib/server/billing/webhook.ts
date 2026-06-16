@@ -19,6 +19,7 @@ const subscriptionFromCheckout = async (
 
 const stripeEventFromRequest = async (platform: App.Platform, request: Request) => {
 	const stripe = createStripeClient(platform);
+	const webhookSecret = getStripeWebhookSecret(platform);
 	const signature = request.headers.get('stripe-signature');
 	if (!signature) error(400, { message: 'Missing Stripe signature.' });
 
@@ -29,7 +30,7 @@ const stripeEventFromRequest = async (platform: App.Platform, request: Request) 
 			event: await stripe.webhooks.constructEventAsync(
 				payload,
 				signature,
-				getStripeWebhookSecret(platform),
+				webhookSecret,
 				undefined,
 				Stripe.createSubtleCryptoProvider()
 			)
@@ -46,6 +47,8 @@ export const handleStripeWebhook = async (platform: App.Platform | undefined, re
 
 	if (event.type === 'checkout.session.completed') {
 		const session = event.data.object as Stripe.Checkout.Session;
+		if (session.mode !== 'subscription' || !session.subscription) return;
+
 		const householdId = session.client_reference_id;
 		const customerId = stringId(session.customer);
 		if (householdId && customerId) {
