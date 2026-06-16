@@ -6,14 +6,14 @@ Fix billing review findings around Stripe price policy, trial cleanup, webhook s
 
 ## Acceptance criteria
 
-- [ ] Stripe checkout/trial price selection does not miss valid prices beyond the first page.
-- [ ] Pricing eligibility/order is shared across display, checkout validation, and trial default selection.
-- [ ] Null amount prices are not treated as free/trial options.
-- [ ] Trial rollback cleans up external Stripe resources and preserves the original failure.
-- [ ] Checkout completion webhooks skip sessions without subscription data.
-- [ ] Stripe configuration failures are descriptive and not masked as signature errors.
-- [ ] Entitlement cache evicts expired entries and access APIs only accept used inputs.
-- [ ] Low-priority cleanups are applied and billing checks pass.
+- [x] Stripe checkout/trial price selection does not miss valid prices beyond the first page.
+- [x] Pricing eligibility/order is shared across display, checkout validation, and trial default selection.
+- [x] Null amount prices are not treated as free/trial options.
+- [x] Trial rollback cleans up external Stripe resources and preserves the original failure.
+- [x] Checkout completion webhooks skip sessions without subscription data.
+- [x] Stripe configuration failures are descriptive and not masked as signature errors.
+- [x] Entitlement cache evicts expired entries and access APIs only accept used inputs.
+- [x] Low-priority cleanups are applied and billing checks pass.
 
 ## TODOs
 
@@ -22,7 +22,7 @@ Fix billing review findings around Stripe price policy, trial cleanup, webhook s
 - [x] Skip non-subscription checkout completion webhooks and separate webhook config errors.
 - [x] Clean up entitlements cache/API and period-end conversion.
 - [x] Replace Stripe pricing test casts with typed fixture helpers.
-- [ ] Run final billing validation.
+- [x] Run final billing validation.
 
 ## Notes
 
@@ -39,3 +39,4 @@ Fix billing review findings around Stripe price policy, trial cleanup, webhook s
 - Validation: `pnpm gen` regenerated/checks worker types, then `pnpm check` passed.
 - Pricing tests now use typed recurring/override helpers, leaving one boundary cast in the price builder instead of repeated per-case Stripe casts.
 - Validation: `pnpm test:unit -- --run src/lib/server/billing/pricing-options.test.ts` passed; `pnpm check` passed.
+- Final validation: `pnpm check` passed; `pnpm test:unit -- --run src/lib/server/billing` passed; `pnpm architecture:check` passed.
