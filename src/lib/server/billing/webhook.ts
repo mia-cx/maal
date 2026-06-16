@@ -26,8 +26,11 @@ const terminalSubscriptionStatuses = new Set<Stripe.Subscription.Status>([
 	'incomplete_expired'
 ]);
 
-const isRolledBackTrialSubscription = (subscription: Stripe.Subscription): boolean =>
-	subscription.metadata.maal_trial_rollback === 'start_failed' &&
+export const isRollbackMarkedTrialSubscription = (subscription: Stripe.Subscription): boolean =>
+	subscription.metadata.maal_trial_rollback === 'start_failed';
+
+export const isTerminalRolledBackTrialSubscription = (subscription: Stripe.Subscription): boolean =>
+	isRollbackMarkedTrialSubscription(subscription) &&
 	terminalSubscriptionStatuses.has(subscription.status);
 
 const stripeEventFromRequest = async (platform: App.Platform, request: Request) => {
@@ -90,13 +93,15 @@ export const handleStripeWebhook = async (platform: App.Platform | undefined, re
 				customerId,
 				subscriptionId: subscription.id
 			}));
-		if (customerId && isRolledBackTrialSubscription(subscription)) {
-			await deleteSubscriptionRecord({
-				database: platform.env.DB,
-				householdId,
-				customerId,
-				subscriptionId: subscription.id
-			});
+		if (customerId && isRollbackMarkedTrialSubscription(subscription)) {
+			if (isTerminalRolledBackTrialSubscription(subscription)) {
+				await deleteSubscriptionRecord({
+					database: platform.env.DB,
+					householdId,
+					customerId,
+					subscriptionId: subscription.id
+				});
+			}
 			return;
 		}
 		if (householdId && customerId) {

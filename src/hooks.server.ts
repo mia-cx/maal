@@ -48,11 +48,12 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 	return resolve(event);
 };
 
-const subscriptionExemptPath = (pathname: string): boolean =>
+export const subscriptionExemptPath = (pathname: string): boolean =>
 	pathname.startsWith('/auth') ||
 	pathname.startsWith('/onboarding') ||
 	pathname.startsWith('/subscribe') ||
 	pathname.startsWith('/billing') ||
+	pathname.startsWith('/household') ||
 	pathname.startsWith('/export-data') ||
 	pathname.startsWith('/demo');
 
