@@ -1,5 +1,5 @@
 import { tryCreateAuthRuntime } from '$lib/server/auth/workos';
-import { loadBillingStatus } from './subscriptions';
+import { loadFreshBillingStatus } from './subscriptions';
 
 const globalGrantTokens = new Set([
 	'maal:free',
@@ -16,8 +16,7 @@ const globalGrantTokens = new Set([
 
 const grantMetadataKeys = ['maal_entitlement', 'maal_entitlements', 'maal_grant', 'maal_grants'];
 const lifetimeGrantPresenceKeys = ['lifetime_grant', 'maal_lifetime_grant'];
-const accessCacheTtlMs = 60_000;
-const accessCache = new Map<string, { value: boolean; expiresAt: number }>();
+const grantCacheTtlMs = 60_000;
 const grantCache = new Map<string, { value: boolean; expiresAt: number }>();
 
 const splitGrantList = (value: unknown): string[] =>
@@ -61,7 +60,7 @@ export const hasHouseholdBillingGrant = async (input: {
 		billingGrantTokens(organization.metadata ?? {}),
 		input.householdId
 	);
-	grantCache.set(input.householdId, { value, expiresAt: Date.now() + accessCacheTtlMs });
+	grantCache.set(input.householdId, { value, expiresAt: Date.now() + grantCacheTtlMs });
 	return value;
 };
 
@@ -70,17 +69,8 @@ export const hasHouseholdAccess = async (input: {
 	database: D1Database;
 	householdId: string;
 }): Promise<boolean> => {
-	const cacheKey = input.householdId;
-	const cached = accessCache.get(cacheKey);
-	if (cached && cached.expiresAt > Date.now()) return cached.value;
-
-	if (await hasHouseholdBillingGrant(input).catch(() => false)) {
-		accessCache.set(cacheKey, { value: true, expiresAt: Date.now() + accessCacheTtlMs });
-		return true;
-	}
-	const billing = await loadBillingStatus(input.database, input.householdId);
-	accessCache.set(cacheKey, { value: billing.isPaid, expiresAt: Date.now() + accessCacheTtlMs });
-	return billing.isPaid;
+	if (await hasHouseholdBillingGrant(input).catch(() => false)) return true;
+	return (await loadFreshBillingStatus(input.platform, input.householdId)).isPaid;
 };
 
 export const firstAccessibleHouseholdId = async (input: {

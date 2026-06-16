@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { invalidateAll } from '$app/navigation';
 	import { navigating, page } from '$app/state';
 	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
 	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
@@ -6,8 +7,13 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { featurePreviews } from '$lib/features/flags';
-	import { uiState, updateUiState } from '$lib/stores/ui-state';
-	import type { Snippet } from 'svelte';
+	import {
+		activeHouseholdId,
+		setActiveHouseholdId,
+		writeActiveHouseholdCookie
+	} from '$lib/stores/active-household';
+	import { appShellUiState, updateAppShellUiState } from '$lib/stores/app-shell-ui-state';
+	import { onMount, type Snippet } from 'svelte';
 	import type { LayoutData } from './$types';
 
 	const minSidebarWidth = 208;
@@ -15,11 +21,12 @@
 
 	let { children, data }: { children: Snippet; data: LayoutData } = $props();
 
-	const initialUiState = uiState.get();
+	const initialUiState = appShellUiState.get();
 	let sidebarOpen = $state(initialUiState.sidebarOpen);
 	let sidebarWidth = $state(initialUiState.sidebarWidth);
 	let resizingSidebar = $state(false);
 	let exportDataPopoverOpen = $state(false);
+	let householdStateHydrated = $state(false);
 
 	const features = $derived(featurePreviews(data.session));
 	const sidebarUser = $derived({
@@ -74,8 +81,33 @@
 		sidebarOpen = !sidebarOpen;
 	};
 
+	onMount(() => {
+		const storedHouseholdId = activeHouseholdId.get();
+		const storedHouseholdIsAccessible = data.households.some(
+			(household) => household.id === storedHouseholdId
+		);
+
+		if (
+			storedHouseholdId &&
+			storedHouseholdId !== data.activeHouseholdId &&
+			storedHouseholdIsAccessible
+		) {
+			writeActiveHouseholdCookie(storedHouseholdId);
+			void invalidateAll().catch(() => setActiveHouseholdId(data.activeHouseholdId));
+		} else {
+			setActiveHouseholdId(data.activeHouseholdId);
+			writeActiveHouseholdCookie(data.activeHouseholdId);
+		}
+
+		householdStateHydrated = true;
+	});
+
 	$effect(() => {
-		updateUiState({ activeNav, sidebarOpen, sidebarWidth });
+		updateAppShellUiState({ activeNav, sidebarOpen, sidebarWidth });
+	});
+
+	$effect(() => {
+		if (householdStateHydrated) setActiveHouseholdId(data.activeHouseholdId);
 	});
 </script>
 

@@ -1,6 +1,7 @@
 import type { Cookies } from '@sveltejs/kit';
 import { createAuthRuntime } from '$lib/server/auth/workos';
 import { provisionAuthSession } from '$lib/server/auth/provisioning';
+import { displayUserName } from '$lib/server/auth/user-display';
 import { SMOKE_HOUSEHOLD_ID, SMOKE_HOUSEHOLD_NAME, SMOKE_USER_ID, smokeAuthEnabled } from './smoke';
 
 export const HOUSEHOLD_COOKIE_NAME = 'maal_household_id';
@@ -17,7 +18,7 @@ export type MaalHouseholdPermission =
 
 const householdCookieOptions = (url: URL) => ({
 	path: '/',
-	httpOnly: true,
+	httpOnly: false,
 	sameSite: 'lax' as const,
 	secure: url.protocol === 'https:',
 	maxAge: 60 * 60 * 24 * 365
@@ -85,16 +86,6 @@ export const canManageActiveHousehold = async (
 
 export type UserHousehold = { id: string; name: string };
 
-const displayUserName = (user: {
-	name?: string | null;
-	firstName?: string | null;
-	lastName?: string | null;
-	email: string;
-}): string => {
-	const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ').trim();
-	return user.name?.trim() || fullName || user.email.split('@')[0] || user.email;
-};
-
 export type HouseholdMember = {
 	id: string;
 	userId: string;
@@ -113,12 +104,13 @@ export const listUserHouseholds = async (
 		return [{ id: SMOKE_HOUSEHOLD_ID, name: SMOKE_HOUSEHOLD_NAME }];
 	}
 	const runtime = createAuthRuntime(platform);
-	const memberships = await runtime.workos.userManagement.listOrganizationMemberships({
-		userId,
-		statuses: ['active'],
-		limit: 25
-	});
-	return memberships.data.map((membership) => ({
+	const memberships = await (
+		await runtime.workos.userManagement.listOrganizationMemberships({
+			userId,
+			statuses: ['active']
+		})
+	).autoPagination();
+	return memberships.map((membership) => ({
 		id: membership.organizationId,
 		name: membership.organizationName
 	}));
@@ -273,6 +265,17 @@ export const countActiveHouseholdMembers = async (
 	householdId: string
 ): Promise<number> => Math.max(1, (await listHouseholdMembers(platform, householdId)).length);
 
+export const selectActiveHouseholdId = (input: {
+	cookieHouseholdId?: string | null;
+	householdIds: string[];
+}): string | null => {
+	const accessibleHouseholdIds = new Set(input.householdIds);
+	if (input.cookieHouseholdId && accessibleHouseholdIds.has(input.cookieHouseholdId)) {
+		return input.cookieHouseholdId;
+	}
+	return input.householdIds[0] ?? null;
+};
+
 export const resolveActiveHouseholdId = async (input: {
 	platform: App.Platform | undefined;
 	cookies: Cookies;
@@ -280,22 +283,12 @@ export const resolveActiveHouseholdId = async (input: {
 	session: { user: { id: string }; organizationId?: string | null };
 	householdIds?: string[];
 }): Promise<{ householdId: string | null; hasAnyHousehold: boolean }> => {
-	if (input.session.organizationId) {
-		await provisionAuthSession(input.platform, {
-			user: input.session.user,
-			organizationId: input.session.organizationId
-		});
-		commitHouseholdCookie(input.cookies, input.session.organizationId, input.url);
-		return { householdId: input.session.organizationId, hasAnyHousehold: true };
-	}
-
-	const cookieHouseholdId = readHouseholdCookie(input.cookies);
 	const householdIds =
 		input.householdIds ?? (await listUserHouseholdIds(input.platform, input.session.user.id));
-	const householdId =
-		cookieHouseholdId && householdIds.includes(cookieHouseholdId)
-			? cookieHouseholdId
-			: (householdIds[0] ?? null);
+	const householdId = selectActiveHouseholdId({
+		cookieHouseholdId: readHouseholdCookie(input.cookies),
+		householdIds
+	});
 
 	if (householdId) {
 		await provisionAuthSession(input.platform, {

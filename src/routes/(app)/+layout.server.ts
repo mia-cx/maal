@@ -2,28 +2,30 @@ import type { LayoutServerLoad } from './$types';
 import {
 	canManageActiveHousehold,
 	listUserHouseholds,
-	readHouseholdCookie
+	resolveActiveHouseholdId
 } from '$lib/server/auth/household';
 import { toPublicSession } from '$lib/server/auth/session';
-import { hasHouseholdBillingGrant } from '$lib/server/billing/entitlements';
-import { loadBillingStatus } from '$lib/server/billing/subscriptions';
+import { hasHouseholdBillingGrant } from '$lib/server/domains/billing';
+import { loadFreshBillingStatus } from '$lib/server/domains/billing';
 
-export const load: LayoutServerLoad = async ({ cookies, locals, platform }) => {
+export const load: LayoutServerLoad = async ({ cookies, locals, platform, url }) => {
 	const session = locals.session;
 	const userHouseholds = session
 		? await listUserHouseholds(platform, session.user.id).catch(() => [])
 		: [];
-	const userHouseholdIds = new Set(userHouseholds.map((household) => household.id));
-	const cookieHouseholdId = readHouseholdCookie(cookies);
-	const activeHouseholdId = session?.organizationId
-		? session.organizationId
-		: cookieHouseholdId && userHouseholdIds.has(cookieHouseholdId)
-			? cookieHouseholdId
-			: (userHouseholds[0]?.id ?? null);
+	const { householdId: activeHouseholdId } = session
+		? await resolveActiveHouseholdId({
+				platform,
+				cookies,
+				url,
+				session,
+				householdIds: userHouseholds.map((household) => household.id)
+			})
+		: { householdId: null };
 
 	let subscriptionLock = null;
 	if (session && activeHouseholdId && platform?.env.DB) {
-		const billing = await loadBillingStatus(platform.env.DB, activeHouseholdId);
+		const billing = await loadFreshBillingStatus(platform, activeHouseholdId);
 		const hasAccess =
 			billing.isPaid ||
 			(await hasHouseholdBillingGrant({ platform, householdId: activeHouseholdId }).catch(

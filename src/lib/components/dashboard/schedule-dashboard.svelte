@@ -13,10 +13,17 @@
 		updateScheduleMealSchedule
 	} from '$lib/stores/schedule-meals';
 	import { createMenuRecipe, hydrateMenuRecipes, menuRecipesStore } from '$lib/stores/menu-recipes';
-	import { setDailyScroll, uiState, updateUiState } from '$lib/stores/ui-state';
+	import { fetchRecipePickerRecipes } from '$lib/menu/menu-client';
+	import { createDraftRecipe } from '$lib/menu/recipe-draft';
+	import {
+		clearScheduleDailyScroll,
+		scheduleUiState,
+		setScheduleDailyScroll,
+		updateScheduleUiState
+	} from '$lib/stores/schedule-ui-state';
 	import AddMealDialog from './add-meal-dialog.svelte';
 	import ContinuousSchedule from './continuous-schedule.svelte';
-	import RecipeEditSheet from '$lib/components/menu/recipe-edit-sheet.svelte';
+	import { RecipeEditSheet, type RecipeMenuItem } from '$lib/components/menu';
 	import MealCheckInDialog, { type MealCheckInPayload } from './meal-check-in-dialog.svelte';
 	import MealDragOverlay from './meal-drag-overlay.svelte';
 	import MealPreviewDialog from './meal-preview-dialog.svelte';
@@ -26,7 +33,15 @@
 	import { addDays, addMonths, dateFromKey, dateKey, startOfDay } from './schedule-date';
 	import { dropTargetFromPointer } from './schedule-dnd';
 	import { isMealInPool, sortMealPool } from './schedule-ordering';
-	import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+	import { submitMealCheckIn } from './schedule-check-ins';
+	import { fetchScheduleMealRange } from './schedule-meal-client';
+	import { cardDirectionByKey, focusMealCard } from './schedule-keyboard';
+	import {
+		hasLoadedMealRange,
+		missingMealRanges,
+		parseMealRangeError,
+		type MealRange
+	} from './schedule-ranges';
 	import type { UnitPreferences } from '$lib/recipes/ingredient-text';
 	import type { HouseholdMember, Meal, MealDropTarget, ScheduleMode } from './schedule-types';
 
@@ -50,7 +65,7 @@
 		unitPreferences?: UnitPreferences;
 	} = $props();
 
-	const initialUiState = uiState.get();
+	const initialUiState = scheduleUiState.get();
 	const mealPoolImageMinHeight = 760;
 
 	let mode = $state<ScheduleMode>(initialUiState.scheduleMode);
@@ -82,7 +97,7 @@
 	let secondaryScrollY = 0;
 	let hydratedMealsSignature = $state('');
 	let hydratedRecipesSignature = $state('');
-	let loadedMealRanges = $state<{ start: string; end: string }[]>([]);
+	let loadedMealRanges = $state<MealRange[]>([]);
 	let loadingMealRangeKey = $state('');
 	let failedMealRangeKeys = $state<string[]>([]);
 	let mealRangeError = $state<string | null>(null);
@@ -115,69 +130,35 @@
 		'm'
 	].map((key) => ({ key, meta: false, ctrl: false, alt: false }));
 
-	const hasLoadedMealRange = (start: string, end: string): boolean =>
-		loadedMealRanges.some((range) => range.start <= start && range.end >= end);
-
-	const nextDateKey = (key: string): string => dateKey(addDays(dateFromKey(key), 1));
-	const previousDateKey = (key: string): string => dateKey(addDays(dateFromKey(key), -1));
-
-	const missingMealRanges = (range: { start: string; end: string }) => {
-		let cursor = range.start;
-		const missing: { start: string; end: string }[] = [];
-		const overlappingRanges = loadedMealRanges
-			.filter((loadedRange) => loadedRange.end >= range.start && loadedRange.start <= range.end)
-			.toSorted((left, right) => left.start.localeCompare(right.start));
-
-		for (const loadedRange of overlappingRanges) {
-			if (loadedRange.start > cursor) {
-				missing.push({ start: cursor, end: previousDateKey(loadedRange.start) });
-			}
-			if (loadedRange.end >= cursor) cursor = nextDateKey(loadedRange.end);
-			if (cursor > range.end) break;
-		}
-		if (cursor <= range.end) missing.push({ start: cursor, end: range.end });
-		return missing;
-	};
-
-	const parseMealRangeError = async (response: Response) => {
-		const body = await response.text();
-		try {
-			const parsed = JSON.parse(body) as { message?: string };
-			return parsed.message ?? body;
-		} catch {
-			return body;
-		}
-	};
-
 	const loadMealRangeSegment = async (range: { start: string; end: string }) => {
 		const key = `${range.start}:${range.end}`;
 		if (loadingMealRangeKey === key || failedMealRangeKeys.includes(key)) return;
 		loadingMealRangeKey = key;
 		try {
-			const response = await fetch(`/plan/meals?start=${range.start}&end=${range.end}`);
-			if (!response.ok) {
-				const message = await parseMealRangeError(response);
-				failedMealRangeKeys = [...failedMealRangeKeys, key];
-				mealRangeError = message;
-				if (response.status !== 402) console.error('Failed to load meal range', message);
-				return;
-			}
-			const body = (await response.json()) as { meals: Meal[] };
+			const meals = await fetchScheduleMealRange(range);
 			mealRangeError = null;
-			mergeHydratedScheduleMeals(body.meals, range.start, range.end);
+			mergeHydratedScheduleMeals(meals, range.start, range.end);
 			loadedMealRanges = [...loadedMealRanges, { start: range.start, end: range.end }];
 		} catch (error) {
 			failedMealRangeKeys = [...failedMealRangeKeys, key];
-			mealRangeError = error instanceof Error ? error.message : 'Failed to load meal range.';
-			console.error('Failed to load meal range', error);
+			const message =
+				error instanceof Response
+					? await parseMealRangeError(error)
+					: error instanceof Error
+						? error.message
+						: 'Failed to load meal range.';
+			mealRangeError = message;
+			if (!(error instanceof Response) || error.status !== 402) {
+				console.error('Failed to load meal range', error);
+			}
 		} finally {
 			if (loadingMealRangeKey === key) loadingMealRangeKey = '';
 		}
 	};
 
 	const loadMealRange = async (range: { start: string; end: string }) => {
-		if (hasLoadedMealRange(range.start, range.end) || loadingMealRangeKey) return;
-		for (const missingRange of missingMealRanges(range)) {
+		if (hasLoadedMealRange(loadedMealRanges, range.start, range.end) || loadingMealRangeKey) return;
+		for (const missingRange of missingMealRanges(loadedMealRanges, range)) {
 			await loadMealRangeSegment(missingRange);
 		}
 	};
@@ -186,10 +167,7 @@
 		if (pickerRecipesLoaded || pickerRecipesLoading || $menuRecipesStore.length > 0) return;
 		pickerRecipesLoading = true;
 		try {
-			const response = await fetch('/menu/recipes?picker=meal&limit=60');
-			if (!response.ok) throw new Error(await parseMealRangeError(response));
-			const body = (await response.json()) as { recipes: RecipeMenuItem[] };
-			hydrateMenuRecipes(body.recipes);
+			hydrateMenuRecipes(await fetchRecipePickerRecipes());
 			pickerRecipesLoaded = true;
 		} catch (error) {
 			addMealError = error instanceof Error ? error.message : 'Could not load recipes.';
@@ -203,49 +181,12 @@
 		renderedMealRange = range;
 	};
 
-	const visibleMealCards = (): HTMLElement[] =>
-		Array.from(document.querySelectorAll<HTMLElement>('[data-meal-card-id]')).filter((card) => {
-			const rect = card.getBoundingClientRect();
-			return rect.width > 0 && rect.height > 0 && getComputedStyle(card).visibility !== 'hidden';
-		});
-
-	const focusMealCard = (activeCard: HTMLElement, direction: 'left' | 'right' | 'up' | 'down') => {
-		const activeRect = activeCard.getBoundingClientRect();
-		const activeX = activeRect.left + activeRect.width / 2;
-		const activeY = activeRect.top + activeRect.height / 2;
-		const horizontal = direction === 'left' || direction === 'right';
-		const forward = direction === 'right' || direction === 'down';
-
-		const nextCard = visibleMealCards()
-			.filter((card) => card !== activeCard)
-			.map((card) => {
-				const rect = card.getBoundingClientRect();
-				const x = rect.left + rect.width / 2;
-				const y = rect.top + rect.height / 2;
-				const primaryDelta = horizontal
-					? forward
-						? x - activeX
-						: activeX - x
-					: forward
-						? y - activeY
-						: activeY - y;
-				const crossDelta = horizontal ? Math.abs(y - activeY) : Math.abs(x - activeX);
-				return { card, primaryDelta, score: primaryDelta + crossDelta * 1.5 };
-			})
-			.filter((candidate) => candidate.primaryDelta > 2)
-			.sort((left, right) => left.score - right.score)[0]?.card;
-
-		if (!nextCard) return;
-		nextCard.focus({ preventScroll: true });
-		nextCard.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
-	};
-
 	const moveByDay = (dayDelta: number) => {
 		anchorDate = startOfDay(addDays(anchorDate, dayDelta));
 		dayNavigationSignal += 1;
 		if (mode !== 'daily') return;
 		dailyScroll = null;
-		updateUiState({ dailyScroll: null });
+		clearScheduleDailyScroll();
 	};
 
 	const moveByMonthRow = (rowDelta: number): boolean => {
@@ -259,16 +200,6 @@
 			event.target instanceof Element
 				? event.target.closest<HTMLElement>('[data-meal-card-id]')
 				: null;
-		const cardDirectionByKey: Record<string, 'left' | 'right' | 'up' | 'down'> = {
-			ArrowLeft: 'left',
-			ArrowRight: 'right',
-			ArrowUp: 'up',
-			ArrowDown: 'down',
-			h: 'left',
-			l: 'right',
-			k: 'up',
-			j: 'down'
-		};
 		const cardDirection =
 			cardDirectionByKey[event.key] ?? cardDirectionByKey[event.key.toLowerCase()];
 		if (activeMealCard && cardDirection) {
@@ -318,20 +249,20 @@
 	const today = () => {
 		anchorDate = startOfDay(new Date());
 		dailyScroll = null;
-		updateUiState({ dailyScroll: null });
+		clearScheduleDailyScroll();
 		todaySignal += 1;
 	};
 
 	const openDay = (date: Date) => {
 		anchorDate = startOfDay(date);
 		dailyScroll = null;
-		updateUiState({ dailyScroll: null });
+		clearScheduleDailyScroll();
 		mode = 'daily';
 	};
 
 	const updateDailyScroll = (scrollState: NonNullable<typeof dailyScroll>) => {
 		dailyScroll = scrollState;
-		setDailyScroll(scrollState);
+		setScheduleDailyScroll(scrollState);
 	};
 
 	const updateVisibleAnchor = (date: Date) => {
@@ -348,28 +279,8 @@
 		checkInOpen = true;
 	};
 
-	const saveMealCheckIn = async ({
-		meal,
-		cooked,
-		verdict,
-		cookTime,
-		reason
-	}: MealCheckInPayload) => {
-		const response = await fetch('/plan/check-ins', {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ mealId: meal.id, cooked, verdict, cookTime, reason })
-		});
-		if (!response.ok) throw new Error(await response.text());
-		updateScheduleMealSchedule(
-			{
-				...meal,
-				status: cooked ? 'cooked' : 'skipped',
-				latestVerdict: verdict,
-				latestCheckIn: { verdict, cookTime, reason: reason?.trim() || undefined }
-			},
-			'external'
-		);
+	const saveMealCheckIn = async (payload: MealCheckInPayload) => {
+		updateScheduleMealSchedule(await submitMealCheckIn(payload), 'external');
 	};
 
 	const createMeal = (date?: string) => {
@@ -396,26 +307,8 @@
 		return 'Could not add that recipe.';
 	};
 
-	const draftRecipeFromTitle = (title: string): RecipeMenuItem => ({
-		id: `draft-recipe-${crypto.randomUUID()}`,
-		title,
-		description: '',
-		ingredientCount: 0,
-		appliances: [],
-		timesCooked: 0,
-		plannedCount: 0,
-		reviewSummary: {
-			worthRepeating: 0,
-			neutral: 0,
-			neverAgain: 0,
-			notes: []
-		},
-		ingredients: [{ amount: '', item: '' }],
-		instructions: [{ position: 1, text: '' }]
-	});
-
 	const createRecipeFromTitle = (title: string) => {
-		draftRecipe = draftRecipeFromTitle(title);
+		draftRecipe = createDraftRecipe(() => crypto.randomUUID(), title);
 		addMealOpen = false;
 		recipeEditorOpen = true;
 	};
@@ -542,7 +435,7 @@
 	});
 
 	$effect(() => {
-		updateUiState({ scheduleMode: mode, scheduleAnchorDate: dateKey(anchorDate) });
+		updateScheduleUiState({ scheduleMode: mode, scheduleAnchorDate: dateKey(anchorDate) });
 	});
 </script>
 

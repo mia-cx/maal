@@ -21,7 +21,14 @@
 	});
 </script>
 
-<svelte:head><link rel="icon" type="image/svg+xml" href={faviconHref} /></svelte:head>
+<svelte:head>
+	<link rel="icon" type="image/svg+xml" href={faviconHref} />
+	<link rel="manifest" href="/manifest.webmanifest" />
+	<meta name="theme-color" content="#fe7156" />
+	<meta name="mobile-web-app-capable" content="yes" />
+	<meta name="apple-mobile-web-app-title" content="Maal" />
+	<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+</svelte:head>
 <ModeWatcher />
 
 {@render children()}

@@ -3,25 +3,19 @@ import type { Meal } from '$lib/components/dashboard/schedule-types';
 import { countActiveHouseholdMembers, listHouseholdMembers } from '$lib/server/auth/household';
 import { getDb } from '$lib/server/db';
 import {
-	householdMealClassifications,
-	householdMealIngredients,
-	householdMealInstructions,
-	householdMealMedia,
-	householdMealNutritionFacts,
 	householdMeals,
 	householdMealUserRecipes,
 	households,
-	userRecipeClassifications,
-	userRecipeIngredients,
-	userRecipeInstructions,
-	userRecipeMedia,
-	userRecipeNutritionFacts,
 	userRecipes
 } from '$lib/server/db/schema';
 import { loadMealPlanMeals, mealFromHouseholdMeal } from '$lib/server/db/recipe-mappers';
-import { parseIngredientAmount, parseIngredientLine } from '$lib/recipes/ingredient-text';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
-import { insertHouseholdMealInstructionEvents } from '$lib/server/taxonomy/instruction-events';
+import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
+import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
+import {
+	replaceMealIngredientsFromLines,
+	replaceMealInstructionsFromLines
+} from './meal-sidecar-writer';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -40,6 +34,7 @@ export type CreateHouseholdMealInput = {
 		imageUrl?: string;
 		prepTimeMinutes?: number;
 		cookTimeMinutes?: number;
+		yield?: number;
 		ingredients?: string[];
 		instructions?: string[];
 	};
@@ -58,19 +53,13 @@ export type UpdateHouseholdMealInput = {
 		status: 'planned' | 'cooked' | 'skipped';
 		title: string;
 		description: string | null;
+		imageUrl: string | null;
 		prepTimeMinutes: number | null;
 		cookTimeMinutes: number | null;
+		yield: number | null;
 		ingredients: string[];
 		instructions: string[];
 	}>;
-};
-
-const servingsPlanned = (
-	meal: { servingsPlanned?: number | null },
-	defaultServings = 1
-): number => {
-	const servings = meal.servingsPlanned ?? defaultServings;
-	return Number.isFinite(servings) ? Math.max(1, Math.round(servings)) : 1;
 };
 
 const loadUnitPreferences = async (db: Db, workosUserId: string, householdId: string) => {
@@ -94,145 +83,6 @@ const ownedRecipe = async (db: Db, userRecipeId: string, workosUserId: string) =
 		.from(userRecipes)
 		.where(and(eq(userRecipes.id, userRecipeId), eq(userRecipes.workosUserId, workosUserId)))
 		.get();
-
-const replaceMealIngredientsFromMeal = async (
-	db: Db,
-	householdMealId: string,
-	ingredients: string[] = []
-) => {
-	await db
-		.delete(householdMealIngredients)
-		.where(eq(householdMealIngredients.householdMealId, householdMealId));
-	for (const [index, line] of ingredients.entries()) {
-		const parsed = parseIngredientLine(line);
-		const amount = parseIngredientAmount(parsed.amount);
-		await db.insert(householdMealIngredients).values({
-			householdMealId,
-			lineIndex: index,
-			originalText: line,
-			sourceAmountText: parsed.amount || null,
-			sourceQuantity: amount.quantity,
-			sourceUnitLabel: amount.unit,
-			sourceFoodLabel: parsed.item || line,
-			confidence: 1
-		});
-	}
-};
-
-const replaceMealInstructionsFromMeal = async (
-	db: Db,
-	householdMealId: string,
-	instructions: string[] = []
-) => {
-	await db
-		.delete(householdMealInstructions)
-		.where(eq(householdMealInstructions.householdMealId, householdMealId));
-	for (const [index, instruction] of instructions.entries()) {
-		await db.insert(householdMealInstructions).values({
-			householdMealId,
-			stepIndex: index,
-			text: instruction,
-			confidence: 1
-		});
-	}
-	const insertedInstructions = await db
-		.select({ id: householdMealInstructions.id, text: householdMealInstructions.text })
-		.from(householdMealInstructions)
-		.where(eq(householdMealInstructions.householdMealId, householdMealId));
-	await insertHouseholdMealInstructionEvents(db, insertedInstructions);
-};
-
-const copyRecipeSidecarsToMeal = async (db: Db, userRecipeId: string, householdMealId: string) => {
-	const [ingredients, instructions, classifications, media, nutritionFacts] = await Promise.all([
-		db
-			.select()
-			.from(userRecipeIngredients)
-			.where(eq(userRecipeIngredients.userRecipeId, userRecipeId)),
-		db
-			.select()
-			.from(userRecipeInstructions)
-			.where(eq(userRecipeInstructions.userRecipeId, userRecipeId)),
-		db
-			.select()
-			.from(userRecipeClassifications)
-			.where(eq(userRecipeClassifications.userRecipeId, userRecipeId)),
-		db.select().from(userRecipeMedia).where(eq(userRecipeMedia.userRecipeId, userRecipeId)),
-		db
-			.select()
-			.from(userRecipeNutritionFacts)
-			.where(eq(userRecipeNutritionFacts.userRecipeId, userRecipeId))
-	]);
-	for (const ingredient of ingredients) {
-		await db.insert(householdMealIngredients).values({
-			householdMealId,
-			lineIndex: ingredient.lineIndex,
-			originalText: ingredient.originalText,
-			sourceAmountText: ingredient.sourceAmountText,
-			sourceQuantity: ingredient.sourceQuantity,
-			sourceUnitLabel: ingredient.sourceUnitLabel,
-			sourceFoodLabel: ingredient.sourceFoodLabel,
-			baseFoodId: ingredient.baseFoodId,
-			baseQuantity: ingredient.baseQuantity,
-			baseUnitId: ingredient.baseUnitId,
-			baseUnitFamilyId: ingredient.baseUnitFamilyId,
-			optional: ingredient.optional,
-			confidence: ingredient.confidence
-		});
-	}
-	for (const instruction of instructions) {
-		await db.insert(householdMealInstructions).values({
-			householdMealId,
-			stepIndex: instruction.stepIndex,
-			sectionName: instruction.sectionName,
-			text: instruction.text,
-			durationMinutes: instruction.durationMinutes,
-			confidence: instruction.confidence
-		});
-	}
-	const insertedInstructions = await db
-		.select({ id: householdMealInstructions.id, text: householdMealInstructions.text })
-		.from(householdMealInstructions)
-		.where(eq(householdMealInstructions.householdMealId, householdMealId));
-	await insertHouseholdMealInstructionEvents(db, insertedInstructions);
-	for (const classification of classifications) {
-		await db.insert(householdMealClassifications).values({
-			householdMealId,
-			kind: classification.kind,
-			value: classification.value,
-			normalizedValue: classification.normalizedValue,
-			schemaOrgValue: classification.schemaOrgValue,
-			locale: classification.locale,
-			confidence: classification.confidence
-		});
-	}
-	for (const item of media) {
-		await db.insert(householdMealMedia).values({
-			householdMealId,
-			kind: item.kind,
-			position: item.position,
-			url: item.url,
-			contentUrl: item.contentUrl,
-			embedUrl: item.embedUrl,
-			thumbnailUrl: item.thumbnailUrl,
-			name: item.name,
-			caption: item.caption
-		});
-	}
-	for (const fact of nutritionFacts) {
-		await db.insert(householdMealNutritionFacts).values({
-			householdMealId,
-			nutrient: fact.nutrient,
-			schemaOrgProperty: fact.schemaOrgProperty,
-			originalText: fact.originalText,
-			amount: fact.amount,
-			unitId: fact.unitId,
-			baseAmount: fact.baseAmount,
-			baseUnitId: fact.baseUnitId,
-			locale: fact.locale,
-			confidence: fact.confidence
-		});
-	}
-};
 
 const validateCook = async (
 	platform: App.Platform | undefined,
@@ -295,8 +145,11 @@ export const createHouseholdMeal = async (input: {
 		imageUrl: recipe?.imageUrl ?? meal.customMeal?.imageUrl ?? null,
 		prepTimeMinutes: recipe?.prepTimeMinutes ?? meal.customMeal?.prepTimeMinutes ?? null,
 		cookTimeMinutes: recipe?.cookTimeMinutes ?? meal.customMeal?.cookTimeMinutes ?? null,
-		yield: recipe?.yield ?? defaultMealServings,
-		plannedYield: servingsPlanned({ servingsPlanned: meal.servingsPlanned }, defaultMealServings),
+		yield: recipe?.yield ?? meal.customMeal?.yield ?? defaultMealServings,
+		plannedYield: normalizeServingsPlanned(
+			{ servingsPlanned: meal.servingsPlanned },
+			defaultMealServings
+		),
 		plannedCookWorkosUserId,
 		date: meal.date ?? null,
 		time: meal.time ?? null,
@@ -308,8 +161,8 @@ export const createHouseholdMeal = async (input: {
 		await db.insert(householdMealUserRecipes).values({ householdMealId, userRecipeId: recipe.id });
 		await copyRecipeSidecarsToMeal(db, recipe.id, householdMealId);
 	} else {
-		await replaceMealIngredientsFromMeal(db, householdMealId, meal.customMeal?.ingredients);
-		await replaceMealInstructionsFromMeal(db, householdMealId, meal.customMeal?.instructions);
+		await replaceMealIngredientsFromLines(db, householdMealId, meal.customMeal?.ingredients);
+		await replaceMealInstructionsFromLines(db, householdMealId, meal.customMeal?.instructions);
 	}
 
 	return getHouseholdMeal({
@@ -371,12 +224,18 @@ export const updateHouseholdMeal = async (input: {
 			plannedYield:
 				meal.patch.servingsPlanned === undefined
 					? existingMeal.plannedYield
-					: servingsPlanned(
+					: normalizeServingsPlanned(
 							{ servingsPlanned: meal.patch.servingsPlanned },
 							existingMeal.plannedYield ?? 1
 						),
 			status: meal.patch.status ?? existingMeal.status,
 			title: meal.patch.title ?? existingMeal.title,
+			imageUrl: meal.patch.imageUrl === undefined ? existingMeal.imageUrl : meal.patch.imageUrl,
+			yield: meal.patch.yield === undefined ? existingMeal.yield : meal.patch.yield,
+			prepTimeMinutes:
+				meal.patch.prepTimeMinutes === undefined
+					? existingMeal.prepTimeMinutes
+					: meal.patch.prepTimeMinutes,
 			description:
 				meal.patch.description === undefined ? existingMeal.description : meal.patch.description,
 			cookTimeMinutes:
@@ -387,10 +246,10 @@ export const updateHouseholdMeal = async (input: {
 		})
 		.where(eq(householdMeals.id, existingMeal.id));
 	if (meal.patch.ingredients !== undefined) {
-		await replaceMealIngredientsFromMeal(db, existingMeal.id, meal.patch.ingredients);
+		await replaceMealIngredientsFromLines(db, existingMeal.id, meal.patch.ingredients);
 	}
 	if (meal.patch.instructions !== undefined) {
-		await replaceMealInstructionsFromMeal(db, existingMeal.id, meal.patch.instructions);
+		await replaceMealInstructionsFromLines(db, existingMeal.id, meal.patch.instructions);
 	}
 	return getHouseholdMeal({
 		db,

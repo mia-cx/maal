@@ -86,43 +86,47 @@
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton
 							isActive={activeNav === 'pantry'}
-							disabled={!features.pantry}
+							aria-disabled={!features.pantry}
 							tooltipContent={features.pantry ? 'Pantry' : 'Pantry preview unavailable'}
 							class={`h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2! ${features.pantry ? '' : 'text-muted-foreground'}`}
 						>
-							{#if features.pantry}
-								{#snippet child({ props })}
+							{#snippet child({ props })}
+								{#if features.pantry}
 									<a href={pantryHref} {...props}>
 										<SoupIcon />
 										<span>Pantry</span>
 									</a>
-								{/snippet}
-							{:else}
-								<SoupIcon />
-								<span>Pantry</span>
-							{/if}
+								{:else}
+									<span {...props}>
+										<SoupIcon />
+										<span>Pantry</span>
+									</span>
+								{/if}
+							{/snippet}
 						</Sidebar.MenuButton>
 					</Sidebar.MenuItem>
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton
 							isActive={activeNav === 'grocery-rollup'}
-							disabled={!features.groceryRollup}
+							aria-disabled={!features.groceryRollup}
 							tooltipContent={features.groceryRollup
 								? 'Grocery rollup'
 								: 'Grocery rollup preview unavailable'}
 							class={`h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2! ${features.groceryRollup ? '' : 'text-muted-foreground'}`}
 						>
-							{#if features.groceryRollup}
-								{#snippet child({ props })}
+							{#snippet child({ props })}
+								{#if features.groceryRollup}
 									<a href={groceryRollupHref} {...props}>
 										<ShoppingCartIcon />
 										<span>Grocery rollup</span>
 									</a>
-								{/snippet}
-							{:else}
-								<ShoppingCartIcon />
-								<span>Grocery rollup</span>
-							{/if}
+								{:else}
+									<span {...props}>
+										<ShoppingCartIcon />
+										<span>Grocery rollup</span>
+									</span>
+								{/if}
+							{/snippet}
 						</Sidebar.MenuButton>
 					</Sidebar.MenuItem>
 					<Sidebar.MenuItem>

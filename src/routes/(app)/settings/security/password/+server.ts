@@ -1,24 +1,10 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { getRequestMetadata } from '$lib/server/auth/session';
 import { createAuthRuntime } from '$lib/server/auth/workos';
+import { readJsonObject } from '$lib/server/http/request';
 
 const minPasswordLength = 8;
 const maxPasswordLength = 72;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === 'object' && value !== null;
-
-const requestBody = async (request: Request): Promise<Record<string, unknown>> => {
-	let body: unknown;
-	try {
-		body = await request.json();
-	} catch {
-		error(400, { message: 'Invalid request.' });
-	}
-
-	if (!isRecord(body)) error(400, { message: 'Invalid request.' });
-	return body;
-};
 
 const textField = (body: Record<string, unknown>, key: string): string => {
 	const value = body[key];
@@ -29,7 +15,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 	const session = locals.session;
 	if (!session) error(401, { message: 'Sign in required.' });
 
-	const body = await requestBody(request);
+	const body = await readJsonObject(request);
 	const currentPassword = textField(body, 'currentPassword');
 	const newPassword = textField(body, 'newPassword');
 

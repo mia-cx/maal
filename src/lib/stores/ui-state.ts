@@ -21,6 +21,8 @@ export type UiState = {
 	dailyScroll: DailyScrollState | null;
 };
 
+export type UiStateStoreSnapshot = UiState;
+
 const todayKey = (): string => {
 	const today = new Date();
 	const year = today.getFullYear();

@@ -2,7 +2,7 @@ import { eq, or } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { getDb } from '$lib/server/db';
 import { billingSubscriptions } from '$lib/server/db/schema';
-import { currentPeriodEndIso, subscriptionPriceId } from './stripe';
+import { createStripeClient, currentPeriodEndIso, subscriptionPriceId } from './stripe';
 
 export type BillingStatus = {
 	householdId: string;
@@ -39,6 +39,37 @@ export const loadBillingStatus = async (
 		cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
 		isPaid: paidStatuses.has(subscription?.status ?? '')
 	};
+};
+
+export const loadFreshBillingStatus = async (
+	platform: App.Platform | undefined,
+	householdId: string
+): Promise<BillingStatus> => {
+	if (!platform?.env.DB) throw new Error('Billing storage is not available.');
+
+	const billing = await loadBillingStatus(platform.env.DB, householdId);
+	if (!billing.isPaid || !billing.stripeSubscriptionId) return billing;
+
+	try {
+		const subscription = await createStripeClient(platform).subscriptions.retrieve(
+			billing.stripeSubscriptionId,
+			{ expand: ['items.data.price'] }
+		);
+		await upsertSubscription({
+			database: platform.env.DB,
+			householdId,
+			customerId:
+				typeof subscription.customer === 'string'
+					? subscription.customer
+					: subscription.customer.id,
+			subscriberUserId: billing.subscriberUserId,
+			subscription
+		});
+		return loadBillingStatus(platform.env.DB, householdId);
+	} catch (cause) {
+		console.error('Failed to refresh Stripe subscription status', cause);
+		return billing;
+	}
 };
 
 export const upsertSubscription = async (input: {

@@ -2,7 +2,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
-	import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+	import type { RecipeMenuItem } from '$lib/components/menu';
+	import { searchMenuRecipes } from '$lib/menu/menu-client';
 
 	type PickerOption =
 		| { id: string; type: 'existing'; recipe: RecipeMenuItem }
@@ -82,16 +83,6 @@
 			activeIndex === index ? 'bg-muted text-foreground' : 'hover:bg-muted'
 		}`;
 
-	const readRecipeFetchError = async (response: Response): Promise<string> => {
-		try {
-			const body = (await response.json()) as { message?: unknown };
-			if (typeof body.message === 'string' && body.message.trim()) return body.message;
-		} catch {
-			// Fall through to the generic message.
-		}
-		return 'Could not load recipes.';
-	};
-
 	const reset = () => {
 		query = '';
 		activeIndex = 0;
@@ -162,13 +153,9 @@
 			() => {
 				fetchRecipesBusy = true;
 				fetchRecipesError = null;
-				fetch(`/menu/recipes?picker=meal&limit=10&q=${encodeURIComponent(query)}`, {
-					signal: controller.signal
-				})
-					.then(async (response) => {
-						if (!response.ok) throw new Error(await readRecipeFetchError(response));
-						const body = (await response.json()) as { recipes: RecipeMenuItem[] };
-						fetchedRecipes = body.recipes;
+				searchMenuRecipes(query, { limit: 10, picker: 'meal', signal: controller.signal })
+					.then((recipes) => {
+						fetchedRecipes = recipes;
 						fetchedRecipeQuery = query;
 					})
 					.catch((error: unknown) => {

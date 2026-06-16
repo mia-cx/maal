@@ -2,6 +2,7 @@
 	import { cn } from '$lib/utils.js';
 	import { onMount, tick } from 'svelte';
 	import { dateKey, isSameMonth, isToday } from './schedule-date';
+	import { handleBlankScheduleTarget } from './schedule-interactions';
 	import ScheduledMealList from './scheduled-meal-list.svelte';
 	import type {
 		Meal,
@@ -67,17 +68,8 @@
 		].join('|')
 	);
 
-	const addMealOnBlankTarget = (event: MouseEvent) => {
-		if (
-			event.target instanceof Element &&
-			event.target.closest(
-				'button, a, input, textarea, select, [contenteditable=""], [contenteditable="true"], [data-meal-card-id]'
-			)
-		)
-			return;
-		event.stopPropagation();
-		onaddmeal?.(dayKey);
-	};
+	const addMealOnBlankTarget = (event: MouseEvent) =>
+		handleBlankScheduleTarget(event, dayKey, onaddmeal);
 
 	const fitVisibleMeals = async () => {
 		const version = ++measureVersion;

@@ -1,5 +1,6 @@
 import { and, eq, isNull } from 'drizzle-orm';
-import { getDb } from '$lib/server/db';
+import type { DrizzleD1Database } from 'drizzle-orm/d1';
+import type * as schema from '$lib/server/db/schema';
 import {
 	householdMealInstructionEvents,
 	householdMealInstructions,
@@ -9,7 +10,7 @@ import {
 	userRecipeInstructions
 } from '$lib/server/db/schema';
 
-type Db = ReturnType<typeof getDb>;
+type Db = DrizzleD1Database<typeof schema>;
 type UnitRow = typeof units.$inferSelect;
 type InstructionEvent = {
 	kind: 'temperature';

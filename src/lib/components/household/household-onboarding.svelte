@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { setActiveHouseholdId } from '$lib/stores/active-household';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import WordmarkLogo from '$lib/components/wordmark-logo.svelte';
@@ -58,7 +59,12 @@
 			return;
 		}
 
-		const body = (await response.json()) as { trialStarted?: boolean };
+		const body = (await response.json()) as {
+			trialStarted?: boolean;
+			household?: { id?: unknown };
+		};
+		const householdId = typeof body.household?.id === 'string' ? body.household.id : null;
+		if (householdId) setActiveHouseholdId(householdId);
 		await goto(resolve(body.trialStarted ? '/plan?trial=started' : '/subscribe'), {
 			invalidateAll: true
 		});

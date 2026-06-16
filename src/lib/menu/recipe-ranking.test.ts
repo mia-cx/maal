@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { rankRecipesByRelevance } from './recipe-ranking';
-import type { RecipeMenuItem } from '$lib/components/menu/menu-types';
+import type { RecipeMenuItem } from '$lib/menu/menu-types';
 
 const recipe = (overrides: Partial<RecipeMenuItem>): RecipeMenuItem => ({
 	id: overrides.id ?? overrides.title ?? crypto.randomUUID(),

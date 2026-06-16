@@ -1,6 +1,6 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { createHouseholdForUser } from '$lib/server/auth/household';
-import { loadTrialAvailability, startHouseholdTrial } from '$lib/server/billing/trials';
+import { loadTrialAvailability, startHouseholdTrial } from '$lib/server/domains/billing';
 
 const maxHouseholdNameLength = 120;
 

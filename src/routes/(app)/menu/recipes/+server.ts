@@ -1,7 +1,6 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
-import { resolveActiveHouseholdId } from '$lib/server/auth/household';
-import { requireHouseholdAccess } from '$lib/server/billing/guards';
+import { requireAppContext } from '$lib/server/http/app-context';
 import { getDb } from '$lib/server/db';
 import {
 	householdMeals,
@@ -23,7 +22,7 @@ import type {
 	RecipeIngredientItem,
 	RecipeInstructionItem,
 	RecipeMenuItem
-} from '$lib/components/menu/menu-types';
+} from '$lib/menu/menu-types';
 import {
 	canonicalIngredientUnit,
 	convertInstructionTemperatures,
@@ -32,9 +31,15 @@ import {
 	type UnitPreferences
 } from '$lib/recipes/ingredient-text';
 import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
+import { emptyRecipeMenuStats } from '$lib/menu/recipe-defaults';
 import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
+import { boundedPagination } from '$lib/shared/pagination';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { cleanImportedText } from '$lib/server/services/html-text';
+import {
+	fetchRecipeImportPage,
+	RecipeImportFetchError
+} from '$lib/server/services/recipe-import-fetch';
 
 const fallbackTitle = 'Untitled recipe';
 const maxTitleLength = 160;
@@ -272,38 +277,20 @@ const siteNameFromUrl = (url: string): string | undefined => {
 };
 
 const fetchRecipeFromUrl = async (url: string) => {
-	let parsedUrl: URL;
+	let html: string;
+	let finalUrl: string;
 	try {
-		parsedUrl = new URL(url);
-	} catch {
-		error(400, { message: 'Enter a valid recipe URL.' });
-	}
-	if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-		error(400, { message: 'Enter a valid recipe URL.' });
-	}
-
-	let response: Response;
-	try {
-		response = await fetch(parsedUrl, {
-			headers: {
-				accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-				'accept-language': 'nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
-				'user-agent':
-					'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36'
-			}
-		});
-	} catch {
+		({ html, finalUrl } = await fetchRecipeImportPage(url, maxImportBytes));
+	} catch (cause) {
+		if (cause instanceof RecipeImportFetchError && cause.message === 'Invalid recipe URL.') {
+			error(400, { message: 'Enter a valid recipe URL.' });
+		}
+		if (cause instanceof RecipeImportFetchError) {
+			error(502, { message: cause.message });
+		}
 		error(502, { message: 'Could not fetch that recipe page.' });
 	}
-	if (!response.ok) error(502, { message: 'Could not fetch that recipe page.' });
-
-	let html: string;
-	try {
-		html = (await response.text()).slice(0, maxImportBytes);
-	} catch {
-		error(502, { message: 'Could not read that recipe page.' });
-	}
-	const imported = recipeFromJsonLd(html, url);
+	const imported = recipeFromJsonLd(html, finalUrl);
 	if (!imported) error(422, { message: 'No schema.org Recipe data found on that page.' });
 
 	const recipe = imported.recipe;
@@ -311,11 +298,11 @@ const fetchRecipeFromUrl = async (url: string) => {
 	const sourcePublisherName = namedReference(recipe.publisher, imported.nodes);
 	return {
 		recipe,
-		sourceSiteName: sourcePublisherName ?? siteNameFromUrl(url),
+		sourceSiteName: sourcePublisherName ?? siteNameFromUrl(finalUrl),
 		sourceAuthorName,
 		sourcePublisherName,
 		sourceIsBasedOnUrl: firstString(recipe.isBasedOn),
-		sourceUrl: url
+		sourceUrl: finalUrl
 	};
 };
 
@@ -577,11 +564,6 @@ const recipeUrlKeys = (recipe: RecipeIdentity): Set<string> => {
 	return keys;
 };
 
-const integerParam = (url: URL, key: string, fallback: number): number => {
-	const value = Number(url.searchParams.get(key));
-	return Number.isInteger(value) && value >= 0 ? value : fallback;
-};
-
 const loadHouseholdUnitPreferences = async (
 	db: ReturnType<typeof getDb>,
 	workosUserId: string,
@@ -686,27 +668,13 @@ const draftRecipeFromImport = (
 			const text = convertInstructionTemperatures(instruction.text, unitPreferences);
 			return { ...instruction, text };
 		}),
-		appliances: [],
-		timesCooked: 0,
-		plannedCount: 0,
-		reviewSummary: {
-			worthRepeating: 0,
-			neutral: 0,
-			neverAgain: 0,
-			notes: []
-		}
+		...emptyRecipeMenuStats()
 	};
 };
 
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
-	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
-	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
-	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
-	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
+	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
 
-	const db = getDb(platform.env.DB);
 	const importUrl = url.searchParams.get('importUrl')?.trim();
 	if (importUrl) {
 		const [unitAliasMap, unitPreferences] = await Promise.all([
@@ -722,8 +690,14 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 		});
 	}
 
-	const offset = integerParam(url, 'offset', 0);
-	const limit = Math.min(integerParam(url, 'limit', defaultRecipePageSize), maxRecipePageSize);
+	const { offset, limit } = boundedPagination(
+		{
+			offset: url.searchParams.get('offset'),
+			limit: url.searchParams.get('limit')
+		},
+		defaultRecipePageSize,
+		maxRecipePageSize
+	);
 	const query = url.searchParams.get('q') ?? '';
 	const picker = url.searchParams.get('picker') === 'meal';
 	const unitPreferences = await loadHouseholdUnitPreferences(db, session.user.id, householdId);
@@ -812,12 +786,7 @@ const matchingExistingRecipe = (
 };
 
 export const POST: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
-	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
-	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
-	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
+	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
 
 	const body = await readBody(request);
 	if (body.url && body.url.length > maxUrlLength)
@@ -830,7 +799,6 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		error(400, { message: 'Enter a recipe name or URL.' });
 	}
 
-	const db = getDb(platform.env.DB);
 	const [unitPreferences, unitAliasMap, recipeIdentities] = await Promise.all([
 		loadHouseholdUnitPreferences(db, session.user.id, householdId),
 		loadIngredientUnitAliases(db),
@@ -929,15 +897,9 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 };
 
 export const PATCH: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
-	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
-	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
-	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
+	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
 
 	const { recipeIds } = await readBulkBody(request);
-	const db = getDb(platform.env.DB);
 	const updatedAt = new Date().toISOString();
 	await db
 		.update(userRecipes)
@@ -959,15 +921,9 @@ export const PATCH: RequestHandler = async ({ cookies, locals, platform, request
 };
 
 export const DELETE: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
-	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
-	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
-	if (!householdId) error(400, { message: 'Household is required.' });
-	await requireHouseholdAccess({ platform, database: platform.env.DB, session, householdId });
+	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
 
 	const { recipeIds, permanent } = await readBulkBody(request);
-	const db = getDb(platform.env.DB);
 	const existingRows = await db
 		.select({ id: userRecipes.id })
 		.from(userRecipes)

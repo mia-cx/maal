@@ -6,10 +6,13 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Input } from '$lib/components/ui/input';
-	import { resolve } from '$app/paths';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import SearchIcon from '@lucide/svelte/icons/search';
-	import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
+	import {
+		fetchMenuRecipesPage,
+		importRecipeDraftFromUrl,
+		searchMenuRecipes
+	} from '$lib/menu/menu-client';
 	import {
 		appendMenuRecipes,
 		archivedMenuRecipesStore,
@@ -29,7 +32,9 @@
 	import MyMenuRecipeSheet from './recipe-edit-sheet.svelte';
 	import RecipeMenuCard from './recipe-menu-card.svelte';
 	import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
-	import type { RecipeMenuItem } from './menu-types';
+	import { createDraftRecipe } from '$lib/menu/recipe-draft';
+	import { toggleMenuSelection } from '$lib/menu/menu-selection';
+	import type { RecipeMenuItem } from '$lib/menu/menu-types';
 
 	let {
 		recipes: initialRecipes = [],
@@ -92,22 +97,15 @@
 		if (nextRecipeOffset === null || recipesLoading) return;
 		recipesLoading = true;
 		recipesLoadError = null;
-		const params = new URLSearchParams({
-			offset: String(nextRecipeOffset),
-			limit: String(MENU_RECIPE_PAGE_SIZE)
-		});
-		const response = await fetch(`${resolve('/menu/recipes')}?${params}`);
-		recipesLoading = false;
-		if (!response.ok) {
+		try {
+			const body = await fetchMenuRecipesPage(nextRecipeOffset);
+			appendMenuRecipes(body.recipes);
+			nextRecipeOffset = body.nextRecipeOffset;
+		} catch {
 			recipesLoadError = 'Could not load more recipes.';
-			return;
+		} finally {
+			recipesLoading = false;
 		}
-		const body = (await response.json()) as {
-			recipes: RecipeMenuItem[];
-			nextRecipeOffset: number | null;
-		};
-		appendMenuRecipes(body.recipes);
-		nextRecipeOffset = body.nextRecipeOffset;
 	};
 
 	const idsMatch = (left: string[], right: string[]): boolean =>
@@ -159,13 +157,7 @@
 		const controller = new AbortController();
 		const timeout = setTimeout(async () => {
 			try {
-				const params = new URLSearchParams({ q: query, limit: '60' });
-				const response = await fetch(`${resolve('/menu/recipes')}?${params}`, {
-					signal: controller.signal
-				});
-				if (!response.ok) throw new Error('Could not search recipes.');
-				const body = (await response.json()) as { recipes: RecipeMenuItem[] };
-				searchRecipes = body.recipes;
+				searchRecipes = await searchMenuRecipes(query, { signal: controller.signal });
 			} catch (error) {
 				if (controller.signal.aborted) return;
 				searchLoadError = readAddRecipeError(error);
@@ -205,48 +197,14 @@
 		return 'Could not add that recipe.';
 	};
 
-	const readResponseError = async (response: Response, fallback: string): Promise<string> => {
-		try {
-			const body = (await response.json()) as { message?: unknown };
-			if (typeof body.message === 'string' && body.message.trim()) return body.message;
-		} catch {
-			// Fall through to fallback.
-		}
-		return fallback;
-	};
-
-	const draftRecipeFromTitle = (title = 'New recipe'): RecipeMenuItem => ({
-		id: `draft-recipe-${crypto.randomUUID()}`,
-		title,
-		description: '',
-		ingredientCount: 0,
-		appliances: [],
-		timesCooked: 0,
-		plannedCount: 0,
-		reviewSummary: {
-			worthRepeating: 0,
-			neutral: 0,
-			neverAgain: 0,
-			notes: []
-		},
-		ingredients: [{ amount: '', item: '' }],
-		instructions: [{ position: 1, text: '' }]
-	});
-
 	const openAddRecipe = () => {
 		selectMenuRecipe(null);
-		draftRecipe = draftRecipeFromTitle();
+		draftRecipe = createDraftRecipe(() => crypto.randomUUID());
 		sheetOpen = true;
 	};
 
-	const loadRecipeDraftFromUrl = async (url: string): Promise<RecipeMenuItem> => {
-		const params = new URLSearchParams({ importUrl: url });
-		const response = await fetch(`${resolve('/menu/recipes')}?${params}`);
-		if (!response.ok)
-			throw new Error(await readResponseError(response, 'Could not import recipe.'));
-		const body = (await response.json()) as { recipe: RecipeMenuItem };
-		return body.recipe;
-	};
+	const loadRecipeDraftFromUrl = (url: string): Promise<RecipeMenuItem> =>
+		importRecipeDraftFromUrl(url);
 
 	const saveRecipeFromSheet = async (recipe: RecipeMenuItem) => {
 		if (!recipe.id.startsWith('draft-recipe-')) {
@@ -258,31 +216,15 @@
 		selectMenuRecipe(null);
 	};
 
-	const applySelection = (selectedIds: string[], ids: string[], selected: boolean): string[] => {
-		if (!selected) return selectedIds.filter((id) => !ids.includes(id));
-		return [...selectedIds, ...ids.filter((id) => !selectedIds.includes(id))];
-	};
-
-	const rangeIds = (
-		items: readonly RecipeMenuItem[],
-		fromId: string | null,
-		toId: string
-	): string[] => {
-		const toIndex = items.findIndex((item) => item.id === toId);
-		const fromIndex = fromId ? items.findIndex((item) => item.id === fromId) : -1;
-		if (fromIndex < 0 || toIndex < 0) return [toId];
-		const start = Math.min(fromIndex, toIndex);
-		const end = Math.max(fromIndex, toIndex);
-		return items.slice(start, end + 1).map((item) => item.id);
-	};
-
 	const toggleRecipeSelection = (recipe: RecipeMenuItem, selected: boolean, range = false) => {
-		const useRange = range && selectedRecipeIds.length > 0;
-		selectedRecipeIds = applySelection(
-			selectedRecipeIds,
-			useRange ? rangeIds(displayedRecipes, lastSelectedRecipeId, recipe.id) : [recipe.id],
-			selected
-		);
+		selectedRecipeIds = toggleMenuSelection({
+			items: displayedRecipes,
+			selectedIds: selectedRecipeIds,
+			lastSelectedId: lastSelectedRecipeId,
+			itemId: recipe.id,
+			selected,
+			range
+		});
 		lastSelectedRecipeId = recipe.id;
 	};
 
@@ -291,12 +233,14 @@
 		selected: boolean,
 		range = false
 	) => {
-		const useRange = range && selectedArchivedRecipeIds.length > 0;
-		selectedArchivedRecipeIds = applySelection(
-			selectedArchivedRecipeIds,
-			useRange ? rangeIds(archivedRecipes, lastSelectedArchivedRecipeId, recipe.id) : [recipe.id],
-			selected
-		);
+		selectedArchivedRecipeIds = toggleMenuSelection({
+			items: archivedRecipes,
+			selectedIds: selectedArchivedRecipeIds,
+			lastSelectedId: lastSelectedArchivedRecipeId,
+			itemId: recipe.id,
+			selected,
+			range
+		});
 		lastSelectedArchivedRecipeId = recipe.id;
 	};
 

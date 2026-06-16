@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { loadMenuRecipes } from '$lib/server/db/recipe-mappers';
 import { households } from '$lib/server/db/schema';
-import { firstAccessibleHouseholdId, hasHouseholdAccess } from '$lib/server/billing/entitlements';
+import { firstAccessibleHouseholdId, hasHouseholdAccess } from '$lib/server/domains/billing';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
 import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';

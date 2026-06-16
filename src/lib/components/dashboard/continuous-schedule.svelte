@@ -3,7 +3,7 @@
 	import { onMount, tick } from 'svelte';
 	import { addDays, dailyScrollDays, dateFromKey, dateKey } from './schedule-date';
 	import DailyScheduleDay from './daily-schedule-day.svelte';
-	import MealPool from './meal-pool.svelte';
+	import ScheduleMealPool from './schedule-meal-pool.svelte';
 	import { sortScheduledMeals } from './schedule-ordering';
 	import type { DailyScrollState } from '$lib/stores/ui-state';
 	import type { Meal, MealCheckInHandler, MealDropTarget } from './schedule-types';
@@ -238,7 +238,7 @@
 		bind:this={mealPoolElement}
 		class="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur"
 	>
-		<MealPool
+		<ScheduleMealPool
 			{draggingMealId}
 			{draggedMeal}
 			{dropTarget}

@@ -1,100 +1,73 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import type { Pathname } from '$app/types';
-	import { Button } from '$lib/components/ui/button';
 	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
-	import { Checkbox } from '$lib/components/ui/checkbox';
-	import * as Command from '$lib/components/ui/command';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
-	import { Input } from '$lib/components/ui/input';
-	import * as InputOTP from '$lib/components/ui/input-otp';
-	import * as Popover from '$lib/components/ui/popover';
-	import * as RadioGroup from '$lib/components/ui/radio-group';
-	import { Separator } from '$lib/components/ui/separator';
-	import { cn } from '$lib/utils';
-	import BellIcon from '@lucide/svelte/icons/bell';
-	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
-	import CreditCardIcon from '@lucide/svelte/icons/credit-card';
-	import KeyRoundIcon from '@lucide/svelte/icons/key-round';
-	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
-	import LockKeyholeIcon from '@lucide/svelte/icons/lock-keyhole';
-	import UserRoundIcon from '@lucide/svelte/icons/user-round';
-	import type { Component } from 'svelte';
-
-	type SettingsCategoryId = 'account' | 'security' | 'mcp' | 'notifications' | 'billing';
-	type User = { name: string; email: string; emailVerified: boolean };
-	type UpdatedUser = { name: string | null; email: string; emailVerified: boolean };
-	type MfaFactor = {
-		id: string;
-		type: 'totp';
-		issuer: string;
-		user: string;
-		createdAt: string;
-		updatedAt: string;
-	};
-	type McpScope =
-		| 'households:read'
-		| 'households:write'
-		| 'recipes:read'
-		| 'recipes:write'
-		| 'meals:read'
-		| 'meals:write'
-		| 'check_ins:read'
-		| 'check_ins:write'
-		| 'food_profile:read'
-		| 'food_profile:write';
-	type McpKeyPreset = 'read_only_planner' | 'meal_planner' | 'full_access';
-	type McpScopeLevel = 'none' | 'read' | 'write';
-	type McpScopeGroup = {
-		id: string;
-		label: string;
-		description: string;
-		read?: McpScope;
-		write?: McpScope;
-	};
-	type SettingsHousehold = { id: string; name: string };
-	type McpKey = {
-		id: string;
-		label: string;
-		householdScope: { kind: 'all' } | { kind: 'households'; householdIds: string[] };
-		scopes: McpScope[];
-		preset?: McpKeyPreset;
-		createdAt: string;
-		expiresAt?: string | null;
-		revokedAt?: string | null;
-		lastUsedAt?: string | null;
-		households?: SettingsHousehold[];
-	};
-
-	type BillingHouseholdStatus = {
-		householdId: string;
-		householdName: string;
-		stripeCustomerId: string | null;
-		subscriberUserId: string | null;
-		status: string | null;
-		currentPeriodEnd: string | null;
-		cancelAtPeriodEnd: boolean;
-		isPaid: boolean;
-		isActiveHousehold: boolean;
-		canManageBilling: boolean;
-	};
-	type BillingStatus = BillingHouseholdStatus & {
-		householdBilling: BillingHouseholdStatus[];
-		canManageBilling: boolean;
-		publishableKey: string;
-		pricingTableId: string;
-		customerEmail: string;
-	};
-
-	type SettingsCategory = {
-		id: SettingsCategoryId;
-		label: string;
-		icon: Component;
-		disabled?: boolean;
-	};
+	import AccountSettingsSection from '$lib/components/settings/account-settings-section.svelte';
+	import BillingSettingsSection from '$lib/components/settings/billing-settings-section.svelte';
+	import McpSettingsSection from '$lib/components/settings/mcp-settings-section.svelte';
+	import MfaSetupDialog from '$lib/components/settings/mfa-setup-dialog.svelte';
+	import NotificationsSettingsSection from '$lib/components/settings/notifications-settings-section.svelte';
+	import PasswordChangeDialog from '$lib/components/settings/password-change-dialog.svelte';
+	import SecuritySettingsSection from '$lib/components/settings/security-settings-section.svelte';
+	import SettingsCategoryNav from '$lib/components/settings/settings-category-nav.svelte';
+	import SettingsSectionHeading from '$lib/components/settings/settings-section-heading.svelte';
+	import {
+		filterMcpHouseholds,
+		mcpHouseholdPickerLabel as formatMcpHouseholdPickerLabel,
+		selectedMcpHouseholds as selectMcpHouseholds,
+		selectedMcpScopesForLevels,
+		setMcpScopeReadLevel,
+		setMcpScopeWriteLevel,
+		toggleMcpHouseholdId,
+		type McpKey,
+		type McpScope,
+		type McpScopeLevel
+	} from '$lib/settings/mcp-key-model';
+	import {
+		accountEmailChanged as hasAccountEmailChanged,
+		accountEmailVerified as isAccountEmailVerified,
+		emailVerificationRequired as needsEmailVerification,
+		normalizedEmail,
+		verificationAttemptKey
+	} from '$lib/settings/account-model';
+	import {
+		changePasswordRequest,
+		deleteMfaFactorRequest,
+		loadMfaFactors as requestMfaFactors,
+		startMfaSetupRequest,
+		verifyMfaSetupRequest
+	} from '$lib/settings/security-client';
+	import {
+		createMcpKey,
+		loadMcpKeys as requestMcpKeys,
+		rerollMcpKey,
+		revokeMcpKey
+	} from '$lib/settings/mcp-key-client';
+	import {
+		createBillingPortalSession,
+		loadBillingStatus as requestBillingStatus
+	} from '$lib/settings/billing-client';
+	import {
+		saveAccountSettings,
+		sendAccountVerificationEmail,
+		verifyAccountEmailCode
+	} from '$lib/settings/account-client';
+	import { emptyPasswordChangeFields, passwordChangeMismatch } from '$lib/settings/password-model';
+	import type {
+		BillingStatus,
+		MfaFactor,
+		SettingsCategoryId,
+		SettingsHousehold,
+		UpdatedUser,
+		User
+	} from '$lib/settings/types';
+	import {
+		settingsCategories,
+		settingsCategoryFromParam,
+		type SettingsCategory
+	} from '$lib/settings/categories';
 
 	let {
 		open = $bindable(false),
@@ -170,24 +143,17 @@
 	let billingError = $state<string | null>(null);
 
 	const verificationCodeMinLength = 6;
-	const normalizedAccountEmail = $derived(accountEmail.trim().toLowerCase());
-	const currentAccountEmail = $derived(user.email.trim().toLowerCase());
-	const accountEmailChanged = $derived(
-		Boolean(normalizedAccountEmail) && normalizedAccountEmail !== currentAccountEmail
+	const normalizedAccountEmail = $derived(normalizedEmail(accountEmail));
+	const currentAccountEmail = $derived(normalizedEmail(user.email));
+	const accountEmailChanged = $derived(hasAccountEmailChanged(accountEmail, user.email));
+	const accountEmailVerified = $derived(isAccountEmailVerified(accountEmail, verifiedEmail));
+	const emailVerificationRequired = $derived(
+		needsEmailVerification(accountEmail, user.email, verifiedEmail)
 	);
-	const accountEmailVerified = $derived(
-		Boolean(normalizedAccountEmail) && verifiedEmail === normalizedAccountEmail
-	);
-	const emailVerificationRequired = $derived(accountEmailChanged && !accountEmailVerified);
 	const accountCanSave = $derived(!accountSaving && !emailVerificationRequired);
+	const mcpServerUrl = $derived(`${page.url.origin}/mcp`);
 
-	const categories: SettingsCategory[] = [
-		{ id: 'account', label: 'Account', icon: UserRoundIcon },
-		{ id: 'security', label: 'Security', icon: LockKeyholeIcon },
-		{ id: 'mcp', label: 'MCP keys', icon: KeyRoundIcon },
-		{ id: 'notifications', label: 'Notifications', icon: BellIcon, disabled: true },
-		{ id: 'billing', label: 'Billing', icon: CreditCardIcon }
-	];
+	const categories: SettingsCategory[] = settingsCategories;
 
 	const activeCategoryDetails = $derived(
 		categories.find((category) => category.id === activeCategory) ?? categories[0]
@@ -195,13 +161,8 @@
 
 	let lastSettingsUrlParam = $state<string | null>(null);
 
-	const settingsCategoryFromUrl = (): SettingsCategoryId | null => {
-		const settingsParam = page.url.searchParams.get('settings');
-		if (!settingsParam) return null;
-		return categories.some((category) => category.id === settingsParam)
-			? (settingsParam as SettingsCategoryId)
-			: 'account';
-	};
+	const settingsCategoryFromUrl = (): SettingsCategoryId | null =>
+		settingsCategoryFromParam(page.url.searchParams.get('settings'));
 
 	const chooseCategory = async (category: SettingsCategory) => {
 		if (category.disabled) return;
@@ -246,16 +207,6 @@
 		accountError = null;
 	});
 
-	const readError = async (response: Response, fallback: string): Promise<string> => {
-		try {
-			const body = (await response.json()) as { message?: unknown };
-			if (typeof body.message === 'string' && body.message.trim()) return body.message;
-		} catch {
-			// Keep the UI message generic when the server response is not JSON.
-		}
-		return fallback;
-	};
-
 	const saveAccount = async (event: SubmitEvent) => {
 		event.preventDefault();
 		if (emailVerificationRequired) return;
@@ -263,19 +214,13 @@
 		accountMessage = null;
 		accountError = null;
 
-		const response = await fetch(resolve('/settings/account'), {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ name: accountName, email: accountEmail })
-		});
+		const body = await saveAccountSettings({ name: accountName, email: accountEmail });
 
 		accountSaving = false;
-		if (!response.ok) {
-			accountError = await readError(response, 'Could not update account.');
+		if (!body.ok) {
+			accountError = body.error;
 			return;
 		}
-
-		const body = (await response.json()) as { user: UpdatedUser; pendingEmail?: string };
 		onuserupdate?.(body.user);
 		accountName = body.user.name ?? body.user.email;
 		accountEmail = body.pendingEmail ?? body.user.email;
@@ -292,15 +237,11 @@
 		accountMessage = null;
 		accountError = null;
 
-		const response = await fetch(resolve('/settings/account/email-verification'), {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ email: normalizedAccountEmail })
-		});
+		const result = await sendAccountVerificationEmail(normalizedAccountEmail);
 
 		emailVerificationBusy = false;
-		if (!response.ok) {
-			accountError = await readError(response, 'Could not send verification email.');
+		if (!result.ok) {
+			accountError = result.error;
 			return;
 		}
 		verificationEmail = normalizedAccountEmail;
@@ -310,25 +251,19 @@
 	};
 
 	const verifyEmailCode = async (email: string, code: string) => {
-		const attemptKey = `${email}:${code}`;
+		const attemptKey = verificationAttemptKey(email, code);
 		lastVerificationAttempt = attemptKey;
 		emailVerificationChecking = true;
 		accountMessage = null;
 		accountError = null;
 
-		const response = await fetch(resolve('/settings/account/email-verification'), {
-			method: 'PUT',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ email, code })
-		});
+		const body = await verifyAccountEmailCode({ email, code });
 
 		emailVerificationChecking = false;
-		if (!response.ok) {
-			accountError = await readError(response, 'That code did not match.');
+		if (!body.ok) {
+			accountError = body.error;
 			return;
 		}
-
-		const body = (await response.json()) as { user: UpdatedUser };
 		onuserupdate?.(body.user);
 		accountName = body.user.name ?? body.user.email;
 		accountEmail = body.user.email;
@@ -345,7 +280,7 @@
 			!emailVerificationRequired ||
 			verificationEmail !== email ||
 			code.length < verificationCodeMinLength ||
-			lastVerificationAttempt === `${email}:${code}`
+			lastVerificationAttempt === verificationAttemptKey(email, code)
 		) {
 			return;
 		}
@@ -359,15 +294,14 @@
 		mfaFactorsBusy = true;
 		securityError = null;
 
-		const response = await fetch(resolve('/settings/security/mfa'));
+		const result = await requestMfaFactors();
 		mfaFactorsBusy = false;
-		if (!response.ok) {
-			securityError = await readError(response, 'Could not load two-factor methods.');
+		if (!result.ok) {
+			securityError = result.error;
 			return;
 		}
 
-		const body = (await response.json()) as { factors: MfaFactor[] };
-		mfaFactors = body.factors;
+		mfaFactors = result.factors;
 		mfaFactorsLoaded = true;
 	};
 
@@ -375,87 +309,21 @@
 		if (open && activeCategory === 'security') void loadMfaFactors();
 	});
 
-	const mcpScopeGroups: McpScopeGroup[] = [
-		{
-			id: 'households',
-			label: 'Households',
-			description: 'List or manage household settings and memberships.',
-			read: 'households:read',
-			write: 'households:write'
-		},
-		{
-			id: 'recipes',
-			label: 'Recipes',
-			description: 'Read or manage recipes in the menu.',
-			read: 'recipes:read',
-			write: 'recipes:write'
-		},
-		{
-			id: 'meals',
-			label: 'Meals',
-			description: 'Read or manage planned meals.',
-			read: 'meals:read',
-			write: 'meals:write'
-		},
-		{
-			id: 'checkIns',
-			label: 'Check-ins',
-			description: 'Read or submit meal feedback.',
-			read: 'check_ins:read',
-			write: 'check_ins:write'
-		},
-		{
-			id: 'foodProfile',
-			label: 'Food profile',
-			description: 'Read or manage food preferences.',
-			read: 'food_profile:read',
-			write: 'food_profile:write'
-		}
-	];
-	const selectedMcpScopes = $derived(
-		mcpScopeGroups.flatMap((group) => {
-			const level = mcpScopeLevels[group.id] ?? 'none';
-			if (level === 'none') return [];
-			if (level === 'read') return group.read ? [group.read] : [];
-			return [group.read, group.write].filter((scope): scope is McpScope => Boolean(scope));
-		})
-	);
-
-	const presetLabel = (preset?: McpKeyPreset): string => {
-		if (preset === 'read_only_planner') return 'Read-only planner';
-		if (preset === 'meal_planner') return 'Meal planner';
-		if (preset === 'full_access') return 'Full access';
-		return 'Custom';
-	};
-	const selectedMcpHouseholds = $derived(
-		mcpHouseholds.filter((household) => mcpKeyHouseholdIds.includes(household.id))
-	);
-	const mcpHouseholdPickerLabel = $derived(
-		selectedMcpHouseholds.length === 0
-			? 'Select households'
-			: selectedMcpHouseholds.length === 1
-				? selectedMcpHouseholds[0].name
-				: `${selectedMcpHouseholds.length} households selected`
-	);
-	const filteredMcpHouseholds = $derived(
-		mcpHouseholdQuery.trim()
-			? mcpHouseholds.filter((household) =>
-					household.name.toLowerCase().includes(mcpHouseholdQuery.trim().toLowerCase())
-				)
-			: mcpHouseholds
-	);
+	const selectedMcpScopes = $derived(selectedMcpScopesForLevels(mcpScopeLevels));
+	const selectedMcpHouseholds = $derived(selectMcpHouseholds(mcpHouseholds, mcpKeyHouseholdIds));
+	const mcpHouseholdPickerLabel = $derived(formatMcpHouseholdPickerLabel(selectedMcpHouseholds));
+	const filteredMcpHouseholds = $derived(filterMcpHouseholds(mcpHouseholds, mcpHouseholdQuery));
 
 	const loadMcpKeys = async (force = false) => {
 		if (mcpKeysBusy || (mcpKeysLoaded && !force)) return;
 		mcpKeysBusy = true;
 		mcpError = null;
-		const response = await fetch(resolve('/settings/mcp-keys'));
+		const body = await requestMcpKeys();
 		mcpKeysBusy = false;
-		if (!response.ok) {
-			mcpError = await readError(response, 'Could not load MCP keys.');
+		if (!body.ok) {
+			mcpError = body.error;
 			return;
 		}
-		const body = (await response.json()) as { keys: McpKey[]; households: SettingsHousehold[] };
 		mcpKeys = body.keys;
 		mcpHouseholds = body.households;
 		mcpKeyHouseholdIds = mcpKeyHouseholdIds.length
@@ -471,19 +339,15 @@
 	});
 
 	const toggleMcpHousehold = (householdId: string, checked: boolean) => {
-		mcpKeyHouseholdIds = checked
-			? [...new Set([...mcpKeyHouseholdIds, householdId])]
-			: mcpKeyHouseholdIds.filter((id) => id !== householdId);
+		mcpKeyHouseholdIds = toggleMcpHouseholdId(mcpKeyHouseholdIds, householdId, checked);
 	};
 
 	const setMcpScopeRead = (groupId: string, checked: boolean) => {
-		const currentLevel = mcpScopeLevels[groupId] ?? 'none';
-		if (currentLevel === 'write') return;
-		mcpScopeLevels = { ...mcpScopeLevels, [groupId]: checked ? 'read' : 'none' };
+		mcpScopeLevels = setMcpScopeReadLevel(mcpScopeLevels, groupId, checked);
 	};
 
 	const setMcpScopeWrite = (groupId: string, checked: boolean) => {
-		mcpScopeLevels = { ...mcpScopeLevels, [groupId]: checked ? 'write' : 'read' };
+		mcpScopeLevels = setMcpScopeWriteLevel(mcpScopeLevels, groupId, checked);
 	};
 
 	const createMcpAccessKey = async () => {
@@ -491,24 +355,19 @@
 		mcpMessage = null;
 		mcpError = null;
 		createdMcpKey = null;
-		const response = await fetch(resolve('/settings/mcp-keys'), {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({
-				label: mcpKeyLabel,
-				scopes: selectedMcpScopes,
-				householdScope:
-					mcpKeyHouseholdKind === 'all'
-						? { kind: 'all' }
-						: { kind: 'households', householdIds: mcpKeyHouseholdIds }
-			})
+		const body = await createMcpKey({
+			label: mcpKeyLabel,
+			scopes: selectedMcpScopes,
+			householdScope:
+				mcpKeyHouseholdKind === 'all'
+					? { kind: 'all' }
+					: { kind: 'households', householdIds: mcpKeyHouseholdIds }
 		});
 		mcpKeyCreating = false;
-		if (!response.ok) {
-			mcpError = await readError(response, 'Could not create MCP key.');
+		if (!body.ok) {
+			mcpError = body.error;
 			return;
 		}
-		const body = (await response.json()) as { key: string; record: McpKey };
 		createdMcpKey = body.key;
 		mcpKeys = [body.record, ...mcpKeys];
 		mcpKeyLabel = '';
@@ -521,17 +380,12 @@
 		mcpError = null;
 		mcpMessage = null;
 		createdMcpKey = null;
-		const response = await fetch(resolve('/settings/mcp-keys'), {
-			method: 'PUT',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ keyId: key.id })
-		});
+		const body = await rerollMcpKey(key.id);
 		rerollingMcpKeyId = null;
-		if (!response.ok) {
-			mcpError = await readError(response, 'Could not reroll MCP key.');
+		if (!body.ok) {
+			mcpError = body.error;
 			return;
 		}
-		const body = (await response.json()) as { key: string; record: McpKey };
 		createdMcpKey = body.key;
 		mcpKeys = mcpKeys.map((existingKey) =>
 			existingKey.id === body.record.id ? body.record : existingKey
@@ -554,14 +408,10 @@
 		revokingMcpKeyId = mcpKeyToRevoke.id;
 		mcpError = null;
 		mcpMessage = null;
-		const response = await fetch(resolve('/settings/mcp-keys'), {
-			method: 'DELETE',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ keyId: mcpKeyToRevoke.id })
-		});
+		const result = await revokeMcpKey(mcpKeyToRevoke.id);
 		revokingMcpKeyId = null;
-		if (!response.ok) {
-			mcpError = await readError(response, 'Could not revoke MCP key.');
+		if (!result.ok) {
+			mcpError = result.error;
 			return;
 		}
 		mcpKeys = mcpKeys.map((key) =>
@@ -586,13 +436,13 @@
 		if (billingBusy) return;
 		billingBusy = true;
 		billingError = null;
-		const response = await fetch(resolve('/billing/status'));
+		const result = await requestBillingStatus();
 		billingBusy = false;
-		if (!response.ok) {
-			billingError = await readError(response, 'Could not load billing.');
+		if (!result.ok) {
+			billingError = result.error;
 			return;
 		}
-		billingStatus = (await response.json()) as BillingStatus;
+		billingStatus = result.status;
 	};
 
 	$effect(() => {
@@ -603,18 +453,13 @@
 		if (!householdId) return;
 		billingPortalBusy = true;
 		billingError = null;
-		const response = await fetch(resolve('/billing/portal'), {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ householdId })
-		});
+		const result = await createBillingPortalSession(householdId);
 		billingPortalBusy = false;
-		if (!response.ok) {
-			billingError = await readError(response, 'Could not open billing portal.');
+		if (!result.ok) {
+			billingError = result.error;
 			return;
 		}
-		const body = (await response.json()) as { url?: string };
-		if (body.url) window.open(body.url, '_blank', 'noopener,noreferrer');
+		if (result.url) window.open(result.url, '_blank', 'noopener,noreferrer');
 	};
 
 	const startMfaSetup = async () => {
@@ -622,23 +467,15 @@
 		securityMessage = null;
 		securityError = null;
 
-		const response = await fetch(resolve('/settings/security/mfa'), {
-			method: 'POST'
-		});
+		const result = await startMfaSetupRequest();
 
 		mfaSetupBusy = false;
-		if (!response.ok) {
-			securityError = await readError(response, 'Could not start two-factor setup.');
+		if (!result.ok) {
+			securityError = result.error;
 			return;
 		}
 
-		const body = (await response.json()) as {
-			factorId: string;
-			challengeId: string;
-			qrCode: string;
-			secret: string;
-		};
-		mfaSetup = body;
+		mfaSetup = result.setup;
 		mfaCode = '';
 		mfaSetupOpen = true;
 	};
@@ -649,24 +486,19 @@
 		securityMessage = null;
 		securityError = null;
 
-		const response = await fetch(resolve('/settings/security/mfa'), {
-			method: 'PUT',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({
-				factorId: mfaSetup.factorId,
-				challengeId: mfaSetup.challengeId,
-				code: mfaCode
-			})
+		const result = await verifyMfaSetupRequest({
+			factorId: mfaSetup.factorId,
+			challengeId: mfaSetup.challengeId,
+			code: mfaCode
 		});
 
 		mfaVerifyBusy = false;
-		if (!response.ok) {
-			securityError = await readError(response, 'That code did not match.');
+		if (!result.ok) {
+			securityError = result.error;
 			return;
 		}
 
-		const body = (await response.json()) as { factors?: MfaFactor[] };
-		mfaFactors = body.factors ?? mfaFactors;
+		mfaFactors = result.factors ?? mfaFactors;
 		mfaFactorsLoaded = true;
 		mfaSetupOpen = false;
 		mfaSetup = null;
@@ -681,20 +513,15 @@
 		securityMessage = null;
 		securityError = null;
 
-		const response = await fetch(resolve('/settings/security/mfa'), {
-			method: 'DELETE',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ factorId: factor.id })
-		});
+		const result = await deleteMfaFactorRequest(factor.id);
 
 		deletingMfaFactorId = null;
-		if (!response.ok) {
-			securityError = await readError(response, 'Could not remove two-factor method.');
+		if (!result.ok) {
+			securityError = result.error;
 			return;
 		}
 
-		const body = (await response.json()) as { factors: MfaFactor[] };
-		mfaFactors = body.factors;
+		mfaFactors = result.factors;
 		mfaDeleteOpen = false;
 		mfaFactorToDelete = null;
 		securityMessage = 'Authenticator app removed.';
@@ -711,9 +538,7 @@
 	});
 
 	const openPasswordChange = () => {
-		currentPassword = '';
-		newPassword = '';
-		confirmPassword = '';
+		({ currentPassword, newPassword, confirmPassword } = emptyPasswordChangeFields());
 		passwordMessage = null;
 		passwordError = null;
 		passwordChangeOpen = true;
@@ -722,21 +547,18 @@
 	const changePassword = async () => {
 		passwordMessage = null;
 		passwordError = null;
-		if (newPassword !== confirmPassword) {
-			passwordError = 'Passwords do not match.';
+		const mismatch = passwordChangeMismatch(newPassword, confirmPassword);
+		if (mismatch) {
+			passwordError = mismatch;
 			return;
 		}
 
 		passwordChangeBusy = true;
-		const response = await fetch(resolve('/settings/security/password'), {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ currentPassword, newPassword })
-		});
+		const result = await changePasswordRequest({ currentPassword, newPassword });
 
 		passwordChangeBusy = false;
-		if (!response.ok) {
-			passwordError = await readError(response, 'Could not change password.');
+		if (!result.ok) {
+			passwordError = result.error;
 			return;
 		}
 
@@ -756,471 +578,102 @@
 		<div
 			class="grid max-h-[min(36rem,calc(100svh-2rem))] min-h-[26rem] overflow-hidden md:grid-cols-[12rem_minmax(0,1fr)]"
 		>
-			<aside
-				class="overflow-y-auto border-b border-border bg-muted/25 p-2 md:border-r md:border-b-0"
-			>
-				<Dialog.Header class="px-2 py-2">
-					<Dialog.Title>Settings</Dialog.Title>
-				</Dialog.Header>
-				<nav aria-label="Settings categories" class="mt-1 grid gap-1">
-					{#each categories as category (category.id)}
-						<button
-							type="button"
-							disabled={category.disabled}
-							class={cn(
-								'flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-left text-xs/relaxed transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none',
-								category.disabled &&
-									'cursor-not-allowed text-muted-foreground/45 opacity-60 hover:bg-transparent',
-								activeCategory === category.id &&
-									'bg-background text-foreground shadow-sm ring-1 ring-border'
-							)}
-							aria-current={activeCategory === category.id ? 'page' : undefined}
-							title={category.disabled ? 'Coming soon' : undefined}
-							onclick={() => void chooseCategory(category)}
-						>
-							<category.icon class="size-3.5 shrink-0" />
-							<span class="truncate font-medium">{category.label}</span>
-							{#if category.disabled}
-								<span class="ml-auto text-[0.625rem] font-medium">Soon</span>
-							{/if}
-						</button>
-					{/each}
-				</nav>
-			</aside>
+			<SettingsCategoryNav
+				{activeCategory}
+				{categories}
+				onchoose={(category) => void chooseCategory(category)}
+			/>
 
 			<section class="min-h-0 overflow-y-auto p-4">
-				<div class="mb-4 flex items-center gap-2">
-					<activeCategoryDetails.icon class="size-4" />
-					<h2 class="text-sm font-medium">{activeCategoryDetails.label}</h2>
-				</div>
+				<SettingsSectionHeading category={activeCategoryDetails} />
 
 				{#if activeCategory === 'account'}
-					<form class="grid gap-3" onsubmit={saveAccount}>
-						<label class="grid gap-1 text-xs font-medium">
-							Name
-							<Input bind:value={accountName} name="name" autocomplete="name" class="h-8" />
-						</label>
-						<label class="grid gap-1 text-xs font-medium">
-							Email
-							<Input
-								bind:value={accountEmail}
-								name="email"
-								type="email"
-								autocomplete="email"
-								class="h-8"
-							/>
-						</label>
-						{#if accountEmailChanged}
-							<div class="grid gap-2 text-xs">
-								<div class="flex items-center justify-between gap-3">
-									<span
-										class={accountEmailVerified ? 'text-meal-load-low' : 'text-muted-foreground'}
-									>
-										{accountEmailVerified ? 'Email verified' : 'Verify this email to save'}
-									</span>
-									{#if emailVerificationRequired}
-										<Button
-											variant="outline"
-											size="sm"
-											disabled={emailVerificationBusy || !normalizedAccountEmail}
-											onclick={sendVerificationEmail}
-										>
-											{emailVerificationBusy ? 'Sending…' : 'Send code'}
-										</Button>
-									{/if}
-								</div>
-								{#if emailVerificationRequired}
-									<div class="grid gap-1">
-										<InputOTP.Root
-											maxlength={6}
-											bind:value={emailVerificationCode}
-											disabled={emailVerificationBusy ||
-												verificationEmail !== normalizedAccountEmail}
-											aria-label="Verification code"
-											class="gap-1.5"
-										>
-											{#snippet children({ cells })}
-												<InputOTP.Group>
-													{#each cells as cell, index (index)}
-														<InputOTP.Slot {cell} />
-													{/each}
-												</InputOTP.Group>
-											{/snippet}
-										</InputOTP.Root>
-										{#if emailVerificationChecking}
-											<span class="text-muted-foreground">Checking code…</span>
-										{:else if verificationEmail !== normalizedAccountEmail}
-											<span class="text-muted-foreground">Send a code to continue.</span>
-										{/if}
-									</div>
-								{/if}
-							</div>
-						{/if}
-						<div class="flex items-center gap-3 pt-1">
-							<Button type="submit" disabled={!accountCanSave}
-								>{accountSaving ? 'Saving…' : 'Save'}</Button
-							>
-							{#if accountMessage}<span class="text-xs text-muted-foreground">{accountMessage}</span
-								>{/if}
-							{#if accountError}<span class="text-xs text-destructive">{accountError}</span>{/if}
-						</div>
-					</form>
+					<AccountSettingsSection
+						bind:accountName
+						bind:accountEmail
+						bind:emailVerificationCode
+						{verificationEmail}
+						{normalizedAccountEmail}
+						{accountEmailChanged}
+						{accountEmailVerified}
+						{emailVerificationRequired}
+						{emailVerificationBusy}
+						{emailVerificationChecking}
+						{accountCanSave}
+						{accountSaving}
+						{accountMessage}
+						{accountError}
+						{saveAccount}
+						{sendVerificationEmail}
+					/>
 				{:else if activeCategory === 'security'}
-					<div class="grid max-w-lg gap-5 text-sm">
-						<div class="flex items-center justify-between gap-4">
-							<div>Password</div>
-							<Button variant="outline" onclick={openPasswordChange}>Change</Button>
-						</div>
-						<Separator />
-						<div class="grid gap-3">
-							<div class="flex items-center justify-between gap-4">
-								<div>Two-factor authentication</div>
-								<Button variant="outline" disabled={mfaSetupBusy} onclick={startMfaSetup}>
-									{mfaSetupBusy ? 'Starting…' : mfaFactors.length ? 'Replace' : 'Set up'}
-								</Button>
-							</div>
-							{#if mfaFactorsBusy}
-								<p class="text-xs text-muted-foreground">Loading methods…</p>
-							{:else if mfaFactors.length === 0}
-								<p class="text-xs text-muted-foreground">No authenticator app is set up.</p>
-							{:else}
-								<ul class="divide-y divide-border">
-									{#each mfaFactors as factor (factor.id)}
-										<li class="flex items-center justify-between gap-3 py-2">
-											<div class="min-w-0">
-												<p class="truncate text-xs font-medium">{factor.issuer}</p>
-												<p class="truncate text-xs text-muted-foreground">{factor.user}</p>
-											</div>
-											<Button
-												variant="outline"
-												size="sm"
-												disabled={deletingMfaFactorId === factor.id}
-												onclick={() => confirmDeleteMfaFactor(factor)}
-											>
-												{deletingMfaFactorId === factor.id ? 'Removing…' : 'Remove'}
-											</Button>
-										</li>
-									{/each}
-								</ul>
-							{/if}
-						</div>
-						{#if securityMessage}<p class="text-xs text-muted-foreground">{securityMessage}</p>{/if}
-						{#if securityError}<p class="text-xs text-destructive">{securityError}</p>{/if}
-					</div>
+					<SecuritySettingsSection
+						{mfaSetupBusy}
+						{mfaFactorsBusy}
+						{mfaFactors}
+						{deletingMfaFactorId}
+						{securityMessage}
+						{securityError}
+						{openPasswordChange}
+						{startMfaSetup}
+						{confirmDeleteMfaFactor}
+					/>
 				{:else if activeCategory === 'mcp'}
-					<div class="grid max-w-lg gap-5 text-sm">
-						<div class="grid gap-2">
-							<div class="flex items-start justify-between gap-3">
-								<div>
-									<p class="text-xs font-medium">MCP keys</p>
-									<p class="text-xs text-muted-foreground">
-										Use MCP keys in clients like Claude Desktop or Inspector.
-									</p>
-								</div>
-								<Button size="sm" onclick={() => (mcpKeyFormOpen = true)}>Create MCP key</Button>
-							</div>
-							{#if mcpKeysBusy}
-								<p class="text-xs text-muted-foreground">Loading MCP keys…</p>
-							{:else if mcpKeys.length === 0}
-								<p class="text-xs text-muted-foreground">No MCP keys yet.</p>
-							{:else}
-								<ul class="divide-y rounded-md border border-border">
-									{#each mcpKeys as key (key.id)}
-										<li class="flex items-center justify-between gap-3 px-3 py-2">
-											<div class="min-w-0">
-												<p class="truncate text-xs font-medium">{key.label}</p>
-												<p class="truncate text-xs text-muted-foreground">
-													{presetLabel(key.preset)} · {key.householdScope.kind === 'all'
-														? 'All households'
-														: `${key.householdScope.householdIds.length} households`}
-													{#if key.revokedAt}
-														· Revoked{/if}
-												</p>
-											</div>
-											<DropdownMenu.Root>
-												<DropdownMenu.Trigger>
-													{#snippet child({ props })}
-														<Button
-															{...props}
-															type="button"
-															variant="ghost"
-															size="icon-sm"
-															disabled={Boolean(key.revokedAt) ||
-																rerollingMcpKeyId === key.id ||
-																revokingMcpKeyId === key.id}
-															aria-label={`Open actions for ${key.label}`}
-														>
-															<EllipsisIcon class="size-4" />
-														</Button>
-													{/snippet}
-												</DropdownMenu.Trigger>
-												<DropdownMenu.Content align="end">
-													<DropdownMenu.Item onclick={() => rerollMcpAccessKey(key)}>
-														{rerollingMcpKeyId === key.id ? 'Rerolling…' : 'Reroll key'}
-													</DropdownMenu.Item>
-													<DropdownMenu.Separator />
-													<DropdownMenu.Item
-														variant="destructive"
-														onclick={() => confirmRevokeMcpKey(key)}
-													>
-														{revokingMcpKeyId === key.id ? 'Revoking…' : 'Revoke key'}
-													</DropdownMenu.Item>
-												</DropdownMenu.Content>
-											</DropdownMenu.Root>
-										</li>
-									{/each}
-								</ul>
-							{/if}
-							<div class="flex justify-end">
-								<Button
-									variant="ghost"
-									size="sm"
-									disabled={mcpKeysBusy}
-									onclick={() => loadMcpKeys(true)}
-								>
-									Refresh
-								</Button>
-							</div>
-						</div>
-						{#if createdMcpKey}
-							<div
-								class="grid gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs"
-							>
-								<p class="font-medium">Copy this MCP key now. It will not be shown again.</p>
-								<code class="rounded bg-background p-2 break-all">{createdMcpKey}</code>
-								<Button variant="outline" size="sm" onclick={copyCreatedMcpKey}>Copy MCP key</Button
-								>
-							</div>
-						{/if}
-						{#if mcpKeyFormOpen}
-							<div class="grid gap-3">
-								<div>
-									<p class="text-xs font-medium">Create MCP key</p>
-									<p class="text-xs text-muted-foreground">
-										Choose permissions and household access.
-									</p>
-								</div>
-								<label class="grid gap-1 text-xs font-medium">
-									Label
-									<Input bind:value={mcpKeyLabel} placeholder="Claude on my laptop" class="h-8" />
-								</label>
-								<div class="grid gap-2 text-xs">
-									<div>
-										<p class="font-medium">Permissions</p>
-										<p class="text-muted-foreground">Write automatically includes read.</p>
-									</div>
-									<div class="grid gap-2">
-										{#each mcpScopeGroups as group (group.id)}
-											{@const level = mcpScopeLevels[group.id] ?? 'none'}
-											<div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-												<div class="min-w-0">
-													<p class="font-medium">{group.label}</p>
-													<p class="text-muted-foreground">{group.description}</p>
-												</div>
-												<div class="flex flex-wrap items-center gap-3">
-													{#if group.read}
-														<label class="flex items-center gap-2 px-1 py-1">
-															<Checkbox
-																checked={level === 'read' || level === 'write'}
-																disabled={level === 'write'}
-																onCheckedChange={(checked) =>
-																	setMcpScopeRead(group.id, checked === true)}
-															/>
-															<span>Read</span>
-														</label>
-													{/if}
-													{#if group.write}
-														<label class="flex items-center gap-2 px-1 py-1">
-															<Checkbox
-																checked={level === 'write'}
-																onCheckedChange={(checked) =>
-																	setMcpScopeWrite(group.id, checked === true)}
-															/>
-															<span>Write</span>
-														</label>
-													{/if}
-												</div>
-											</div>
-										{/each}
-									</div>
-								</div>
-								<div class="grid gap-2 text-xs">
-									<span class="font-medium">Households</span>
-									<RadioGroup.Root bind:value={mcpKeyHouseholdKind} class="gap-2">
-										<label class="flex items-center gap-2 py-1"
-											><RadioGroup.Item value="all" /><span>All current and future households</span
-											></label
-										>
-										<label class="flex items-center gap-2 py-1"
-											><RadioGroup.Item value="households" /><span>Selected households</span></label
-										>
-									</RadioGroup.Root>
-									{#if mcpKeyHouseholdKind === 'households'}
-										<Popover.Root bind:open={mcpHouseholdPickerOpen}>
-											<Popover.Trigger>
-												<Button
-													type="button"
-													variant="outline"
-													class="h-8 w-full justify-between text-xs font-normal"
-													><span class="truncate">{mcpHouseholdPickerLabel}</span
-													><ChevronsUpDownIcon class="size-3.5 opacity-50" /></Button
-												>
-											</Popover.Trigger>
-											<Popover.Content align="start" class="w-[22rem] max-w-[calc(100vw-2rem)] p-1">
-												<Command.Root>
-													<Command.Input
-														bind:value={mcpHouseholdQuery}
-														placeholder="Search households…"
-													/>
-													<Command.List class="max-h-56 overflow-y-auto p-1">
-														{#if filteredMcpHouseholds.length === 0}<Command.Empty
-																>No households found.</Command.Empty
-															>{:else}
-															{#each filteredMcpHouseholds as household (household.id)}
-																{@const checked = mcpKeyHouseholdIds.includes(household.id)}
-																<Command.Item
-																	value={household.name}
-																	data-checked={checked}
-																	onselect={() => toggleMcpHousehold(household.id, !checked)}
-																	><Checkbox {checked} class="pointer-events-none" /><span
-																		class="truncate">{household.name}</span
-																	></Command.Item
-																>
-															{/each}
-														{/if}
-													</Command.List>
-												</Command.Root>
-											</Popover.Content>
-										</Popover.Root>
-									{/if}
-								</div>
-								<div class="flex justify-end gap-2">
-									<Button
-										variant="ghost"
-										disabled={mcpKeyCreating}
-										onclick={() => (mcpKeyFormOpen = false)}>Cancel</Button
-									>
-									<Button
-										disabled={mcpKeyCreating ||
-											!mcpKeyLabel.trim() ||
-											!selectedMcpScopes.length ||
-											(mcpKeyHouseholdKind === 'households' && !mcpKeyHouseholdIds.length)}
-										onclick={createMcpAccessKey}
-										>{mcpKeyCreating ? 'Creating…' : 'Create MCP key'}</Button
-									>
-								</div>
-							</div>
-						{/if}
-						{#if mcpMessage}<p class="text-xs text-muted-foreground">{mcpMessage}</p>{/if}
-						{#if mcpError}<p class="text-xs text-destructive">{mcpError}</p>{/if}
-					</div>
+					<McpSettingsSection
+						{mcpServerUrl}
+						{mcpKeys}
+						{mcpKeysBusy}
+						{rerollingMcpKeyId}
+						{revokingMcpKeyId}
+						{createdMcpKey}
+						bind:mcpKeyFormOpen
+						bind:mcpKeyLabel
+						bind:mcpKeyHouseholdKind
+						bind:mcpHouseholdPickerOpen
+						bind:mcpHouseholdQuery
+						{mcpKeyCreating}
+						{selectedMcpScopes}
+						{mcpKeyHouseholdIds}
+						{mcpScopeLevels}
+						{mcpHouseholdPickerLabel}
+						{filteredMcpHouseholds}
+						{mcpMessage}
+						{mcpError}
+						{loadMcpKeys}
+						{rerollMcpAccessKey}
+						{confirmRevokeMcpKey}
+						{copyCreatedMcpKey}
+						{setMcpScopeRead}
+						{setMcpScopeWrite}
+						{toggleMcpHousehold}
+						{createMcpAccessKey}
+					/>
 				{:else if activeCategory === 'notifications'}
-					<div class="grid max-w-lg gap-3 text-sm opacity-50 grayscale">
-						<p class="text-xs text-muted-foreground">Notifications are coming later.</p>
-						<label class="flex cursor-not-allowed items-center justify-between gap-4">
-							Planning reminders
-							<input type="checkbox" class="size-4 accent-primary" disabled />
-						</label>
-						<label class="flex cursor-not-allowed items-center justify-between gap-4">
-							Meal check-ins
-							<input type="checkbox" class="size-4 accent-primary" disabled />
-						</label>
-					</div>
+					<NotificationsSettingsSection />
 				{:else if activeCategory === 'billing'}
-					<div class="grid gap-4 text-sm">
-						{#if billingBusy && !billingStatus}
-							<p class="text-xs text-muted-foreground">Loading billing…</p>
-						{:else if billingStatus}
-							<div class="grid gap-2">
-								<p class="text-xs font-medium">Managed household subscriptions</p>
-								<ul class="divide-y divide-border">
-									{#each billingStatus.householdBilling as householdBilling (householdBilling.householdId)}
-										<li class="flex items-center justify-between gap-3 py-2">
-											<div class="min-w-0">
-												<p class="truncate text-xs font-medium">
-													{householdBilling.householdName}{householdBilling.isActiveHousehold
-														? ' · current'
-														: ''}
-												</p>
-												<p class="truncate text-xs text-muted-foreground">
-													{householdBilling.status
-														? `${householdBilling.status}${householdBilling.cancelAtPeriodEnd ? ' · cancels at period end' : ''}`
-														: 'No active plan'}
-												</p>
-											</div>
-											{#if householdBilling.stripeCustomerId && householdBilling.canManageBilling}
-												<Button
-													variant="outline"
-													size="sm"
-													disabled={billingPortalBusy}
-													onclick={() => openBillingPortal(householdBilling.householdId)}
-												>
-													{billingPortalBusy ? 'Opening…' : 'Manage subscriptions'}
-												</Button>
-											{/if}
-										</li>
-									{/each}
-								</ul>
-							</div>
-						{/if}
-						{#if billingError}<p class="text-xs text-destructive">{billingError}</p>{/if}
-					</div>
+					<BillingSettingsSection
+						{billingBusy}
+						{billingStatus}
+						{billingPortalBusy}
+						{billingError}
+						{openBillingPortal}
+					/>
 				{/if}
 			</section>
 		</div>
 	</Dialog.Content>
 </Dialog.Root>
 
-<Dialog.Root bind:open={passwordChangeOpen}>
-	<Dialog.Content class="sm:max-w-[24rem]">
-		<Dialog.Header>
-			<Dialog.Title>Change password</Dialog.Title>
-			<Dialog.Description>Enter your current password before choosing a new one.</Dialog.Description
-			>
-		</Dialog.Header>
-		<div class="grid gap-3">
-			<label class="grid gap-1 text-xs font-medium">
-				Current password
-				<Input
-					bind:value={currentPassword}
-					type="password"
-					autocomplete="current-password"
-					class="h-8"
-				/>
-			</label>
-			<label class="grid gap-1 text-xs font-medium">
-				New password
-				<Input bind:value={newPassword} type="password" autocomplete="new-password" class="h-8" />
-			</label>
-			<label class="grid gap-1 text-xs font-medium">
-				Confirm new password
-				<Input
-					bind:value={confirmPassword}
-					type="password"
-					autocomplete="new-password"
-					class="h-8"
-				/>
-			</label>
-			{#if passwordMessage}<p class="text-xs text-muted-foreground">{passwordMessage}</p>{/if}
-			{#if passwordError}<p class="text-xs text-destructive">{passwordError}</p>{/if}
-			<div class="flex justify-end gap-2">
-				<Button
-					variant="ghost"
-					disabled={passwordChangeBusy}
-					onclick={() => (passwordChangeOpen = false)}
-				>
-					Cancel
-				</Button>
-				<Button
-					disabled={passwordChangeBusy || !currentPassword || !newPassword || !confirmPassword}
-					onclick={changePassword}
-				>
-					{passwordChangeBusy ? 'Saving…' : 'Save'}
-				</Button>
-			</div>
-		</div>
-	</Dialog.Content>
-</Dialog.Root>
+<PasswordChangeDialog
+	bind:open={passwordChangeOpen}
+	bind:currentPassword
+	bind:newPassword
+	bind:confirmPassword
+	{passwordMessage}
+	{passwordError}
+	{passwordChangeBusy}
+	{changePassword}
+/>
 
 <DeleteConfirmDialog
 	bind:open={mcpRevokeOpen}
@@ -1248,52 +701,11 @@
 	onconfirm={deleteMfaFactor}
 />
 
-<Dialog.Root bind:open={mfaSetupOpen}>
-	<Dialog.Content class="sm:max-w-[26rem]">
-		<Dialog.Header>
-			<Dialog.Title>Set up two-factor authentication</Dialog.Title>
-			<Dialog.Description>
-				Scan the QR code with your authenticator app, then enter the 6-digit code.
-			</Dialog.Description>
-		</Dialog.Header>
-		{#if mfaSetup}
-			<div class="grid gap-4">
-				<div class="flex justify-center">
-					<img
-						src={mfaSetup.qrCode}
-						alt="Authenticator app QR code"
-						class="size-44 rounded-md border border-border bg-white p-2"
-					/>
-				</div>
-				<div class="grid gap-1 text-xs text-muted-foreground">
-					<span>Manual setup key</span>
-					<code class="rounded-md bg-muted px-2 py-1 break-all text-foreground"
-						>{mfaSetup.secret}</code
-					>
-				</div>
-				<div class="grid justify-center gap-2">
-					<InputOTP.Root maxlength={6} bind:value={mfaCode} aria-label="Authenticator code">
-						{#snippet children({ cells })}
-							<InputOTP.Group>
-								{#each cells as cell, index (index)}
-									<InputOTP.Slot {cell} />
-								{/each}
-							</InputOTP.Group>
-						{/snippet}
-					</InputOTP.Root>
-				</div>
-				<div class="flex justify-end gap-2">
-					<Button variant="ghost" disabled={mfaVerifyBusy} onclick={() => (mfaSetupOpen = false)}>
-						Cancel
-					</Button>
-					<Button
-						disabled={mfaVerifyBusy || mfaCode.trim().length < verificationCodeMinLength}
-						onclick={verifyMfaSetup}
-					>
-						{mfaVerifyBusy ? 'Verifying…' : 'Verify'}
-					</Button>
-				</div>
-			</div>
-		{/if}
-	</Dialog.Content>
-</Dialog.Root>
+<MfaSetupDialog
+	bind:open={mfaSetupOpen}
+	bind:mfaCode
+	{mfaSetup}
+	{mfaVerifyBusy}
+	{verificationCodeMinLength}
+	{verifyMfaSetup}
+/>

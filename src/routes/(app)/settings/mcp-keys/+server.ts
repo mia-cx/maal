@@ -1,4 +1,4 @@
-import { error, json, type RequestHandler } from '@sveltejs/kit';
+import { error, isHttpError, json, type RequestHandler } from '@sveltejs/kit';
 import {
 	createMcpKey,
 	listMcpKeys,
@@ -10,20 +10,10 @@ import {
 	type McpKeyPreset
 } from '$lib/server/auth/mcp-keys';
 import { listUserHouseholds } from '$lib/server/auth/household';
+import { readJsonObject, isRecord } from '$lib/server/http/request';
 
 const presets = new Set<McpKeyPreset>(['read_only_planner', 'meal_planner', 'full_access']);
 const scopes = new Set<MaalApiScope>(MAAL_API_SCOPES);
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === 'object' && value !== null;
-
-const readJson = async (request: Request): Promise<unknown> => {
-	try {
-		return await request.json();
-	} catch {
-		error(400, { message: 'Invalid request.' });
-	}
-};
 
 const readHouseholdScope = async (
 	platform: App.Platform | undefined,
@@ -78,8 +68,7 @@ export const GET: RequestHandler = async ({ locals, platform }) => {
 export const POST: RequestHandler = async ({ locals, platform, request }) => {
 	const session = locals.session;
 	if (!session) error(401, { message: 'Sign in required.' });
-	const body = await readJson(request);
-	if (!isRecord(body)) error(400, { message: 'Invalid request.' });
+	const body = await readJsonObject(request);
 
 	const label = typeof body.label === 'string' ? body.label.trim() : '';
 	if (label.length < 2) error(400, { message: 'Give this MCP key a label.' });
@@ -110,7 +99,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 export const PUT: RequestHandler = async ({ locals, platform, request }) => {
 	const session = locals.session;
 	if (!session) error(401, { message: 'Sign in required.' });
-	const body = await readJson(request);
+	const body = await readJsonObject(request);
 	const keyId = isRecord(body) && typeof body.keyId === 'string' ? body.keyId.trim() : '';
 	if (!keyId) error(400, { message: 'MCP key is required.' });
 
@@ -119,6 +108,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request }) => {
 		if (!rerolled) error(404, { message: 'MCP key not found.' });
 		return json(rerolled);
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error(cause);
 		error(503, { message: 'MCP key storage is not available.' });
 	}
@@ -127,7 +117,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request }) => {
 export const DELETE: RequestHandler = async ({ locals, platform, request }) => {
 	const session = locals.session;
 	if (!session) error(401, { message: 'Sign in required.' });
-	const body = await readJson(request);
+	const body = await readJsonObject(request);
 	const keyId = isRecord(body) && typeof body.keyId === 'string' ? body.keyId.trim() : '';
 	if (!keyId) error(400, { message: 'MCP key is required.' });
 
@@ -136,6 +126,7 @@ export const DELETE: RequestHandler = async ({ locals, platform, request }) => {
 		if (!revoked) error(404, { message: 'MCP key not found.' });
 		return json({ revoked: true });
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error(cause);
 		error(503, { message: 'MCP key storage is not available.' });
 	}

@@ -1,4 +1,5 @@
 import { redirect, type Cookies } from '@sveltejs/kit';
+import { readHouseholdCookie } from '$lib/server/auth/household';
 import {
 	commitOAuthReturnTo,
 	commitOAuthState,
@@ -39,7 +40,8 @@ export const redirectToAuthKit = (input: {
 			runtime,
 			origin: input.url.origin,
 			state,
-			screenHint: screenHintFrom(input.url.searchParams.get('screen_hint'))
+			screenHint: screenHintFrom(input.url.searchParams.get('screen_hint')),
+			organizationId: readHouseholdCookie(input.cookies)
 		})
 	);
 };

@@ -1,13 +1,11 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { commitSealedSession, readSealedSession } from '$lib/server/auth/session';
 import { createAuthRuntime } from '$lib/server/auth/workos';
+import { readJsonObject } from '$lib/server/http/request';
 
 const maxNameLength = 100;
 const maxEmailLength = 254;
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === 'object' && value !== null;
 
 const textField = (body: Record<string, unknown>, key: string): string => {
 	const value = body[key];
@@ -37,14 +35,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	const session = locals.session;
 	if (!session) error(401, { message: 'Sign in required.' });
 
-	let body: unknown;
-	try {
-		body = await request.json();
-	} catch {
-		error(400, { message: 'Invalid request.' });
-	}
-
-	if (!isRecord(body)) error(400, { message: 'Invalid request.' });
+	const body = await readJsonObject(request);
 
 	const name = textField(body, 'name');
 	const email = textField(body, 'email').toLowerCase();

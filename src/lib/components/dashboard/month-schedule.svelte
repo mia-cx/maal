@@ -10,7 +10,7 @@
 		type ProgrammaticScrollBehavior
 	} from '$lib/interaction/scroll-sdk';
 	import { onMount, tick } from 'svelte';
-	import MealPool from './meal-pool.svelte';
+	import ScheduleMealPoolBar from './schedule-meal-pool-bar.svelte';
 	import MonthDayCell from './month-day-cell.svelte';
 	import {
 		addDays,
@@ -671,19 +671,17 @@
 </script>
 
 <div class="flex h-full min-w-0 flex-col overflow-hidden">
-	<div class="border-b border-border">
-		<MealPool
-			{draggingMealId}
-			{draggedMeal}
-			{dropTarget}
-			{onaddmeal}
-			{onpick}
-			{onselect}
-			meals={mealPool}
-			density="title"
-			showImages={showMealPoolImages}
-		/>
-	</div>
+	<ScheduleMealPoolBar
+		{draggingMealId}
+		{draggedMeal}
+		{dropTarget}
+		{onaddmeal}
+		{onpick}
+		{onselect}
+		meals={mealPool}
+		density="title"
+		showImages={showMealPoolImages}
+	/>
 	<div class="border-b border-border px-4 py-1 text-xs font-medium">
 		{formatMonthHeading(anchorDate)}
 	</div>

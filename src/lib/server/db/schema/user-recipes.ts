@@ -9,23 +9,12 @@ import {
 	text,
 	uniqueIndex
 } from 'drizzle-orm/sqlite-core';
+import { applianceValues } from '../../../domain/household/appliances';
 import { createdAt, id, updatedAt } from './common';
 import { foods } from './food';
 import { households } from './households';
 import { units } from './units';
 import { users } from './users';
-
-const applianceValues = [
-	'oven',
-	'stovetop',
-	'microwave',
-	'air_fryer',
-	'slow_cooker',
-	'rice_cooker',
-	'blender',
-	'food_processor',
-	'grill'
-] as const;
 
 const applianceSourceValues = ['schema_org', 'instruction_heuristic', 'user'] as const;
 const classificationKindValues = ['category', 'cuisine', 'keyword', 'diet'] as const;
