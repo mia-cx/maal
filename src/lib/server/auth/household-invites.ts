@@ -10,11 +10,8 @@ import { createAuthRuntime } from './workos';
 const inviteCodeBytes = 12;
 const inviteCodeAlphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 const inviteCreateAttempts = 5;
-const uniqueConstraintFragments = [
-	'UNIQUE constraint failed',
-	'household_invites.id',
-	'household_invites.code'
-];
+const uniqueConstraintMessage = 'UNIQUE constraint failed';
+const inviteUniqueColumns = ['household_invites.id', 'household_invites.code'];
 export const householdRoleSlugs = ['admin', 'member', 'child'] as const;
 export type HouseholdRoleSlug = (typeof householdRoleSlugs)[number];
 const defaultMemberRole: HouseholdRoleSlug = 'member';
@@ -53,7 +50,10 @@ export const listHouseholdInvites = async (
 
 const isInviteUniquenessFailure = (cause: unknown): boolean => {
 	const message = cause instanceof Error ? cause.message : String(cause);
-	return uniqueConstraintFragments.every((fragment) => message.includes(fragment));
+	return (
+		message.includes(uniqueConstraintMessage) &&
+		inviteUniqueColumns.some((column) => message.includes(column))
+	);
 };
 
 export const createHouseholdInvite = async (input: {

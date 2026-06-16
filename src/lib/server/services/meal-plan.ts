@@ -96,8 +96,10 @@ const validateCook = async (
 	}
 };
 
-const defaultMealServings = async (platform: App.Platform | undefined, householdId: string) =>
-	Math.max(1, await countActiveHouseholdMembers(platform, householdId));
+export const defaultMealServings = async (
+	platform: App.Platform | undefined,
+	householdId: string
+) => Math.max(1, await countActiveHouseholdMembers(platform, householdId));
 
 export const listHouseholdPlanMeals = async (input: {
 	platform: App.Platform | undefined;

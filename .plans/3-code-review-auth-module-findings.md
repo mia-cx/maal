@@ -6,15 +6,15 @@ Harden `src/lib/server/auth` against the high- and medium-priority review findin
 
 ## Acceptance criteria
 
-- [ ] Invite joins consume invite uses with a conditional update so exhausted/revoked/expired invites cannot be overused.
-- [ ] Household member listing reads every active WorkOS membership page.
-- [ ] MCP key KV records are runtime-validated before authorization code uses them.
-- [ ] Malformed expiry timestamps are treated as expired/invalid for invites and MCP keys.
-- [ ] Smoke-user manage checks are restricted to the smoke household via shared logic.
-- [ ] MCP key reroll/revoke/list recover from stale non-empty user indexes by scanning and reconciling records.
-- [ ] Invite creation retries only expected unique id/code collisions and wraps other database failures with context.
-- [ ] Active household member counts return the real active member count.
-- [ ] Low-priority auth cleanups are addressed where small and safe.
+- [x] Invite joins consume invite uses with a conditional update so exhausted/revoked/expired invites cannot be overused.
+- [x] Household member listing reads every active WorkOS membership page.
+- [x] MCP key KV records are runtime-validated before authorization code uses them.
+- [x] Malformed expiry timestamps are treated as expired/invalid for invites and MCP keys.
+- [x] Smoke-user manage checks are restricted to the smoke household via shared logic.
+- [x] MCP key reroll/revoke/list recover from stale non-empty user indexes by scanning and reconciling records.
+- [x] Invite creation retries only expected unique id/code collisions and wraps other database failures with context.
+- [x] Active household member counts return the real active member count.
+- [x] Low-priority auth cleanups are addressed where small and safe.
 
 ## TODOs
 
