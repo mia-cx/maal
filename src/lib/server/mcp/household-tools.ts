@@ -1,7 +1,17 @@
-import { listUserHouseholds } from '$lib/server/auth/household';
+import { listUserHouseholds, type UserHousehold } from '$lib/server/auth/household';
+import type { McpKeyHouseholdScope } from '$lib/server/auth/mcp-keys';
 import { requireScope } from './context';
 import { emptyInput } from './schemas';
 import type { ToolDefinition } from './registry';
+
+export const filterHouseholdsForScope = (
+	households: UserHousehold[],
+	scope: McpKeyHouseholdScope
+): UserHousehold[] => {
+	if (scope.kind === 'all') return households;
+	const allowedIds = new Set(scope.householdIds);
+	return households.filter((household) => allowedIds.has(household.id));
+};
 
 export const householdTools: ToolDefinition[] = [
 	{
@@ -12,7 +22,10 @@ export const householdTools: ToolDefinition[] = [
 		annotations: { readOnlyHint: true },
 		handler: async (context) => {
 			requireScope(context.key, 'households:read');
-			const households = await listUserHouseholds(context.platform, context.key.userId);
+			const households = filterHouseholdsForScope(
+				await listUserHouseholds(context.platform, context.key.userId),
+				context.key.householdScope
+			);
 			return { households };
 		}
 	}

@@ -104,12 +104,13 @@ export const listUserHouseholds = async (
 		return [{ id: SMOKE_HOUSEHOLD_ID, name: SMOKE_HOUSEHOLD_NAME }];
 	}
 	const runtime = createAuthRuntime(platform);
-	const memberships = await runtime.workos.userManagement.listOrganizationMemberships({
-		userId,
-		statuses: ['active'],
-		limit: 25
-	});
-	return memberships.data.map((membership) => ({
+	const memberships = await (
+		await runtime.workos.userManagement.listOrganizationMemberships({
+			userId,
+			statuses: ['active']
+		})
+	).autoPagination();
+	return memberships.map((membership) => ({
 		id: membership.organizationId,
 		name: membership.organizationName
 	}));

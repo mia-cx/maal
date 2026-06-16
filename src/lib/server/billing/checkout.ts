@@ -1,6 +1,7 @@
 import { error, redirect, type RequestHandler } from '@sveltejs/kit';
 import { canManageActiveHousehold, resolveActiveHouseholdId } from '$lib/server/auth/household';
-import { createStripeClient } from './stripe';
+import { pricingOptionForProductPrice } from './pricing-options';
+import { createStripeClient, getStripeProductId } from './stripe';
 import { loadBillingStatus, upsertSubscription } from './subscriptions';
 import { startHouseholdTrial } from './trials';
 
@@ -32,9 +33,15 @@ export const createCheckoutRedirect = async ({
 	}
 
 	const stripe = createStripeClient(platform);
+	const productId = getStripeProductId(platform);
+	const selectedOption = pricingOptionForProductPrice(
+		await stripe.prices.retrieve(priceId),
+		productId
+	);
+	if (!selectedOption) error(400, { message: 'Choose a valid Maal plan.' });
+
 	const billing = await loadBillingStatus(platform.env.DB, householdId);
-	const price = await stripe.prices.retrieve(priceId);
-	const trialPriceSelected = price.unit_amount === 0;
+	const trialPriceSelected = selectedOption.amount === 0;
 	if (trialRequested || trialPriceSelected) {
 		try {
 			await startHouseholdTrial({

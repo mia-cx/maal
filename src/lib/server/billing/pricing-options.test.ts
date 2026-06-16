@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type Stripe from 'stripe';
-import { pricingOptionsFromPrices } from './pricing-options';
+import { pricingOptionForProductPrice, pricingOptionsFromPrices } from './pricing-options';
 
 const price = (overrides: Partial<Stripe.Price>): Stripe.Price =>
 	({
 		id: 'price_1',
 		type: 'recurring',
+		active: true,
 		unit_amount: 100,
 		currency: 'gbp',
+		product: 'prod_maal',
 		recurring: { interval: 'month', interval_count: 1 },
 		...overrides
 	}) as Stripe.Price;
@@ -40,33 +42,47 @@ describe('pricingOptionsFromPrices', () => {
 		).toEqual(['Weekly', 'Monthly', 'Yearly', 'Trial']);
 	});
 
-	it('drops one-time and unsupported recurring prices', () => {
+	it('drops inactive, one-time, and unsupported recurring prices', () => {
 		expect(
 			pricingOptionsFromPrices([
+				price({ active: false }),
 				price({ type: 'one_time', recurring: null }),
 				price({ recurring: { interval: 'day', interval_count: 1 } as Stripe.Price.Recurring })
 			])
 		).toEqual([]);
 	});
 
-	it('preserves recurring interval count and defaults missing amounts to zero', () => {
+	it('preserves recurring interval count and drops nullable amount prices', () => {
 		expect(
 			pricingOptionsFromPrices([
 				price({
 					id: 'monthly-every-two',
-					unit_amount: null,
+					unit_amount: 800,
 					recurring: { interval: 'month', interval_count: 2 } as Stripe.Price.Recurring
-				})
+				}),
+				price({ id: 'metered', unit_amount: null })
 			])
 		).toEqual([
 			{
 				id: 'monthly-every-two',
 				label: 'Monthly',
-				amount: 0,
+				amount: 800,
 				currency: 'gbp',
 				interval: 'month',
 				intervalCount: 2
 			}
 		]);
+	});
+
+	it('selects only valid active recurring pricing options for the configured product', () => {
+		expect(pricingOptionForProductPrice(price({ id: 'selected' }), 'prod_maal')?.id).toBe(
+			'selected'
+		);
+		expect(
+			pricingOptionForProductPrice(price({ id: 'wrong', product: 'prod_other' }), 'prod_maal')
+		).toBeNull();
+		expect(
+			pricingOptionForProductPrice(price({ id: 'inactive', active: false }), 'prod_maal')
+		).toBeNull();
 	});
 });

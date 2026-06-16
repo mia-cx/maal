@@ -31,14 +31,24 @@ const optionOrder = new Map<PricingOption['label'], number>([
 	['Trial', 4]
 ]);
 
+const priceProductId = (price: Stripe.Price): string | null => {
+	if (typeof price.product === 'string') return price.product;
+	if (price.product && !price.product.deleted) return price.product.id;
+	return null;
+};
+
 export const priceToPricingOption = (price: Stripe.Price): PricingOption | null => {
 	const label = optionLabel(price);
 	const interval = price.recurring ? supportedInterval(price.recurring.interval) : null;
-	if (!label || !price.recurring || !interval) return null;
+	if (!price.active || price.type !== 'recurring' || !label || !price.recurring || !interval) {
+		return null;
+	}
+	const amount = price.unit_amount;
+	if (amount === null || !Number.isFinite(amount)) return null;
 	return {
 		id: price.id,
 		label,
-		amount: price.unit_amount ?? 0,
+		amount,
 		currency: price.currency,
 		interval,
 		intervalCount: price.recurring.interval_count
@@ -47,9 +57,16 @@ export const priceToPricingOption = (price: Stripe.Price): PricingOption | null 
 
 export const pricingOptionsFromPrices = (prices: Stripe.Price[]): PricingOption[] =>
 	prices
-		.filter((price) => price.type === 'recurring' && price.recurring)
 		.map(priceToPricingOption)
 		.filter((option): option is PricingOption => Boolean(option))
 		.sort(
 			(left, right) => (optionOrder.get(left.label) ?? 99) - (optionOrder.get(right.label) ?? 99)
 		);
+
+export const pricingOptionForProductPrice = (
+	price: Stripe.Price,
+	productId: string
+): PricingOption | null => {
+	if (priceProductId(price) !== productId) return null;
+	return priceToPricingOption(price);
+};

@@ -1,4 +1,4 @@
-import { error, json, type RequestHandler } from '@sveltejs/kit';
+import { error, isHttpError, json, type RequestHandler } from '@sveltejs/kit';
 import {
 	createMcpKey,
 	listMcpKeys,
@@ -108,6 +108,7 @@ export const PUT: RequestHandler = async ({ locals, platform, request }) => {
 		if (!rerolled) error(404, { message: 'MCP key not found.' });
 		return json(rerolled);
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error(cause);
 		error(503, { message: 'MCP key storage is not available.' });
 	}
@@ -125,6 +126,7 @@ export const DELETE: RequestHandler = async ({ locals, platform, request }) => {
 		if (!revoked) error(404, { message: 'MCP key not found.' });
 		return json({ revoked: true });
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error(cause);
 		error(503, { message: 'MCP key storage is not available.' });
 	}
