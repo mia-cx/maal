@@ -1,8 +1,5 @@
 import { error, isHttpError, json, type RequestHandler } from '@sveltejs/kit';
-import {
-	activateRequestedHouseholdId,
-	resolveActiveHouseholdId
-} from '$lib/server/auth/household';
+import { activateRequestedHouseholdId, resolveActiveHouseholdId } from '$lib/server/auth/household';
 import { readJsonObject } from '$lib/server/http/request';
 
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
@@ -34,7 +31,9 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		onParseError: (cause) => console.warn('Invalid active-household request body', cause)
 	});
 	const householdId =
-		typeof body.householdId === 'string' && body.householdId.trim() ? body.householdId.trim() : null;
+		typeof body.householdId === 'string' && body.householdId.trim()
+			? body.householdId.trim()
+			: null;
 	if (!householdId) error(400, { message: 'Household ID is required.' });
 
 	try {

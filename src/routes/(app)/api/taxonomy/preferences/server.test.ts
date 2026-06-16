@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AuthSession } from '$lib/server/auth/session';
+import { createAuthSession } from '$lib/server/auth/session-test-fixtures';
 
 const requireAppContext = vi.fn();
 const loadEffectiveTaxonomyPreferences = vi.fn();
@@ -11,25 +11,7 @@ const { GET } = await import('./+server');
 
 type TaxonomyPreferencesEvent = Parameters<typeof GET>[0];
 
-const session: AuthSession = {
-	user: {
-		id: 'user_1',
-		email: 'user@maal.test',
-		name: null,
-		firstName: null,
-		lastName: null,
-		profilePictureUrl: null,
-		emailVerified: true,
-		metadata: {}
-	},
-	sessionId: 'session_1',
-	organizationId: null,
-	role: null,
-	roles: [],
-	permissions: [],
-	entitlements: [],
-	featureFlags: []
-};
+const session = createAuthSession();
 
 const cookies: TaxonomyPreferencesEvent['cookies'] = {
 	get: vi.fn(),

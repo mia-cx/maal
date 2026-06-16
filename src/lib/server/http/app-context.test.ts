@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AuthSession } from '$lib/server/auth/session';
+import { createAuthSession } from '$lib/server/auth/session-test-fixtures';
 import type { AppContextInput } from './app-context';
 
 const resolveActiveHouseholdId = vi.fn();
@@ -10,25 +10,7 @@ vi.mock('$lib/server/domains/billing', () => ({ requireHouseholdAccess }));
 
 const { requireAppContext, requireBillingAppContext } = await import('./app-context');
 
-const session: AuthSession = {
-	user: {
-		id: 'user_1',
-		email: 'user@maal.test',
-		name: null,
-		firstName: null,
-		lastName: null,
-		profilePictureUrl: null,
-		emailVerified: true,
-		metadata: {}
-	},
-	sessionId: 'session_1',
-	organizationId: null,
-	role: null,
-	roles: [],
-	permissions: [],
-	entitlements: [],
-	featureFlags: []
-};
+const session = createAuthSession();
 const database = {} as D1Database;
 const cookies: AppContextInput['cookies'] = {
 	get: vi.fn(),
@@ -68,12 +50,12 @@ describe('requireAppContext', () => {
 	});
 
 	it('rejects requests without a database binding', async () => {
-		await expect(requireAppContext(input({ platform: { env: {} } as App.Platform }))).rejects.toMatchObject(
-			{
-				status: 503,
-				body: { message: 'Database unavailable.' }
-			}
-		);
+		await expect(
+			requireAppContext(input({ platform: { env: {} } as App.Platform }))
+		).rejects.toMatchObject({
+			status: 503,
+			body: { message: 'Database unavailable.' }
+		});
 		expect(resolveActiveHouseholdId).not.toHaveBeenCalled();
 		expect(requireHouseholdAccess).not.toHaveBeenCalled();
 	});

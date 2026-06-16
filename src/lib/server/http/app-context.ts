@@ -18,7 +18,9 @@ export type AppContextInput = {
 	url: URL;
 };
 
-export const requireAppContext = async (input: AppContextInput): Promise<AuthenticatedAppContext> => {
+export const requireAppContext = async (
+	input: AppContextInput
+): Promise<AuthenticatedAppContext> => {
 	const session = input.locals.session;
 	if (!session) error(401, { message: 'Sign in required.' });
 	const database = input.platform?.env.DB;
