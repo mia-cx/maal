@@ -21,8 +21,14 @@ const subscriptionFromCheckout = async (
 	return stripe.subscriptions.retrieve(subscriptionId, { expand: ['items.data.price'] });
 };
 
+const terminalSubscriptionStatuses = new Set<Stripe.Subscription.Status>([
+	'canceled',
+	'incomplete_expired'
+]);
+
 const isRolledBackTrialSubscription = (subscription: Stripe.Subscription): boolean =>
-	subscription.metadata.maal_trial_rollback === 'start_failed';
+	subscription.metadata.maal_trial_rollback === 'start_failed' &&
+	terminalSubscriptionStatuses.has(subscription.status);
 
 const stripeEventFromRequest = async (platform: App.Platform, request: Request) => {
 	const stripe = createStripeClient(platform);

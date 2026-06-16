@@ -8,7 +8,6 @@ import {
 	readSealedSession
 } from '$lib/server/auth/session';
 import {
-	canManageActiveHousehold,
 	commitHouseholdCookie,
 	listUserHouseholds,
 	resolveActiveHouseholdId
@@ -89,13 +88,6 @@ const handleSubscriptionGate: Handle = async ({ event, resolve }) => {
 		householdId
 	});
 	if (hasAccess) return resolve(event);
-
-	const canManageSubscription = await canManageActiveHousehold(
-		event.platform,
-		event.locals.session,
-		householdId
-	);
-	if (canManageSubscription) return resolve(event);
 
 	const subscribedHouseholdId = await activeSubscribedHouseholdId(
 		event.platform,
