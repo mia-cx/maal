@@ -10,7 +10,25 @@ vi.mock('$lib/server/domains/billing', () => ({ requireHouseholdAccess }));
 
 const { requireAppContext, requireBillingAppContext } = await import('./app-context');
 
-const session: AuthSession = { user: { id: 'user_1' } };
+const session: AuthSession = {
+	user: {
+		id: 'user_1',
+		email: 'user@maal.test',
+		name: null,
+		firstName: null,
+		lastName: null,
+		profilePictureUrl: null,
+		emailVerified: true,
+		metadata: {}
+	},
+	sessionId: 'session_1',
+	organizationId: null,
+	role: null,
+	roles: [],
+	permissions: [],
+	entitlements: [],
+	featureFlags: []
+};
 const database = {} as D1Database;
 const cookies: AppContextInput['cookies'] = {
 	get: vi.fn(),
