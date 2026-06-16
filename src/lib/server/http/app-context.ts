@@ -11,12 +11,14 @@ export type AuthenticatedAppContext = {
 	db: ReturnType<typeof getDb>;
 };
 
-export const requireAppContext = async (input: {
+export type AppContextInput = {
 	cookies: Cookies;
 	locals: App.Locals;
 	platform: App.Platform | undefined;
 	url: URL;
-}): Promise<AuthenticatedAppContext> => {
+};
+
+export const requireAppContext = async (input: AppContextInput): Promise<AuthenticatedAppContext> => {
 	const session = input.locals.session;
 	if (!session) error(401, { message: 'Sign in required.' });
 	const database = input.platform?.env.DB;
@@ -30,12 +32,20 @@ export const requireAppContext = async (input: {
 	});
 	if (!householdId) error(400, { message: 'Household is required.' });
 
+	return { session, householdId, database, db: getDb(database) };
+};
+
+export const requireBillingAppContext = async (
+	input: AppContextInput
+): Promise<AuthenticatedAppContext> => {
+	const context = await requireAppContext(input);
+
 	await requireHouseholdAccess({
 		platform: input.platform,
-		database,
-		session,
-		householdId
+		database: context.database,
+		session: context.session,
+		householdId: context.householdId
 	});
 
-	return { session, householdId, database, db: getDb(database) };
+	return context;
 };

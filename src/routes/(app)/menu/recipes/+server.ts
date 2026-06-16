@@ -1,6 +1,6 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
-import { requireAppContext } from '$lib/server/http/app-context';
+import { requireBillingAppContext } from '$lib/server/http/app-context';
 import { getDb } from '$lib/server/db';
 import {
 	householdMeals,
@@ -673,7 +673,7 @@ const draftRecipeFromImport = (
 };
 
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
-	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
 
 	const importUrl = url.searchParams.get('importUrl')?.trim();
 	if (importUrl) {
@@ -786,7 +786,7 @@ const matchingExistingRecipe = (
 };
 
 export const POST: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
 
 	const body = await readBody(request);
 	if (body.url && body.url.length > maxUrlLength)
@@ -897,7 +897,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 };
 
 export const PATCH: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
 
 	const { recipeIds } = await readBulkBody(request);
 	const updatedAt = new Date().toISOString();
@@ -921,7 +921,7 @@ export const PATCH: RequestHandler = async ({ cookies, locals, platform, request
 };
 
 export const DELETE: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
 
 	const { recipeIds, permanent } = await readBulkBody(request);
 	const existingRows = await db
