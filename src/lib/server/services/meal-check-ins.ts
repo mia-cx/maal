@@ -32,31 +32,33 @@ export const upsertMealCheckIn = async (db: Db, input: MealCheckInInput) => {
 	const reason = input.reason?.trim() || null;
 	const updatedAt = new Date().toISOString();
 
-	await db
-		.insert(mealCheckIns)
-		.values({
-			workosUserId: input.workosUserId,
-			householdMealId: input.mealId,
-			verdict: input.verdict,
-			cookTime,
-			reason,
-			updatedAt
-		})
-		.onConflictDoUpdate({
-			target: [mealCheckIns.householdMealId, mealCheckIns.workosUserId],
-			set: {
+	await db.transaction(async (tx) => {
+		await tx
+			.insert(mealCheckIns)
+			.values({
+				workosUserId: input.workosUserId,
+				householdMealId: input.mealId,
 				verdict: input.verdict,
 				cookTime,
 				reason,
 				updatedAt
-			}
-		});
+			})
+			.onConflictDoUpdate({
+				target: [mealCheckIns.householdMealId, mealCheckIns.workosUserId],
+				set: {
+					verdict: input.verdict,
+					cookTime,
+					reason,
+					updatedAt
+				}
+			});
 
-	await db
-		.update(householdMeals)
-		.set({
-			status: input.cooked ? 'cooked' : 'skipped',
-			updatedAt
-		})
-		.where(eq(householdMeals.id, input.mealId));
+		await tx
+			.update(householdMeals)
+			.set({
+				status: input.cooked ? 'cooked' : 'skipped',
+				updatedAt
+			})
+			.where(eq(householdMeals.id, input.mealId));
+	});
 };

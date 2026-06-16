@@ -14,7 +14,7 @@ Address the remaining service-module review findings by removing UI type couplin
 ## TODOs
 - [x] Add shared meal feedback/check-in validation types and update imports away from UI modules.
 - [x] Tighten check-in input/service validation and tests.
-- [ ] Wrap remaining meal check-in/meal-plan multi-write mutations in transactions.
+- [x] Wrap remaining meal check-in/meal-plan multi-write mutations in transactions.
 - [ ] Add exact meal loading support and use it from `getHouseholdMeal`.
 - [ ] Preserve `sourceClaimedMinutes` and make recipe delete no-ops observable.
 - [ ] Run focused and repo validation, then file PR.
@@ -24,3 +24,4 @@ Address the remaining service-module review findings by removing UI type couplin
 - Existing `main` already contains several fixes from the issue: recipe import SSRF/byte-limit protection, transactions in recipe create/update, and unused `mealFromHouseholdMeal` import removal.
 - Added `$lib/domain/meal-feedback` for shared verdict/capacity types so server code no longer imports UI label modules.
 - Check-in parsing now rejects non-boolean `cooked` values and non-integer cook times instead of coercing them.
+- Wrapped meal creation/update sidecar writes and check-in status updates in transactions.
