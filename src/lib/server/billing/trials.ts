@@ -92,11 +92,12 @@ export const startHouseholdTrial = async (input: {
 		.returning({ workosUserId: users.workosUserId });
 	if (!claimed.length) throw new Error('Trial has already been used.');
 
-	const stripe = createStripeClient(input.platform);
+	let stripe: Stripe | null = null;
 	let customerId: string | null = null;
 	let subscriptionId: string | null = null;
 
 	try {
+		stripe = createStripeClient(input.platform);
 		const priceId =
 			input.priceId ?? (await findDefaultTrialPriceId(stripe, getStripeProductId(input.platform)));
 		const customer = await stripe.customers.create({
@@ -124,14 +125,14 @@ export const startHouseholdTrial = async (input: {
 		return subscription;
 	} catch (cause) {
 		const cleanupFailures: unknown[] = [];
-		if (subscriptionId) {
+		if (stripe && subscriptionId) {
 			try {
 				await stripe.subscriptions.cancel(subscriptionId);
 			} catch (cleanupCause) {
 				cleanupFailures.push(cleanupCause);
 			}
 		}
-		if (customerId) {
+		if (stripe && customerId) {
 			try {
 				await stripe.customers.del(customerId);
 			} catch (cleanupCause) {
@@ -143,6 +144,10 @@ export const startHouseholdTrial = async (input: {
 				.update(users)
 				.set({ trialHouseholdId: null, trialStartedAt: null })
 				.where(eq(users.workosUserId, input.user.id));
+		} catch (cleanupCause) {
+			cleanupFailures.push(cleanupCause);
+		}
+		try {
 			await db
 				.delete(billingSubscriptions)
 				.where(eq(billingSubscriptions.householdId, input.householdId));

@@ -19,10 +19,17 @@ const lifetimeGrantPresenceKeys = ['lifetime_grant', 'maal_lifetime_grant'];
 const grantCacheTtlMs = 60_000;
 const grantCache = new Map<string, { value: boolean; expiresAt: number }>();
 
+const pruneExpiredGrantCache = (now = Date.now()): void => {
+	for (const [householdId, cached] of grantCache) {
+		if (cached.expiresAt <= now) grantCache.delete(householdId);
+	}
+};
+
 const cachedGrant = (householdId: string): boolean | null => {
+	const now = Date.now();
 	const cached = grantCache.get(householdId);
 	if (!cached) return null;
-	if (cached.expiresAt > Date.now()) return cached.value;
+	if (cached.expiresAt > now) return cached.value;
 	grantCache.delete(householdId);
 	return null;
 };
@@ -68,7 +75,9 @@ export const hasHouseholdBillingGrant = async (input: {
 		billingGrantTokens(organization.metadata ?? {}),
 		input.householdId
 	);
-	grantCache.set(input.householdId, { value, expiresAt: Date.now() + grantCacheTtlMs });
+	const now = Date.now();
+	pruneExpiredGrantCache(now);
+	grantCache.set(input.householdId, { value, expiresAt: now + grantCacheTtlMs });
 	return value;
 };
 
