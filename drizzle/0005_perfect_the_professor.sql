@@ -434,5 +434,6 @@ CREATE INDEX `user_recipes_user_visible_idx` ON `user_recipes` (`workos_user_id`
 CREATE INDEX `user_recipes_saved_from_household_id_idx` ON `user_recipes` (`saved_from_household_id`);--> statement-breakpoint
 CREATE INDEX `user_recipes_source_url_idx` ON `user_recipes` (`source_url`);--> statement-breakpoint
 CREATE INDEX `user_recipes_source_html_hash_idx` ON `user_recipes` (`source_html_hash`);--> statement-breakpoint
-CREATE INDEX `user_recipes_deleted_at_idx` ON `user_recipes` (`deleted_at`);PRAGMA foreign_key_check;--> statement-breakpoint
+CREATE INDEX `user_recipes_deleted_at_idx` ON `user_recipes` (`deleted_at`);--> statement-breakpoint
+PRAGMA foreign_key_check;--> statement-breakpoint
 PRAGMA foreign_keys=ON;--> statement-breakpoint
