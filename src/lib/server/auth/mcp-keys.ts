@@ -137,7 +137,7 @@ const listRecordKeys = async (store: KVNamespace): Promise<string[]> => {
 	return names;
 };
 
-type McpKeyUserIndex = { keyNames: string[]; rebuiltAt?: string };
+type McpKeyUserIndex = { keyNames: string[]; version?: 1; rebuiltAt?: string };
 type KeyedMcpRecord = { keyName: string; record: McpKeyRecord };
 
 const userIndexKey = (userId: string): string => `${MCP_KEY_USER_INDEX_PREFIX}${userId}`;
@@ -145,25 +145,36 @@ const userIndexKey = (userId: string): string => `${MCP_KEY_USER_INDEX_PREFIX}${
 const readUserIndex = async (
 	store: KVNamespace,
 	userId: string
-): Promise<{ exists: boolean; keyNames: string[] }> => {
+): Promise<{ isComplete: boolean; keyNames: string[] }> => {
 	const index = await store.get<McpKeyUserIndex>(userIndexKey(userId), 'json');
 	return {
-		exists: Boolean(index && Array.isArray(index.keyNames)),
+		isComplete: index?.version === 1 && Array.isArray(index.keyNames),
 		keyNames: Array.isArray(index?.keyNames)
 			? index.keyNames.filter((keyName): keyName is string => typeof keyName === 'string')
 			: []
 	};
 };
 
-const writeUserIndex = async (store: KVNamespace, userId: string, keyNames: string[]) => {
+const writeUserIndex = async (
+	store: KVNamespace,
+	userId: string,
+	keyNames: string[],
+	options: { complete: boolean }
+) => {
 	await store.put(
 		userIndexKey(userId),
-		JSON.stringify({ keyNames: [...new Set(keyNames)], rebuiltAt: new Date().toISOString() })
+		JSON.stringify({
+			keyNames: [...new Set(keyNames)],
+			...(options.complete ? { version: 1 as const, rebuiltAt: new Date().toISOString() } : {})
+		})
 	);
 };
 
 const addToUserIndex = async (store: KVNamespace, userId: string, keyName: string) => {
-	await writeUserIndex(store, userId, [...(await readUserIndex(store, userId)).keyNames, keyName]);
+	const index = await readUserIndex(store, userId);
+	await writeUserIndex(store, userId, [...index.keyNames, keyName], {
+		complete: index.isComplete
+	});
 };
 
 const indexedRecordsForUser = async (
@@ -178,7 +189,7 @@ const indexedRecordsForUser = async (
 	const records = indexedRecords.filter(
 		(entry): entry is KeyedMcpRecord => entry.record?.userId === userId
 	);
-	return { records, needsRepair: !index.exists || records.length !== keyNames.length };
+	return { records, needsRepair: !index.isComplete || records.length !== keyNames.length };
 };
 
 const scanRecordsForUser = async (
@@ -197,7 +208,8 @@ const scanRecordsForUser = async (
 	await writeUserIndex(
 		store,
 		userId,
-		userRecords.map((entry) => entry.keyName)
+		userRecords.map((entry) => entry.keyName),
+		{ complete: true }
 	);
 	return userRecords;
 };
@@ -315,7 +327,8 @@ export const rerollMcpKey = async (input: {
 	await writeUserIndex(
 		store,
 		input.userId,
-		records.map((entry) => (entry.keyName === match.keyName ? nextKeyName : entry.keyName))
+		records.map((entry) => (entry.keyName === match.keyName ? nextKeyName : entry.keyName)),
+		{ complete: true }
 	);
 	return { key: rawKey, record: toPublicMcpKey(nextRecord) };
 };
