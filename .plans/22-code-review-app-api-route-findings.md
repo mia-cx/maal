@@ -14,7 +14,7 @@ Standardize the app API auth/error contract and active-household resolution for 
 
 ## TODOs
 
-- [ ] Extend shared household/app context helpers to classify household resolution and dependency failures.
+- [x] Extend shared household/app context helpers to classify household resolution and dependency failures.
 - [ ] Move active-household and taxonomy preference APIs onto the shared API contract.
 - [ ] Add focused tests for helper and route behaviors.
 - [ ] Run focused and repo-level validation.
@@ -23,3 +23,4 @@ Standardize the app API auth/error contract and active-household resolution for 
 
 - Issue #22 covers API auth/error consistency, household resolution duplication, dependency failure mapping, and malformed JSON context.
 - Issue #16 active-household scope covers stale/inaccessible household IDs and API routes returning browser redirects/defaults instead of API errors.
+- `pnpm test:unit -- --run src/lib/server/http/app-context.test.ts` passed; the script invocation ran the current unit suite (46 files, 166 tests).

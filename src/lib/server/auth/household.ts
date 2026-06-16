@@ -309,6 +309,33 @@ export const resolveActiveHouseholdId = async (input: {
 	return { householdId, hasAnyHousehold: householdIds.length > 0 };
 };
 
+export type RequestedHouseholdActivation =
+	| { status: 'activated'; householdId: string; hasAnyHousehold: true }
+	| { status: 'inaccessible'; householdId: string; hasAnyHousehold: boolean }
+	| { status: 'none'; householdId: null; hasAnyHousehold: false };
+
+export const activateRequestedHouseholdId = async (input: {
+	platform: App.Platform | undefined;
+	cookies: Cookies;
+	url: URL;
+	session: { user: { id: string }; organizationId?: string | null };
+	householdId: string;
+}): Promise<RequestedHouseholdActivation> => {
+	const householdIds = await listUserHouseholdIds(input.platform, input.session.user.id);
+	const hasAnyHousehold = householdIds.length > 0;
+
+	if (!householdIds.includes(input.householdId)) {
+		return { status: 'inaccessible', householdId: input.householdId, hasAnyHousehold };
+	}
+
+	await provisionAuthSession(input.platform, {
+		user: input.session.user,
+		organizationId: input.householdId
+	});
+	commitHouseholdCookie(input.cookies, input.householdId, input.url);
+	return { status: 'activated', householdId: input.householdId, hasAnyHousehold: true };
+};
+
 export const createHouseholdForUser = async (input: {
 	platform: App.Platform | undefined;
 	cookies: Cookies;

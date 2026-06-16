@@ -1,4 +1,4 @@
-import { error, type Cookies } from '@sveltejs/kit';
+import { error, isHttpError, type Cookies } from '@sveltejs/kit';
 import type { AuthSession } from '$lib/server/auth/session';
 import { resolveActiveHouseholdId } from '$lib/server/auth/household';
 import { requireHouseholdAccess } from '$lib/server/domains/billing';
@@ -24,12 +24,21 @@ export const requireAppContext = async (input: AppContextInput): Promise<Authent
 	const database = input.platform?.env.DB;
 	if (!database) error(503, { message: 'Database unavailable.' });
 
-	const { householdId } = await resolveActiveHouseholdId({
-		platform: input.platform,
-		cookies: input.cookies,
-		url: input.url,
-		session
-	});
+	let householdId: string | null;
+	let hasAnyHousehold: boolean;
+	try {
+		({ householdId, hasAnyHousehold } = await resolveActiveHouseholdId({
+			platform: input.platform,
+			cookies: input.cookies,
+			url: input.url,
+			session
+		}));
+	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
+		console.error('Failed to resolve active household', cause);
+		error(503, { message: 'Household service unavailable.' });
+	}
+	if (!householdId && !hasAnyHousehold) error(404, { message: 'No households available.' });
 	if (!householdId) error(400, { message: 'Household is required.' });
 
 	return { session, householdId, database, db: getDb(database) };

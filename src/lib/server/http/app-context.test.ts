@@ -51,7 +51,10 @@ const input = (overrides: Partial<AppContextInput> = {}): AppContextInput => ({
 describe('requireAppContext', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		resolveActiveHouseholdId.mockResolvedValue({ householdId: 'household_1' });
+		resolveActiveHouseholdId.mockResolvedValue({
+			householdId: 'household_1',
+			hasAnyHousehold: true
+		});
 		requireHouseholdAccess.mockResolvedValue(undefined);
 	});
 
@@ -76,13 +79,34 @@ describe('requireAppContext', () => {
 	});
 
 	it('rejects requests without an active household', async () => {
-		resolveActiveHouseholdId.mockResolvedValue({ householdId: null });
+		resolveActiveHouseholdId.mockResolvedValue({ householdId: null, hasAnyHousehold: true });
 
 		await expect(requireAppContext(input())).rejects.toMatchObject({
 			status: 400,
 			body: { message: 'Household is required.' }
 		});
 		expect(resolveActiveHouseholdId).toHaveBeenCalledTimes(1);
+		expect(requireHouseholdAccess).not.toHaveBeenCalled();
+	});
+
+	it('rejects requests when the user has no households', async () => {
+		resolveActiveHouseholdId.mockResolvedValue({ householdId: null, hasAnyHousehold: false });
+
+		await expect(requireAppContext(input())).rejects.toMatchObject({
+			status: 404,
+			body: { message: 'No households available.' }
+		});
+		expect(resolveActiveHouseholdId).toHaveBeenCalledTimes(1);
+		expect(requireHouseholdAccess).not.toHaveBeenCalled();
+	});
+
+	it('maps household dependency failures to a service error', async () => {
+		resolveActiveHouseholdId.mockRejectedValue(new Error('WorkOS unavailable'));
+
+		await expect(requireAppContext(input())).rejects.toMatchObject({
+			status: 503,
+			body: { message: 'Household service unavailable.' }
+		});
 		expect(requireHouseholdAccess).not.toHaveBeenCalled();
 	});
 
@@ -100,7 +124,10 @@ describe('requireAppContext', () => {
 describe('requireBillingAppContext', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		resolveActiveHouseholdId.mockResolvedValue({ householdId: 'household_1' });
+		resolveActiveHouseholdId.mockResolvedValue({
+			householdId: 'household_1',
+			hasAnyHousehold: true
+		});
 		requireHouseholdAccess.mockResolvedValue(undefined);
 	});
 
