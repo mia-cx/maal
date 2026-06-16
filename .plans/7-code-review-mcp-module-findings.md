@@ -11,7 +11,7 @@ Address MCP module code-review findings by tightening input validation, permissi
 
 ## TODOs
 - [x] Tighten scalar, required-id, meal source, date range, and batch meal input validation.
-- [ ] Enforce check-in role permissions and update planning tools to use strict required IDs.
+- [x] Enforce check-in role permissions and update planning tools to use strict required IDs.
 - [ ] Harden registry, protocol cleanup, result serialization, recipe delete semantics, and pagination behavior.
 - [ ] Add or update MCP unit tests for the fixed review findings.
 - [ ] Run final validation and file the PR.
@@ -22,3 +22,5 @@ Address MCP module code-review findings by tightening input validation, permissi
 
 - Tightened scalar helpers, meal source exclusivity, date range validation, and batch meal validation.
 - Validation: `pnpm test:unit -- --run src/lib/server/mcp/meal-input.test.ts src/lib/server/mcp/plan-range.test.ts` passed.
+- Check-ins now resolve with `check_ins:write` scope plus `meals:write` household role; meal/recipe IDs use `requireNonEmptyText`.
+- Validation: `pnpm test:unit -- --run src/lib/server/mcp/context.test.ts` passed; `pnpm check` blocked because generated `worker-configuration.d.ts` is absent in this worktree.

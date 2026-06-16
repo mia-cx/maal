@@ -7,7 +7,7 @@ import {
 	updateUserRecipe
 } from '$lib/server/domains/recipes';
 import { boundedPagination } from '$lib/shared/pagination';
-import { isRecord, text } from './scalars';
+import { isRecord, requireNonEmptyText, text } from './scalars';
 import { toolError } from './results';
 import { resolveHouseholdId } from './context';
 import { createRecipeShape, optionalHouseholdInput, recipeShape } from './schemas';
@@ -63,7 +63,7 @@ export const recipeTools: ToolDefinition[] = [
 					db: context.db,
 					workosUserId: context.key.userId,
 					householdId,
-					recipeId: text(args.recipeId) ?? ''
+					recipeId: requireNonEmptyText(args.recipeId, 'recipeId')
 				})
 			};
 		}
@@ -107,7 +107,7 @@ export const recipeTools: ToolDefinition[] = [
 				recipe: await updateUserRecipe({
 					db: context.db,
 					workosUserId: context.key.userId,
-					recipeId: text(args.recipeId) ?? '',
+					recipeId: requireNonEmptyText(args.recipeId, 'recipeId'),
 					patch: recipePatchFromArgs(args.patch)
 				})
 			};
@@ -124,7 +124,7 @@ export const recipeTools: ToolDefinition[] = [
 			return await deleteUserRecipe({
 				db: context.db,
 				workosUserId: context.key.userId,
-				recipeId: text(args.recipeId) ?? ''
+				recipeId: requireNonEmptyText(args.recipeId, 'recipeId')
 			});
 		}
 	}
