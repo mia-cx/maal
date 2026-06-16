@@ -316,6 +316,14 @@ export const removeMemberFromForm = async ({
 		},
 		mutation: async () => {
 			const runtime = createAuthRuntime(platform);
+			const memberships = await listActiveHouseholdMemberships(platform, householdId);
+			const actorMembership = memberships.find(
+				(membership) => membership.userId === session.user.id
+			);
+			if (!actorMembership || !membershipHasAdminRole(actorMembership)) {
+				return { ok: false, status: 403, message: 'Only household managers can remove members.' };
+			}
+
 			const membership =
 				await runtime.workos.userManagement.getOrganizationMembership(membershipId);
 			if (membership.organizationId !== householdId || membership.userId !== userId) {
@@ -328,7 +336,6 @@ export const removeMemberFromForm = async ({
 					message: 'Directory-managed members must be removed in the identity provider.'
 				};
 			}
-			const memberships = await listActiveHouseholdMemberships(platform, householdId);
 			const adminCount = memberships.filter(membershipHasAdminRole).length;
 			if (isLastAdmin({ isAdmin: membershipHasAdminRole(membership), adminCount })) {
 				return { ok: false, status: 400, message: lastManagerMessage };
