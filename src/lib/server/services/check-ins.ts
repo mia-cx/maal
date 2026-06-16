@@ -1,16 +1,13 @@
 import type { MealFeedbackVerdict } from '$lib/domain/meal-feedback';
+import {
+	parseMealFeedbackVerdict,
+	parseOptionalPositiveInteger,
+	parseRequiredText
+} from '$lib/domain/meal-feedback-validation';
 import { getDb } from '$lib/server/db';
 import { upsertMealCheckIn as upsertMealCheckInCore } from './meal-check-ins';
 
 type Db = ReturnType<typeof getDb>;
-
-const verdicts = new Set<MealFeedbackVerdict>(['repeat', 'neutral', 'avoid']);
-
-const positiveInteger = (value: unknown): number | null => {
-	if (value === undefined || value === null || value === '') return null;
-	const number = Number(value);
-	return Number.isFinite(number) && number > 0 ? Math.round(number) : null;
-};
 
 export const upsertMealCheckIn = async (input: {
 	db: Db;
@@ -22,15 +19,17 @@ export const upsertMealCheckIn = async (input: {
 	cookTime?: unknown;
 	reason?: string | null;
 }) => {
-	if (!input.mealId) throw new Error('Meal is required.');
-	if (!verdicts.has(input.verdict)) throw new Error('Verdict is required.');
+	const mealId = parseRequiredText(input.mealId);
+	const verdict = parseMealFeedbackVerdict(input.verdict);
+	if (!mealId) throw new Error('Meal is required.');
+	if (!verdict) throw new Error('Verdict is required.');
 	await upsertMealCheckInCore(input.db, {
 		householdId: input.householdId,
 		workosUserId: input.workosUserId,
-		mealId: input.mealId,
-		verdict: input.verdict,
+		mealId,
+		verdict,
 		cooked: input.cooked !== false,
-		cookTime: positiveInteger(input.cookTime),
+		cookTime: parseOptionalPositiveInteger(input.cookTime),
 		reason: input.reason ?? null
 	});
 	return { ok: true };
