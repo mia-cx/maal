@@ -15,7 +15,7 @@ describe('MCP meal input mapping', () => {
 				prepTimeMinutes: '10',
 				cookTimeMinutes: 20,
 				yield: '4',
-				ingredients: ['onion', 3, 'stock'],
+				ingredients: ['onion', 'stock'],
 				instructions: ['Chop', 'Simmer'],
 				userNotes: 'Use leftovers'
 			})
@@ -44,6 +44,18 @@ describe('MCP meal input mapping', () => {
 				description: undefined,
 				ingredients: [{ amount: '', item: 'onion' }],
 				instructions: undefined
+			})
+		);
+	});
+
+	it('rejects malformed provided number fields', () => {
+		expect(() => recipeFromArgs({ title: 'Soup', yield: 'many' })).toThrow(
+			expect.objectContaining({ code: 'invalid_input', message: 'yield must be a finite number.' })
+		);
+		expect(() => mealPatchFromArgs({ servingsPlanned: true })).toThrow(
+			expect.objectContaining({
+				code: 'invalid_input',
+				message: 'servingsPlanned must be a finite number.'
 			})
 		);
 	});

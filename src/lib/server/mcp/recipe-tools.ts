@@ -7,7 +7,7 @@ import {
 	updateUserRecipe
 } from '$lib/server/domains/recipes';
 import { boundedPagination } from '$lib/shared/pagination';
-import { isRecord, text } from './scalars';
+import { isRecord, requireNonEmptyText, text } from './scalars';
 import { toolError } from './results';
 import { resolveHouseholdId } from './context';
 import { createRecipeShape, optionalHouseholdInput, recipeShape } from './schemas';
@@ -38,15 +38,15 @@ export const recipeTools: ToolDefinition[] = [
 				workosUserId: context.key.userId,
 				householdId,
 				query: text(args.query),
-				limit,
+				limit: limit + 1,
 				offset,
 				includeArchived: args.includeArchived === true
 			});
 			return {
 				limit,
 				offset,
-				nextOffset: recipes.length === limit ? offset + limit : null,
-				recipes
+				nextOffset: recipes.length > limit ? offset + limit : null,
+				recipes: recipes.slice(0, limit)
 			};
 		}
 	},
@@ -63,7 +63,7 @@ export const recipeTools: ToolDefinition[] = [
 					db: context.db,
 					workosUserId: context.key.userId,
 					householdId,
-					recipeId: text(args.recipeId) ?? ''
+					recipeId: requireNonEmptyText(args.recipeId, 'recipeId')
 				})
 			};
 		}
@@ -101,13 +101,14 @@ export const recipeTools: ToolDefinition[] = [
 		}),
 		annotations: { readOnlyHint: false },
 		handler: async (context, args) => {
-			await resolveHouseholdId(context, args, 'recipes:write', 'recipes:write');
+			const householdId = await resolveHouseholdId(context, args, 'recipes:write', 'recipes:write');
 			if (!isRecord(args.patch)) throw toolError('invalid_input', 'Recipe patch is required.');
 			return {
 				recipe: await updateUserRecipe({
 					db: context.db,
 					workosUserId: context.key.userId,
-					recipeId: text(args.recipeId) ?? '',
+					householdId,
+					recipeId: requireNonEmptyText(args.recipeId, 'recipeId'),
 					patch: recipePatchFromArgs(args.patch)
 				})
 			};
@@ -120,11 +121,12 @@ export const recipeTools: ToolDefinition[] = [
 		inputSchema: Schema.Struct({ ...optionalHouseholdInput, recipeId: Schema.String }),
 		annotations: { readOnlyHint: false, destructiveHint: true },
 		handler: async (context, args) => {
-			await resolveHouseholdId(context, args, 'recipes:write', 'recipes:write');
+			const householdId = await resolveHouseholdId(context, args, 'recipes:write', 'recipes:write');
 			return await deleteUserRecipe({
 				db: context.db,
 				workosUserId: context.key.userId,
-				recipeId: text(args.recipeId) ?? ''
+				householdId,
+				recipeId: requireNonEmptyText(args.recipeId, 'recipeId')
 			});
 		}
 	}

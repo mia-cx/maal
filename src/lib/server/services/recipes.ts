@@ -52,7 +52,7 @@ export const listUserRecipes = async (input: {
 		archive: input.includeArchived ? 'all' : 'active'
 	});
 	const ranked = rankRecipesByRelevance(recipes, input.query?.trim() ?? '');
-	return ranked.slice(input.offset ?? 0, (input.offset ?? 0) + Math.min(input.limit ?? 25, 60));
+	return ranked.slice(input.offset ?? 0, (input.offset ?? 0) + Math.min(input.limit ?? 25, 61));
 };
 
 export const getUserRecipe = async (input: {
@@ -178,6 +178,24 @@ const linkedMealMatchesSnapshot = async (
 	);
 };
 
+const requireRecipeMutableInHousehold = async (input: {
+	db: Db;
+	recipeId: string;
+	householdId?: string | null;
+}) => {
+	if (!input.householdId) return;
+	const linkedHouseholds = await input.db
+		.select({ householdId: householdMeals.householdId })
+		.from(householdMealUserRecipes)
+		.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
+		.where(eq(householdMealUserRecipes.userRecipeId, input.recipeId));
+	const householdIds = new Set(linkedHouseholds.map((link) => link.householdId));
+	if (householdIds.size === 0 || (householdIds.size === 1 && householdIds.has(input.householdId))) {
+		return;
+	}
+	throw new Error('Recipe not found.');
+};
+
 const propagateRecipeUpdateToLinkedMeals = async (
 	db: WritableDb,
 	recipeId: string,
@@ -223,6 +241,7 @@ const propagateRecipeUpdateToLinkedMeals = async (
 export const updateUserRecipe = async (input: {
 	db: Db;
 	workosUserId: string;
+	householdId?: string | null;
 	recipeId: string;
 	patch: Partial<RecipeMenuItem>;
 }): Promise<RecipeMenuItem> => {
@@ -234,6 +253,11 @@ export const updateUserRecipe = async (input: {
 		)
 		.get();
 	if (!existing) throw new Error('Recipe not found.');
+	await requireRecipeMutableInHousehold({
+		db: input.db,
+		recipeId: input.recipeId,
+		householdId: input.householdId
+	});
 	const propagationSnapshot: RecipePropagationSnapshot = {
 		recipe: existing,
 		ingredients: (await orderedRecipeIngredients(input.db, input.recipeId)).map(
@@ -298,6 +322,7 @@ export const updateUserRecipe = async (input: {
 	return getUserRecipe({
 		db: input.db,
 		workosUserId: input.workosUserId,
+		householdId: input.householdId,
 		recipeId: input.recipeId
 	});
 };
@@ -305,10 +330,16 @@ export const updateUserRecipe = async (input: {
 export const deleteUserRecipe = async (input: {
 	db: Db;
 	workosUserId: string;
+	householdId?: string | null;
 	recipeId: string;
 }) => {
+	await requireRecipeMutableInHousehold({
+		db: input.db,
+		recipeId: input.recipeId,
+		householdId: input.householdId
+	});
 	const deletedAt = new Date().toISOString();
-	await input.db
+	const deleted = await input.db
 		.update(userRecipes)
 		.set({ deletedAt, updatedAt: deletedAt })
 		.where(
@@ -317,6 +348,8 @@ export const deleteUserRecipe = async (input: {
 				eq(userRecipes.workosUserId, input.workosUserId),
 				isNull(userRecipes.deletedAt)
 			)
-		);
+		)
+		.returning({ id: userRecipes.id });
+	if (!deleted.length) throw new Error('Recipe not found.');
 	return { deleted: true, deletedAt };
 };
