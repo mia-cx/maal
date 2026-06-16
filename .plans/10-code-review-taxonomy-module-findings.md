@@ -17,7 +17,7 @@ Address taxonomy review findings by making alias resolution locale-aware and det
 - [x] Make display override upserts validate input and atomically lookup-or-create scoped aliases.
 - [x] Batch and de-duplicate instruction event parsing/insertion with flexible alias patterns.
 - [x] Clean up taxonomy options grouping and preset constants.
-- [ ] Add focused tests for locale precedence, idempotent alias writes, and instruction parsing.
+- [x] Add focused tests for locale precedence, deterministic duplicate alias resolution, and flexible instruction alias whitespace.
 - [ ] Run final validation (`pnpm check`, focused unit tests, `pnpm architecture:check`).
 
 ## Notes
@@ -31,3 +31,5 @@ Address taxonomy review findings by making alias resolution locale-aware and det
 - Validation: `pnpm exec eslint src/lib/server/taxonomy/instruction-events.ts src/lib/server/taxonomy/aliases.ts` passed.
 - Taxonomy options now push into alias buckets instead of recreating arrays and derive preset filters from one typed constant.
 - Validation: `pnpm exec eslint src/lib/server/taxonomy/options.ts` passed.
+- Added focused helper tests covering locale precedence, duplicate alias winner stability, and whitespace-flexible alias patterns.
+- Validation: `pnpm test:unit -- --run src/lib/server/taxonomy/aliases.test.ts` passed (Vitest project config ran 39 files / 143 tests).
