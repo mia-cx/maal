@@ -33,6 +33,12 @@ export const isTerminalRolledBackTrialSubscription = (subscription: Stripe.Subsc
 	isRollbackMarkedTrialSubscription(subscription) &&
 	terminalSubscriptionStatuses.has(subscription.status);
 
+export const shouldIgnoreUnknownDeletedSubscription = (input: {
+	eventType: Stripe.Event.Type;
+	existingHouseholdId: string | null;
+}): boolean =>
+	input.eventType === 'customer.subscription.deleted' && input.existingHouseholdId === null;
+
 const stripeEventFromRequest = async (platform: App.Platform, request: Request) => {
 	const stripe = createStripeClient(platform);
 	const webhookSecret = getStripeWebhookSecret(platform);
@@ -86,13 +92,14 @@ export const handleStripeWebhook = async (platform: App.Platform | undefined, re
 	) {
 		const subscription = event.data.object as Stripe.Subscription;
 		const customerId = stringId(subscription.customer);
-		const householdId =
-			subscription.metadata.householdId ||
-			(await findHouseholdIdForStripeSubscription({
-				database: platform.env.DB,
-				customerId,
-				subscriptionId: subscription.id
-			}));
+		const existingHouseholdId = await findHouseholdIdForStripeSubscription({
+			database: platform.env.DB,
+			customerId,
+			subscriptionId: subscription.id
+		});
+		const householdId = existingHouseholdId ?? subscription.metadata.householdId;
+		if (shouldIgnoreUnknownDeletedSubscription({ eventType: event.type, existingHouseholdId }))
+			return;
 		if (customerId && isRollbackMarkedTrialSubscription(subscription)) {
 			if (isTerminalRolledBackTrialSubscription(subscription)) {
 				await deleteSubscriptionRecord({
