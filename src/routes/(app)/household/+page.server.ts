@@ -184,6 +184,7 @@ export const actions: Actions = {
 			return memberCommandResponse(
 				await updateMemberRoleFromForm({
 					platform: event.platform,
+					database: event.platform!.env.DB,
 					householdId: managedHousehold.householdId,
 					session: managedHousehold.session,
 					form: await event.request.formData()

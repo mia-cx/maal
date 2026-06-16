@@ -130,9 +130,13 @@ const startMembershipMutationLockRenewal = ({
 		}
 
 		return renewalError;
-	})().catch((error: unknown) =>
-		error instanceof Error ? error : new Error('Household membership mutation lock renewal failed.')
-	);
+	})().catch((error: unknown) => {
+		renewalError =
+			error instanceof Error
+				? error
+				: new Error('Household membership mutation lock renewal failed.');
+		return renewalError;
+	});
 
 	void done;
 
@@ -172,11 +176,13 @@ const runSerializedMembershipMutation = async <T>({
 
 export const updateMemberRoleFromForm = async ({
 	platform,
+	database,
 	householdId,
 	session,
 	form
 }: {
 	platform: App.Platform | undefined;
+	database: D1Database;
 	householdId: string;
 	session: AuthSession;
 	form: FormData;
@@ -186,24 +192,53 @@ export const updateMemberRoleFromForm = async ({
 	const roleSlug = householdRoleSlug(form.get('role'));
 	if (!membershipId || !userId)
 		return { ok: false, status: 400, message: 'Choose a member to update.' };
-	if (userId === session.user.id && roleSlug !== 'admin') {
-		return { ok: false, status: 400, message: 'You cannot remove your own manager access.' };
-	}
 
-	const runtime = createAuthRuntime(platform);
-	const membership = await runtime.workos.userManagement.getOrganizationMembership(membershipId);
-	if (membership.organizationId !== householdId || membership.userId !== userId) {
-		return { ok: false, status: 404, message: 'Household member not found.' };
-	}
-	if (membership.directoryManaged) {
-		return {
+	return runSerializedMembershipMutation({
+		database,
+		householdId,
+		busyResult: {
 			ok: false,
-			status: 400,
-			message: 'Directory-managed member roles must be changed in the identity provider.'
-		};
-	}
-	await runtime.workos.userManagement.updateOrganizationMembership(membershipId, { roleSlug });
-	return { ok: true, message: 'Member role updated.' };
+			status: 409,
+			message: 'Household membership is changing. Try again in a moment.'
+		},
+		mutation: async () => {
+			const runtime = createAuthRuntime(platform);
+			const memberships = await listActiveHouseholdMemberships(platform, householdId);
+			const actorMembership = memberships.find(
+				(membership) => membership.userId === session.user.id
+			);
+			if (!actorMembership || !membershipHasAdminRole(actorMembership)) {
+				return { ok: false, status: 403, message: 'Only household managers can update roles.' };
+			}
+
+			const membership =
+				await runtime.workos.userManagement.getOrganizationMembership(membershipId);
+			if (membership.organizationId !== householdId || membership.userId !== userId) {
+				return { ok: false, status: 404, message: 'Household member not found.' };
+			}
+			if (membership.directoryManaged) {
+				return {
+					ok: false,
+					status: 400,
+					message: 'Directory-managed member roles must be changed in the identity provider.'
+				};
+			}
+			if (userId === session.user.id && roleSlug !== 'admin') {
+				return { ok: false, status: 400, message: 'You cannot remove your own manager access.' };
+			}
+
+			const adminCount = memberships.filter(membershipHasAdminRole).length;
+			if (
+				roleSlug !== 'admin' &&
+				isLastAdmin({ isAdmin: membershipHasAdminRole(membership), adminCount })
+			) {
+				return { ok: false, status: 400, message: lastManagerMessage };
+			}
+
+			await runtime.workos.userManagement.updateOrganizationMembership(membershipId, { roleSlug });
+			return { ok: true, message: 'Member role updated.' };
+		}
+	});
 };
 
 export const leaveHouseholdMembership = async ({
