@@ -34,6 +34,8 @@ import { cleanImportedText } from '$lib/server/services/html-text';
 import { insertUserRecipeInstructionEvents } from '$lib/server/taxonomy/instruction-events';
 
 type Db = DrizzleD1Database<typeof schema>;
+type Transaction = Parameters<Parameters<Db['transaction']>[0]>[0];
+type WritableDb = Db | Transaction;
 type UserRecipeRow = typeof userRecipes.$inferSelect;
 type UserRecipeIngredientRow = typeof userRecipeIngredients.$inferSelect;
 type UserRecipeInstructionRow = typeof userRecipeInstructions.$inferSelect;
@@ -619,8 +621,8 @@ export const loadMealPlanMeals = async (
 	return scheduledMeals;
 };
 
-export const updateRecipeIngredients = async (
-	db: Db,
+const replaceRecipeIngredients = async (
+	db: WritableDb,
 	recipeId: string,
 	ingredients: RecipeIngredientItem[]
 ) => {
@@ -649,15 +651,20 @@ export const updateRecipeIngredients = async (
 	}
 };
 
-export const updateRecipeInstructions = async (
+export const updateRecipeIngredients = async (
 	db: Db,
+	recipeId: string,
+	ingredients: RecipeIngredientItem[]
+) => db.transaction((tx) => replaceRecipeIngredients(tx, recipeId, ingredients));
+
+const replaceRecipeInstructions = async (
+	db: WritableDb,
 	recipeId: string,
 	instructions: RecipeInstructionItem[]
 ) => {
 	await db.delete(userRecipeInstructions).where(eq(userRecipeInstructions.userRecipeId, recipeId));
-	if (!instructions.length) {
-		return;
-	}
+	if (!instructions.length) return;
+
 	const rows = instructions.map((instruction, index) => ({
 		userRecipeId: recipeId,
 		stepIndex: index,
@@ -675,3 +682,9 @@ export const updateRecipeInstructions = async (
 		.where(eq(userRecipeInstructions.userRecipeId, recipeId));
 	await insertUserRecipeInstructionEvents(db, insertedInstructions);
 };
+
+export const updateRecipeInstructions = async (
+	db: Db,
+	recipeId: string,
+	instructions: RecipeInstructionItem[]
+) => db.transaction((tx) => replaceRecipeInstructions(tx, recipeId, instructions));
