@@ -14,9 +14,10 @@ import {
 } from '$lib/server/db/schema';
 import {
 	loadMenuRecipes,
+	replaceRecipeIngredients,
+	replaceRecipeInstructions,
 	schemaOrgFromRecipeItem,
-	updateRecipeIngredients,
-	updateRecipeInstructions
+	type WritableDb
 } from '$lib/server/db/recipe-mappers';
 import type {
 	RecipeIngredientItem,
@@ -389,7 +390,7 @@ const sourceStrings = (value: unknown): string[] =>
 		.filter(Boolean);
 
 const saveRecipeClassifications = async (
-	db: ReturnType<typeof getDb>,
+	db: WritableDb,
 	userRecipeId: string,
 	recipe: RecipeJson
 ) => {
@@ -424,11 +425,7 @@ const mediaRecord = (value: unknown): RecipeJson | undefined => {
 	return isRecord(value) ? value : undefined;
 };
 
-const saveRecipeMedia = async (
-	db: ReturnType<typeof getDb>,
-	userRecipeId: string,
-	recipe: RecipeJson
-) => {
+const saveRecipeMedia = async (db: WritableDb, userRecipeId: string, recipe: RecipeJson) => {
 	const images = arrayValue(recipe.image).flatMap((item) => {
 		const image = mediaRecord(item);
 		return image ? [image] : [];
@@ -488,7 +485,7 @@ const parseNutritionAmount = (value: string) => {
 };
 
 const saveRecipeNutritionFacts = async (
-	db: ReturnType<typeof getDb>,
+	db: WritableDb,
 	userRecipeId: string,
 	recipe: RecipeJson
 ) => {
@@ -517,11 +514,7 @@ const saveRecipeNutritionFacts = async (
 	}
 };
 
-const saveRecipeSidecars = async (
-	db: ReturnType<typeof getDb>,
-	userRecipeId: string,
-	recipe: RecipeJson
-) => {
+const saveRecipeSidecars = async (db: WritableDb, userRecipeId: string, recipe: RecipeJson) => {
 	await Promise.all([
 		saveRecipeClassifications(db, userRecipeId, recipe),
 		saveRecipeMedia(db, userRecipeId, recipe),
@@ -863,43 +856,48 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	const recipeInstructions = body.recipe?.instructions ?? instructionsFromRecipe(recipeJson);
 	const recipeId = crypto.randomUUID();
 
-	await db.insert(userRecipes).values({
-		id: recipeId,
-		workosUserId: session.user.id,
-		savedFromHouseholdId: householdId,
-		title: firstString(recipeJson.name, recipeJson.headline) ?? body.recipe?.title ?? fallbackTitle,
-		description: stringValue(recipeJson.description) ?? body.recipe?.description ?? null,
-		imageUrl: firstString(recipeJson.image) ?? body.recipe?.image ?? null,
-		prepTimeMinutes: body.recipe?.prepTimeMinutes ?? durationMinutes(recipeJson.prepTime) ?? null,
-		cookTimeMinutes: body.recipe?.cookTimeMinutes ?? cookMinutesFromRecipe(recipeJson) ?? null,
-		totalTimeMinutes:
-			body.recipe?.totalTimeMinutes ?? durationMinutes(recipeJson.totalTime) ?? null,
-		yield: body.recipe?.yield ?? firstNumber(recipeJson.recipeYield, recipeJson.yield) ?? null,
-		sourceYieldText: firstString(recipeJson.recipeYield, recipeJson.yield) ?? null,
-		sourceDatePublished: stringValue(recipeJson.datePublished) ?? null,
-		sourceDateModified: stringValue(recipeJson.dateModified) ?? null,
-		sourceLanguage: stringValue(recipeJson.inLanguage) ?? null,
-		sourceUrl: imported?.sourceUrl ?? body.recipe?.sourceUrl ?? null,
-		sourceSiteName: imported?.sourceSiteName ?? body.recipe?.sourceSiteName ?? null,
-		sourceAuthorName: imported?.sourceAuthorName ?? body.recipe?.sourceAuthorName ?? null,
-		sourcePublisherName: imported?.sourcePublisherName ?? body.recipe?.sourcePublisherName ?? null,
-		sourceIsBasedOnUrl: imported?.sourceIsBasedOnUrl ?? body.recipe?.sourceIsBasedOnUrl ?? null,
-		sourceRatingValue: ratingValue(recipeJson.aggregateRating, 'ratingValue') ?? null,
-		sourceRatingCount: ratingValue(recipeJson.aggregateRating, 'ratingCount') ?? null,
-		sourceReviewCount: ratingValue(recipeJson.aggregateRating, 'reviewCount') ?? null,
-		sourceClaimedMinutes: body.recipe?.cookTimeMinutes ?? cookMinutesFromRecipe(recipeJson) ?? null,
-		parseConfidence: imported ? 1 : 0.4,
-		ingredientConfidence: imported ? 1 : body.recipe ? 1 : 0,
-		instructionConfidence: imported ? 1 : body.recipe ? 1 : 0
-	});
+	await db.transaction(async (tx) => {
+		await tx.insert(userRecipes).values({
+			id: recipeId,
+			workosUserId: session.user.id,
+			savedFromHouseholdId: householdId,
+			title:
+				firstString(recipeJson.name, recipeJson.headline) ?? body.recipe?.title ?? fallbackTitle,
+			description: stringValue(recipeJson.description) ?? body.recipe?.description ?? null,
+			imageUrl: firstString(recipeJson.image) ?? body.recipe?.image ?? null,
+			prepTimeMinutes: body.recipe?.prepTimeMinutes ?? durationMinutes(recipeJson.prepTime) ?? null,
+			cookTimeMinutes: body.recipe?.cookTimeMinutes ?? cookMinutesFromRecipe(recipeJson) ?? null,
+			totalTimeMinutes:
+				body.recipe?.totalTimeMinutes ?? durationMinutes(recipeJson.totalTime) ?? null,
+			yield: body.recipe?.yield ?? firstNumber(recipeJson.recipeYield, recipeJson.yield) ?? null,
+			sourceYieldText: firstString(recipeJson.recipeYield, recipeJson.yield) ?? null,
+			sourceDatePublished: stringValue(recipeJson.datePublished) ?? null,
+			sourceDateModified: stringValue(recipeJson.dateModified) ?? null,
+			sourceLanguage: stringValue(recipeJson.inLanguage) ?? null,
+			sourceUrl: imported?.sourceUrl ?? body.recipe?.sourceUrl ?? null,
+			sourceSiteName: imported?.sourceSiteName ?? body.recipe?.sourceSiteName ?? null,
+			sourceAuthorName: imported?.sourceAuthorName ?? body.recipe?.sourceAuthorName ?? null,
+			sourcePublisherName:
+				imported?.sourcePublisherName ?? body.recipe?.sourcePublisherName ?? null,
+			sourceIsBasedOnUrl: imported?.sourceIsBasedOnUrl ?? body.recipe?.sourceIsBasedOnUrl ?? null,
+			sourceRatingValue: ratingValue(recipeJson.aggregateRating, 'ratingValue') ?? null,
+			sourceRatingCount: ratingValue(recipeJson.aggregateRating, 'ratingCount') ?? null,
+			sourceReviewCount: ratingValue(recipeJson.aggregateRating, 'reviewCount') ?? null,
+			sourceClaimedMinutes:
+				body.recipe?.cookTimeMinutes ?? cookMinutesFromRecipe(recipeJson) ?? null,
+			parseConfidence: imported ? 1 : 0.4,
+			ingredientConfidence: imported ? 1 : body.recipe ? 1 : 0,
+			instructionConfidence: imported ? 1 : body.recipe ? 1 : 0
+		});
 
-	await updateRecipeIngredients(
-		db,
-		recipeId,
-		body.recipe?.ingredients ?? ingredientsFromRecipe(recipeJson, unitAliasMap)
-	);
-	await updateRecipeInstructions(db, recipeId, recipeInstructions);
-	await saveRecipeSidecars(db, recipeId, recipeJson);
+		await replaceRecipeIngredients(
+			tx,
+			recipeId,
+			body.recipe?.ingredients ?? ingredientsFromRecipe(recipeJson, unitAliasMap)
+		);
+		await replaceRecipeInstructions(tx, recipeId, recipeInstructions);
+		await saveRecipeSidecars(tx, recipeId, recipeJson);
+	});
 
 	const recipe = await loadSingleMenuRecipe(
 		db,

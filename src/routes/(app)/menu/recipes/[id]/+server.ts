@@ -9,8 +9,8 @@ import {
 } from '$lib/server/db/schema';
 import {
 	loadMenuRecipes,
-	updateRecipeIngredients,
-	updateRecipeInstructions
+	replaceRecipeIngredients,
+	replaceRecipeInstructions
 } from '$lib/server/db/recipe-mappers';
 import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import { parseRecipeMenuItemPayload } from '$lib/menu/recipe-payload';
@@ -58,35 +58,37 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 		.get();
 	if (!existing) error(404, { message: 'Recipe not found.' });
 
-	await db
-		.update(userRecipes)
-		.set({
-			title: recipe.title,
-			description: recipe.description ?? null,
-			imageUrl: recipe.image ?? null,
-			prepTimeMinutes: recipe.prepTimeMinutes ?? null,
-			cookTimeMinutes: recipe.cookTimeMinutes ?? null,
-			totalTimeMinutes: recipe.totalTimeMinutes ?? null,
-			yield: recipe.yield ?? null,
-			sourceUrl: recipe.sourceUrl ?? null,
-			sourceSiteName: recipe.sourceSiteName ?? null,
-			sourceAuthorName: recipe.sourceAuthorName ?? null,
-			sourcePublisherName: recipe.sourcePublisherName ?? null,
-			sourceIsBasedOnUrl: recipe.sourceIsBasedOnUrl ?? null,
-			sourceClaimedMinutes: recipe.cookTimeMinutes ?? null,
-			userNotes: recipe.userNotes ?? null,
-			updatedAt: new Date().toISOString()
-		})
-		.where(
-			and(
-				eq(userRecipes.id, recipeId),
-				eq(userRecipes.workosUserId, session.user.id),
-				isNull(userRecipes.deletedAt)
-			)
-		);
+	await db.transaction(async (tx) => {
+		await tx
+			.update(userRecipes)
+			.set({
+				title: recipe.title,
+				description: recipe.description ?? null,
+				imageUrl: recipe.image ?? null,
+				prepTimeMinutes: recipe.prepTimeMinutes ?? null,
+				cookTimeMinutes: recipe.cookTimeMinutes ?? null,
+				totalTimeMinutes: recipe.totalTimeMinutes ?? null,
+				yield: recipe.yield ?? null,
+				sourceUrl: recipe.sourceUrl ?? null,
+				sourceSiteName: recipe.sourceSiteName ?? null,
+				sourceAuthorName: recipe.sourceAuthorName ?? null,
+				sourcePublisherName: recipe.sourcePublisherName ?? null,
+				sourceIsBasedOnUrl: recipe.sourceIsBasedOnUrl ?? null,
+				sourceClaimedMinutes: recipe.cookTimeMinutes ?? null,
+				userNotes: recipe.userNotes ?? null,
+				updatedAt: new Date().toISOString()
+			})
+			.where(
+				and(
+					eq(userRecipes.id, recipeId),
+					eq(userRecipes.workosUserId, session.user.id),
+					isNull(userRecipes.deletedAt)
+				)
+			);
 
-	await updateRecipeIngredients(db, recipeId, recipe.ingredients ?? []);
-	await updateRecipeInstructions(db, recipeId, recipe.instructions ?? []);
+		await replaceRecipeIngredients(tx, recipeId, recipe.ingredients ?? []);
+		await replaceRecipeInstructions(tx, recipeId, recipe.instructions ?? []);
+	});
 
 	const profileRows = householdId
 		? await db
@@ -108,7 +110,8 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 		await loadMenuRecipes(db, session.user.id, householdId, { unitPreferences })
 	).find((candidate) => candidate.id === recipeId);
 
-	return json({ recipe: freshRecipe ?? recipe });
+	if (!freshRecipe) error(500, { message: 'Recipe was updated but could not be loaded.' });
+	return json({ recipe: freshRecipe });
 };
 
 export const PATCH: RequestHandler = async ({ cookies, locals, params, platform, url }) => {
