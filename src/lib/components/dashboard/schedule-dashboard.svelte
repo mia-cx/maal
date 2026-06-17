@@ -34,14 +34,9 @@
 	import { dropTargetFromPointer } from './schedule-dnd';
 	import { isMealInPool, sortMealPool } from './schedule-ordering';
 	import { submitMealCheckIn } from './schedule-check-ins';
-	import { fetchScheduleMealRange } from './schedule-meal-client';
+	import { fetchScheduleMealRange, ScheduleMealClientError } from './schedule-meal-client';
 	import { cardDirectionByKey, focusMealCard } from './schedule-keyboard';
-	import {
-		hasLoadedMealRange,
-		missingMealRanges,
-		parseMealRangeError,
-		type MealRange
-	} from './schedule-ranges';
+	import { hasLoadedMealRange, missingMealRanges, type MealRange } from './schedule-ranges';
 	import type { UnitPreferences } from '$lib/recipes/ingredient-text';
 	import type { HouseholdMember, Meal, MealDropTarget, ScheduleMode } from './schedule-types';
 
@@ -99,7 +94,7 @@
 	let hydratedRecipesSignature = $state('');
 	let loadedMealRanges = $state<MealRange[]>([]);
 	let loadingMealRangeKey = $state('');
-	let failedMealRangeKeys = $state<string[]>([]);
+	let pendingMealRange = $state<MealRange | null>(null);
 	let mealRangeError = $state<string | null>(null);
 	let renderedMealRange = $state<{ start: string; end: string } | null>(null);
 
@@ -130,9 +125,9 @@
 		'm'
 	].map((key) => ({ key, meta: false, ctrl: false, alt: false }));
 
-	const loadMealRangeSegment = async (range: { start: string; end: string }) => {
+	const loadMealRangeSegment = async (range: MealRange) => {
 		const key = `${range.start}:${range.end}`;
-		if (loadingMealRangeKey === key || failedMealRangeKeys.includes(key)) return;
+		if (loadingMealRangeKey === key) return;
 		loadingMealRangeKey = key;
 		try {
 			const meals = await fetchScheduleMealRange(range);
@@ -140,15 +135,9 @@
 			mergeHydratedScheduleMeals(meals, range.start, range.end);
 			loadedMealRanges = [...loadedMealRanges, { start: range.start, end: range.end }];
 		} catch (error) {
-			failedMealRangeKeys = [...failedMealRangeKeys, key];
-			const message =
-				error instanceof Response
-					? await parseMealRangeError(error)
-					: error instanceof Error
-						? error.message
-						: 'Failed to load meal range.';
+			const message = error instanceof Error ? error.message : 'Failed to load meal range.';
 			mealRangeError = message;
-			if (!(error instanceof Response) || error.status !== 402) {
+			if (!(error instanceof ScheduleMealClientError) || error.status !== 402) {
 				console.error('Failed to load meal range', error);
 			}
 		} finally {
@@ -156,10 +145,25 @@
 		}
 	};
 
-	const loadMealRange = async (range: { start: string; end: string }) => {
-		if (hasLoadedMealRange(loadedMealRanges, range.start, range.end) || loadingMealRangeKey) return;
-		for (const missingRange of missingMealRanges(loadedMealRanges, range)) {
-			await loadMealRangeSegment(missingRange);
+	const loadMealRange = async (range: MealRange) => {
+		if (hasLoadedMealRange(loadedMealRanges, range.start, range.end)) return;
+		if (loadingMealRangeKey) {
+			pendingMealRange = range;
+			return;
+		}
+		try {
+			for (const missingRange of missingMealRanges(loadedMealRanges, range)) {
+				await loadMealRangeSegment(missingRange);
+			}
+		} finally {
+			const pendingRange = pendingMealRange;
+			pendingMealRange = null;
+			if (
+				pendingRange &&
+				!hasLoadedMealRange(loadedMealRanges, pendingRange.start, pendingRange.end)
+			) {
+				void loadMealRange(pendingRange);
+			}
 		}
 	};
 
