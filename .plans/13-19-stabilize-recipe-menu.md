@@ -21,7 +21,7 @@ Address the menu component and route review findings as one coherent hardening p
 - [x] Transactionalize create/update lifecycle writes and align post-write reload behavior.
 - [x] Transactionalize archive/restore/permanent delete paths and only delete meals after recipe links are removed and no links remain.
 - [x] Harden menu load household/promise failure handling and add visible client error behavior where needed.
-- [ ] Run focused menu validation and final repo checks; update PR notes with results.
+- [x] Run focused menu validation and final repo checks; update PR notes with results.
 
 ## Notes
 - 2026-06-17: Issues #13 and #19 are open. Parent worktree has unrelated local changes; this worktree was created from `origin/main` to leave them untouched.
@@ -31,3 +31,4 @@ Address the menu component and route review findings as one coherent hardening p
 - 2026-06-17: Create/update transaction TODO complete. POST now inserts the user recipe, ingredients, instructions, and sidecars in one transaction using replace helpers. PUT now updates the main row plus ingredients/instructions in one transaction and fails if the persisted recipe cannot be reloaded. `pnpm check` passes.
 - 2026-06-17: Permanent delete lifecycle TODO complete. Single and bulk permanent deletes now run in a transaction, remove target recipe links first, delete only meals with no remaining recipe links, then delete archived recipe rows. `pnpm check` passes.
 - 2026-06-17: Menu load hardening TODO complete. Server load no longer swallows household lookup failures and returns concrete recipe values instead of unresolved promises. Client cache/state now clears when the active household becomes falsy and clears the household cookie through the existing writer. `pnpm check` passes.
+- 2026-06-17: Final validation complete: `pnpm test:unit --run src/lib/components/menu src/lib/menu src/lib/server/services src/lib/server/db` passed 12 files / 52 tests; `pnpm architecture:check` passed; `pnpm check` passed.
