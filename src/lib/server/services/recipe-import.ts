@@ -1,6 +1,10 @@
 import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import { parseIngredientLine } from '$lib/recipes/ingredient-text';
-import { fetchRecipeImportPage } from './recipe-import-fetch';
+import {
+	fetchRecipeImportPage,
+	type RecipeImportFetchOptions,
+	type RecipeImportFetchRuntime
+} from './recipe-import-fetch';
 import { cleanImportedText } from './html-text';
 
 const maxImportBytes = 1_500_000;
@@ -117,8 +121,15 @@ const siteNameFromUrl = (url: string): string | undefined => {
 	}
 };
 
-export const fetchRecipeFromUrlForImport = async (url: string): Promise<RecipeMenuItem> => {
-	const { html, finalUrl } = await fetchRecipeImportPage(url, maxImportBytes);
+type RecipeImportOptions = Pick<RecipeImportFetchOptions, 'fetcher'> & {
+	runtime?: RecipeImportFetchRuntime;
+};
+
+export const fetchRecipeFromUrlForImport = async (
+	url: string,
+	options: RecipeImportOptions = {}
+): Promise<RecipeMenuItem> => {
+	const { html, finalUrl } = await fetchRecipeImportPage(url, maxImportBytes, options);
 	const nodes = parseJsonLdScripts(html).flatMap(flattenJsonLd);
 	const recipe = nodes.find((node) => recipeType(node['@type']));
 	if (!recipe) throw new Error('No schema.org JSON-LD Recipe data found on that page.');

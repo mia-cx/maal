@@ -134,7 +134,7 @@ export const createMealResolvingRecipe = async (
 		const recipe = await createUserRecipe({
 			db: context.db,
 			workosUserId: context.key.userId,
-			recipe: await fetchRecipeFromUrlForImport(url)
+			recipe: await fetchRecipeFromUrlForImport(url, { runtime: 'cloudflare-workers' })
 		});
 		return createMealFromArgs(householdId, context.key.userId, args, recipe.id);
 	}
