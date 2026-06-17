@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import * as InputOTP from '$lib/components/ui/input-otp';
+	import VerificationCodeInput from '$lib/components/settings/verification-code-input.svelte';
 
 	let {
 		accountName = $bindable(''),
@@ -35,8 +35,8 @@
 		accountSaving: boolean;
 		accountMessage: string | null;
 		accountError: string | null;
-		saveAccount: (event: SubmitEvent) => void;
-		sendVerificationEmail: () => void;
+		saveAccount: (event: SubmitEvent) => void | Promise<void>;
+		sendVerificationEmail: () => void | Promise<void>;
 	} = $props();
 </script>
 
@@ -68,21 +68,11 @@
 			</div>
 			{#if emailVerificationRequired}
 				<div class="grid gap-1">
-					<InputOTP.Root
-						maxlength={6}
+					<VerificationCodeInput
+						length={6}
 						bind:value={emailVerificationCode}
 						disabled={emailVerificationBusy || verificationEmail !== normalizedAccountEmail}
-						aria-label="Verification code"
-						class="gap-1.5"
-					>
-						{#snippet children({ cells })}
-							<InputOTP.Group>
-								{#each cells as cell, index (index)}
-									<InputOTP.Slot {cell} />
-								{/each}
-							</InputOTP.Group>
-						{/snippet}
-					</InputOTP.Root>
+					/>
 					{#if emailVerificationChecking}
 						<span class="text-muted-foreground">Checking code…</span>
 					{:else if verificationEmail !== normalizedAccountEmail}

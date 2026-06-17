@@ -1,4 +1,4 @@
-import { error, json, type RequestHandler } from '@sveltejs/kit';
+import { error, isHttpError, json, type RequestHandler } from '@sveltejs/kit';
 import { getRequestMetadata } from '$lib/server/auth/session';
 import { createAuthRuntime } from '$lib/server/auth/workos';
 import { readJsonObject } from '$lib/server/http/request';
@@ -50,6 +50,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 
 		return json({ ok: true });
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error('Failed to change WorkOS password', cause);
 		error(400, { message: 'Could not change password. Check your current password.' });
 	}

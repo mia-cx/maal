@@ -1,7 +1,7 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
-	import * as InputOTP from '$lib/components/ui/input-otp';
+	import VerificationCodeInput from '$lib/components/settings/verification-code-input.svelte';
 
 	type MfaSetup = {
 		factorId: string;
@@ -23,8 +23,10 @@
 		mfaSetup: MfaSetup | null;
 		mfaVerifyBusy: boolean;
 		verificationCodeMinLength: number;
-		verifyMfaSetup: () => void;
+		verifyMfaSetup: () => void | Promise<void>;
 	} = $props();
+
+	const codeLengthLabel = $derived(`${verificationCodeMinLength}-digit code`);
 </script>
 
 <Dialog.Root bind:open>
@@ -32,7 +34,7 @@
 		<Dialog.Header>
 			<Dialog.Title>Set up two-factor authentication</Dialog.Title>
 			<Dialog.Description>
-				Scan the QR code with your authenticator app, then enter the 6-digit code.
+				Scan the QR code with your authenticator app, then enter the {codeLengthLabel}.
 			</Dialog.Description>
 		</Dialog.Header>
 		{#if mfaSetup}
@@ -51,15 +53,12 @@
 					>
 				</div>
 				<div class="grid justify-center gap-2">
-					<InputOTP.Root maxlength={6} bind:value={mfaCode} aria-label="Authenticator code">
-						{#snippet children({ cells })}
-							<InputOTP.Group>
-								{#each cells as cell, index (index)}
-									<InputOTP.Slot {cell} />
-								{/each}
-							</InputOTP.Group>
-						{/snippet}
-					</InputOTP.Root>
+					<VerificationCodeInput
+						length={verificationCodeMinLength}
+						bind:value={mfaCode}
+						label="Authenticator code"
+						class=""
+					/>
 				</div>
 				<div class="flex justify-end gap-2">
 					<Button variant="ghost" disabled={mfaVerifyBusy} onclick={() => (open = false)}>

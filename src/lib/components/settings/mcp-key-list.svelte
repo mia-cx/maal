@@ -17,9 +17,9 @@
 		mcpKeysBusy: boolean;
 		rerollingMcpKeyId: string | null;
 		revokingMcpKeyId: string | null;
-		loadMcpKeys: (force?: boolean) => void;
-		rerollMcpAccessKey: (key: McpKey) => void;
-		confirmRevokeMcpKey: (key: McpKey) => void;
+		loadMcpKeys: (force?: boolean) => void | Promise<void>;
+		rerollMcpAccessKey: (key: McpKey) => void | Promise<void>;
+		confirmRevokeMcpKey: (key: McpKey) => void | Promise<void>;
 		openCreateForm: () => void;
 	} = $props();
 </script>

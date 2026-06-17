@@ -20,7 +20,7 @@
 		passwordMessage: string | null;
 		passwordError: string | null;
 		passwordChangeBusy: boolean;
-		changePassword: () => void;
+		changePassword: () => void | Promise<void>;
 	} = $props();
 </script>
 

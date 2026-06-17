@@ -1,6 +1,7 @@
-import { error, json, type RequestHandler } from '@sveltejs/kit';
+import { error, isHttpError, json, type RequestHandler } from '@sveltejs/kit';
 import { createAuthRuntime } from '$lib/server/auth/workos';
 import { readJsonObject } from '$lib/server/http/request';
+import { isVerificationCode, normalizeVerificationCode } from '$lib/settings/verification-code';
 
 const issuer = 'Maal';
 
@@ -71,8 +72,10 @@ const readVerification = async (
 	const body = await readJsonObject(request);
 	const factorId = factorIdFromBody(body);
 	const challengeId = typeof body.challengeId === 'string' ? body.challengeId : '';
-	const code = typeof body.code === 'string' ? body.code.replace(/\D/g, '') : '';
-	if (!challengeId || code.length < 6) error(400, { message: 'Verification code is required.' });
+	if (!challengeId) error(400, { message: 'Authenticator setup session is required.' });
+
+	const code = normalizeVerificationCode(body.code);
+	if (!isVerificationCode(code)) error(400, { message: 'Enter the 6-digit verification code.' });
 	return { factorId, challengeId, code };
 };
 
@@ -84,6 +87,7 @@ export const GET: RequestHandler = async ({ locals, platform }) => {
 		const factors = await listTotpFactors(platform, session.user.id);
 		return json({ factors: factors.map(publicFactor) });
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error('Failed to list MFA factors', cause);
 		error(502, { message: 'Could not load two-factor methods.' });
 	}
@@ -110,6 +114,7 @@ export const POST: RequestHandler = async ({ locals, platform }) => {
 			secret: enrollment.authenticationFactor.totp.secret
 		});
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error('Failed to start MFA setup', cause);
 		error(502, { message: 'Could not start two-factor setup.' });
 	}
@@ -143,8 +148,9 @@ export const PUT: RequestHandler = async ({ locals, platform, request }) => {
 		const refreshedFactors = await listTotpFactors(platform, session.user.id);
 		return json({ verified: true, factors: refreshedFactors.map(publicFactor) });
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error('Failed to verify MFA setup', cause);
-		error(400, { message: 'That code did not match.' });
+		error(502, { message: 'Could not verify two-factor setup.' });
 	}
 };
 
@@ -159,6 +165,7 @@ export const DELETE: RequestHandler = async ({ locals, platform, request }) => {
 		const factors = await listTotpFactors(platform, session.user.id);
 		return json({ factors: factors.map(publicFactor) });
 	} catch (cause) {
+		if (isHttpError(cause)) throw cause;
 		console.error('Failed to delete MFA factor', cause);
 		error(502, { message: 'Could not remove two-factor method.' });
 	}

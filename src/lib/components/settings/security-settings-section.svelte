@@ -21,8 +21,8 @@
 		securityMessage: string | null;
 		securityError: string | null;
 		openPasswordChange: () => void;
-		startMfaSetup: () => void;
-		confirmDeleteMfaFactor: (factor: MfaFactor) => void;
+		startMfaSetup: () => void | Promise<void>;
+		confirmDeleteMfaFactor: (factor: MfaFactor) => void | Promise<void>;
 	} = $props();
 </script>
 

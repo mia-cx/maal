@@ -38,4 +38,10 @@ describe('MCP key model', () => {
 		expect(setMcpScopeWriteLevel({ meals: 'read' }, 'meals', true)).toEqual({ meals: 'write' });
 		expect(setMcpScopeWriteLevel({ meals: 'write' }, 'meals', false)).toEqual({ meals: 'read' });
 	});
+
+	it('ignores unknown scope group ids at runtime', () => {
+		const levels = { meals: 'read' } as const;
+		expect(setMcpScopeReadLevel(levels, 'unknown' as never, true)).toBe(levels);
+		expect(setMcpScopeWriteLevel(levels, 'unknown' as never, true)).toBe(levels);
+	});
 });

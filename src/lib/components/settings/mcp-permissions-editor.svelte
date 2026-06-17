@@ -1,15 +1,19 @@
 <script lang="ts">
 	import { Checkbox } from '$lib/components/ui/checkbox';
-	import { mcpScopeGroups, type McpScopeLevel } from '$lib/settings/mcp-key-model';
+	import {
+		mcpScopeGroups,
+		type McpScopeGroupId,
+		type McpScopeLevels
+	} from '$lib/settings/mcp-key-model';
 
 	let {
 		mcpScopeLevels,
 		setMcpScopeRead,
 		setMcpScopeWrite
 	}: {
-		mcpScopeLevels: Record<string, McpScopeLevel>;
-		setMcpScopeRead: (groupId: string, checked: boolean) => void;
-		setMcpScopeWrite: (groupId: string, checked: boolean) => void;
+		mcpScopeLevels: McpScopeLevels;
+		setMcpScopeRead: (groupId: McpScopeGroupId, checked: boolean) => void;
+		setMcpScopeWrite: (groupId: McpScopeGroupId, checked: boolean) => void;
 	} = $props();
 </script>
 

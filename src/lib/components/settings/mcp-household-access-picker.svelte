@@ -51,7 +51,7 @@
 				</Button>
 			</Popover.Trigger>
 			<Popover.Content align="start" class="w-[22rem] max-w-[calc(100vw-2rem)] p-1">
-				<Command.Root>
+				<Command.Root shouldFilter={false}>
 					<Command.Input bind:value={mcpHouseholdQuery} placeholder="Search households…" />
 					<Command.List class="max-h-56 overflow-y-auto p-1">
 						{#if filteredMcpHouseholds.length === 0}
@@ -60,9 +60,9 @@
 							{#each filteredMcpHouseholds as household (household.id)}
 								{@const checked = mcpKeyHouseholdIds.includes(household.id)}
 								<Command.Item
-									value={household.name}
+									value={household.id}
 									data-checked={checked}
-									onselect={() => toggleMcpHousehold(household.id, !checked)}
+									onSelect={() => toggleMcpHousehold(household.id, !checked)}
 								>
 									<Checkbox {checked} class="pointer-events-none" />
 									<span class="truncate">{household.name}</span>
