@@ -15,7 +15,7 @@ Tighten remaining miscellaneous component reliability issues: public marketing c
 - [x] Clean up public marketing components: footer CDN/links, wordmark rendering, sticky header globals, pricing CTA typing, and gradient blur dead CSS.
 - [x] Fix nav-user local state semantics and unreachable link branches.
 - [x] Harden household onboarding, team switching, and delete confirm async paths.
-- [ ] Harden user settings async handlers and remove dead imports/state.
+- [x] Harden user settings async handlers and remove dead imports/state.
 - [ ] Run final validation and file the PR.
 
 ## Notes
@@ -23,3 +23,4 @@ Tighten remaining miscellaneous component reliability issues: public marketing c
 - Public marketing validation: `pnpm exec prettier --write ... && pnpm check` passed with 0 Svelte diagnostics.
 - Nav user validation: `pnpm exec prettier --write src/lib/components/nav-user.svelte && pnpm check` passed with 0 Svelte diagnostics.
 - Async component validation: `pnpm exec prettier --write src/lib/components/delete-confirm-dialog.svelte src/lib/components/household/household-onboarding.svelte src/lib/components/team-switcher.svelte && pnpm check` passed with 0 Svelte diagnostics.
+- User settings validation: `pnpm exec prettier --write src/lib/components/user-settings-dialog.svelte && pnpm check` passed with 0 Svelte diagnostics.

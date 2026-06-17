@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import type { Pathname } from '$app/types';
 	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import AccountSettingsSection from '$lib/components/settings/account-settings-section.svelte';
@@ -22,7 +21,6 @@
 		setMcpScopeWriteLevel,
 		toggleMcpHouseholdId,
 		type McpKey,
-		type McpScope,
 		type McpScopeGroupId,
 		type McpScopeLevels
 	} from '$lib/settings/mcp-key-model';
@@ -145,7 +143,6 @@
 
 	const verificationCodeMinLength = 6;
 	const normalizedAccountEmail = $derived(normalizedEmail(accountEmail));
-	const currentAccountEmail = $derived(normalizedEmail(user.email));
 	const accountEmailChanged = $derived(hasAccountEmailChanged(accountEmail, user.email));
 	const accountEmailVerified = $derived(isAccountEmailVerified(accountEmail, verifiedEmail));
 	const emailVerificationRequired = $derived(
@@ -171,11 +168,15 @@
 		const nextUrl = new URL(page.url);
 		nextUrl.searchParams.set('settings', category.id);
 		lastSettingsUrlParam = category.id;
-		await goto(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`, {
-			keepFocus: true,
-			noScroll: true,
-			replaceState: true
-		});
+		try {
+			await goto(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`, {
+				keepFocus: true,
+				noScroll: true,
+				replaceState: true
+			});
+		} catch {
+			accountError = 'Could not update the settings URL.';
+		}
 	};
 
 	$effect(() => {
@@ -215,21 +216,25 @@
 		accountMessage = null;
 		accountError = null;
 
-		const body = await saveAccountSettings({ name: accountName, email: accountEmail });
-
-		accountSaving = false;
-		if (!body.ok) {
-			accountError = body.error;
-			return;
+		try {
+			const body = await saveAccountSettings({ name: accountName, email: accountEmail });
+			if (!body.ok) {
+				accountError = body.error;
+				return;
+			}
+			onuserupdate?.(body.user);
+			accountName = body.user.name ?? body.user.email;
+			accountEmail = body.pendingEmail ?? body.user.email;
+			verifiedEmail = body.user.emailVerified ? body.user.email.toLowerCase() : null;
+			verificationEmail = body.pendingEmail ?? null;
+			emailVerificationCode = '';
+			lastVerificationAttempt = '';
+			accountMessage = body.pendingEmail ? 'Verification code sent.' : 'Saved.';
+		} catch {
+			accountError = 'Could not save account settings.';
+		} finally {
+			accountSaving = false;
 		}
-		onuserupdate?.(body.user);
-		accountName = body.user.name ?? body.user.email;
-		accountEmail = body.pendingEmail ?? body.user.email;
-		verifiedEmail = body.user.emailVerified ? body.user.email.toLowerCase() : null;
-		verificationEmail = body.pendingEmail ?? null;
-		emailVerificationCode = '';
-		lastVerificationAttempt = '';
-		accountMessage = body.pendingEmail ? 'Verification code sent.' : 'Saved.';
 	};
 
 	const sendVerificationEmail = async () => {
@@ -238,17 +243,21 @@
 		accountMessage = null;
 		accountError = null;
 
-		const result = await sendAccountVerificationEmail(normalizedAccountEmail);
-
-		emailVerificationBusy = false;
-		if (!result.ok) {
-			accountError = result.error;
-			return;
+		try {
+			const result = await sendAccountVerificationEmail(normalizedAccountEmail);
+			if (!result.ok) {
+				accountError = result.error;
+				return;
+			}
+			verificationEmail = normalizedAccountEmail;
+			emailVerificationCode = '';
+			lastVerificationAttempt = '';
+			accountMessage = 'Verification code sent.';
+		} catch {
+			accountError = 'Could not send a verification code.';
+		} finally {
+			emailVerificationBusy = false;
 		}
-		verificationEmail = normalizedAccountEmail;
-		emailVerificationCode = '';
-		lastVerificationAttempt = '';
-		accountMessage = 'Verification code sent.';
 	};
 
 	const verifyEmailCode = async (email: string, code: string) => {
@@ -258,20 +267,24 @@
 		accountMessage = null;
 		accountError = null;
 
-		const body = await verifyAccountEmailCode({ email, code });
-
-		emailVerificationChecking = false;
-		if (!body.ok) {
-			accountError = body.error;
-			return;
+		try {
+			const body = await verifyAccountEmailCode({ email, code });
+			if (!body.ok) {
+				accountError = body.error;
+				return;
+			}
+			onuserupdate?.(body.user);
+			accountName = body.user.name ?? body.user.email;
+			accountEmail = body.user.email;
+			verifiedEmail = body.user.emailVerified ? body.user.email.toLowerCase() : email;
+			verificationEmail = null;
+			emailVerificationCode = '';
+			accountMessage = 'Email changed.';
+		} catch {
+			accountError = 'Could not verify that code.';
+		} finally {
+			emailVerificationChecking = false;
 		}
-		onuserupdate?.(body.user);
-		accountName = body.user.name ?? body.user.email;
-		accountEmail = body.user.email;
-		verifiedEmail = body.user.emailVerified ? body.user.email.toLowerCase() : email;
-		verificationEmail = null;
-		emailVerificationCode = '';
-		accountMessage = 'Email changed.';
 	};
 
 	$effect(() => {
@@ -295,15 +308,20 @@
 		mfaFactorsBusy = true;
 		securityError = null;
 
-		const result = await requestMfaFactors();
-		mfaFactorsBusy = false;
-		if (!result.ok) {
-			securityError = result.error;
-			return;
-		}
+		try {
+			const result = await requestMfaFactors();
+			if (!result.ok) {
+				securityError = result.error;
+				return;
+			}
 
-		mfaFactors = result.factors;
-		mfaFactorsLoaded = true;
+			mfaFactors = result.factors;
+			mfaFactorsLoaded = true;
+		} catch {
+			securityError = 'Could not load authentication factors.';
+		} finally {
+			mfaFactorsBusy = false;
+		}
 	};
 
 	$effect(() => {
@@ -319,20 +337,25 @@
 		if (mcpKeysBusy || (mcpKeysLoaded && !force)) return;
 		mcpKeysBusy = true;
 		mcpError = null;
-		const body = await requestMcpKeys();
-		mcpKeysBusy = false;
-		if (!body.ok) {
-			mcpError = body.error;
-			return;
+		try {
+			const body = await requestMcpKeys();
+			if (!body.ok) {
+				mcpError = body.error;
+				return;
+			}
+			mcpKeys = body.keys;
+			mcpHouseholds = body.households;
+			mcpKeyHouseholdIds = mcpKeyHouseholdIds.length
+				? mcpKeyHouseholdIds
+				: body.households[0]
+					? [body.households[0].id]
+					: [];
+			mcpKeysLoaded = true;
+		} catch {
+			mcpError = 'Could not load MCP keys.';
+		} finally {
+			mcpKeysBusy = false;
 		}
-		mcpKeys = body.keys;
-		mcpHouseholds = body.households;
-		mcpKeyHouseholdIds = mcpKeyHouseholdIds.length
-			? mcpKeyHouseholdIds
-			: body.households[0]
-				? [body.households[0].id]
-				: [];
-		mcpKeysLoaded = true;
 	};
 
 	$effect(() => {
@@ -356,24 +379,29 @@
 		mcpMessage = null;
 		mcpError = null;
 		createdMcpKey = null;
-		const body = await createMcpKey({
-			label: mcpKeyLabel,
-			scopes: selectedMcpScopes,
-			householdScope:
-				mcpKeyHouseholdKind === 'all'
-					? { kind: 'all' }
-					: { kind: 'households', householdIds: mcpKeyHouseholdIds }
-		});
-		mcpKeyCreating = false;
-		if (!body.ok) {
-			mcpError = body.error;
-			return;
+		try {
+			const body = await createMcpKey({
+				label: mcpKeyLabel,
+				scopes: selectedMcpScopes,
+				householdScope:
+					mcpKeyHouseholdKind === 'all'
+						? { kind: 'all' }
+						: { kind: 'households', householdIds: mcpKeyHouseholdIds }
+			});
+			if (!body.ok) {
+				mcpError = body.error;
+				return;
+			}
+			createdMcpKey = body.key;
+			mcpKeys = [body.record, ...mcpKeys];
+			mcpKeyLabel = '';
+			mcpKeyFormOpen = false;
+			mcpMessage = 'MCP key created. Copy it now — it will not be shown again.';
+		} catch {
+			mcpError = 'Could not create MCP key.';
+		} finally {
+			mcpKeyCreating = false;
 		}
-		createdMcpKey = body.key;
-		mcpKeys = [body.record, ...mcpKeys];
-		mcpKeyLabel = '';
-		mcpKeyFormOpen = false;
-		mcpMessage = 'MCP key created. Copy it now — it will not be shown again.';
 	};
 
 	const rerollMcpAccessKey = async (key: McpKey) => {
@@ -381,17 +409,22 @@
 		mcpError = null;
 		mcpMessage = null;
 		createdMcpKey = null;
-		const body = await rerollMcpKey(key.id);
-		rerollingMcpKeyId = null;
-		if (!body.ok) {
-			mcpError = body.error;
-			return;
+		try {
+			const body = await rerollMcpKey(key.id);
+			if (!body.ok) {
+				mcpError = body.error;
+				return;
+			}
+			createdMcpKey = body.key;
+			mcpKeys = mcpKeys.map((existingKey) =>
+				existingKey.id === body.record.id ? body.record : existingKey
+			);
+			mcpMessage = 'MCP key rerolled. Copy the new key now — it will not be shown again.';
+		} catch {
+			mcpError = 'Could not reroll MCP key.';
+		} finally {
+			rerollingMcpKeyId = null;
 		}
-		createdMcpKey = body.key;
-		mcpKeys = mcpKeys.map((existingKey) =>
-			existingKey.id === body.record.id ? body.record : existingKey
-		);
-		mcpMessage = 'MCP key rerolled. Copy the new key now — it will not be shown again.';
 	};
 
 	const copyCreatedMcpKey = async () => {
@@ -406,21 +439,27 @@
 
 	const revokeMcpAccessKey = async () => {
 		if (!mcpKeyToRevoke) return;
-		revokingMcpKeyId = mcpKeyToRevoke.id;
+		const keyId = mcpKeyToRevoke.id;
+		revokingMcpKeyId = keyId;
 		mcpError = null;
 		mcpMessage = null;
-		const result = await revokeMcpKey(mcpKeyToRevoke.id);
-		revokingMcpKeyId = null;
-		if (!result.ok) {
-			mcpError = result.error;
-			return;
+		try {
+			const result = await revokeMcpKey(keyId);
+			if (!result.ok) {
+				mcpError = result.error;
+				return;
+			}
+			mcpKeys = mcpKeys.map((key) =>
+				key.id === keyId ? { ...key, revokedAt: new Date().toISOString() } : key
+			);
+			mcpRevokeOpen = false;
+			mcpKeyToRevoke = null;
+			mcpMessage = 'MCP key revoked.';
+		} catch {
+			mcpError = 'Could not revoke MCP key.';
+		} finally {
+			revokingMcpKeyId = null;
 		}
-		mcpKeys = mcpKeys.map((key) =>
-			key.id === mcpKeyToRevoke?.id ? { ...key, revokedAt: new Date().toISOString() } : key
-		);
-		mcpRevokeOpen = false;
-		mcpKeyToRevoke = null;
-		mcpMessage = 'MCP key revoked.';
 	};
 
 	const confirmRevokeMcpKey = (key: McpKey) => {
@@ -437,13 +476,18 @@
 		if (billingBusy) return;
 		billingBusy = true;
 		billingError = null;
-		const result = await requestBillingStatus();
-		billingBusy = false;
-		if (!result.ok) {
-			billingError = result.error;
-			return;
+		try {
+			const result = await requestBillingStatus();
+			if (!result.ok) {
+				billingError = result.error;
+				return;
+			}
+			billingStatus = result.status;
+		} catch {
+			billingError = 'Could not load billing status.';
+		} finally {
+			billingBusy = false;
 		}
-		billingStatus = result.status;
 	};
 
 	$effect(() => {
@@ -454,13 +498,18 @@
 		if (!householdId) return;
 		billingPortalBusy = true;
 		billingError = null;
-		const result = await createBillingPortalSession(householdId);
-		billingPortalBusy = false;
-		if (!result.ok) {
-			billingError = result.error;
-			return;
+		try {
+			const result = await createBillingPortalSession(householdId);
+			if (!result.ok) {
+				billingError = result.error;
+				return;
+			}
+			if (result.url) window.open(result.url, '_blank', 'noopener,noreferrer');
+		} catch {
+			billingError = 'Could not open the billing portal.';
+		} finally {
+			billingPortalBusy = false;
 		}
-		if (result.url) window.open(result.url, '_blank', 'noopener,noreferrer');
 	};
 
 	const startMfaSetup = async () => {
@@ -468,17 +517,21 @@
 		securityMessage = null;
 		securityError = null;
 
-		const result = await startMfaSetupRequest();
+		try {
+			const result = await startMfaSetupRequest();
+			if (!result.ok) {
+				securityError = result.error;
+				return;
+			}
 
-		mfaSetupBusy = false;
-		if (!result.ok) {
-			securityError = result.error;
-			return;
+			mfaSetup = result.setup;
+			mfaCode = '';
+			mfaSetupOpen = true;
+		} catch {
+			securityError = 'Could not start two-factor setup.';
+		} finally {
+			mfaSetupBusy = false;
 		}
-
-		mfaSetup = result.setup;
-		mfaCode = '';
-		mfaSetupOpen = true;
 	};
 
 	const verifyMfaSetup = async () => {
@@ -487,24 +540,28 @@
 		securityMessage = null;
 		securityError = null;
 
-		const result = await verifyMfaSetupRequest({
-			factorId: mfaSetup.factorId,
-			challengeId: mfaSetup.challengeId,
-			code: mfaCode
-		});
+		try {
+			const result = await verifyMfaSetupRequest({
+				factorId: mfaSetup.factorId,
+				challengeId: mfaSetup.challengeId,
+				code: mfaCode
+			});
+			if (!result.ok) {
+				securityError = result.error;
+				return;
+			}
 
-		mfaVerifyBusy = false;
-		if (!result.ok) {
-			securityError = result.error;
-			return;
+			mfaFactors = result.factors ?? mfaFactors;
+			mfaFactorsLoaded = true;
+			mfaSetupOpen = false;
+			mfaSetup = null;
+			mfaCode = '';
+			securityMessage = 'Two-factor authentication is set up.';
+		} catch {
+			securityError = 'Could not verify that authenticator code.';
+		} finally {
+			mfaVerifyBusy = false;
 		}
-
-		mfaFactors = result.factors ?? mfaFactors;
-		mfaFactorsLoaded = true;
-		mfaSetupOpen = false;
-		mfaSetup = null;
-		mfaCode = '';
-		securityMessage = 'Two-factor authentication is set up.';
 	};
 
 	const deleteMfaFactor = async () => {
@@ -514,18 +571,22 @@
 		securityMessage = null;
 		securityError = null;
 
-		const result = await deleteMfaFactorRequest(factor.id);
+		try {
+			const result = await deleteMfaFactorRequest(factor.id);
+			if (!result.ok) {
+				securityError = result.error;
+				return;
+			}
 
-		deletingMfaFactorId = null;
-		if (!result.ok) {
-			securityError = result.error;
-			return;
+			mfaFactors = result.factors;
+			mfaDeleteOpen = false;
+			mfaFactorToDelete = null;
+			securityMessage = 'Authenticator app removed.';
+		} catch {
+			securityError = 'Could not remove authenticator app.';
+		} finally {
+			deletingMfaFactorId = null;
 		}
-
-		mfaFactors = result.factors;
-		mfaDeleteOpen = false;
-		mfaFactorToDelete = null;
-		securityMessage = 'Authenticator app removed.';
 	};
 
 	const confirmDeleteMfaFactor = (factor: MfaFactor) => {
@@ -555,16 +616,20 @@
 		}
 
 		passwordChangeBusy = true;
-		const result = await changePasswordRequest({ currentPassword, newPassword });
+		try {
+			const result = await changePasswordRequest({ currentPassword, newPassword });
+			if (!result.ok) {
+				passwordError = result.error;
+				return;
+			}
 
-		passwordChangeBusy = false;
-		if (!result.ok) {
-			passwordError = result.error;
-			return;
+			passwordChangeOpen = false;
+			securityMessage = 'Password changed.';
+		} catch {
+			passwordError = 'Could not change password.';
+		} finally {
+			passwordChangeBusy = false;
 		}
-
-		passwordChangeOpen = false;
-		securityMessage = 'Password changed.';
 	};
 </script>
 
