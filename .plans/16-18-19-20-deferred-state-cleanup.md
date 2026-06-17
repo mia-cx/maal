@@ -6,10 +6,10 @@ Clean up the remaining cross-app deferred/stale state hazards mechanically: keep
 
 ## Acceptance criteria
 
-- [ ] Household deferred `freshView` failures are caught and do not produce unhandled rejections.
-- [ ] Late household refresh resolutions cannot overwrite newer route data.
-- [ ] Fresh household view replacement does not retain stale top-level fields.
-- [ ] Menu/plan route caches store concrete resolved data without promise-based stale writes.
+- [x] Household deferred `freshView` failures are caught and do not produce unhandled rejections.
+- [x] Late household refresh resolutions cannot overwrite newer route data.
+- [x] Fresh household view replacement does not retain stale top-level fields.
+- [x] Menu/plan route caches store concrete resolved data without promise-based stale writes.
 - [x] Focused Svelte/type validation passes.
 
 ## TODOs
