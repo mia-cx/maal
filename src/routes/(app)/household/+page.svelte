@@ -33,6 +33,7 @@
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 	let view = $state<LocalPageData | null>(null);
+	let freshViewVersion = 0;
 
 	let initialView = untrack(() => data as LocalPageData);
 	let householdName = $state(initialView.household.name);
@@ -146,7 +147,8 @@
 		untrack(() => initialView.displayOverrideRows.ingredientOverrides)
 	);
 	const applyHouseholdView = (nextView: LocalPageData) => {
-		view = { ...currentView, ...nextView };
+		const { freshView: _freshView, ...resolvedView } = nextView;
+		view = resolvedView;
 		householdName = nextView.household.name;
 		defaultServings = String(nextView.profile.defaultServings);
 		locale = nextView.profile.locale;
@@ -174,11 +176,18 @@
 	};
 
 	$effect(() => {
+		const nextVersion = ++freshViewVersion;
 		view = data as LocalPageData;
 		if ('freshView' in data && data.freshView) {
-			void Promise.resolve(data.freshView).then((freshView) =>
-				applyHouseholdView(freshView as LocalPageData)
-			);
+			void Promise.resolve(data.freshView)
+				.then((freshView) => {
+					if (nextVersion !== freshViewVersion) return;
+					applyHouseholdView(freshView as LocalPageData);
+				})
+				.catch((cause) => {
+					if (nextVersion !== freshViewVersion) return;
+					console.error('Failed to refresh household view', cause);
+				});
 		}
 	});
 	const addUnitOverrideRow = () => {

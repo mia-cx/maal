@@ -11,10 +11,12 @@ Clean up the remaining cross-app deferred/stale state hazards mechanically: keep
 - [ ] Focused Svelte/type validation passes.
 
 ## TODOs
-- [ ] Guard household `freshView` hydration with a version token and rejection handling.
+- [x] Guard household `freshView` hydration with a version token and rejection handling.
 - [ ] Replace household view state cleanly and clone mutable override rows when applying fresh data.
 - [ ] Validate menu/plan synchronous route-data cache behavior and run focused checks.
 
 ## Notes
 - Issues #19 and #20 are closed, but this PR intentionally covers the cross-cutting deferred/stale subset called out by the user.
 - Svelte MCP server was unavailable in this session (`mcp` only listed `maal`), so local code and validation are the available Svelte checks.
+- `pnpm prettier --check 'src/routes/(app)/household/+page.svelte'` passed.
+- `pnpm check` passed after guarding `freshView` resolution/rejection.
