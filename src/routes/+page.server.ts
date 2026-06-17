@@ -1,6 +1,10 @@
 import type Stripe from 'stripe';
 import type { PageServerLoad } from './$types';
 import { resolveActiveHouseholdId } from '$lib/server/auth/household';
+import {
+	isSupportedFixedRecurringPrice,
+	supportedInterval
+} from '$lib/server/billing/pricing-options';
 import { createStripeClient, getStripePublicConfig } from '$lib/server/domains/billing';
 import { loadTrialAvailability } from '$lib/server/domains/billing';
 
@@ -21,32 +25,30 @@ const labelFor = (price: Stripe.Price): LandingPrice['label'] | null => {
 	return null;
 };
 
-const intervalFor = (
-	interval: Stripe.Price.Recurring.Interval
-): LandingPrice['interval'] | null => {
-	if (interval === 'week' || interval === 'month' || interval === 'year') return interval;
-	return null;
-};
-
 const priceOrder = new Map<LandingPrice['label'], number>([
 	['Weekly', 1],
 	['Monthly', 2],
 	['Yearly', 3]
 ]);
 
-const paidLandingPrice = (price: Stripe.Price): LandingPrice | null => {
+export const paidLandingPrice = (price: Stripe.Price): LandingPrice | null => {
+	if (!isSupportedFixedRecurringPrice(price)) return null;
 	const label = labelFor(price);
-	const interval = price.recurring ? intervalFor(price.recurring.interval) : null;
-	if (!label || !price.recurring || !interval) return null;
+	const interval = supportedInterval(price.recurring.interval);
+	if (!label || !interval) return null;
 	return {
 		id: price.id,
 		label,
-		amount: price.unit_amount ?? 0,
+		amount: price.unit_amount,
 		currency: price.currency,
 		interval,
 		intervalCount: price.recurring.interval_count
 	};
 };
+
+export const trialPriceIdFromPrices = (prices: Stripe.Price[]): string | null =>
+	prices.find((price) => isSupportedFixedRecurringPrice(price) && price.unit_amount === 0)?.id ??
+	null;
 
 const findProduct = async (stripe: Stripe, configuredProductId: string) => {
 	if (configuredProductId) return stripe.products.retrieve(configuredProductId);
@@ -72,7 +74,7 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 			.sort(
 				(left, right) => (priceOrder.get(left.label) ?? 99) - (priceOrder.get(right.label) ?? 99)
 			);
-		const trialPriceId = prices.data.find((price) => price.unit_amount === 0)?.id ?? null;
+		const trialPriceId = trialPriceIdFromPrices(prices.data);
 		let trialAvailable = false;
 		if (locals.session && platform?.env.DB && trialPriceId) {
 			const { householdId } = await resolveActiveHouseholdId({

@@ -41,16 +41,8 @@
 		return 'The normal rhythm for shared meal planning.';
 	};
 
-	const checkoutPath = (priceId: string, trialIntent = false): string => {
-		const params = new URLSearchParams({ priceId });
-		if (trialIntent) params.set('trial', '1');
-		return resolve(`/billing/checkout?${params.toString()}`);
-	};
-
-	const checkoutHref = (priceId: string, trialIntent = false): string => {
-		const path = checkoutPath(priceId, trialIntent);
-		return signedIn ? path : resolve(`/auth/login?returnTo=${encodeURIComponent(path)}`);
-	};
+	const checkoutAction = resolve('/billing/checkout');
+	const loginHref = resolve(`/auth/login?returnTo=${encodeURIComponent(resolve('/subscribe'))}`);
 
 	const showTrialCta = $derived(Boolean(trialPriceId && (!signedIn || trialAvailable)));
 	const ctaPriceId = (priceId: string): string =>
@@ -80,12 +72,27 @@
 					{planUseCase(price.label)}
 				</p>
 				<div class="mt-6 grid gap-2">
-					<Button
-						href={checkoutHref(ctaPriceId(price.id), showTrialCta)}
-						size="lg"
-						class="bg-[var(--brand)] text-white hover:bg-[var(--brand)]/90"
-						style={`--brand:${brand}`}>{ctaLabel}</Button
-					>
+					{#if signedIn}
+						<form method="POST" action={checkoutAction}>
+							<input type="hidden" name="priceId" value={ctaPriceId(price.id)} />
+							{#if showTrialCta}
+								<input type="hidden" name="trial" value="1" />
+							{/if}
+							<Button
+								type="submit"
+								size="lg"
+								class="w-full bg-[var(--brand)] text-white hover:bg-[var(--brand)]/90"
+								style={`--brand:${brand}`}>{ctaLabel}</Button
+							>
+						</form>
+					{:else}
+						<Button
+							href={loginHref}
+							size="lg"
+							class="bg-[var(--brand)] text-white hover:bg-[var(--brand)]/90"
+							style={`--brand:${brand}`}>{ctaLabel}</Button
+						>
+					{/if}
 				</div>
 			</div>
 		{/each}
