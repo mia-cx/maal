@@ -1,3 +1,5 @@
+import { dateKey as formatDateKey, parseDateKey } from '$lib/plan/date-key';
+
 const dayMs = 24 * 60 * 60 * 1000;
 
 export type WeekStartsOn = 'sunday' | 'monday';
@@ -9,9 +11,17 @@ export const addDays = (date: Date, days: number): Date => {
 };
 
 export const addMonths = (date: Date, months: number): Date => {
-	const next = new Date(date);
-	next.setMonth(next.getMonth() + months);
-	return next;
+	const targetMonth = date.getMonth() + months;
+	const lastDayOfTargetMonth = new Date(date.getFullYear(), targetMonth + 1, 0).getDate();
+	return new Date(
+		date.getFullYear(),
+		targetMonth,
+		Math.min(date.getDate(), lastDayOfTargetMonth),
+		date.getHours(),
+		date.getMinutes(),
+		date.getSeconds(),
+		date.getMilliseconds()
+	);
 };
 
 export const startOfDay = (date: Date): Date =>
@@ -37,16 +47,12 @@ export const dailyScrollDays = (date: Date): Date[] => {
 	return Array.from({ length: 63 }, (_, index) => addDays(start, index));
 };
 
-export const dateKey = (date: Date): string => {
-	const year = date.getFullYear();
-	const month = String(date.getMonth() + 1).padStart(2, '0');
-	const day = String(date.getDate()).padStart(2, '0');
-	return `${year}-${month}-${day}`;
-};
+export const dateKey = formatDateKey;
 
 export const dateFromKey = (key: string): Date => {
-	const [year, month, day] = key.split('-').map(Number);
-	return new Date(year, month - 1, day);
+	const date = parseDateKey(key);
+	if (!date) throw new Error(`Invalid date key: ${key}`);
+	return date;
 };
 
 const dayHeadingFormatter = new Intl.DateTimeFormat('en', {
