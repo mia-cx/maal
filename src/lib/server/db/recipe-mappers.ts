@@ -15,7 +15,7 @@ import {
 	userRecipes
 } from '$lib/server/db/schema';
 import type { MealFeedbackVerdict } from '$lib/domain/meal-feedback';
-import type { Meal } from '$lib/components/dashboard/schedule-types';
+import type { Meal } from '$lib/plan/plan-types';
 import type {
 	RecipeIngredientItem,
 	RecipeInstructionItem,

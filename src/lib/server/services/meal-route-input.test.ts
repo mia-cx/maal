@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Meal } from '$lib/components/dashboard/schedule-types';
+import type { Meal } from '$lib/plan/plan-types';
 import { mealToCreateInput, mealToUpdateInput } from './meal-route-input';
 
 const meal = (overrides: Partial<Meal> = {}): Meal => ({

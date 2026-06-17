@@ -28,13 +28,3 @@ export const missingMealRanges = (loadedMealRanges: MealRange[], range: MealRang
 	if (cursor <= range.end) missing.push({ start: cursor, end: range.end });
 	return missing;
 };
-
-export const parseMealRangeError = async (response: Response): Promise<string> => {
-	const body = await response.text();
-	try {
-		const parsed = JSON.parse(body) as { message?: string };
-		return parsed.message ?? body;
-	} catch {
-		return body;
-	}
-};

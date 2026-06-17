@@ -1,6 +1,6 @@
 <script lang="ts">
 	import ScheduleDashboard from '$lib/components/dashboard/schedule-dashboard.svelte';
-	import type { HouseholdMember, Meal } from '$lib/components/dashboard/schedule-types';
+	import type { HouseholdMember, Meal } from '$lib/plan/plan-types';
 	import { activeHouseholdId } from '$lib/stores/active-household';
 	import { getCachedPlanRouteData, setCachedPlanRouteData } from '$lib/stores/route-data-cache';
 	import { onDestroy, onMount } from 'svelte';
@@ -12,13 +12,9 @@
 	let unsubscribeActiveHousehold: (() => void) | null = null;
 
 	$effect(() => {
-		void Promise.all([Promise.resolve(data.meals), Promise.resolve(data.householdMembers)]).then(
-			([resolvedMeals, resolvedMembers]) => {
-				meals = resolvedMeals ?? [];
-				householdMembers = resolvedMembers ?? [];
-				setCachedPlanRouteData(data.activeHouseholdId, { meals, householdMembers });
-			}
-		);
+		meals = data.meals ?? [];
+		householdMembers = data.householdMembers ?? [];
+		setCachedPlanRouteData(data.activeHouseholdId, { meals, householdMembers });
 	});
 
 	onMount(() => {

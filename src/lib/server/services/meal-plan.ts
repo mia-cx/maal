@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import type { Meal } from '$lib/components/dashboard/schedule-types';
+import type { Meal } from '$lib/plan/plan-types';
 import { countActiveHouseholdMembers, listHouseholdMembers } from '$lib/server/auth/household';
 import { getDb } from '$lib/server/db';
 import {
