@@ -1,4 +1,4 @@
-import type { Meal } from '$lib/components/dashboard/schedule-types';
+import type { Meal } from '$lib/plan/plan-types';
 
 export const fetchScheduleMealRange = async (range: {
 	start: string;

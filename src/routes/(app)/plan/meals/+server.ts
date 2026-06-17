@@ -1,6 +1,6 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq } from 'drizzle-orm';
-import type { Meal } from '$lib/components/dashboard/schedule-types';
+import type { Meal } from '$lib/plan/plan-types';
 import { requireBillingAppContext } from '$lib/server/http/app-context';
 import { mapKnownError } from '$lib/server/http/domain-errors';
 import { readJsonObject } from '$lib/server/http/request';
@@ -36,7 +36,12 @@ const readMealId = async (request: Request): Promise<string> => {
 };
 
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
-	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({
+		cookies,
+		locals,
+		platform,
+		url
+	});
 	const startDate = dateParam(url, 'start');
 	const endDate = dateParam(url, 'end');
 	if (!startDate || !endDate) error(400, { message: 'Date range is required.' });
@@ -54,7 +59,12 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 };
 
 export const POST: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({
+		cookies,
+		locals,
+		platform,
+		url
+	});
 	const meal = await readMeal(request);
 
 	try {
@@ -85,7 +95,12 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 };
 
 export const PUT: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({
+		cookies,
+		locals,
+		platform,
+		url
+	});
 	const meal = await readMeal(request);
 
 	const existingMeal = await db
