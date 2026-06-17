@@ -65,14 +65,6 @@ export function buildPolicy(slug: LegalPolicySlug, today = currentLegalDate()): 
 	};
 }
 
-export function getPolicies(today = currentLegalDate()): Record<LegalPolicySlug, LegalPolicy> {
-	return {
-		privacy: buildPolicy('privacy', today),
-		terms: buildPolicy('terms', today),
-		cookies: buildPolicy('cookies', today)
-	};
-}
-
 export function getPolicyList(today = currentLegalDate()): LegalPolicy[] {
 	return policySlugs.map((slug) => buildPolicy(slug, today));
 }
