@@ -6,11 +6,19 @@ export const isRecord = (value: unknown): value is Record<string, unknown> =>
 	!Array.isArray(value) &&
 	Object.getPrototypeOf(value) === Object.prototype;
 
-export const readJsonObject = async (request: Request): Promise<Record<string, unknown>> => {
+export const readJsonObject = async (
+	request: Request,
+	options: { onParseError?: (cause: unknown) => void } = {}
+): Promise<Record<string, unknown>> => {
 	let body: unknown;
 	try {
 		body = await request.json();
-	} catch {
+	} catch (cause) {
+		try {
+			options.onParseError?.(cause);
+		} catch {
+			// Ignore parse-error hook failures to preserve the HTTP contract.
+		}
 		error(400, { message: 'Invalid request.' });
 	}
 
