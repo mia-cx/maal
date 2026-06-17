@@ -6,17 +6,19 @@ const policyTitles: Record<LegalPolicySlug, string> = {
 	cookies: 'Cookie Policy'
 };
 
+const policySlugs = ['privacy', 'terms', 'cookies'] as const satisfies LegalPolicySlug[];
+
 const modules: Partial<Record<string, LegalContentModule>> = import.meta.glob<LegalContentModule>(
 	'/src/legal-content/*/*.svx',
 	{ eager: true }
 );
 
-const today = new Date().toISOString().slice(0, 10);
-
 const legalPathPattern = /\/src\/legal-content\/([^/]+)\/([^/]+)\.svx$/;
 
+export const currentLegalDate = (): string => new Date().toISOString().slice(0, 10);
+
 function isPolicySlug(value: string): value is LegalPolicySlug {
-	return value === 'privacy' || value === 'terms' || value === 'cookies';
+	return policySlugs.includes(value as LegalPolicySlug);
 }
 
 function versionFromModule(path: string, module: LegalContentModule): LegalPolicyVersion | null {
@@ -43,7 +45,7 @@ const versions = Object.entries(modules)
 	.filter((version): version is LegalPolicyVersion => Boolean(version))
 	.sort(byNewestEffectiveDate);
 
-function buildPolicy(slug: LegalPolicySlug): LegalPolicy {
+export function buildPolicy(slug: LegalPolicySlug, today = currentLegalDate()): LegalPolicy {
 	const policyVersions = versions.filter((version) => version.policy === slug);
 	const current =
 		policyVersions.find((version) => version.effectiveDate <= today) ?? policyVersions.at(0);
@@ -63,20 +65,28 @@ function buildPolicy(slug: LegalPolicySlug): LegalPolicy {
 	};
 }
 
-export const policies = {
-	privacy: buildPolicy('privacy'),
-	terms: buildPolicy('terms'),
-	cookies: buildPolicy('cookies')
-} satisfies Record<LegalPolicySlug, LegalPolicy>;
-
-export const policyList = Object.values(policies);
-
-export function getPolicy(policy: string): LegalPolicy | null {
-	return isPolicySlug(policy) ? policies[policy] : null;
+export function getPolicies(today = currentLegalDate()): Record<LegalPolicySlug, LegalPolicy> {
+	return {
+		privacy: buildPolicy('privacy', today),
+		terms: buildPolicy('terms', today),
+		cookies: buildPolicy('cookies', today)
+	};
 }
 
-export function getPolicyVersion(policy: string, version: string): LegalPolicyVersion | null {
-	return getPolicy(policy)?.versions.find((entry) => entry.version === version) ?? null;
+export function getPolicyList(today = currentLegalDate()): LegalPolicy[] {
+	return policySlugs.map((slug) => buildPolicy(slug, today));
+}
+
+export function getPolicy(policy: string, today = currentLegalDate()): LegalPolicy | null {
+	return isPolicySlug(policy) ? buildPolicy(policy, today) : null;
+}
+
+export function getPolicyVersion(
+	policy: string,
+	version: string,
+	today = currentLegalDate()
+): LegalPolicyVersion | null {
+	return getPolicy(policy, today)?.versions.find((entry) => entry.version === version) ?? null;
 }
 
 export function getPolicyComponent(policy: LegalPolicySlug, version: string) {

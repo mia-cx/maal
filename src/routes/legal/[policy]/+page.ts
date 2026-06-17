@@ -8,7 +8,6 @@ export const load: PageLoad = ({ params }) => {
 
 	return {
 		document: policy.current,
-		archive: policy.versions,
 		archiveHref: `/legal/${policy.slug}/archive`
 	};
 };

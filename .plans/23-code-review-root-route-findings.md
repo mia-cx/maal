@@ -17,7 +17,7 @@ Clean up remaining root/public route safety findings: make invite acceptance an 
 - [x] Refactor invite route so GET previews only and POST accepts invites with a safe DB lookup.
 - [x] Add focused invite route tests for preview, missing DB, and POST acceptance behavior.
 - [x] Make landing load report pricing failures through an explicit degraded state.
-- [ ] Fix legal policy date/archive handling and add focused tests.
+- [x] Fix legal policy date/archive handling and add focused tests.
 - [ ] Run final validation, push the branch, and file the PR mentioning @pullfrog review.
 
 ## Notes
@@ -27,3 +27,5 @@ Clean up remaining root/public route safety findings: make invite acceptance an 
 - Validation: `pnpm exec vitest run 'src/routes/invite/[code]/server.test.ts'` passed.
 - Landing pricing failures now log the root cause and return `pricingStatus: 'unavailable'`; the page renders an explicit degraded-state message.
 - Validation: `pnpm exec vitest run src/routes/page.server.test.ts` passed.
+- Legal policies now build current/archive flags from a per-call date; the current-policy route no longer returns unused `archive` data.
+- Validation: `pnpm exec vitest run src/lib/legal/policies.test.ts` passed.

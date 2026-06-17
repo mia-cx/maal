@@ -1,4 +1,4 @@
-import { policyList } from '$lib/legal/policies';
+import { getPolicyList } from '$lib/legal/policies';
 import type { PageLoad } from './$types';
 
-export const load: PageLoad = () => ({ policies: policyList });
+export const load: PageLoad = () => ({ policies: getPolicyList() });
