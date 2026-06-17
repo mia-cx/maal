@@ -33,6 +33,7 @@
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 	let view = $state<LocalPageData | null>(null);
+	let freshViewVersion = 0;
 
 	let initialView = untrack(() => data as LocalPageData);
 	let householdName = $state(initialView.household.name);
@@ -111,6 +112,9 @@
 		preferredFoodAlias: string;
 		preferredMeasureUnit: string;
 	};
+	const cloneUnitOverrideRows = (rows: UnitOverrideRow[]) => rows.map((row) => ({ ...row }));
+	const cloneIngredientOverrideRows = (rows: IngredientOverrideRow[]) =>
+		rows.map((row) => ({ ...row }));
 	const serializeUnitOverrideRows = (rows: UnitOverrideRow[]) =>
 		JSON.stringify(
 			rows
@@ -140,13 +144,14 @@
 	);
 	let nextOverrideRowId = 0;
 	let unitOverrideRows = $state<UnitOverrideRow[]>(
-		untrack(() => initialView.displayOverrideRows.unitOverrides)
+		untrack(() => cloneUnitOverrideRows(initialView.displayOverrideRows.unitOverrides))
 	);
 	let ingredientOverrideRows = $state<IngredientOverrideRow[]>(
-		untrack(() => initialView.displayOverrideRows.ingredientOverrides)
+		untrack(() => cloneIngredientOverrideRows(initialView.displayOverrideRows.ingredientOverrides))
 	);
 	const applyHouseholdView = (nextView: LocalPageData) => {
-		view = { ...currentView, ...nextView };
+		const { freshView: _freshView, ...resolvedView } = nextView;
+		view = resolvedView;
 		householdName = nextView.household.name;
 		defaultServings = String(nextView.profile.defaultServings);
 		locale = nextView.profile.locale;
@@ -168,17 +173,26 @@
 		initialIngredientOverrideRows = serializeIngredientOverrideRows(
 			nextView.displayOverrideRows.ingredientOverrides
 		);
-		unitOverrideRows = nextView.displayOverrideRows.unitOverrides;
-		ingredientOverrideRows = nextView.displayOverrideRows.ingredientOverrides;
+		unitOverrideRows = cloneUnitOverrideRows(nextView.displayOverrideRows.unitOverrides);
+		ingredientOverrideRows = cloneIngredientOverrideRows(
+			nextView.displayOverrideRows.ingredientOverrides
+		);
 		visibleInvites = nextView.invites;
 	};
 
 	$effect(() => {
+		const nextVersion = ++freshViewVersion;
 		view = data as LocalPageData;
 		if ('freshView' in data && data.freshView) {
-			void Promise.resolve(data.freshView).then((freshView) =>
-				applyHouseholdView(freshView as LocalPageData)
-			);
+			void Promise.resolve(data.freshView)
+				.then((freshView) => {
+					if (nextVersion !== freshViewVersion) return;
+					applyHouseholdView(freshView as LocalPageData);
+				})
+				.catch((cause) => {
+					if (nextVersion !== freshViewVersion) return;
+					console.error('Failed to refresh household view', cause);
+				});
 		}
 	});
 	const addUnitOverrideRow = () => {
