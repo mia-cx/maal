@@ -2,6 +2,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import { navigating, page } from '$app/state';
 	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
+	import { activeNavItemForPath } from '$lib/components/dashboard/active-nav';
 	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
 	import type { DashboardNavItem } from '$lib/components/dashboard/dashboard-nav';
 	import * as Popover from '$lib/components/ui/popover';
@@ -36,17 +37,7 @@
 		emailVerified: data.session?.user.emailVerified ?? false
 	});
 	const showDashboardShell = $derived(Boolean(data.session));
-	const activeNav = $derived<DashboardNavItem>(
-		page.url.pathname.startsWith('/menu')
-			? 'my-menu'
-			: page.url.pathname.startsWith('/pantry')
-				? 'pantry'
-				: page.url.pathname.startsWith('/groceries')
-					? 'grocery-rollup'
-					: page.url.pathname.startsWith('/household')
-						? 'household'
-						: 'meal-plan'
-	);
+	const activeNav = $derived<DashboardNavItem>(activeNavItemForPath(page.url.pathname));
 	const isSubscribePage = $derived(page.url.pathname.startsWith('/subscribe'));
 	const subscriptionLocked = $derived(
 		Boolean(data.subscriptionLock?.locked) &&

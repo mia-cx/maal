@@ -18,7 +18,7 @@ Close the code-review refactor remainder for app routes and household routes, le
 - [x] Reuse household validation constants and handle invite clipboard failures in the household UI.
 - [x] Stop masking household-list failures and paginate subscribe pricing.
 - [x] Centralize household taxonomy preference loading across menu/plan/recipe service callers.
-- [ ] Flatten app-shell active nav mapping and add/update focused tests.
+- [x] Flatten app-shell active nav mapping and add/update focused tests.
 - [ ] Run final repo validation and file a PR closing #16 and #18.
 
 ## Notes
@@ -28,4 +28,5 @@ Close the code-review refactor remainder for app routes and household routes, le
 - Reused household name length/invite expiry constants in the Svelte UI and surfaced invite copy failures through an aria-live message.
 - Layout and subscribe route household-list failures now log and return 503 instead of pretending there are no households; subscribe pricing uses a shared paginator.
 - Added `household-preferences` helper to centralize household locale + effective taxonomy preference lookup, then reused it from menu, plan, and recipe service paths.
+- Extracted active nav path mapping into a tested helper and changed invite optimistic updates to derive from server view plus an overlay instead of mirroring invite rows as separate state.
 - `pnpm exec tsc --noEmit --skipLibCheck` is not a valid focused check here; after `pnpm gen`, it fails on pre-existing Svelte barrel/paraglide generated typing issues. Use `pnpm check` for final validation.

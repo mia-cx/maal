@@ -71,13 +71,19 @@
 	let inviteRole = $state('member');
 	let inviteExpiresInDays = $state('7');
 	let inviteCopyMessage = $state('');
-	let visibleInvites = $state<InviteRow[]>(initialView.invites);
+	let inviteOptimism = $state<Record<string, { hidden?: boolean; revokedAt?: string }>>({});
 
 	const currentView = $derived(view ?? initialView);
-
-	$effect(() => {
-		visibleInvites = currentView.invites;
-	});
+	const visibleInvites = $derived(
+		currentView.invites.flatMap((invite) => {
+			const optimistic = inviteOptimism[invite.id];
+			if (optimistic?.hidden) return [];
+			if (optimistic?.revokedAt) {
+				return [{ ...invite, revokedAt: optimistic.revokedAt, usable: false } satisfies InviteRow];
+			}
+			return [invite];
+		})
+	);
 
 	const canManageHousehold = $derived(currentView.canManageHousehold);
 	const fieldDisabled = $derived(!canManageHousehold);
@@ -179,12 +185,13 @@
 		ingredientOverrideRows = cloneIngredientOverrideRows(
 			nextView.displayOverrideRows.ingredientOverrides
 		);
-		visibleInvites = nextView.invites;
+		inviteOptimism = {};
 	};
 
 	$effect(() => {
 		const nextVersion = ++freshViewVersion;
 		view = data as LocalPageData;
+		inviteOptimism = {};
 		if ('freshView' in data && data.freshView) {
 			void Promise.resolve(data.freshView)
 				.then((freshView) => {
@@ -301,23 +308,23 @@
 	const deleteInviteEnhance =
 		(inviteId: string): SubmitFunction =>
 		() => {
-			const previousInvites = visibleInvites;
-			visibleInvites = visibleInvites.filter((invite) => invite.id !== inviteId);
+			const previousOptimism = inviteOptimism;
+			inviteOptimism = { ...inviteOptimism, [inviteId]: { hidden: true } };
 			return async ({ result }) => {
-				if (result.type !== 'success') visibleInvites = previousInvites;
+				if (result.type !== 'success') inviteOptimism = previousOptimism;
 			};
 		};
 
 	const revokeInviteEnhance =
 		(inviteId: string): SubmitFunction =>
 		() => {
-			const previousInvites = visibleInvites;
-			const revokedAt = new Date().toISOString();
-			visibleInvites = visibleInvites.map((invite) =>
-				invite.id === inviteId ? { ...invite, revokedAt, usable: false } : invite
-			);
+			const previousOptimism = inviteOptimism;
+			inviteOptimism = {
+				...inviteOptimism,
+				[inviteId]: { revokedAt: new Date().toISOString() }
+			};
 			return async ({ result }) => {
-				if (result.type !== 'success') visibleInvites = previousInvites;
+				if (result.type !== 'success') inviteOptimism = previousOptimism;
 			};
 		};
 
