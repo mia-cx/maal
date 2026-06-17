@@ -6,6 +6,7 @@ import {
 } from './schedule-meal-client';
 
 const mockFetch = (response: Response) => vi.spyOn(globalThis, 'fetch').mockResolvedValue(response);
+const mockFetchRejection = (error: Error) => vi.spyOn(globalThis, 'fetch').mockRejectedValue(error);
 
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -30,6 +31,20 @@ describe('schedule meal client', () => {
 			name: 'ScheduleMealClientError',
 			status: 404,
 			body: 'nope',
+			context: 'Load meal range'
+		});
+	});
+
+	it('throws a typed client error for network failures', async () => {
+		mockFetchRejection(new TypeError('network offline'));
+
+		await expect(
+			fetchScheduleMealRange({ start: '2026-06-01', end: '2026-06-07' })
+		).rejects.toMatchObject({
+			name: 'ScheduleMealClientError',
+			message: 'network offline',
+			status: 0,
+			body: '',
 			context: 'Load meal range'
 		});
 	});

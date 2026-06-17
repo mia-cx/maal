@@ -36,7 +36,17 @@ const responseText = async (response: Response): Promise<string> => {
 };
 
 const requestJson = async (input: RequestInfo | URL, init: RequestInit, context: string) => {
-	const response = await fetch(input, init);
+	let response: Response;
+	try {
+		response = await fetch(input, init);
+	} catch (cause) {
+		throw new ScheduleMealClientError(
+			cause instanceof Error ? cause.message : `${context} request failed.`,
+			0,
+			'',
+			context
+		);
+	}
 	if (!response.ok) {
 		const body = await responseText(response);
 		throw new ScheduleMealClientError(
