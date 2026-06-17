@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import { error, isHttpError, json, type RequestHandler } from '@sveltejs/kit';
 import { createAuthRuntime } from '$lib/server/auth/workos';
 import { readJsonObject } from '$lib/server/http/request';
@@ -56,13 +57,13 @@ const requireOwnedFactor = async (
 	const factor = (await listTotpFactors(platform, userId)).find(
 		(candidate) => candidate.id === factorId
 	);
-	if (!factor) error(404, { message: 'Authentication factor not found.' });
+	if (!factor) error(404, { message: m.settings_authentication_factor_not_found() });
 	return factor;
 };
 
 const factorIdFromBody = (body: Record<string, unknown>): string => {
 	const factorId = typeof body.factorId === 'string' ? body.factorId : '';
-	if (!factorId) error(400, { message: 'Authentication factor is required.' });
+	if (!factorId) error(400, { message: m.settings_authentication_factor_is_required() });
 	return factorId;
 };
 
@@ -72,16 +73,17 @@ const readVerification = async (
 	const body = await readJsonObject(request);
 	const factorId = factorIdFromBody(body);
 	const challengeId = typeof body.challengeId === 'string' ? body.challengeId : '';
-	if (!challengeId) error(400, { message: 'Authenticator setup session is required.' });
+	if (!challengeId) error(400, { message: m.settings_authenticator_setup_session_is_required() });
 
 	const code = normalizeVerificationCode(body.code);
-	if (!isVerificationCode(code)) error(400, { message: 'Enter the 6-digit verification code.' });
+	if (!isVerificationCode(code))
+		error(400, { message: m.settings_enter_the_6_digit_verification_code() });
 	return { factorId, challengeId, code };
 };
 
 export const GET: RequestHandler = async ({ locals, platform }) => {
 	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
+	if (!session) error(401, { message: m.app_sign_in_required() });
 
 	try {
 		const factors = await listTotpFactors(platform, session.user.id);
@@ -89,13 +91,13 @@ export const GET: RequestHandler = async ({ locals, platform }) => {
 	} catch (cause) {
 		if (isHttpError(cause)) throw cause;
 		console.error('Failed to list MFA factors', cause);
-		error(502, { message: 'Could not load two-factor methods.' });
+		error(502, { message: m.settings_could_not_load_two_factor_methods() });
 	}
 };
 
 export const POST: RequestHandler = async ({ locals, platform }) => {
 	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
+	if (!session) error(401, { message: m.app_sign_in_required() });
 
 	try {
 		const enrollment = await createAuthRuntime(
@@ -116,13 +118,13 @@ export const POST: RequestHandler = async ({ locals, platform }) => {
 	} catch (cause) {
 		if (isHttpError(cause)) throw cause;
 		console.error('Failed to start MFA setup', cause);
-		error(502, { message: 'Could not start two-factor setup.' });
+		error(502, { message: m.settings_could_not_start_two_factor_setup() });
 	}
 };
 
 export const PUT: RequestHandler = async ({ locals, platform, request }) => {
 	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
+	if (!session) error(401, { message: m.app_sign_in_required() });
 	const { factorId, challengeId, code } = await readVerification(request);
 
 	try {
@@ -131,9 +133,9 @@ export const PUT: RequestHandler = async ({ locals, platform, request }) => {
 			authenticationChallengeId: challengeId,
 			code
 		});
-		if (!result.valid) error(400, { message: 'That code did not match.' });
+		if (!result.valid) error(400, { message: m.settings_that_code_did_not_match() });
 		if (result.challenge.authenticationFactorId !== factorId) {
-			error(400, { message: 'Authenticator setup session is invalid.' });
+			error(400, { message: m.settings_authenticator_setup_session_is_invalid() });
 		}
 
 		await requireOwnedFactor(platform, session.user.id, factorId);
@@ -150,13 +152,13 @@ export const PUT: RequestHandler = async ({ locals, platform, request }) => {
 	} catch (cause) {
 		if (isHttpError(cause)) throw cause;
 		console.error('Failed to verify MFA setup', cause);
-		error(502, { message: 'Could not verify two-factor setup.' });
+		error(502, { message: m.settings_could_not_verify_two_factor_setup() });
 	}
 };
 
 export const DELETE: RequestHandler = async ({ locals, platform, request }) => {
 	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
+	if (!session) error(401, { message: m.app_sign_in_required() });
 	const factorId = factorIdFromBody(await readJsonObject(request));
 
 	try {
@@ -167,6 +169,6 @@ export const DELETE: RequestHandler = async ({ locals, platform, request }) => {
 	} catch (cause) {
 		if (isHttpError(cause)) throw cause;
 		console.error('Failed to delete MFA factor', cause);
-		error(502, { message: 'Could not remove two-factor method.' });
+		error(502, { message: m.settings_could_not_remove_two_factor_method() });
 	}
 };

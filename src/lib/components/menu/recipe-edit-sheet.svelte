@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
@@ -540,7 +541,7 @@
 
 <DeleteConfirmDialog
 	bind:open={deleteConfirmOpen}
-	title="Archive this recipe?"
+	title={m.menu_archive_this_recipe()}
 	description="This removes the recipe from My Menu. Planned meals keep their saved recipe snapshot."
 	confirmLabel="Archive recipe"
 	confirmingLabel="Archiving…"

@@ -2,8 +2,8 @@ import { redirect, type Handle } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { cookieName, getTextDirection } from '$lib/paraglide/runtime';
 import { paraglideMiddleware } from '$lib/paraglide/server';
+import { authenticatedAppPathUsesHouseholdLocale } from '$lib/i18n/app-locale';
 import {
-	authenticatedAppPathUsesHouseholdLocale,
 	commitParaglideLocaleCookie,
 	loadHouseholdParaglideLocale,
 	readActiveHouseholdIdForLocale
@@ -110,11 +110,12 @@ const handleSubscriptionGate: Handle = async ({ event, resolve }) => {
 
 const requestWithCookie = (request: Request, name: string, value: string): Request => {
 	const headers = new Headers(request.headers);
-	const cookies = headers
-		.get('cookie')
-		?.split(';')
-		.map((cookie) => cookie.trim())
-		.filter((cookie) => cookie && !cookie.startsWith(`${name}=`)) ?? [];
+	const cookies =
+		headers
+			.get('cookie')
+			?.split(';')
+			.map((cookie) => cookie.trim())
+			.filter((cookie) => cookie && !cookie.startsWith(`${name}=`)) ?? [];
 	headers.set('cookie', [...cookies, `${name}=${encodeURIComponent(value)}`].join('; '));
 	return new Request(request, { headers });
 };

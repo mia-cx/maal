@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { resolveActiveHouseholdId } from '$lib/server/auth/household';
@@ -6,11 +7,11 @@ import { householdMeals, userRecipes } from '$lib/server/db/schema';
 
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
 	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
-	if (!platform?.env.DB) error(503, { message: 'Database unavailable.' });
+	if (!session) error(401, { message: m.app_sign_in_required() });
+	if (!platform?.env.DB) error(503, { message: m.app_database_unavailable() });
 
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
-	if (!householdId) error(404, { message: 'No household found.' });
+	if (!householdId) error(404, { message: m.app_no_household_found() });
 
 	const db = getDb(platform.env.DB);
 	const [recipes, meals] = await Promise.all([

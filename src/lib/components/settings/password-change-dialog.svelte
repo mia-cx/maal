@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -27,13 +28,14 @@
 <Dialog.Root bind:open>
 	<Dialog.Content class="sm:max-w-[24rem]">
 		<Dialog.Header>
-			<Dialog.Title>Change password</Dialog.Title>
-			<Dialog.Description>Enter your current password before choosing a new one.</Dialog.Description
+			<Dialog.Title>{m.settings_change_password()}</Dialog.Title>
+			<Dialog.Description
+				>{m.settings_enter_your_current_password_before_choosing_()}</Dialog.Description
 			>
 		</Dialog.Header>
 		<div class="grid gap-3">
 			<label class="grid gap-1 text-xs font-medium">
-				Current password
+				{m.settings_current_password()}
 				<Input
 					bind:value={currentPassword}
 					type="password"
@@ -42,11 +44,11 @@
 				/>
 			</label>
 			<label class="grid gap-1 text-xs font-medium">
-				New password
+				{m.settings_new_password()}
 				<Input bind:value={newPassword} type="password" autocomplete="new-password" class="h-8" />
 			</label>
 			<label class="grid gap-1 text-xs font-medium">
-				Confirm new password
+				{m.settings_confirm_new_password()}
 				<Input
 					bind:value={confirmPassword}
 					type="password"
@@ -58,7 +60,7 @@
 			{#if passwordError}<p class="text-xs text-destructive">{passwordError}</p>{/if}
 			<div class="flex justify-end gap-2">
 				<Button variant="ghost" disabled={passwordChangeBusy} onclick={() => (open = false)}>
-					Cancel
+					{m.settings_cancel()}
 				</Button>
 				<Button
 					disabled={passwordChangeBusy || !currentPassword || !newPassword || !confirmPassword}

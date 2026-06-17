@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	authenticatedAppPathUsesHouseholdLocale,
 	paraglideLocaleFromHouseholdLocale
-} from '$lib/server/i18n/household-locale';
+} from '$lib/i18n/app-locale';
 import { subscriptionExemptPath } from './hooks.server';
 
 describe('subscriptionExemptPath', () => {

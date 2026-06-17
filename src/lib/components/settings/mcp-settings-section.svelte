@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import McpCreatedKeyPanel from '$lib/components/settings/mcp-created-key-panel.svelte';
 	import McpKeyForm from '$lib/components/settings/mcp-key-form.svelte';
 	import McpKeyList from '$lib/components/settings/mcp-key-list.svelte';
@@ -86,12 +87,12 @@
 	<div class="grid gap-2 rounded-md border border-border bg-muted/30 p-3">
 		<div class="flex items-start justify-between gap-3">
 			<div>
-				<p class="text-xs font-medium">MCP server address</p>
+				<p class="text-xs font-medium">{m.settings_mcp_server_address()}</p>
 				<p class="text-xs text-muted-foreground">
-					Use this URL when connecting Claude Desktop, Inspector, or another MCP client.
+					{m.settings_use_this_url_when_connecting_claude_desktop_()}
 				</p>
 			</div>
-			<Button variant="outline" size="sm" onclick={copyMcpServerUrl}>Copy</Button>
+			<Button variant="outline" size="sm" onclick={copyMcpServerUrl}>{m.settings_copy()}</Button>
 		</div>
 		<code class="overflow-x-auto rounded bg-background px-2 py-1.5 text-xs">{mcpServerUrl}</code>
 		{#if mcpServerCopyError}<p class="text-xs text-destructive">{mcpServerCopyError}</p>{/if}

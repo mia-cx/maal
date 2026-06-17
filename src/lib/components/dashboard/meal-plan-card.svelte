@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { CookIcon, PrepIcon } from '$lib/components/icons/solar-outline';
 	import * as Button from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card/index.js';
@@ -411,7 +412,10 @@
 					<div
 						class="mt-0.5 grid min-w-0 gap-0.5 overflow-visible text-[0.6875rem] leading-tight text-muted-foreground @min-[28ch]/meal-card-body:flex @min-[28ch]/meal-card-body:flex-wrap @min-[28ch]/meal-card-body:items-center @min-[28ch]/meal-card-body:gap-x-1.5 @min-[28ch]/meal-card-body:gap-y-0.5"
 					>
-						<span class="inline-flex min-w-0 items-center gap-1 tabular-nums" title="Prep time">
+						<span
+							class="inline-flex min-w-0 items-center gap-1 tabular-nums"
+							title={m.plan_prep_time()}
+						>
 							<PrepIcon class="size-3 shrink-0" />
 							<span>{prepTimeMinutes} min</span>
 						</span>
@@ -421,7 +425,10 @@
 						>
 							•
 						</span>
-						<span class="inline-flex min-w-0 items-center gap-1 tabular-nums" title="Cook time">
+						<span
+							class="inline-flex min-w-0 items-center gap-1 tabular-nums"
+							title={m.plan_cook_time_2()}
+						>
 							<CookIcon class="size-3 shrink-0" />
 							<span>{cookTimeMinutes} min</span>
 						</span>

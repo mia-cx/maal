@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { enhance } from '$app/forms';
 	import { Button } from '$lib/components/ui/button';
 	import { inviteExpiryDays, maxHouseholdNameLength } from '$lib/domain/household/settings-parsing';
@@ -335,7 +336,7 @@
 </script>
 
 <svelte:head>
-	<title>Household · Maal</title>
+	<title>{m.household_household_maal()}</title>
 </svelte:head>
 
 <div class="flex h-svh min-w-0 flex-col overflow-hidden bg-background text-foreground">
@@ -352,9 +353,9 @@
 	<main class="min-h-0 flex-1 overflow-y-auto">
 		<div class="mx-auto grid w-full max-w-4xl gap-6 px-4 py-5 md:px-6">
 			<div class="flex flex-wrap items-center justify-between gap-3">
-				<h1 class="text-xl font-semibold tracking-tight">Household settings</h1>
+				<h1 class="text-xl font-semibold tracking-tight">{m.household_household_settings()}</h1>
 				{#if !canManageHousehold}
-					<p class="text-xs text-muted-foreground">Read-only</p>
+					<p class="text-xs text-muted-foreground">{m.household_read_only()}</p>
 				{/if}
 			</div>
 
@@ -374,12 +375,15 @@
 				</p>
 			{/if}
 
-			<section class="grid gap-3 border-t border-border pt-4" aria-label="Basic settings">
+			<section
+				class="grid gap-3 border-t border-border pt-4"
+				aria-label={m.household_basic_settings()}
+			>
 				<form method="post" action="?/updateSettings" class="grid gap-4">
 					<fieldset class="grid gap-3">
-						<legend class="sr-only">Household</legend>
+						<legend class="sr-only">{m.app_household()}</legend>
 						<label class="grid min-w-0 gap-1 text-xs font-medium">
-							Name
+							{m.settings_name()}
 							<Input
 								name={householdNameChanged ? 'name' : undefined}
 								bind:value={householdName}
@@ -391,34 +395,34 @@
 					</fieldset>
 
 					<fieldset class="grid gap-3">
-						<legend class="sr-only">Locale and calendar</legend>
+						<legend class="sr-only">{m.household_locale_and_calendar()}</legend>
 						<div class="grid gap-3 md:grid-cols-3">
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
-								Locale
+								{m.household_locale()}
 								<SearchCombobox
 									name={localeChanged ? 'locale' : undefined}
 									bind:value={locale}
 									options={localeOptions}
 									disabled={fieldDisabled}
-									placeholder="Select locale"
+									placeholder={m.household_select_locale()}
 									searchPlaceholder="Search or type a BCP 47 locale..."
 									allowCustom
 									customOptionLabel={(input) => `Use custom locale “${input}”`}
 								/>
 							</label>
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
-								Timezone
+								{m.household_timezone()}
 								<SearchCombobox
 									name={timezoneChanged ? 'timezone' : undefined}
 									bind:value={timezone}
 									options={timezoneOptions}
 									disabled={fieldDisabled}
-									placeholder="Select timezone"
+									placeholder={m.household_select_timezone()}
 									searchPlaceholder="Search timezones..."
 								/>
 							</label>
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
-								Start of week
+								{m.household_start_of_week()}
 								{#if weekStartsOnChanged}
 									<input type="hidden" name="weekStartsOn" value={weekStartsOn} />
 								{/if}
@@ -437,10 +441,10 @@
 					</fieldset>
 
 					<fieldset class="grid gap-3">
-						<legend class="sr-only">Meal defaults</legend>
+						<legend class="sr-only">{m.household_meal_defaults()}</legend>
 						<div class="grid gap-3 md:grid-cols-2">
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
-								Default yield
+								{m.household_default_yield()}
 								<Input
 									name={defaultServingsChanged ? 'defaultServings' : undefined}
 									type="number"
@@ -453,7 +457,7 @@
 								/>
 							</label>
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
-								Preferred dinner time
+								{m.household_preferred_dinner_time()}
 								<Input
 									name={preferredDinnerTimeChanged ? 'preferredDinnerTime' : undefined}
 									type="time"
@@ -467,14 +471,16 @@
 
 					{#if canManageHousehold}
 						<div>
-							<Button type="submit" disabled={!householdSettingsChanged}>Save household</Button>
+							<Button type="submit" disabled={!householdSettingsChanged}
+								>{m.household_save_household()}</Button
+							>
 						</div>
 					{/if}
 				</form>
 			</section>
 
 			<section class="grid gap-3 border-t border-border pt-4">
-				<h2 class="text-sm font-medium">Appliances</h2>
+				<h2 class="text-sm font-medium">{m.household_appliances()}</h2>
 				<form method="post" action="?/updateAppliances" class="grid gap-3">
 					{#each changedAppliances as appliance (appliance.appliance)}
 						<input
@@ -507,7 +513,9 @@
 					</div>
 					{#if canManageHousehold}
 						<div>
-							<Button type="submit" disabled={!appliancesChanged}>Save appliances</Button>
+							<Button type="submit" disabled={!appliancesChanged}
+								>{m.household_save_appliances()}</Button
+							>
 						</div>
 					{/if}
 				</form>
@@ -517,14 +525,18 @@
 				class="grid gap-4 border-t border-border pt-4"
 				aria-labelledby="aliases-overrides-title"
 			>
-				<h2 id="aliases-overrides-title" class="text-sm font-medium">Aliases & overrides</h2>
+				<h2 id="aliases-overrides-title" class="text-sm font-medium">
+					{m.household_aliases_overrides()}
+				</h2>
 				<form method="post" action="?/updateSettings" class="grid gap-5">
 					<input type="hidden" name="overrideLocale" value={locale} />
 					<fieldset class="grid gap-3">
-						<legend class="text-xs font-semibold text-muted-foreground">Units</legend>
+						<legend class="text-xs font-semibold text-muted-foreground"
+							>{m.household_units()}</legend
+						>
 						<div class="grid gap-3 md:grid-cols-3">
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
-								Weight unit
+								{m.household_weight_unit()}
 								{#if preferredMassUnitChanged}
 									<input type="hidden" name="preferredMassUnit" value={preferredMassUnit} />
 								{/if}
@@ -532,12 +544,12 @@
 									bind:value={preferredMassUnit}
 									options={currentView.taxonomyOptions.weightPresetOptions}
 									disabled={fieldDisabled}
-									placeholder="Select weight unit"
+									placeholder={m.household_select_weight_unit()}
 									searchPlaceholder="Search weight units..."
 								/>
 							</label>
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
-								Volume unit
+								{m.household_volume_unit()}
 								{#if preferredVolumeUnitChanged}
 									<input type="hidden" name="preferredVolumeUnit" value={preferredVolumeUnit} />
 								{/if}
@@ -545,12 +557,12 @@
 									bind:value={preferredVolumeUnit}
 									options={currentView.taxonomyOptions.volumePresetOptions}
 									disabled={fieldDisabled}
-									placeholder="Select volume unit"
+									placeholder={m.household_select_volume_unit()}
 									searchPlaceholder="Search volume units..."
 								/>
 							</label>
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
-								Temperature unit
+								{m.household_temperature_unit()}
 								{#if temperatureUnitChanged}
 									<input
 										type="hidden"
@@ -562,7 +574,7 @@
 									bind:value={preferredTemperatureUnit}
 									options={currentView.taxonomyOptions.temperaturePresetOptions}
 									disabled={fieldDisabled}
-									placeholder="Select temperature unit"
+									placeholder={m.household_select_temperature_unit()}
 									searchPlaceholder="Search temperature units..."
 								/>
 							</label>
@@ -579,22 +591,22 @@
 									class="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end"
 								>
 									<label class="grid min-w-0 gap-1 text-xs font-medium">
-										Base unit
+										{m.household_base_unit()}
 										<SearchCombobox
 											bind:value={override.baseUnit}
 											options={currentView.taxonomyOptions.baseUnitOptions}
 											disabled={fieldDisabled}
-											placeholder="base unit"
+											placeholder={m.household_base_unit_2()}
 											searchPlaceholder="Search base units..."
 										/>
 									</label>
 									<label class="grid min-w-0 gap-1 text-xs font-medium">
-										Preferred alias
+										{m.household_preferred_alias()}
 										<SearchCombobox
 											bind:value={override.preferredUnitAlias}
 											options={currentView.taxonomyOptions.unitAliasOptions}
 											disabled={fieldDisabled}
-											placeholder="alias"
+											placeholder={m.household_alias_placeholder()}
 											searchPlaceholder="Search unit aliases..."
 											allowCustom
 											customOptionLabel={(input) => `Use custom alias “${input}”`}
@@ -606,7 +618,7 @@
 											variant="ghost"
 											onclick={() => removeUnitOverrideRow(override.id)}
 										>
-											Remove
+											{m.menu_remove()}
 										</Button>
 									{/if}
 								</div>
@@ -614,7 +626,7 @@
 							{#if canManageHousehold}
 								<div>
 									<Button type="button" variant="outline" onclick={addUnitOverrideRow}>
-										Add unit override
+										{m.household_add_unit_override()}
 									</Button>
 								</div>
 							{/if}
@@ -622,7 +634,9 @@
 					</fieldset>
 
 					<fieldset class="grid gap-3">
-						<legend class="text-xs font-semibold text-muted-foreground">Ingredients</legend>
+						<legend class="text-xs font-semibold text-muted-foreground"
+							>{m.menu_ingredients()}</legend
+						>
 						<input
 							type="hidden"
 							name="ingredientOverrides"
@@ -634,34 +648,34 @@
 									class="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end"
 								>
 									<label class="grid min-w-0 gap-1 text-xs font-medium">
-										Base food
+										{m.household_base_food()}
 										<SearchCombobox
 											bind:value={override.baseFood}
 											options={currentView.taxonomyOptions.foodOptions}
 											disabled={fieldDisabled}
-											placeholder="base food"
+											placeholder={m.household_base_food_2()}
 											searchPlaceholder="Search foods..."
 										/>
 									</label>
 									<label class="grid min-w-0 gap-1 text-xs font-medium">
-										Preferred alias
+										{m.household_preferred_alias()}
 										<SearchCombobox
 											bind:value={override.preferredFoodAlias}
 											options={currentView.taxonomyOptions.foodAliasOptions}
 											disabled={fieldDisabled}
-											placeholder="alias"
+											placeholder={m.household_alias_placeholder()}
 											searchPlaceholder="Search food aliases..."
 											allowCustom
 											customOptionLabel={(input) => `Use custom alias “${input}”`}
 										/>
 									</label>
 									<label class="grid min-w-0 gap-1 text-xs font-medium">
-										Measure unit
+										{m.household_measure_unit()}
 										<SearchCombobox
 											bind:value={override.preferredMeasureUnit}
 											options={currentView.taxonomyOptions.measureUnitOptions}
 											disabled={fieldDisabled}
-											placeholder="unit"
+											placeholder={m.household_unit_placeholder()}
 											searchPlaceholder="Search measure units..."
 										/>
 									</label>
@@ -671,7 +685,7 @@
 											variant="ghost"
 											onclick={() => removeIngredientOverrideRow(override.id)}
 										>
-											Remove
+											{m.menu_remove()}
 										</Button>
 									{/if}
 								</div>
@@ -679,7 +693,7 @@
 							{#if canManageHousehold}
 								<div>
 									<Button type="button" variant="outline" onclick={addIngredientOverrideRow}>
-										Add ingredient override
+										{m.household_add_ingredient_override()}
 									</Button>
 								</div>
 							{/if}
@@ -688,7 +702,9 @@
 
 					{#if canManageHousehold}
 						<div>
-							<Button type="submit" disabled={!aliasOverridesChanged}>Save overrides</Button>
+							<Button type="submit" disabled={!aliasOverridesChanged}
+								>{m.household_save_overrides()}</Button
+							>
 						</div>
 					{/if}
 				</form>
@@ -696,9 +712,11 @@
 
 			<section class="grid gap-3 border-t border-border pt-4">
 				<div class="grid gap-1">
-					<h2 class="text-sm font-medium">Members</h2>
+					<h2 class="text-sm font-medium">{m.household_members()}</h2>
 					<p class="text-xs text-muted-foreground">
-						Manage who can access {currentView.household.name} and what role new invitees receive.
+						{m.household_manage_who_can_access()}
+						{currentView.household.name}
+						{m.household_and_what_role_new_invitees_receive()}
 					</p>
 				</div>
 
@@ -733,9 +751,9 @@
 								{/if}
 
 								{#if member.userId === currentView.currentUserId}
-									<span class="text-xs text-muted-foreground">You</span>
+									<span class="text-xs text-muted-foreground">{m.household_you()}</span>
 								{:else if member.directoryManaged}
-									<span class="text-xs text-muted-foreground">Managed by IdP</span>
+									<span class="text-xs text-muted-foreground">{m.household_managed_by_idp()}</span>
 								{/if}
 
 								{#if canManageHousehold && !member.directoryManaged}
@@ -755,7 +773,7 @@
 												}}
 												variant="destructive"
 											>
-												Remove
+												{m.menu_remove()}
 											</DropdownMenu.Item>
 										</DropdownMenu.Content>
 									</DropdownMenu.Root>
@@ -768,7 +786,7 @@
 						<div
 							class="bg-muted/20 px-3 py-1 text-[0.65rem] font-medium tracking-wide text-muted-foreground uppercase"
 						>
-							Invites
+							{m.household_invites()}
 						</div>
 						{#each visibleInvites as invite (invite.id)}
 							<div
@@ -779,7 +797,7 @@
 							>
 								<div class="flex min-w-0 items-center gap-2">
 									<div class="min-w-0">
-										<p class="truncate text-sm font-medium">Invite</p>
+										<p class="truncate text-sm font-medium">{m.household_invite()}</p>
 										<p class="truncate font-mono text-xs text-muted-foreground">{invite.code}</p>
 									</div>
 									{#if invite.usable}
@@ -789,7 +807,7 @@
 											size="sm"
 											onclick={() => copyInviteUrl(invite.url)}
 										>
-											Copy URL
+											{m.household_copy_url()}
 										</Button>
 									{/if}
 								</div>
@@ -849,7 +867,7 @@
 														onclick={(event) =>
 															event.currentTarget.closest('form')?.requestSubmit()}
 													>
-														Delete
+														{m.plan_delete()}
 													</DropdownMenu.Item>
 												</form>
 											</DropdownMenu.Content>
@@ -864,14 +882,14 @@
 				{#if canManageHousehold}
 					<div>
 						<Button type="button" variant="outline" onclick={() => (inviteDialogOpen = true)}>
-							Invite people to your household
+							{m.household_invite_people_to_your_household()}
 						</Button>
 					</div>
 				{/if}
 			</section>
 
 			<section class="grid gap-3 border-t border-border pt-4">
-				<h2 class="text-sm font-medium">Danger zone</h2>
+				<h2 class="text-sm font-medium">{m.household_danger_zone()}</h2>
 				<div class="flex flex-wrap gap-2">
 					<Button
 						type="button"
@@ -880,7 +898,7 @@
 						title={currentView.leaveHouseholdDisabledReason ?? undefined}
 						onclick={() => (leaveHouseholdDialogOpen = true)}
 					>
-						Leave household
+						{m.household_leave_household()}
 					</Button>
 					{#if canManageHousehold}
 						<Button
@@ -888,7 +906,7 @@
 							variant="destructive"
 							onclick={() => (deleteHouseholdFirstOpen = true)}
 						>
-							Delete household
+							{m.household_delete_household()}
 						</Button>
 					{/if}
 				</div>
@@ -903,10 +921,10 @@
 <Dialog.Root bind:open={inviteDialogOpen}>
 	<Dialog.Content class="sm:max-w-md">
 		<Dialog.Header>
-			<Dialog.Title>Invite people to your household</Dialog.Title>
+			<Dialog.Title>{m.household_invite_people_to_your_household()}</Dialog.Title>
 			<Dialog.Description>
-				Create an invite link for {currentView.household.name}. People who use it will join with the
-				role you choose.
+				{m.household_create_an_invite_link_for()}
+				{currentView.household.name}{m.household_people_who_use_it_will_join_with_the_role_yo()}
 			</Dialog.Description>
 		</Dialog.Header>
 
@@ -914,7 +932,7 @@
 			<input type="hidden" name="role" value={inviteRole} />
 			<input type="hidden" name="expiresInDays" value={inviteExpiresInDays} />
 			<label class="grid gap-1 text-xs font-medium">
-				Role
+				{m.household_role()}
 				<Select.Root type="single" bind:value={inviteRole}>
 					<Select.Trigger class="!h-9 w-full text-sm">
 						{roleLabel(inviteRole)}
@@ -928,18 +946,18 @@
 			</label>
 			<div class="grid gap-3 sm:grid-cols-2">
 				<label class="grid gap-1 text-xs font-medium">
-					Max uses
+					{m.household_max_uses()}
 					<Input
 						name="maxUses"
 						type="number"
 						min="1"
 						max="100"
-						placeholder="Unlimited"
+						placeholder={m.household_unlimited()}
 						class="h-9"
 					/>
 				</label>
 				<label class="grid gap-1 text-xs font-medium">
-					Expires
+					{m.household_expires()}
 					<Select.Root type="single" bind:value={inviteExpiresInDays}>
 						<Select.Trigger class="!h-9 w-full text-sm">
 							{inviteExpiresInDays}
@@ -955,15 +973,17 @@
 			</div>
 			<Dialog.Footer>
 				<Button type="button" variant="outline" onclick={() => (inviteDialogOpen = false)}
-					>Cancel</Button
+					>{m.settings_cancel()}</Button
 				>
-				<Button type="submit">Create invite link</Button>
+				<Button type="submit">{m.household_create_invite_link()}</Button>
 			</Dialog.Footer>
 		</form>
 
 		{#if visibleInvites.find((invite) => invite.usable)}
 			<div class="grid gap-2 border-t border-border pt-4">
-				<p class="text-xs font-medium text-muted-foreground">Current invite links</p>
+				<p class="text-xs font-medium text-muted-foreground">
+					{m.household_current_invite_links()}
+				</p>
 				{#each visibleInvites.filter((invite) => invite.usable).slice(0, 3) as invite (invite.id)}
 					<div class="flex min-w-0 items-center gap-2 rounded-md border border-border p-2">
 						<div class="min-w-0 flex-1">
@@ -980,7 +1000,7 @@
 							size="sm"
 							onclick={() => copyInviteUrl(invite.url)}
 						>
-							Copy URL
+							{m.household_copy_url()}
 						</Button>
 					</div>
 				{/each}
@@ -991,7 +1011,7 @@
 
 <DeleteConfirmDialog
 	bind:open={removeMemberDialogOpen}
-	title="Remove member?"
+	title={m.household_remove_member()}
 	description="Remove {memberToRemove?.name ?? 'this member'} from this household."
 	confirmLabel="Remove"
 	formAction="?/removeMember"
@@ -1000,7 +1020,7 @@
 
 <DeleteConfirmDialog
 	bind:open={leaveHouseholdDialogOpen}
-	title="Leave household?"
+	title={m.household_leave_household_2()}
 	description="You will lose access to {currentView.household
 		.name}. Your personal menu and check-in history stay with your account."
 	confirmLabel="Leave household"
@@ -1009,7 +1029,7 @@
 
 <DeleteConfirmDialog
 	bind:open={deleteHouseholdFirstOpen}
-	title="Delete household?"
+	title={m.household_delete_household_2()}
 	description="This deletes the WorkOS organization and Maal household data for {currentView
 		.household.name}."
 	confirmLabel="Continue"
@@ -1021,7 +1041,7 @@
 
 <DeleteConfirmDialog
 	bind:open={deleteHouseholdSecondOpen}
-	title="Really delete household?"
+	title={m.household_really_delete_household()}
 	description="This cannot be undone. Recipes saved to your menu stay, but household settings and planned meals are deleted."
 	confirmLabel="Delete household"
 	formAction="?/deleteHousehold"

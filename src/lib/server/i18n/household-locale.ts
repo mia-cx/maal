@@ -1,6 +1,7 @@
 import type { Cookies } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
-import { cookieName, locales, type Locale } from '$lib/paraglide/runtime';
+import { paraglideLocaleFromHouseholdLocale } from '$lib/i18n/app-locale';
+import { cookieName, type Locale } from '$lib/paraglide/runtime';
 import { readHouseholdCookie } from '$lib/server/auth/household';
 import { getDb } from '$lib/server/db';
 import { households } from '$lib/server/db/schema';
@@ -12,25 +13,6 @@ const localeCookieOptions = (url: URL) => ({
 	secure: url.protocol === 'https:',
 	maxAge: 60 * 60 * 24 * 365
 });
-
-export const authenticatedAppPathUsesHouseholdLocale = (pathname: string): boolean =>
-	pathname.startsWith('/menu') ||
-	pathname.startsWith('/plan') ||
-	pathname.startsWith('/household') ||
-	pathname.startsWith('/settings') ||
-	pathname.startsWith('/subscribe') ||
-	pathname.startsWith('/billing') ||
-	pathname.startsWith('/export-data');
-
-export const paraglideLocaleFromHouseholdLocale = (locale: string | null | undefined): Locale | null => {
-	if (!locale) return null;
-	try {
-		const language = new Intl.Locale(locale).language;
-		return locales.includes(language as Locale) ? (language as Locale) : null;
-	} catch {
-		return null;
-	}
-};
 
 export const commitParaglideLocaleCookie = (cookies: Cookies, locale: Locale, url: URL): void => {
 	cookies.set(cookieName, locale, localeCookieOptions(url));
@@ -52,4 +34,5 @@ export const loadHouseholdParaglideLocale = async ({
 	return paraglideLocaleFromHouseholdLocale(row?.locale);
 };
 
-export const readActiveHouseholdIdForLocale = (cookies: Cookies): string | null => readHouseholdCookie(cookies);
+export const readActiveHouseholdIdForLocale = (cookies: Cookies): string | null =>
+	readHouseholdCookie(cookies);

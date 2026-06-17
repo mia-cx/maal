@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
@@ -754,7 +755,7 @@
 
 <DeleteConfirmDialog
 	bind:open={mcpRevokeOpen}
-	title="Revoke MCP key?"
+	title={m.app_revoke_mcp_key()}
 	description={mcpKeyToRevoke
 		? `Clients using “${mcpKeyToRevoke.label}” will lose access immediately.`
 		: 'Clients using this MCP key will lose access immediately.'}
@@ -768,7 +769,7 @@
 
 <DeleteConfirmDialog
 	bind:open={mfaDeleteOpen}
-	title="Remove authenticator app?"
+	title={m.app_remove_authenticator_app()}
 	description="You will need another sign-in method to use two-factor authentication."
 	confirmLabel="Remove"
 	confirmingLabel="Removing…"

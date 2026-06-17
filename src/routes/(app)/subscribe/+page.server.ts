@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import {
@@ -21,7 +22,7 @@ export type { PricingOption };
 export const load: PageServerLoad = async ({ cookies, locals, platform, url }) => {
 	const session = locals.session;
 	if (!session) redirect(302, `/auth/login?returnTo=${encodeURIComponent('/subscribe')}`);
-	if (!platform?.env.DB) error(503, { message: 'Billing storage is not available.' });
+	if (!platform?.env.DB) error(503, { message: m.billing_billing_storage_is_not_available() });
 
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
 	if (!householdId) redirect(302, '/onboarding');
@@ -35,7 +36,7 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 		accessibleHouseholds = await listUserHouseholds(platform, session.user.id);
 	} catch (cause) {
 		console.error('Failed to load households for subscribe page', cause);
-		error(503, { message: 'Could not load your households. Try again in a moment.' });
+		error(503, { message: m.billing_could_not_load_your_households_try_again_in_() });
 	}
 	const householdName =
 		accessibleHouseholds.find((household) => household.id === householdId)?.name ??

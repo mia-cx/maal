@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import { error } from '@sveltejs/kit';
 import type { LayoutServerLoad } from './$types';
 import {
@@ -17,7 +18,7 @@ export const load: LayoutServerLoad = async ({ cookies, locals, platform, url })
 			userHouseholds = await listUserHouseholds(platform, session.user.id);
 		} catch (cause) {
 			console.error('Failed to load app households', cause);
-			error(503, { message: 'Could not load your households. Try again in a moment.' });
+			error(503, { message: m.billing_could_not_load_your_households_try_again_in_() });
 		}
 	}
 	const { householdId: activeHouseholdId } = session

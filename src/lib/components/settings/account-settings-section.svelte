@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import VerificationCodeInput from '$lib/components/settings/verification-code-input.svelte';
@@ -42,11 +43,11 @@
 
 <form class="grid gap-3" onsubmit={saveAccount}>
 	<label class="grid gap-1 text-xs font-medium">
-		Name
+		{m.settings_name()}
 		<Input bind:value={accountName} name="name" autocomplete="name" class="h-8" />
 	</label>
 	<label class="grid gap-1 text-xs font-medium">
-		Email
+		{m.settings_email()}
 		<Input bind:value={accountEmail} name="email" type="email" autocomplete="email" class="h-8" />
 	</label>
 	{#if accountEmailChanged}
@@ -74,9 +75,9 @@
 						disabled={emailVerificationBusy || verificationEmail !== normalizedAccountEmail}
 					/>
 					{#if emailVerificationChecking}
-						<span class="text-muted-foreground">Checking code…</span>
+						<span class="text-muted-foreground">{m.settings_checking_code()}</span>
 					{:else if verificationEmail !== normalizedAccountEmail}
-						<span class="text-muted-foreground">Send a code to continue.</span>
+						<span class="text-muted-foreground">{m.settings_send_a_code_to_continue()}</span>
 					{/if}
 				</div>
 			{/if}

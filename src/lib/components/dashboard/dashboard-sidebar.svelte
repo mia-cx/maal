@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { resolve } from '$app/paths';
 	import NavUser from '$lib/components/nav-user.svelte';
 	import TeamSwitcher from '$lib/components/team-switcher.svelte';
@@ -64,7 +65,7 @@
 							{#snippet child({ props })}
 								<a href={planHref} {...props}>
 									<CalendarDaysIcon />
-									<span>Meal Plan</span>
+									<span>{m.app_meal_plan()}</span>
 								</a>
 							{/snippet}
 						</Sidebar.MenuButton>
@@ -78,7 +79,7 @@
 							{#snippet child({ props })}
 								<a href={menuHref} {...props}>
 									<ListIcon />
-									<span>My Menu</span>
+									<span>{m.app_my_menu()}</span>
 								</a>
 							{/snippet}
 						</Sidebar.MenuButton>
@@ -94,12 +95,12 @@
 								{#if features.pantry}
 									<a href={pantryHref} {...props}>
 										<SoupIcon />
-										<span>Pantry</span>
+										<span>{m.app_pantry()}</span>
 									</a>
 								{:else}
 									<span {...props}>
 										<SoupIcon />
-										<span>Pantry</span>
+										<span>{m.app_pantry()}</span>
 									</span>
 								{/if}
 							{/snippet}
@@ -118,12 +119,12 @@
 								{#if features.groceryRollup}
 									<a href={groceryRollupHref} {...props}>
 										<ShoppingCartIcon />
-										<span>Grocery rollup</span>
+										<span>{m.app_grocery_rollup()}</span>
 									</a>
 								{:else}
 									<span {...props}>
 										<ShoppingCartIcon />
-										<span>Grocery rollup</span>
+										<span>{m.app_grocery_rollup()}</span>
 									</span>
 								{/if}
 							{/snippet}
@@ -138,7 +139,7 @@
 							{#snippet child({ props })}
 								<a href={householdHref} {...props}>
 									<HomeIcon />
-									<span>Household</span>
+									<span>{m.app_household()}</span>
 								</a>
 							{/snippet}
 						</Sidebar.MenuButton>

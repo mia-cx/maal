@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import { error, isHttpError, json } from '@sveltejs/kit';
 import { requireAppContext } from '$lib/server/http/app-context';
 import { loadHouseholdTaxonomyPreferences } from '$lib/server/taxonomy/household-preferences';
@@ -18,6 +19,6 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 	} catch (cause) {
 		if (isHttpError(cause)) throw cause;
 		console.error('Failed to load taxonomy preferences', cause);
-		error(503, { message: 'Taxonomy preferences unavailable.' });
+		error(503, { message: m.app_taxonomy_preferences_unavailable() });
 	}
 };

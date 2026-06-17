@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { setActiveHouseholdId } from '$lib/stores/active-household';
@@ -96,24 +97,24 @@
 	<div class="container mx-auto grid max-w-md content-center gap-6">
 		{#if hasHouseholds}
 			<div>
-				<Button href={resolve('/plan')} variant="ghost">Back to meal plan</Button>
+				<Button href={resolve('/plan')} variant="ghost">{m.household_back_to_meal_plan()}</Button>
 			</div>
 		{/if}
 		<div class="grid gap-2">
 			<WordmarkLogo class="h-6 w-auto" />
-			<h1 class="text-xl font-semibold tracking-tight">Set up your household</h1>
+			<h1 class="text-xl font-semibold tracking-tight">{m.household_set_up_your_household()}</h1>
 			<p class="text-sm text-muted-foreground">
-				Keep meal plans in a household so cooking history, menus, and plans can be shared.
+				{m.household_keep_meal_plans_in_a_household_so_cooking_hi()}
 			</p>
 		</div>
 
 		<form class="grid gap-3" onsubmit={createHousehold}>
 			<label class="grid gap-1 text-sm font-medium">
-				Household name
+				{m.household_household_name()}
 				<Input
 					bind:value={householdName}
 					autocomplete="organization"
-					placeholder="Home"
+					placeholder={m.household_home()}
 					class="h-9"
 				/>
 			</label>
@@ -128,13 +129,19 @@
 
 		<div class="grid gap-2 border-t border-border pt-4">
 			<label class="grid gap-1 text-sm font-medium text-muted-foreground">
-				Invite code
-				<Input bind:value={inviteCode} placeholder="Paste an invite code" class="h-9" />
+				{m.household_invite_code()}
+				<Input
+					bind:value={inviteCode}
+					placeholder={m.household_paste_an_invite_code()}
+					class="h-9"
+				/>
 			</label>
 			<Button variant="outline" disabled={!inviteCode.trim()} onclick={joinInvitedHousehold}>
-				Join household
+				{m.household_join_household()}
 			</Button>
-			<p class="text-xs text-muted-foreground">Have an invite code? Join that household instead.</p>
+			<p class="text-xs text-muted-foreground">
+				{m.household_have_an_invite_code_join_that_household_inst()}
+			</p>
 		</div>
 
 		{#if error}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { resolve } from '$app/paths';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
@@ -86,12 +87,12 @@
 				<DropdownMenu.Group>
 					<DropdownMenu.Item onclick={() => (settingsOpen = true)} class="cursor-pointer">
 						<Settings2Icon />
-						User settings
+						{m.app_user_settings()}
 					</DropdownMenu.Item>
 					<DropdownMenu.Item>
 						<a href={homeHref} class="flex w-full items-center gap-2">
 							<ArrowLeftIcon />
-							Back to home
+							{m.app_back_to_home()}
 						</a>
 					</DropdownMenu.Item>
 				</DropdownMenu.Group>
@@ -99,7 +100,7 @@
 				<DropdownMenu.Item>
 					<a href={logoutHref} class="flex w-full items-center gap-2">
 						<LogOutIcon />
-						Log out
+						{m.app_log_out()}
 					</a>
 				</DropdownMenu.Item>
 			</DropdownMenu.Content>

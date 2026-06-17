@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import type { SettingsHousehold } from './types';
 
 export type McpScope =
@@ -39,36 +40,36 @@ export type McpKey = {
 export const mcpScopeGroups = [
 	{
 		id: 'households',
-		label: 'Households',
-		description: 'Read or manage household membership and settings.',
+		label: m.settings_households(),
+		description: m.settings_read_or_manage_household_membership_and_sett(),
 		read: 'households:read',
 		write: 'households:write'
 	},
 	{
 		id: 'recipes',
-		label: 'Recipes',
-		description: 'Read, create, and update saved recipes.',
+		label: m.settings_recipes(),
+		description: m.settings_read_create_and_update_saved_recipes(),
 		read: 'recipes:read',
 		write: 'recipes:write'
 	},
 	{
 		id: 'meals',
-		label: 'Meal plan',
-		description: 'Read and manage planned meals.',
+		label: m.settings_meal_plan(),
+		description: m.settings_read_and_manage_planned_meals(),
 		read: 'meals:read',
 		write: 'meals:write'
 	},
 	{
 		id: 'checkIns',
-		label: 'Check-ins',
-		description: 'Record meal feedback after cooking.',
+		label: m.settings_check_ins(),
+		description: m.settings_record_meal_feedback_after_cooking(),
 		read: 'check_ins:read',
 		write: 'check_ins:write'
 	},
 	{
 		id: 'foodProfile',
-		label: 'Food profile',
-		description: 'Read or update taxonomy preferences.',
+		label: m.settings_food_profile(),
+		description: m.settings_read_or_update_taxonomy_preferences(),
 		read: 'food_profile:read',
 		write: 'food_profile:write'
 	}

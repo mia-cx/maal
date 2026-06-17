@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { invalidateAll } from '$app/navigation';
 	import { navigating, page } from '$app/state';
 	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
@@ -133,7 +134,7 @@
 			/>
 			{#if sidebarOpen}
 				<button
-					aria-label="Resize sidebar"
+					aria-label={m.app_resize_sidebar()}
 					class="fixed top-0 bottom-0 z-[55] w-3 cursor-col-resize bg-transparent after:absolute after:top-0 after:bottom-0 after:left-1/2 after:w-px after:-translate-x-1/2 hover:after:bg-border"
 					style:left="{sidebarWidth - 6}px"
 					onpointerdown={startSidebarResize}
@@ -171,29 +172,31 @@
 							<div
 								class="max-w-md rounded-xl border border-border bg-background p-5 text-center shadow-lg"
 							>
-								<h2 class="text-base font-semibold">This household has no active subscription</h2>
+								<h2 class="text-base font-semibold">
+									{m.app_this_household_has_no_active_subscription()}
+								</h2>
 								{#if canManageSubscription}
 									<p class="mt-2 text-sm text-muted-foreground">
-										Subscribe to resume access for this household.
+										{m.app_subscribe_to_resume_access_for_this_househol()}
 									</p>
 									<div class="mt-4 flex justify-center gap-2">
 										<a
 											class="inline-flex h-9 items-center justify-center rounded-md bg-[var(--brand-salmon)] px-4 text-sm font-medium text-white shadow-xs transition-colors hover:bg-[var(--brand-salmon)]/90 focus-visible:ring-2 focus-visible:ring-[var(--brand-salmon)]/30 focus-visible:outline-none"
 											href="/subscribe"
 										>
-											Subscribe
+											{m.app_subscribe()}
 										</a>
 										<Popover.Root bind:open={exportDataPopoverOpen}>
 											<Popover.Trigger
 												class="inline-flex h-9 cursor-default items-center justify-center rounded-md border border-border bg-muted px-4 text-sm font-medium text-muted-foreground opacity-60 shadow-xs focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
-												aria-label="Export data unavailable"
+												aria-label={m.app_export_data_unavailable()}
 												onclick={(event) => event.preventDefault()}
 												onfocus={() => (exportDataPopoverOpen = true)}
 												onblur={() => (exportDataPopoverOpen = false)}
 												onmouseenter={() => (exportDataPopoverOpen = true)}
 												onmouseleave={() => (exportDataPopoverOpen = false)}
 											>
-												Export data
+												{m.app_export_data()}
 											</Popover.Trigger>
 											<Popover.Content
 												side="top"
@@ -202,15 +205,15 @@
 												onmouseenter={() => (exportDataPopoverOpen = true)}
 												onmouseleave={() => (exportDataPopoverOpen = false)}
 											>
-												Email data-governance@maal.mia.cx to request your data.
+												{m.app_email_data_governance_maal_mia_cx_to_request()}
 											</Popover.Content>
 										</Popover.Root>
 									</div>
 								{:else}
 									<p class="mt-2 text-sm text-muted-foreground">
-										Tell the household manager to resume their subscription, or
+										{m.app_tell_the_household_manager_to_resume_their_s()}
 										<a class="font-medium underline underline-offset-4" href="/export-data"
-											>export your data</a
+											>{m.app_export_your_data()}</a
 										>.
 									</p>
 								{/if}

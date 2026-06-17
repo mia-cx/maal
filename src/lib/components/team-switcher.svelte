@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { HomeIcon } from '$lib/components/icons/solar-outline';
@@ -126,13 +127,13 @@
 				{:else}
 					<DropdownMenu.Item disabled class="gap-2 p-2 text-muted-foreground">
 						<HomeIcon class="size-5 shrink-0" />
-						No household yet
+						{m.app_no_household_yet()}
 					</DropdownMenu.Item>
 				{/if}
 				<DropdownMenu.Separator />
 				<DropdownMenu.Item class="gap-2 p-2" onclick={startHouseholdCreation}>
 					<PlusIcon class="size-5 shrink-0" />
-					<span class="truncate">New household</span>
+					<span class="truncate">{m.app_new_household()}</span>
 				</DropdownMenu.Item>
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>

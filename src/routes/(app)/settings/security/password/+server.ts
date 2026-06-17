@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import { error, isHttpError, json, type RequestHandler } from '@sveltejs/kit';
 import { getRequestMetadata } from '$lib/server/auth/session';
 import { createAuthRuntime } from '$lib/server/auth/workos';
@@ -13,20 +14,21 @@ const textField = (body: Record<string, unknown>, key: string): string => {
 
 export const POST: RequestHandler = async ({ locals, platform, request }) => {
 	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
+	if (!session) error(401, { message: m.app_sign_in_required() });
 
 	const body = await readJsonObject(request);
 	const currentPassword = textField(body, 'currentPassword');
 	const newPassword = textField(body, 'newPassword');
 
-	if (!currentPassword) error(400, { message: 'Current password is required.' });
+	if (!currentPassword) error(400, { message: m.settings_current_password_is_required() });
 	if (newPassword.length < minPasswordLength) {
 		error(400, { message: `Use at least ${minPasswordLength} characters.` });
 	}
 	if (newPassword.length > maxPasswordLength) {
 		error(400, { message: `Use ${maxPasswordLength} characters or fewer.` });
 	}
-	if (currentPassword === newPassword) error(400, { message: 'Choose a different password.' });
+	if (currentPassword === newPassword)
+		error(400, { message: m.settings_choose_a_different_password() });
 
 	try {
 		const runtime = createAuthRuntime(platform);
@@ -40,7 +42,7 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 		});
 
 		if (authenticated.user.id !== session.user.id) {
-			error(403, { message: 'Current password did not match this account.' });
+			error(403, { message: m.settings_current_password_did_not_match_this_account() });
 		}
 
 		await runtime.workos.userManagement.updateUser({
@@ -52,6 +54,6 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 	} catch (cause) {
 		if (isHttpError(cause)) throw cause;
 		console.error('Failed to change WorkOS password', cause);
-		error(400, { message: 'Could not change password. Check your current password.' });
+		error(400, { message: m.settings_could_not_change_password_check_your_current() });
 	}
 };

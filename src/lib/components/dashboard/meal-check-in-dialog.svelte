@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import * as Button from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
@@ -94,7 +95,7 @@
 <Dialog.Root bind:open>
 	<Dialog.Content class="sm:max-w-[24rem]">
 		<Dialog.Header>
-			<Dialog.Title>Meal check-in</Dialog.Title>
+			<Dialog.Title>{m.plan_meal_check_in()}</Dialog.Title>
 			<Dialog.Description>
 				{meal ? `How did ${meal.title} go?` : 'Record how this meal went.'}
 			</Dialog.Description>
@@ -102,7 +103,7 @@
 
 		<div class="grid gap-3">
 			<div class="grid gap-1.5">
-				<p class="text-xs font-medium">Was this meal cooked and eaten?</p>
+				<p class="text-xs font-medium">{m.plan_was_this_meal_cooked_and_eaten()}</p>
 				<div class="grid grid-cols-2 gap-1">
 					<Button.Root
 						type="button"
@@ -110,7 +111,7 @@
 						class="h-auto min-h-8 px-1.5 text-center whitespace-normal"
 						onclick={() => (cooked = true)}
 					>
-						Cooked/eaten
+						{m.plan_cooked_eaten()}
 					</Button.Root>
 					<Button.Root
 						type="button"
@@ -118,13 +119,13 @@
 						class="h-auto min-h-8 px-1.5 text-center whitespace-normal"
 						onclick={() => (cooked = false)}
 					>
-						Skipped
+						{m.plan_skipped()}
 					</Button.Root>
 				</div>
 			</div>
 
 			<div class="grid gap-1.5">
-				<p class="text-xs font-medium">Verdict</p>
+				<p class="text-xs font-medium">{m.plan_verdict()}</p>
 				<div class="grid grid-cols-3 gap-1">
 					{#each verdicts as option (option)}
 						<Button.Root
@@ -141,20 +142,20 @@
 
 			{#if canReportCookTime}
 				<label class="grid gap-1.5 text-xs font-medium">
-					How long did it take to cook this meal?
+					{m.plan_how_long_did_it_take_to_cook_this_meal()}
 					<Input
 						bind:value={cookTime}
 						type="text"
 						inputmode="numeric"
-						placeholder="30"
+						placeholder={m.plan_default_cook_minutes()}
 						disabled={!cooked}
 					/>
 				</label>
 			{/if}
 
 			<label class="grid gap-1.5 text-xs font-medium">
-				Notes
-				<Textarea bind:value={reason} placeholder="What worked or didn’t?" />
+				{m.plan_notes()}
+				<Textarea bind:value={reason} placeholder={m.plan_what_worked_or_didn_t()} />
 			</label>
 
 			{#if error}
@@ -164,7 +165,7 @@
 
 		<Dialog.Footer>
 			<Button.Root type="button" variant="ghost" disabled={busy} onclick={() => (open = false)}>
-				Cancel
+				{m.settings_cancel()}
 			</Button.Root>
 			<Button.Root type="button" disabled={busy || !meal} onclick={submit}>
 				{busy ? 'Saving…' : 'Save check-in'}

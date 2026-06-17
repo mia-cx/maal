@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { Button } from '$lib/components/ui/button';
 	import type { BillingStatus } from '$lib/settings/types';
 
@@ -19,10 +20,10 @@
 
 <div class="grid gap-4 text-sm">
 	{#if billingBusy && !billingStatus}
-		<p class="text-xs text-muted-foreground">Loading billing…</p>
+		<p class="text-xs text-muted-foreground">{m.settings_loading_billing()}</p>
 	{:else if billingStatus}
 		<div class="grid gap-2">
-			<p class="text-xs font-medium">Managed household subscriptions</p>
+			<p class="text-xs font-medium">{m.settings_managed_household_subscriptions()}</p>
 			<ul class="divide-y divide-border">
 				{#each billingStatus.householdBilling as householdBilling (householdBilling.householdId)}
 					<li class="flex items-center justify-between gap-3 py-2">
