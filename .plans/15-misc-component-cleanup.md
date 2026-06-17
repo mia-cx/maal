@@ -32,4 +32,5 @@ Tighten remaining miscellaneous component reliability issues: public marketing c
 - User settings validation: `pnpm exec prettier --write src/lib/components/user-settings-dialog.svelte && pnpm check` passed with 0 Svelte diagnostics.
 - Final validation: `pnpm test:e2e` passed after retrying the web server startup; `pnpm check` passed with 0 Svelte diagnostics after clearing stale `.svelte-kit` build output; `pnpm architecture:check` passed.
 - PR discussion resolution validation: `pnpm check` passed with 0 Svelte diagnostics after clearing stale `.svelte-kit` build output.
+- Follow-up review resolution validation: `pnpm check` passed with 0 Svelte diagnostics after adding request-id guarding to settings tab navigation and replaying delayed household store ids.
 - Full `pnpm lint` remains blocked by pre-existing repository-wide Prettier warnings outside this issue's changed files.

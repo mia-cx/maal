@@ -25,6 +25,7 @@
 	let clientActiveHouseholdId = $state<string | null>(null);
 	let lastServerActiveHouseholdId = $state<string | null>(null);
 	let switchError = $state<string | null>(null);
+	let storedActiveHouseholdId = $state<string | null>(null);
 	let switchRequestId = 0;
 
 	const activeHousehold = $derived(
@@ -65,11 +66,15 @@
 		}
 	});
 
+	$effect(() => {
+		if (!isKnownHouseholdId(storedActiveHouseholdId)) return;
+		clientActiveHouseholdId = storedActiveHouseholdId;
+	});
+
 	let unsubscribeActiveHousehold: (() => void) | null = null;
 	onMount(() => {
 		unsubscribeActiveHousehold = activeHouseholdIdStore.subscribe((householdId) => {
-			if (!isKnownHouseholdId(householdId)) return;
-			clientActiveHouseholdId = householdId;
+			storedActiveHouseholdId = householdId;
 		});
 	});
 	onDestroy(() => unsubscribeActiveHousehold?.());

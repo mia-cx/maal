@@ -159,12 +159,14 @@
 	);
 
 	let lastSettingsUrlParam = $state<string | null>(null);
+	let categoryNavigationRequestId = 0;
 
 	const settingsCategoryFromUrl = (): SettingsCategoryId | null =>
 		settingsCategoryFromParam(page.url.searchParams.get('settings'));
 
 	const chooseCategory = async (category: SettingsCategory) => {
 		if (category.disabled) return;
+		const requestId = ++categoryNavigationRequestId;
 		const previousCategory = activeCategory;
 		activeCategory = category.id;
 		navigationError = null;
@@ -176,8 +178,10 @@
 				noScroll: true,
 				replaceState: true
 			});
+			if (requestId !== categoryNavigationRequestId) return;
 			lastSettingsUrlParam = category.id;
 		} catch {
+			if (requestId !== categoryNavigationRequestId) return;
 			activeCategory = previousCategory;
 			navigationError = 'Could not update the settings URL.';
 		}
