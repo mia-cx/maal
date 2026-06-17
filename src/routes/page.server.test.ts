@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
-import { paidLandingPrice, trialPriceIdFromPrices } from './+page.server';
+import { landingPricingFallback, paidLandingPrice, trialPriceIdFromPrices } from './+page.server';
 
 const price = (overrides: Partial<Stripe.Price>): Stripe.Price =>
 	({
@@ -32,7 +32,13 @@ describe('paidLandingPrice', () => {
 		expect(paidLandingPrice(price({ billing_scheme: 'tiered' }))).toBeNull();
 		expect(
 			paidLandingPrice(
-				price({ recurring: { interval: 'month', interval_count: 1, usage_type: 'metered' } as Stripe.Price.Recurring })
+				price({
+					recurring: {
+						interval: 'month',
+						interval_count: 1,
+						usage_type: 'metered'
+					} as Stripe.Price.Recurring
+				})
 			)
 		).toBeNull();
 		expect(paidLandingPrice(price({ active: false }))).toBeNull();
@@ -45,9 +51,35 @@ describe('trialPriceIdFromPrices', () => {
 		expect(
 			trialPriceIdFromPrices([
 				price({ id: 'nullable', unit_amount: null }),
-				price({ id: 'metered-trial', unit_amount: 0, recurring: { interval: 'month', interval_count: 1, usage_type: 'metered' } as Stripe.Price.Recurring }),
+				price({
+					id: 'metered-trial',
+					unit_amount: 0,
+					recurring: {
+						interval: 'month',
+						interval_count: 1,
+						usage_type: 'metered'
+					} as Stripe.Price.Recurring
+				}),
 				price({ id: 'trial', unit_amount: 0 })
 			])
 		).toBe('trial');
+	});
+});
+
+describe('landingPricingFallback', () => {
+	it('logs the cause and returns an explicit unavailable pricing state', () => {
+		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const cause = new Error('stripe unavailable');
+
+		expect(landingPricingFallback(cause)).toEqual({
+			productName: 'Maal',
+			pricing: [],
+			pricingStatus: 'unavailable',
+			trialPriceId: null,
+			trialAvailable: false
+		});
+		expect(consoleError).toHaveBeenCalledWith('Failed to load landing pricing', cause);
+
+		consoleError.mockRestore();
 	});
 });
