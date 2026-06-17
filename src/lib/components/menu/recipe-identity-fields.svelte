@@ -15,7 +15,7 @@
 		cookTimeMinutes = $bindable(''),
 		recipeYield = $bindable(''),
 		textareaClass,
-		onimporturl,
+		canImportFromUrl,
 		sourceUrlCanImport,
 		importBusy,
 		importError,
@@ -33,7 +33,7 @@
 		cookTimeMinutes: string;
 		recipeYield: string;
 		textareaClass: string;
-		onimporturl?: unknown;
+		canImportFromUrl: boolean;
 		sourceUrlCanImport: boolean;
 		importBusy: boolean;
 		importError: string | null;
@@ -51,7 +51,7 @@
 		Source URL
 		<div class="flex gap-2">
 			<Input bind:value={sourceUrl} />
-			{#if onimporturl}
+			{#if canImportFromUrl}
 				<Button.Root
 					type="button"
 					variant="outline"
@@ -62,7 +62,7 @@
 				</Button.Root>
 			{/if}
 		</div>
-		{#if onimporturl && sourceUrlCanImport}
+		{#if canImportFromUrl && sourceUrlCanImport}
 			<span class="text-muted-foreground">
 				Import will fill this sheet from schema.org recipe data before you save.
 			</span>
