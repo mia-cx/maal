@@ -14,7 +14,7 @@ Close the code-review refactor remainder for app routes and household routes, le
 - [ ] Validation covers changed household/app route behavior.
 
 ## TODOs
-- [ ] Harden household invite actions and onboarding trial handling.
+- [x] Harden household invite actions and onboarding trial handling.
 - [ ] Reuse household validation constants and handle invite clipboard failures in the household UI.
 - [ ] Stop masking household-list failures and paginate subscribe pricing.
 - [ ] Centralize household taxonomy preference loading across menu/plan/recipe service callers.
@@ -24,3 +24,4 @@ Close the code-review refactor remainder for app routes and household routes, le
 ## Notes
 - #24 localization is intentionally out of scope until code-review refactor is finished.
 - Svelte MCP tools are unavailable in this session (`mcp search svelte` returned no tools), so Svelte autofixer cannot be run.
+- Hardened invite revoke/delete/role actions with structured failure mapping and split household creation from best-effort trial setup.

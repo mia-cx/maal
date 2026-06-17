@@ -137,13 +137,18 @@ export const actions: Actions = {
 		const database = requireInviteStorage(event.platform);
 		if (!database) return fail(503, { message: 'Invite storage is not available.' });
 
-		return inviteCommandResponse(
-			await revokeInviteFromForm({
-				database,
-				householdId: managedHousehold.householdId,
-				form: await event.request.formData()
-			})
-		);
+		try {
+			return inviteCommandResponse(
+				await revokeInviteFromForm({
+					database,
+					householdId: managedHousehold.householdId,
+					form: await event.request.formData()
+				})
+			);
+		} catch (cause) {
+			console.error('Failed to revoke household invite', cause);
+			return fail(502, { message: 'Could not revoke invite.' });
+		}
 	},
 
 	deleteInvite: async (event) => {
@@ -152,13 +157,18 @@ export const actions: Actions = {
 		const database = requireInviteStorage(event.platform);
 		if (!database) return fail(503, { message: 'Invite storage is not available.' });
 
-		return inviteCommandResponse(
-			await deleteInviteFromForm({
-				database,
-				householdId: managedHousehold.householdId,
-				form: await event.request.formData()
-			})
-		);
+		try {
+			return inviteCommandResponse(
+				await deleteInviteFromForm({
+					database,
+					householdId: managedHousehold.householdId,
+					form: await event.request.formData()
+				})
+			);
+		} catch (cause) {
+			console.error('Failed to delete household invite', cause);
+			return fail(502, { message: 'Could not delete invite.' });
+		}
 	},
 
 	updateInviteRole: async (event) => {
@@ -167,13 +177,18 @@ export const actions: Actions = {
 		const database = requireInviteStorage(event.platform);
 		if (!database) return fail(503, { message: 'Invite storage is not available.' });
 
-		return inviteCommandResponse(
-			await updateInviteRoleFromForm({
-				database,
-				householdId: managedHousehold.householdId,
-				form: await event.request.formData()
-			})
-		);
+		try {
+			return inviteCommandResponse(
+				await updateInviteRoleFromForm({
+					database,
+					householdId: managedHousehold.householdId,
+					form: await event.request.formData()
+				})
+			);
+		} catch (cause) {
+			console.error('Failed to update household invite role', cause);
+			return fail(502, { message: 'Could not update invite role.' });
+		}
 	},
 
 	updateMemberRole: async (event) => {

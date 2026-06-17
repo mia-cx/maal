@@ -1,8 +1,7 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { createHouseholdForUser } from '$lib/server/auth/household';
+import { maxHouseholdNameLength } from '$lib/domain/household/settings-parsing';
 import { loadTrialAvailability, startHouseholdTrial } from '$lib/server/domains/billing';
-
-const maxHouseholdNameLength = 120;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
@@ -25,15 +24,22 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	if (!name) error(400, { message: 'Household name is required.' });
 	if (name.length > maxHouseholdNameLength) error(400, { message: 'Household name is too long.' });
 
+	let household: Awaited<ReturnType<typeof createHouseholdForUser>>;
 	try {
-		const household = await createHouseholdForUser({
+		household = await createHouseholdForUser({
 			platform,
 			cookies,
 			url,
 			userId: session.user.id,
 			name
 		});
-		let trialStarted = false;
+	} catch (cause) {
+		console.error('Failed to create household', cause);
+		error(502, { message: 'Could not create household.' });
+	}
+
+	let trialStarted = false;
+	try {
 		const trialAvailability = await loadTrialAvailability({
 			database: platform?.env.DB,
 			userId: session.user.id,
@@ -47,12 +53,12 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 			});
 			trialStarted = true;
 		}
-		return json(
-			{ household: { id: household.id, name: household.name }, trialStarted },
-			{ status: 201 }
-		);
 	} catch (cause) {
-		console.error('Failed to create household', cause);
-		error(502, { message: 'Could not create household.' });
+		console.error('Failed to start household trial after creation', cause);
 	}
+
+	return json(
+		{ household: { id: household.id, name: household.name }, trialStarted },
+		{ status: 201 }
+	);
 };
