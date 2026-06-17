@@ -36,6 +36,22 @@ describe('loadHouseholdTaxonomyPreferences', () => {
 		});
 	});
 
+	it('falls back to the default locale when the household row is missing', async () => {
+		localeRows.mockResolvedValue([]);
+
+		await loadHouseholdTaxonomyPreferences(db as never, {
+			workosUserId: 'user_1',
+			householdId: 'household_1'
+		});
+
+		expect(localeRows).toHaveBeenCalledTimes(1);
+		expect(loadEffectiveTaxonomyPreferences).toHaveBeenCalledWith(db, {
+			workosUserId: 'user_1',
+			householdId: 'household_1',
+			locale: 'en-US'
+		});
+	});
+
 	it('uses an explicit locale without querying the household row', async () => {
 		await loadHouseholdTaxonomyPreferences(db as never, {
 			workosUserId: 'user_1',
