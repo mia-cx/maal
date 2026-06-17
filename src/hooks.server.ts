@@ -1,4 +1,4 @@
-import type { Handle } from '@sveltejs/kit';
+import { redirect, type Handle } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
 import { getTextDirection } from '$lib/paraglide/runtime';
 import { paraglideMiddleware } from '$lib/paraglide/server';
@@ -8,7 +8,6 @@ import {
 	readSealedSession
 } from '$lib/server/auth/session';
 import {
-	canManageActiveHousehold,
 	commitHouseholdCookie,
 	listUserHouseholds,
 	resolveActiveHouseholdId
@@ -49,11 +48,12 @@ const handleAuth: Handle = async ({ event, resolve }) => {
 	return resolve(event);
 };
 
-const subscriptionExemptPath = (pathname: string): boolean =>
+export const subscriptionExemptPath = (pathname: string): boolean =>
 	pathname.startsWith('/auth') ||
 	pathname.startsWith('/onboarding') ||
 	pathname.startsWith('/subscribe') ||
 	pathname.startsWith('/billing') ||
+	pathname.startsWith('/household') ||
 	pathname.startsWith('/export-data') ||
 	pathname.startsWith('/demo');
 
@@ -62,7 +62,7 @@ const activeSubscribedHouseholdId = async (
 	session: NonNullable<App.Locals['session']>
 ): Promise<string | null> => {
 	const households = await listUserHouseholds(platform, session.user.id).catch(() => []);
-	return firstAccessibleHouseholdId({ platform, database: platform.env.DB, households });
+	return firstAccessibleHouseholdId({ platform, households });
 };
 
 const handleSubscriptionGate: Handle = async ({ event, resolve }) => {
@@ -70,7 +70,7 @@ const handleSubscriptionGate: Handle = async ({ event, resolve }) => {
 		!event.locals.session ||
 		event.request.method !== 'GET' ||
 		subscriptionExemptPath(event.url.pathname) ||
-		!event.request.headers.get('accept')?.includes('text/html') ||
+		(!event.isDataRequest && !event.request.headers.get('accept')?.includes('text/html')) ||
 		!event.platform?.env.DB
 	) {
 		return resolve(event);
@@ -86,28 +86,20 @@ const handleSubscriptionGate: Handle = async ({ event, resolve }) => {
 
 	const hasAccess = await hasHouseholdAccess({
 		platform: event.platform,
-		database: event.platform.env.DB,
 		householdId
 	});
-	if (!hasAccess) {
-		const canManageSubscription = await canManageActiveHousehold(
-			event.platform,
-			event.locals.session,
-			householdId
-		);
-		if (canManageSubscription) return resolve(event);
+	if (hasAccess) return resolve(event);
 
-		const subscribedHouseholdId = await activeSubscribedHouseholdId(
-			event.platform,
-			event.locals.session
-		);
-		if (subscribedHouseholdId) {
-			commitHouseholdCookie(event.cookies, subscribedHouseholdId, event.url);
-			return resolve(event);
-		}
+	const subscribedHouseholdId = await activeSubscribedHouseholdId(
+		event.platform,
+		event.locals.session
+	);
+	if (subscribedHouseholdId) {
+		commitHouseholdCookie(event.cookies, subscribedHouseholdId, event.url);
+		return resolve(event);
 	}
 
-	return resolve(event);
+	redirect(303, '/subscribe');
 };
 
 const handleParaglide: Handle = ({ event, resolve }) =>

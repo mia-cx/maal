@@ -114,8 +114,6 @@ export const requireBillingAppContext = async (
 
 	await requireHouseholdAccess({
 		platform: input.platform,
-		database: context.database,
-		session: context.session,
 		householdId: context.householdId
 	});
 
