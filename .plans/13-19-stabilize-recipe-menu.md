@@ -19,7 +19,7 @@ Address the menu component and route review findings as one coherent hardening p
 - [x] Fix client menu state lifecycle: hydration signatures, async sheet saves, displayed-source selection, import callback typing, reorder direction, formatting helpers, and fixtures.
 - [x] Add shared route validation/URL safety helpers with focused tests for malformed recipes and unsafe import URLs.
 - [x] Transactionalize create/update lifecycle writes and align post-write reload behavior.
-- [ ] Transactionalize archive/restore/permanent delete paths and only delete meals after recipe links are removed and no links remain.
+- [x] Transactionalize archive/restore/permanent delete paths and only delete meals after recipe links are removed and no links remain.
 - [ ] Harden menu load household/promise failure handling and add visible client error behavior where needed.
 - [ ] Run focused menu validation and final repo checks; update PR notes with results.
 
@@ -29,3 +29,4 @@ Address the menu component and route review findings as one coherent hardening p
 - 2026-06-17: Client lifecycle TODO complete. `pnpm check` passes after making menu store updates awaitable, save failures visible, selection display-source aware, URL import prop typed by one callback presence flag, instruction arrow semantics consistent, date/minute/title formatting stricter, and fixture ingredient counts derived at export.
 - 2026-06-17: Validation/URL safety TODO complete. Added shared `parseRecipeMenuItemPayload`, wired create/update route bodies to reject malformed nested recipes, moved import URL max-length enforcement into `fetchRecipeImportPage`, and covered both with unit tests. `pnpm test:unit -- --run src/lib/menu/recipe-payload.test.ts src/lib/server/services/recipe-import-fetch.test.ts` exited 0 (Vitest ran the configured suite because of script arg handling); `pnpm check` passes.
 - 2026-06-17: Create/update transaction TODO complete. POST now inserts the user recipe, ingredients, instructions, and sidecars in one transaction using replace helpers. PUT now updates the main row plus ingredients/instructions in one transaction and fails if the persisted recipe cannot be reloaded. `pnpm check` passes.
+- 2026-06-17: Permanent delete lifecycle TODO complete. Single and bulk permanent deletes now run in a transaction, remove target recipe links first, delete only meals with no remaining recipe links, then delete archived recipe rows. `pnpm check` passes.

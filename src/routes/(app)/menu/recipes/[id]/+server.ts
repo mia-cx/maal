@@ -196,27 +196,42 @@ export const DELETE: RequestHandler = async ({ cookies, locals, params, platform
 		error(404, { message: permanent ? 'Archived recipe not found.' : 'Recipe not found.' });
 
 	if (permanent) {
-		const mealLinks = await db
-			.select({ householdMealId: householdMealUserRecipes.householdMealId })
-			.from(householdMealUserRecipes)
-			.where(eq(householdMealUserRecipes.userRecipeId, recipeId));
-		const householdMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
-		if (householdMealIds.length) {
-			await db.delete(householdMeals).where(inArray(householdMeals.id, householdMealIds));
-		}
-		await db
-			.delete(householdMealUserRecipes)
-			.where(eq(householdMealUserRecipes.userRecipeId, recipeId));
-		await db
-			.delete(userRecipes)
-			.where(
-				and(
-					eq(userRecipes.id, recipeId),
-					eq(userRecipes.workosUserId, session.user.id),
-					isNotNull(userRecipes.deletedAt)
-				)
-			);
-		return json({ deleted: true, permanent: true, deletedMealCount: householdMealIds.length });
+		const deletedMealCount = await db.transaction(async (tx) => {
+			const mealLinks = await tx
+				.select({ householdMealId: householdMealUserRecipes.householdMealId })
+				.from(householdMealUserRecipes)
+				.where(eq(householdMealUserRecipes.userRecipeId, recipeId));
+			const householdMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
+
+			await tx
+				.delete(householdMealUserRecipes)
+				.where(eq(householdMealUserRecipes.userRecipeId, recipeId));
+
+			let mealIdsWithoutLinks: string[] = [];
+			if (householdMealIds.length) {
+				const remainingLinks = await tx
+					.select({ householdMealId: householdMealUserRecipes.householdMealId })
+					.from(householdMealUserRecipes)
+					.where(inArray(householdMealUserRecipes.householdMealId, householdMealIds));
+				const linkedMealIds = new Set(remainingLinks.map((link) => link.householdMealId));
+				mealIdsWithoutLinks = householdMealIds.filter((mealId) => !linkedMealIds.has(mealId));
+				if (mealIdsWithoutLinks.length) {
+					await tx.delete(householdMeals).where(inArray(householdMeals.id, mealIdsWithoutLinks));
+				}
+			}
+
+			await tx
+				.delete(userRecipes)
+				.where(
+					and(
+						eq(userRecipes.id, recipeId),
+						eq(userRecipes.workosUserId, session.user.id),
+						isNotNull(userRecipes.deletedAt)
+					)
+				);
+			return mealIdsWithoutLinks.length;
+		});
+		return json({ deleted: true, permanent: true, deletedMealCount });
 	}
 
 	const deletedAt = new Date().toISOString();
