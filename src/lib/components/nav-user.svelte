@@ -15,13 +15,10 @@
 	let { user }: { user: NavUser } = $props();
 	const sidebar = useSidebar();
 
-	let localUser = $state<NavUser>({ name: '', email: '', avatar: '', emailVerified: false });
+	let localUserOverride = $state<NavUser | null>(null);
 	let settingsOpen = $state(false);
 
-	$effect(() => {
-		localUser = { ...user };
-	});
-
+	const localUser = $derived(localUserOverride ?? user);
 	const initials = $derived(localUser.name.slice(0, 2).toUpperCase());
 	const homeHref = resolve('/');
 	const logoutHref = resolve('/auth/logout');
@@ -31,7 +28,7 @@
 		email: string;
 		emailVerified: boolean;
 	}) => {
-		localUser = {
+		localUserOverride = {
 			...localUser,
 			name: updatedUser.name ?? updatedUser.email,
 			email: updatedUser.email,

@@ -54,7 +54,9 @@
 		const header = headerElement;
 		const main =
 			header.nextElementSibling instanceof HTMLElement ? header.nextElementSibling : null;
-		const hero = main?.querySelector<HTMLElement>('section[data-section="hero"]') ?? null;
+		const hero =
+			main?.querySelector<HTMLElement>('section[data-section="hero"]') ??
+			document.querySelector<HTMLElement>('section[data-section="hero"]');
 		const root = document.documentElement;
 		const setHeaderHeight = () => {
 			root.style.setProperty('--marketing-header-height', `${header.clientHeight}px`);

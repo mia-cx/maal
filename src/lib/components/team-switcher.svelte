@@ -34,6 +34,8 @@
 	);
 	const householdName = $derived(activeHousehold?.name ?? 'No household');
 	const householdMeta = $derived(activeHousehold ? 'Household' : 'Create one from Meal Plan');
+	const isKnownHouseholdId = (householdId: string | null): householdId is string =>
+		Boolean(householdId && households.some((household) => household.id === householdId));
 	const startHouseholdCreation = () => goto(resolve('/onboarding?new=1'));
 	const switchHousehold = async (householdId: string) => {
 		if (householdId === clientActiveHouseholdId) return;
@@ -66,6 +68,7 @@
 	let unsubscribeActiveHousehold: (() => void) | null = null;
 	onMount(() => {
 		unsubscribeActiveHousehold = activeHouseholdIdStore.subscribe((householdId) => {
+			if (!isKnownHouseholdId(householdId)) return;
 			clientActiveHouseholdId = householdId;
 		});
 	});

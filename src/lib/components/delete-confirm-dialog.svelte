@@ -50,6 +50,11 @@
 	);
 
 	$effect(() => {
+		if (open) return;
+		localError = null;
+	});
+
+	$effect(() => {
 		if (!open || isBusy) return;
 		const focusTimeout = window.setTimeout(() => confirmButton?.focus());
 		return () => window.clearTimeout(focusTimeout);

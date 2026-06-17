@@ -12,6 +12,7 @@ Tighten remaining miscellaneous component reliability issues: public marketing c
 - [x] Nav user uses mutable local state without mutating a derived value.
 - [x] Async component handlers clear busy/submitting state and surface errors on failure.
 - [x] Focused and repo validation pass or residual risks are recorded.
+- [x] Unresolved PR review discussions are classified, fixed, replied to, and resolved.
 
 ## TODOs
 
@@ -20,6 +21,7 @@ Tighten remaining miscellaneous component reliability issues: public marketing c
 - [x] Harden household onboarding, team switching, and delete confirm async paths.
 - [x] Harden user settings async handlers and remove dead imports/state.
 - [x] Run final validation and file the PR.
+- [x] Resolve PR #41 review discussions for nav user, household switcher, settings navigation, delete dialog, and sticky header.
 
 ## Notes
 
@@ -29,4 +31,5 @@ Tighten remaining miscellaneous component reliability issues: public marketing c
 - Async component validation: `pnpm exec prettier --write src/lib/components/delete-confirm-dialog.svelte src/lib/components/household/household-onboarding.svelte src/lib/components/team-switcher.svelte && pnpm check` passed with 0 Svelte diagnostics.
 - User settings validation: `pnpm exec prettier --write src/lib/components/user-settings-dialog.svelte && pnpm check` passed with 0 Svelte diagnostics.
 - Final validation: `pnpm test:e2e` passed after retrying the web server startup; `pnpm check` passed with 0 Svelte diagnostics after clearing stale `.svelte-kit` build output; `pnpm architecture:check` passed.
+- PR discussion resolution validation: `pnpm check` passed with 0 Svelte diagnostics after clearing stale `.svelte-kit` build output.
 - Full `pnpm lint` remains blocked by pre-existing repository-wide Prettier warnings outside this issue's changed files.

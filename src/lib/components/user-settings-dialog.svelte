@@ -140,6 +140,7 @@
 	let billingBusy = $state(false);
 	let billingPortalBusy = $state(false);
 	let billingError = $state<string | null>(null);
+	let navigationError = $state<string | null>(null);
 
 	const verificationCodeMinLength = 6;
 	const normalizedAccountEmail = $derived(normalizedEmail(accountEmail));
@@ -164,18 +165,21 @@
 
 	const chooseCategory = async (category: SettingsCategory) => {
 		if (category.disabled) return;
+		const previousCategory = activeCategory;
 		activeCategory = category.id;
+		navigationError = null;
 		const nextUrl = new URL(page.url);
 		nextUrl.searchParams.set('settings', category.id);
-		lastSettingsUrlParam = category.id;
 		try {
 			await goto(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`, {
 				keepFocus: true,
 				noScroll: true,
 				replaceState: true
 			});
+			lastSettingsUrlParam = category.id;
 		} catch {
-			accountError = 'Could not update the settings URL.';
+			activeCategory = previousCategory;
+			navigationError = 'Could not update the settings URL.';
 		}
 	};
 
@@ -652,6 +656,9 @@
 
 			<section class="min-h-0 overflow-y-auto p-4">
 				<SettingsSectionHeading category={activeCategoryDetails} />
+				{#if navigationError}
+					<p class="mb-4 text-sm text-destructive">{navigationError}</p>
+				{/if}
 
 				{#if activeCategory === 'account'}
 					<AccountSettingsSection
