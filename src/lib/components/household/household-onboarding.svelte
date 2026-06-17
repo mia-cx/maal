@@ -36,8 +36,15 @@
 
 	const joinInvitedHousehold = async () => {
 		const code = inviteCode.trim();
-		if (!code) return;
-		await goto(resolve(`/invite/${encodeURIComponent(code)}`));
+		if (!code || busy) return;
+		busy = true;
+		error = null;
+		try {
+			await goto(resolve(`/invite/${encodeURIComponent(code)}`));
+		} catch {
+			error = 'Could not open that invite. Please try again.';
+			busy = false;
+		}
 	};
 
 	const createHousehold = async (event: SubmitEvent) => {
@@ -47,27 +54,41 @@
 		busy = true;
 		error = null;
 
-		const response = await fetch('/household/onboarding', {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ name })
-		});
+		try {
+			const response = await fetch('/household/onboarding', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ name })
+			});
 
-		busy = false;
-		if (!response.ok) {
-			error = await readError(response, 'Could not create household.');
-			return;
+			if (!response.ok) {
+				error = await readError(response, 'Could not create household.');
+				busy = false;
+				return;
+			}
+
+			const body: unknown = await response.json();
+			if (!body || typeof body !== 'object') {
+				throw new Error('Invalid onboarding response.');
+			}
+			const trialStarted = 'trialStarted' in body && body.trialStarted === true;
+			const household = 'household' in body ? body.household : null;
+			const householdId =
+				household &&
+				typeof household === 'object' &&
+				'id' in household &&
+				typeof household.id === 'string'
+					? household.id
+					: null;
+			if (!householdId) throw new Error('Created household response did not include an id.');
+			setActiveHouseholdId(householdId);
+			await goto(resolve(trialStarted ? '/plan?trial=started' : '/subscribe'), {
+				invalidateAll: true
+			});
+		} catch {
+			error = 'Could not create household. Please try again.';
+			busy = false;
 		}
-
-		const body = (await response.json()) as {
-			trialStarted?: boolean;
-			household?: { id?: unknown };
-		};
-		const householdId = typeof body.household?.id === 'string' ? body.household.id : null;
-		if (householdId) setActiveHouseholdId(householdId);
-		await goto(resolve(body.trialStarted ? '/plan?trial=started' : '/subscribe'), {
-			invalidateAll: true
-		});
 	};
 </script>
 
