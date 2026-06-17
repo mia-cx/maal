@@ -79,8 +79,8 @@ export const handleMcpRequest = async (platform: App.Platform | undefined, reque
 		enableJsonResponse: true
 	});
 
-	await server.connect(transport);
 	try {
+		await server.connect(transport);
 		return await transport.handleRequest(request);
 	} finally {
 		await server.close();

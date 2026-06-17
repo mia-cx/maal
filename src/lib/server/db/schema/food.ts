@@ -131,6 +131,12 @@ export const foodHouseholdAliases = sqliteTable(
 		}),
 		index('food_household_aliases_household_idx').on(table.householdId),
 		index('food_household_aliases_food_id_idx').on(table.foodId),
+		uniqueIndex('food_household_aliases_identity_unique').on(
+			table.householdId,
+			table.foodId,
+			table.locale,
+			table.alias
+		),
 		index('food_household_aliases_lookup_idx').on(table.householdId, table.locale, table.alias),
 		index('food_household_aliases_adoption_idx').on(table.adoptionStatus),
 		check(

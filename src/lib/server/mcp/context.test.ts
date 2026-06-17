@@ -33,16 +33,19 @@ const key = (overrides: Partial<McpKeyRecord> = {}): McpKeyRecord => ({
 	...overrides
 });
 
+const db = {} as McpContext['db'];
+
 const context = (record = key()): McpContext => ({
 	platform: undefined,
 	key: record,
-	db: undefined as unknown as McpContext['db']
+	db
 });
 
 beforeEach(() => {
 	mocks.listUserHouseholds.mockReset();
 	mocks.userHasHouseholdPermission.mockReset();
 	mocks.scopeAllowsHousehold.mockReset();
+	mocks.listUserHouseholds.mockResolvedValue([]);
 	mocks.scopeAllowsHousehold.mockResolvedValue(true);
 	mocks.userHasHouseholdPermission.mockResolvedValue(true);
 });
