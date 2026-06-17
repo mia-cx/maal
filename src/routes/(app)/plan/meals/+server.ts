@@ -1,6 +1,7 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq } from 'drizzle-orm';
-import type { Meal } from '$lib/plan/plan-types';
+import { isDateKey, parseDateKey } from '$lib/plan/date-key';
+import type { Meal, MealStatus } from '$lib/plan/plan-types';
 import { requireBillingAppContext } from '$lib/server/http/app-context';
 import { mapKnownError } from '$lib/server/http/domain-errors';
 import { readJsonObject } from '$lib/server/http/request';
@@ -17,15 +18,77 @@ import { mealToCreateInput, mealToUpdateInput } from '$lib/server/services/meal-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
 
-const dateParam = (url: URL, key: string): string | undefined => {
-	const value = url.searchParams.get(key)?.trim();
-	return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined;
+const mealStatuses = new Set<MealStatus>(['planned', 'cooked', 'skipped']);
+
+const optionalString = (value: unknown, field: string): string | undefined => {
+	if (value === undefined || value === null) return undefined;
+	if (typeof value === 'string') return value;
+	error(400, { message: `${field} must be a string.` });
 };
 
-const readMeal = async (request: Request): Promise<Meal> => {
+const optionalNumber = (value: unknown, field: string): number | undefined => {
+	if (value === undefined || value === null) return undefined;
+	if (typeof value === 'number' && Number.isFinite(value)) return value;
+	error(400, { message: `${field} must be a number.` });
+};
+
+const optionalStringArray = (value: unknown, field: string): string[] | undefined => {
+	if (value === undefined || value === null) return undefined;
+	if (Array.isArray(value) && value.every((item) => typeof item === 'string')) return value;
+	error(400, { message: `${field} must be a string array.` });
+};
+
+const optionalDateKey = (value: unknown, field: string): string | undefined => {
+	const key = optionalString(value, field)?.trim();
+	if (!key) return undefined;
+	if (isDateKey(key)) return key;
+	error(400, { message: `${field} must be a valid YYYY-MM-DD date.` });
+};
+
+const dateParam = (url: URL, key: string): string | undefined => {
+	const value = url.searchParams.get(key)?.trim();
+	return value && isDateKey(value) ? value : undefined;
+};
+
+const readMeal = async (request: Request, options: { requireId?: boolean } = {}): Promise<Meal> => {
 	const body = await readJsonObject(request);
 	if (!isRecord(body.meal)) error(400, { message: 'Meal is required.' });
-	return body.meal as Meal;
+	const meal = body.meal;
+	const id = optionalString(meal.id, 'meal.id')?.trim();
+	if (options.requireId && !id) error(400, { message: 'Meal id is required.' });
+	const title = optionalString(meal.title, 'meal.title');
+	if (typeof title !== 'string') error(400, { message: 'Meal title is required.' });
+	const status = optionalString(meal.status, 'meal.status');
+	if (status && !mealStatuses.has(status as MealStatus)) {
+		error(400, { message: 'Meal status is invalid.' });
+	}
+
+	return {
+		id: id ?? '',
+		userRecipeId: optionalString(meal.userRecipeId, 'meal.userRecipeId'),
+		title,
+		day: optionalString(meal.day, 'meal.day'),
+		date: optionalDateKey(meal.date, 'meal.date'),
+		time: optionalString(meal.time, 'meal.time'),
+		sortOrder: optionalNumber(meal.sortOrder, 'meal.sortOrder'),
+		status: status as MealStatus | undefined,
+		plannedCookWorkosUserId: optionalString(
+			meal.plannedCookWorkosUserId,
+			'meal.plannedCookWorkosUserId'
+		),
+		prepTimeMinutes: optionalNumber(meal.prepTimeMinutes, 'meal.prepTimeMinutes'),
+		cookTimeMinutes: optionalNumber(meal.cookTimeMinutes, 'meal.cookTimeMinutes'),
+		adjustedCookTimeMinutes: optionalNumber(
+			meal.adjustedCookTimeMinutes,
+			'meal.adjustedCookTimeMinutes'
+		),
+		servingsPlanned: optionalNumber(meal.servingsPlanned, 'meal.servingsPlanned'),
+		baseServings: optionalNumber(meal.baseServings, 'meal.baseServings'),
+		image: optionalString(meal.image, 'meal.image'),
+		description: optionalString(meal.description, 'meal.description'),
+		ingredients: optionalStringArray(meal.ingredients, 'meal.ingredients'),
+		instructions: optionalStringArray(meal.instructions, 'meal.instructions')
+	};
 };
 
 const readMealId = async (request: Request): Promise<string> => {
@@ -44,7 +107,10 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 	});
 	const startDate = dateParam(url, 'start');
 	const endDate = dateParam(url, 'end');
-	if (!startDate || !endDate) error(400, { message: 'Date range is required.' });
+	if (!startDate || !endDate) error(400, { message: 'Valid date range is required.' });
+	if (parseDateKey(startDate)!.getTime() > parseDateKey(endDate)!.getTime()) {
+		error(400, { message: 'Date range start must be before end.' });
+	}
 
 	return json({
 		meals: await listHouseholdPlanMeals({
@@ -90,7 +156,8 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 	const { db, householdId } = await requireBillingAppContext({ cookies, locals, platform, url });
 
 	const mealId = await readMealId(request);
-	await deleteHouseholdMeal({ db, householdId, mealId });
+	const deleted = await deleteHouseholdMeal({ db, householdId, mealId });
+	if (!deleted) error(404, { message: 'Meal not found.' });
 	return json({ ok: true });
 };
 
@@ -101,7 +168,7 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 		platform,
 		url
 	});
-	const meal = await readMeal(request);
+	const meal = await readMeal(request, { requireId: true });
 
 	const existingMeal = await db
 		.select()
@@ -109,10 +176,7 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 		.where(and(eq(householdMeals.id, meal.id), eq(householdMeals.householdId, householdId)))
 		.get();
 
-	if (!existingMeal) {
-		if (!meal.date) return json({ meal });
-		error(404, { message: 'Meal not found.' });
-	}
+	if (!existingMeal) error(404, { message: 'Meal not found.' });
 
 	try {
 		return json({

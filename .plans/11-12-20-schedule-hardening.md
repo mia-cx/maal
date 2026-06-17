@@ -16,7 +16,7 @@ Harden the meal planning/schedule data flow across dashboard helpers and plan ro
 ## TODOs
 
 - [x] Add neutral plan DTO/date validation helpers and update route/client imports.
-- [ ] Harden `/plan/meals` request parsing, range validation, and not-found semantics.
+- [x] Harden `/plan/meals` request parsing, range validation, and not-found semantics.
 - [ ] Harden schedule date helpers and API client response/error handling.
 - [ ] Make dashboard range loading queue latest requests and allow retries.
 - [ ] Await plan page route data server-side and simplify client hydration.
@@ -28,3 +28,4 @@ Harden the meal planning/schedule data flow across dashboard helpers and plan ro
 - Issues reviewed: #11, #12, #20 are open.
 - Added `$lib/plan/plan-types` and moved server/route/client imports off dashboard component DTOs.
 - Validation: `pnpm exec tsc --noEmit --skipLibCheck` fails before typechecking because `worker-configuration.d.ts` has not been generated yet.
+- Added strict date-key validation, route meal payload parsing, reversed range rejection, DELETE missing-row 404, and PUT missing-id/missing-row 400/404 handling.
