@@ -12,7 +12,7 @@ Tighten remaining miscellaneous component reliability issues: public marketing c
 - [ ] Focused and repo validation pass or residual risks are recorded.
 
 ## TODOs
-- [ ] Clean up public marketing components: footer CDN/links, wordmark rendering, sticky header globals, pricing CTA typing, and gradient blur dead CSS.
+- [x] Clean up public marketing components: footer CDN/links, wordmark rendering, sticky header globals, pricing CTA typing, and gradient blur dead CSS.
 - [ ] Fix nav-user local state semantics and unreachable link branches.
 - [ ] Harden household onboarding, team switching, and delete confirm async paths.
 - [ ] Harden user settings async handlers and remove dead imports/state.
@@ -20,3 +20,4 @@ Tighten remaining miscellaneous component reliability issues: public marketing c
 
 ## Notes
 - Svelte MCP server is not available in this session (`mcp` only lists the maal server), so Svelte docs/autofixer cannot be used.
+- Public marketing validation: `pnpm exec prettier --write ... && pnpm check` passed with 0 Svelte diagnostics.

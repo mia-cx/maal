@@ -12,6 +12,7 @@
 	};
 
 	let { logo, nav, actions, class: className = '' }: Props = $props();
+	let headerElement: HTMLElement;
 	let heroVisible = $state(true);
 	let heroIntersectionRatio = $state(0);
 	let scrollProgress = $state(0);
@@ -50,16 +51,18 @@
 	};
 
 	onMount(() => {
-		const header = document.querySelector<HTMLElement>('header[data-marketing-header]');
-		const hero = document.querySelector<HTMLElement>(
-			'header[data-marketing-header] + main section[data-section="hero"]'
-		);
-		if (!header) return;
+		const header = headerElement;
+		const main =
+			header.nextElementSibling instanceof HTMLElement ? header.nextElementSibling : null;
+		const hero = main?.querySelector<HTMLElement>('section[data-section="hero"]') ?? null;
+		const root = document.documentElement;
+		const setHeaderHeight = () => {
+			root.style.setProperty('--marketing-header-height', `${header.clientHeight}px`);
+		};
+		const headerSizeObserver = new ResizeObserver(setHeaderHeight);
 
-		document.documentElement.style.setProperty(
-			'--marketing-header-height',
-			`${header.clientHeight}px`
-		);
+		setHeaderHeight();
+		headerSizeObserver.observe(header);
 
 		const scroller = scrollParent(header);
 		const scrollElement =
@@ -97,6 +100,8 @@
 		window.addEventListener('resize', updateProgress, { passive: true });
 
 		return () => {
+			headerSizeObserver.disconnect();
+			root.style.removeProperty('--marketing-header-height');
 			scrollElement.removeEventListener('scroll', updateProgress);
 			window.removeEventListener('resize', updateProgress);
 		};
@@ -104,6 +109,7 @@
 </script>
 
 <header
+	bind:this={headerElement}
 	data-marketing-header
 	data-hero-visible={heroVisible}
 	class="fixed top-0 right-0 left-0 isolate z-50 flex w-full items-center justify-center {className}"
@@ -155,6 +161,8 @@
 
 	:global(.header-blur),
 	.header-gradient {
+		--header-background-peak-bottom: -500%;
+		--header-background-settled-bottom: -150%;
 		position: absolute;
 		z-index: -20;
 		inset: 0 0 var(--bottom) 0;
@@ -239,11 +247,11 @@
 				--bottom: 0%;
 			}
 			20% {
-				--bottom: -500%;
+				--bottom: var(--header-background-peak-bottom);
 			}
 			90%,
 			100% {
-				--bottom: -150%;
+				--bottom: var(--header-background-settled-bottom);
 			}
 		}
 

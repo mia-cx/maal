@@ -3,7 +3,8 @@ import type { PageServerLoad } from './$types';
 import { resolveActiveHouseholdId } from '$lib/server/auth/household';
 import {
 	isSupportedFixedRecurringPrice,
-	supportedInterval
+	supportedInterval,
+	trialDefaultPricingOptionFromPrices
 } from '$lib/server/billing/pricing-options';
 import { createStripeClient, getStripePublicConfig } from '$lib/server/domains/billing';
 import { loadTrialAvailability } from '$lib/server/domains/billing';
@@ -15,6 +16,8 @@ export type LandingPrice = {
 	currency: string;
 	interval: 'week' | 'month' | 'year';
 	intervalCount: number;
+	supportsTrial?: boolean;
+	trialPriceId?: string | null;
 };
 
 const labelFor = (price: Stripe.Price): LandingPrice['label'] | null => {
@@ -68,13 +71,19 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 			active: true,
 			limit: 20
 		});
+		const trialPriceId = trialPriceIdFromPrices(prices.data);
+		const trialDefaultOption = trialDefaultPricingOptionFromPrices(prices.data, product.id);
 		const pricing = prices.data
 			.map(paidLandingPrice)
 			.filter((price): price is LandingPrice => Boolean(price))
+			.map((price) => ({
+				...price,
+				supportsTrial: price.id === trialDefaultOption?.id,
+				trialPriceId: price.id === trialDefaultOption?.id ? trialPriceId : null
+			}))
 			.sort(
 				(left, right) => (priceOrder.get(left.label) ?? 99) - (priceOrder.get(right.label) ?? 99)
 			);
-		const trialPriceId = trialPriceIdFromPrices(prices.data);
 		let trialAvailable = false;
 		if (locals.session && platform?.env.DB && trialPriceId) {
 			const { householdId } = await resolveActiveHouseholdId({

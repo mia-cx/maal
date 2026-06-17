@@ -11,6 +11,7 @@ import {
 	loadFreshBillingStatus,
 	loadTrialAvailability,
 	pricingOptionsFromPrices,
+	trialDefaultPricingOptionFromPrices,
 	type PricingOption
 } from '$lib/server/domains/billing';
 
@@ -37,6 +38,8 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 	const productId = getStripeProductId(platform);
 	const prices = await stripe.prices.list({ product: productId, active: true, limit: 20 });
 	const options = pricingOptionsFromPrices(prices.data);
+	const trialOption = options.find((option) => option.amount === 0) ?? null;
+	const trialDefaultOption = trialDefaultPricingOptionFromPrices(prices.data, productId);
 
 	const trialAvailability = await loadTrialAvailability({
 		database: platform.env.DB,
@@ -48,7 +51,13 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 		billing,
 		householdName,
 		trialAvailable: trialAvailability.available,
-		paidOptions: options.filter((option) => option.amount > 0),
-		trialOption: options.find((option) => option.amount === 0) ?? null
+		paidOptions: options
+			.filter((option) => option.amount > 0)
+			.map((option) => ({
+				...option,
+				supportsTrial: option.id === trialDefaultOption?.id,
+				trialPriceId: option.id === trialDefaultOption?.id ? trialOption?.id : null
+			})),
+		trialOption
 	};
 };
