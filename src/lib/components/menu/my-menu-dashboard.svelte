@@ -21,7 +21,6 @@
 		deleteMenuRecipes,
 		hydrateMenuRecipes,
 		menuRecipesStore,
-		permanentlyDeleteMenuRecipe,
 		permanentlyDeleteMenuRecipes,
 		restoreMenuRecipe,
 		restoreMenuRecipes,
@@ -76,17 +75,18 @@
 		serverSearchActive ? (searchRecipes ?? []) : rankRecipesByRelevance(recipes, recipeSearchQuery)
 	);
 	const selectedRecipes = $derived(
-		recipes.filter((recipe) => selectedRecipeIds.includes(recipe.id))
+		displayedRecipes.filter((recipe) => selectedRecipeIds.includes(recipe.id))
 	);
 	const selectedArchivedRecipes = $derived(
 		archivedRecipes.filter((recipe) => selectedArchivedRecipeIds.includes(recipe.id))
 	);
 
 	$effect(() => {
-		const signature = [
-			initialRecipes.map((recipe) => recipe.id).join('|'),
-			initialArchivedRecipes.map((recipe) => recipe.id).join('|')
-		].join('::');
+		const signature = JSON.stringify({
+			recipes: initialRecipes,
+			archivedRecipes: initialArchivedRecipes,
+			nextRecipeOffset: initialNextRecipeOffset
+		});
 		if (signature === hydratedRecipesSignature) return;
 		hydratedRecipesSignature = signature;
 		nextRecipeOffset = initialNextRecipeOffset;
@@ -112,13 +112,17 @@
 		left.length === right.length && left.every((id) => right.includes(id));
 
 	$effect(() => {
+		const selectableRecipes = displayedRecipes;
 		const nextSelectedRecipeIds = selectedRecipeIds.filter((id) =>
-			recipes.some((recipe) => recipe.id === id)
+			selectableRecipes.some((recipe) => recipe.id === id)
 		);
 		if (!idsMatch(selectedRecipeIds, nextSelectedRecipeIds)) {
 			selectedRecipeIds = nextSelectedRecipeIds;
 		}
-		if (lastSelectedRecipeId && !recipes.some((recipe) => recipe.id === lastSelectedRecipeId)) {
+		if (
+			lastSelectedRecipeId &&
+			!selectableRecipes.some((recipe) => recipe.id === lastSelectedRecipeId)
+		) {
 			lastSelectedRecipeId = null;
 		}
 	});
@@ -208,7 +212,7 @@
 
 	const saveRecipeFromSheet = async (recipe: RecipeMenuItem) => {
 		if (!recipe.id.startsWith('draft-recipe-')) {
-			updateMenuRecipe(recipe);
+			await updateMenuRecipe(recipe);
 			return;
 		}
 		await createMenuRecipe({ recipe });

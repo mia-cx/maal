@@ -14,9 +14,10 @@ import {
 } from '$lib/server/db/schema';
 import {
 	loadMenuRecipes,
+	replaceRecipeIngredients,
+	replaceRecipeInstructions,
 	schemaOrgFromRecipeItem,
-	updateRecipeIngredients,
-	updateRecipeInstructions
+	type WritableDb
 } from '$lib/server/db/recipe-mappers';
 import type {
 	RecipeIngredientItem,
@@ -31,6 +32,7 @@ import {
 	type UnitPreferences
 } from '$lib/recipes/ingredient-text';
 import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
+import { parseRecipeMenuItemPayload } from '$lib/menu/recipe-payload';
 import { emptyRecipeMenuStats } from '$lib/menu/recipe-defaults';
 import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
 import { boundedPagination } from '$lib/shared/pagination';
@@ -280,10 +282,16 @@ const fetchRecipeFromUrl = async (url: string) => {
 	let html: string;
 	let finalUrl: string;
 	try {
-		({ html, finalUrl } = await fetchRecipeImportPage(url, maxImportBytes));
+		({ html, finalUrl } = await fetchRecipeImportPage(url, maxImportBytes, {
+			maxUrlLength,
+			runtime: 'cloudflare-workers'
+		}));
 	} catch (cause) {
 		if (cause instanceof RecipeImportFetchError && cause.message === 'Invalid recipe URL.') {
 			error(400, { message: 'Enter a valid recipe URL.' });
+		}
+		if (cause instanceof RecipeImportFetchError && cause.message === 'Recipe URL is too long.') {
+			error(400, { message: 'Recipe URL is too long.' });
 		}
 		if (cause instanceof RecipeImportFetchError) {
 			error(502, { message: cause.message });
@@ -385,7 +393,7 @@ const sourceStrings = (value: unknown): string[] =>
 		.filter(Boolean);
 
 const saveRecipeClassifications = async (
-	db: ReturnType<typeof getDb>,
+	db: WritableDb,
 	userRecipeId: string,
 	recipe: RecipeJson
 ) => {
@@ -420,11 +428,7 @@ const mediaRecord = (value: unknown): RecipeJson | undefined => {
 	return isRecord(value) ? value : undefined;
 };
 
-const saveRecipeMedia = async (
-	db: ReturnType<typeof getDb>,
-	userRecipeId: string,
-	recipe: RecipeJson
-) => {
+const saveRecipeMedia = async (db: WritableDb, userRecipeId: string, recipe: RecipeJson) => {
 	const images = arrayValue(recipe.image).flatMap((item) => {
 		const image = mediaRecord(item);
 		return image ? [image] : [];
@@ -484,7 +488,7 @@ const parseNutritionAmount = (value: string) => {
 };
 
 const saveRecipeNutritionFacts = async (
-	db: ReturnType<typeof getDb>,
+	db: WritableDb,
 	userRecipeId: string,
 	recipe: RecipeJson
 ) => {
@@ -513,11 +517,7 @@ const saveRecipeNutritionFacts = async (
 	}
 };
 
-const saveRecipeSidecars = async (
-	db: ReturnType<typeof getDb>,
-	userRecipeId: string,
-	recipe: RecipeJson
-) => {
+const saveRecipeSidecars = async (db: WritableDb, userRecipeId: string, recipe: RecipeJson) => {
 	await Promise.all([
 		saveRecipeClassifications(db, userRecipeId, recipe),
 		saveRecipeMedia(db, userRecipeId, recipe),
@@ -526,8 +526,10 @@ const saveRecipeSidecars = async (
 };
 
 const recipeBody = (value: unknown): RecipeMenuItem | undefined => {
-	if (!isRecord(value) || typeof value.title !== 'string') return;
-	return value as RecipeMenuItem;
+	if (value === undefined) return;
+	const recipe = parseRecipeMenuItemPayload(value);
+	if (!recipe) error(400, { message: 'Recipe payload is invalid.' });
+	return recipe;
 };
 
 const urlKeys = (value?: string | null): string[] => {
@@ -673,7 +675,12 @@ const draftRecipeFromImport = (
 };
 
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
-	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({
+		cookies,
+		locals,
+		platform,
+		url
+	});
 
 	const importUrl = url.searchParams.get('importUrl')?.trim();
 	if (importUrl) {
@@ -786,7 +793,12 @@ const matchingExistingRecipe = (
 };
 
 export const POST: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({
+		cookies,
+		locals,
+		platform,
+		url
+	});
 
 	const body = await readBody(request);
 	if (body.url && body.url.length > maxUrlLength)
@@ -847,43 +859,48 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	const recipeInstructions = body.recipe?.instructions ?? instructionsFromRecipe(recipeJson);
 	const recipeId = crypto.randomUUID();
 
-	await db.insert(userRecipes).values({
-		id: recipeId,
-		workosUserId: session.user.id,
-		savedFromHouseholdId: householdId,
-		title: firstString(recipeJson.name, recipeJson.headline) ?? body.recipe?.title ?? fallbackTitle,
-		description: stringValue(recipeJson.description) ?? body.recipe?.description ?? null,
-		imageUrl: firstString(recipeJson.image) ?? body.recipe?.image ?? null,
-		prepTimeMinutes: body.recipe?.prepTimeMinutes ?? durationMinutes(recipeJson.prepTime) ?? null,
-		cookTimeMinutes: body.recipe?.cookTimeMinutes ?? cookMinutesFromRecipe(recipeJson) ?? null,
-		totalTimeMinutes:
-			body.recipe?.totalTimeMinutes ?? durationMinutes(recipeJson.totalTime) ?? null,
-		yield: body.recipe?.yield ?? firstNumber(recipeJson.recipeYield, recipeJson.yield) ?? null,
-		sourceYieldText: firstString(recipeJson.recipeYield, recipeJson.yield) ?? null,
-		sourceDatePublished: stringValue(recipeJson.datePublished) ?? null,
-		sourceDateModified: stringValue(recipeJson.dateModified) ?? null,
-		sourceLanguage: stringValue(recipeJson.inLanguage) ?? null,
-		sourceUrl: imported?.sourceUrl ?? body.recipe?.sourceUrl ?? null,
-		sourceSiteName: imported?.sourceSiteName ?? body.recipe?.sourceSiteName ?? null,
-		sourceAuthorName: imported?.sourceAuthorName ?? body.recipe?.sourceAuthorName ?? null,
-		sourcePublisherName: imported?.sourcePublisherName ?? body.recipe?.sourcePublisherName ?? null,
-		sourceIsBasedOnUrl: imported?.sourceIsBasedOnUrl ?? body.recipe?.sourceIsBasedOnUrl ?? null,
-		sourceRatingValue: ratingValue(recipeJson.aggregateRating, 'ratingValue') ?? null,
-		sourceRatingCount: ratingValue(recipeJson.aggregateRating, 'ratingCount') ?? null,
-		sourceReviewCount: ratingValue(recipeJson.aggregateRating, 'reviewCount') ?? null,
-		sourceClaimedMinutes: body.recipe?.cookTimeMinutes ?? cookMinutesFromRecipe(recipeJson) ?? null,
-		parseConfidence: imported ? 1 : 0.4,
-		ingredientConfidence: imported ? 1 : body.recipe ? 1 : 0,
-		instructionConfidence: imported ? 1 : body.recipe ? 1 : 0
-	});
+	await db.transaction(async (tx) => {
+		await tx.insert(userRecipes).values({
+			id: recipeId,
+			workosUserId: session.user.id,
+			savedFromHouseholdId: householdId,
+			title:
+				firstString(recipeJson.name, recipeJson.headline) ?? body.recipe?.title ?? fallbackTitle,
+			description: stringValue(recipeJson.description) ?? body.recipe?.description ?? null,
+			imageUrl: firstString(recipeJson.image) ?? body.recipe?.image ?? null,
+			prepTimeMinutes: body.recipe?.prepTimeMinutes ?? durationMinutes(recipeJson.prepTime) ?? null,
+			cookTimeMinutes: body.recipe?.cookTimeMinutes ?? cookMinutesFromRecipe(recipeJson) ?? null,
+			totalTimeMinutes:
+				body.recipe?.totalTimeMinutes ?? durationMinutes(recipeJson.totalTime) ?? null,
+			yield: body.recipe?.yield ?? firstNumber(recipeJson.recipeYield, recipeJson.yield) ?? null,
+			sourceYieldText: firstString(recipeJson.recipeYield, recipeJson.yield) ?? null,
+			sourceDatePublished: stringValue(recipeJson.datePublished) ?? null,
+			sourceDateModified: stringValue(recipeJson.dateModified) ?? null,
+			sourceLanguage: stringValue(recipeJson.inLanguage) ?? null,
+			sourceUrl: imported?.sourceUrl ?? body.recipe?.sourceUrl ?? null,
+			sourceSiteName: imported?.sourceSiteName ?? body.recipe?.sourceSiteName ?? null,
+			sourceAuthorName: imported?.sourceAuthorName ?? body.recipe?.sourceAuthorName ?? null,
+			sourcePublisherName:
+				imported?.sourcePublisherName ?? body.recipe?.sourcePublisherName ?? null,
+			sourceIsBasedOnUrl: imported?.sourceIsBasedOnUrl ?? body.recipe?.sourceIsBasedOnUrl ?? null,
+			sourceRatingValue: ratingValue(recipeJson.aggregateRating, 'ratingValue') ?? null,
+			sourceRatingCount: ratingValue(recipeJson.aggregateRating, 'ratingCount') ?? null,
+			sourceReviewCount: ratingValue(recipeJson.aggregateRating, 'reviewCount') ?? null,
+			sourceClaimedMinutes:
+				body.recipe?.cookTimeMinutes ?? cookMinutesFromRecipe(recipeJson) ?? null,
+			parseConfidence: imported ? 1 : 0.4,
+			ingredientConfidence: imported ? 1 : body.recipe ? 1 : 0,
+			instructionConfidence: imported ? 1 : body.recipe ? 1 : 0
+		});
 
-	await updateRecipeIngredients(
-		db,
-		recipeId,
-		body.recipe?.ingredients ?? ingredientsFromRecipe(recipeJson, unitAliasMap)
-	);
-	await updateRecipeInstructions(db, recipeId, recipeInstructions);
-	await saveRecipeSidecars(db, recipeId, recipeJson);
+		await replaceRecipeIngredients(
+			tx,
+			recipeId,
+			body.recipe?.ingredients ?? ingredientsFromRecipe(recipeJson, unitAliasMap)
+		);
+		await replaceRecipeInstructions(tx, recipeId, recipeInstructions);
+		await saveRecipeSidecars(tx, recipeId, recipeJson);
+	});
 
 	const recipe = await loadSingleMenuRecipe(
 		db,
@@ -897,20 +914,27 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 };
 
 export const PATCH: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({
+		cookies,
+		locals,
+		platform,
+		url
+	});
 
 	const { recipeIds } = await readBulkBody(request);
 	const updatedAt = new Date().toISOString();
-	await db
-		.update(userRecipes)
-		.set({ deletedAt: null, updatedAt })
-		.where(
-			and(
-				eq(userRecipes.workosUserId, session.user.id),
-				inArray(userRecipes.id, recipeIds),
-				isNotNull(userRecipes.deletedAt)
+	await db.transaction((tx) =>
+		tx
+			.update(userRecipes)
+			.set({ deletedAt: null, updatedAt })
+			.where(
+				and(
+					eq(userRecipes.workosUserId, session.user.id),
+					inArray(userRecipes.id, recipeIds),
+					isNotNull(userRecipes.deletedAt)
+				)
 			)
-		);
+	);
 
 	const unitPreferences = await loadHouseholdUnitPreferences(db, session.user.id, householdId);
 	const recipes = await loadMenuRecipes(db, session.user.id, householdId, {
@@ -921,9 +945,78 @@ export const PATCH: RequestHandler = async ({ cookies, locals, platform, request
 };
 
 export const DELETE: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const { db, session } = await requireBillingAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({
+		cookies,
+		locals,
+		platform,
+		url
+	});
 
 	const { recipeIds, permanent } = await readBulkBody(request);
+
+	if (permanent) {
+		const { deletedMealCount, existingRecipeIds } = await db.transaction(async (tx) => {
+			const existingRows = await tx
+				.select({ id: userRecipes.id })
+				.from(userRecipes)
+				.where(
+					and(
+						eq(userRecipes.workosUserId, session.user.id),
+						inArray(userRecipes.id, recipeIds),
+						isNotNull(userRecipes.deletedAt)
+					)
+				);
+			const existingRecipeIds = existingRows.map((recipe) => recipe.id);
+			if (!existingRecipeIds.length) error(404, { message: 'Archived recipes not found.' });
+
+			const mealLinks = await tx
+				.select({ householdMealId: householdMealUserRecipes.householdMealId })
+				.from(householdMealUserRecipes)
+				.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
+				.where(
+					and(
+						inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds),
+						eq(householdMeals.householdId, householdId)
+					)
+				);
+			const householdMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
+
+			await tx
+				.delete(householdMealUserRecipes)
+				.where(inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds));
+
+			let mealIdsWithoutLinks: string[] = [];
+			if (householdMealIds.length) {
+				const remainingLinks = await tx
+					.select({ householdMealId: householdMealUserRecipes.householdMealId })
+					.from(householdMealUserRecipes)
+					.where(inArray(householdMealUserRecipes.householdMealId, householdMealIds));
+				const linkedMealIds = new Set(remainingLinks.map((link) => link.householdMealId));
+				mealIdsWithoutLinks = householdMealIds.filter((mealId) => !linkedMealIds.has(mealId));
+				if (mealIdsWithoutLinks.length) {
+					await tx.delete(householdMeals).where(inArray(householdMeals.id, mealIdsWithoutLinks));
+				}
+			}
+
+			await tx
+				.delete(userRecipes)
+				.where(
+					and(
+						eq(userRecipes.workosUserId, session.user.id),
+						inArray(userRecipes.id, existingRecipeIds),
+						isNotNull(userRecipes.deletedAt)
+					)
+				);
+			return { deletedMealCount: mealIdsWithoutLinks.length, existingRecipeIds };
+		});
+		return json({
+			deleted: true,
+			permanent: true,
+			recipeIds: existingRecipeIds,
+			deletedMealCount
+		});
+	}
+
 	const existingRows = await db
 		.select({ id: userRecipes.id })
 		.from(userRecipes)
@@ -931,54 +1024,25 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 			and(
 				eq(userRecipes.workosUserId, session.user.id),
 				inArray(userRecipes.id, recipeIds),
-				permanent ? isNotNull(userRecipes.deletedAt) : isNull(userRecipes.deletedAt)
+				isNull(userRecipes.deletedAt)
 			)
 		);
 	const existingRecipeIds = existingRows.map((recipe) => recipe.id);
-	if (!existingRecipeIds.length) {
-		error(404, { message: permanent ? 'Archived recipes not found.' : 'Recipes not found.' });
-	}
+	if (!existingRecipeIds.length) error(404, { message: 'Recipes not found.' });
 
-	if (permanent) {
-		const mealLinks = await db
-			.select({ householdMealId: householdMealUserRecipes.householdMealId })
-			.from(householdMealUserRecipes)
-			.where(inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds));
-		const householdMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
-		if (householdMealIds.length) {
-			await db.delete(householdMeals).where(inArray(householdMeals.id, householdMealIds));
-		}
-		await db
-			.delete(householdMealUserRecipes)
-			.where(inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds));
-		await db
-			.delete(userRecipes)
+	const deletedAt = new Date().toISOString();
+	await db.transaction((tx) =>
+		tx
+			.update(userRecipes)
+			.set({ deletedAt, updatedAt: deletedAt })
 			.where(
 				and(
 					eq(userRecipes.workosUserId, session.user.id),
 					inArray(userRecipes.id, existingRecipeIds),
-					isNotNull(userRecipes.deletedAt)
+					isNull(userRecipes.deletedAt)
 				)
-			);
-		return json({
-			deleted: true,
-			permanent: true,
-			recipeIds: existingRecipeIds,
-			deletedMealCount: householdMealIds.length
-		});
-	}
-
-	const deletedAt = new Date().toISOString();
-	await db
-		.update(userRecipes)
-		.set({ deletedAt, updatedAt: deletedAt })
-		.where(
-			and(
-				eq(userRecipes.workosUserId, session.user.id),
-				inArray(userRecipes.id, existingRecipeIds),
-				isNull(userRecipes.deletedAt)
 			)
-		);
+	);
 
 	return json({ deleted: true, recipeIds: existingRecipeIds, deletedAt });
 };

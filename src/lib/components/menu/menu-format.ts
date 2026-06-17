@@ -35,12 +35,25 @@ const mentalLoadLevel = (score: number): MealLoad => {
 export const recipeCookMinutes = (recipe: RecipeMenuItem): number | undefined =>
 	recipe.averageActualMinutes ?? recipe.cookTimeMinutes ?? recipe.sourceClaimedMinutes;
 
-const daysSince = (dateKey?: string): number | undefined => {
+const parseDateKey = (dateKey?: string): Date | undefined => {
 	if (!dateKey) return;
-	const [year, month, day] = dateKey.split('-').map(Number);
-	if (!year || !month || !day) return;
-	const today = new Date();
+	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+	if (!match) return;
+	const [, yearText, monthText, dayText] = match;
+	const year = Number(yearText);
+	const month = Number(monthText);
+	const day = Number(dayText);
 	const date = new Date(year, month - 1, day);
+	if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+		return;
+	}
+	return date;
+};
+
+const daysSince = (dateKey?: string): number | undefined => {
+	const date = parseDateKey(dateKey);
+	if (!date) return;
+	const today = new Date();
 	return Math.max(0, Math.floor((today.getTime() - date.getTime()) / 86_400_000));
 };
 
@@ -67,7 +80,7 @@ export const recipeMentalLoad = (recipe: RecipeMenuItem): MealLoad => {
 };
 
 export const formatMinutes = (minutes?: number): string | undefined => {
-	if (!minutes) return;
+	if (minutes == null || Number.isNaN(minutes)) return;
 	if (minutes < 60) return `${Math.round(minutes)} min`;
 	const roundedMinutes = Math.round(minutes);
 	const hours = Math.floor(roundedMinutes / 60);
@@ -77,16 +90,15 @@ export const formatMinutes = (minutes?: number): string | undefined => {
 
 export const formatDate = (dateKey?: string): string | undefined => {
 	if (!dateKey) return;
-	const [year, month, day] = dateKey.split('-').map(Number);
-	if (!year || !month || !day) return dateKey;
-	return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' }).format(
-		new Date(year, month - 1, day)
-	);
+	const date = parseDateKey(dateKey);
+	if (!date) return dateKey;
+	return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' }).format(date);
 };
 
 export const applianceLabel = (appliance: string): string =>
 	appliance
 		.split('_')
+		.filter(Boolean)
 		.map((word) => word[0]!.toUpperCase() + word.slice(1))
 		.join(' ');
 

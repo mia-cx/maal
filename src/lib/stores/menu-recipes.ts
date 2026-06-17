@@ -124,19 +124,19 @@ export const createMenuRecipe = async (input: {
 	return recipe;
 };
 
-export const updateMenuRecipe = (recipe: RecipeMenuItem) => {
+export const updateMenuRecipe = async (recipe: RecipeMenuItem) => {
 	const previousRecipe = menuRecipesStore.get().find((candidate) => candidate.id === recipe.id);
 	replaceRecipe(recipe);
-	if (!browser) return;
+	if (!browser) return recipe;
 
-	updateMenuRecipeRemote(recipe)
-		.then((persistedRecipe) => {
-			replaceRecipe(persistedRecipe);
-		})
-		.catch((error: unknown) => {
-			console.error('Failed to persist menu recipe', error);
-			if (previousRecipe) replaceRecipe(previousRecipe);
-		});
+	try {
+		const persistedRecipe = await updateMenuRecipeRemote(recipe);
+		replaceRecipe(persistedRecipe);
+		return persistedRecipe;
+	} catch (error) {
+		if (previousRecipe) replaceRecipe(previousRecipe);
+		throw error;
+	}
 };
 
 export const deleteMenuRecipe = async (recipe: RecipeMenuItem) => {

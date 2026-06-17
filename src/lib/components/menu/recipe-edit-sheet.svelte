@@ -1,5 +1,4 @@
 <script lang="ts">
-	import * as Button from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
@@ -31,7 +30,7 @@
 	}: {
 		open?: boolean;
 		recipe: RecipeMenuItem | null;
-		onsaved?: (recipe: RecipeMenuItem) => void;
+		onsaved?: (recipe: RecipeMenuItem) => void | Promise<void>;
 		ondeleted?: (recipe: RecipeMenuItem) => void | Promise<void>;
 		onimporturl?: (url: string) => Promise<RecipeMenuItem>;
 	} = $props();
@@ -63,6 +62,8 @@
 	let deleteConfirmOpen = $state(false);
 	let deleteBusy = $state(false);
 	let deleteError = $state<string | null>(null);
+	let saveBusy = $state(false);
+	let saveError = $state<string | null>(null);
 	let importBusy = $state(false);
 	let importError = $state<string | null>(null);
 	let wasOpen = $state(false);
@@ -130,6 +131,8 @@
 		deleteConfirmOpen = false;
 		deleteBusy = false;
 		deleteError = null;
+		saveBusy = false;
+		saveError = null;
 		importBusy = false;
 		importError = null;
 		draggedInstruction = null;
@@ -240,7 +243,7 @@
 		}
 		if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
 			event.preventDefault();
-			stepInstructionPositionDraft(draftId, event.key === 'ArrowUp' ? 1 : -1);
+			stepInstructionPositionDraft(draftId, event.key === 'ArrowUp' ? -1 : 1);
 		}
 	};
 
@@ -355,9 +358,9 @@
 		}
 	};
 
-	const saveRecipe = (event?: SubmitEvent) => {
+	const saveRecipe = async (event?: SubmitEvent) => {
 		event?.preventDefault();
-		if (!recipe) return;
+		if (!recipe || saveBusy) return;
 
 		const savedIngredients = ingredients
 			.map(({ amount, unit, item }) => ({
@@ -366,25 +369,33 @@
 				item: item.trim()
 			}))
 			.filter((ingredient) => ingredient.amount || ingredient.unit || ingredient.item);
-		onsaved?.({
-			...recipe,
-			title: title.trim() || recipe.title,
-			sourceUrl: sourceUrl.trim() || undefined,
-			sourceSiteName: sourceSiteName.trim() || undefined,
-			sourceAuthorName: sourceAuthorName.trim() || undefined,
-			sourcePublisherName: sourcePublisherName.trim() || undefined,
-			sourceIsBasedOnUrl: sourceIsBasedOnUrl.trim() || undefined,
-			description: description.trim(),
-			image: image.trim() || undefined,
-			prepTimeMinutes: optionalNumber(prepTimeMinutes),
-			cookTimeMinutes: optionalNumber(cookTimeMinutes),
-			totalTimeMinutes: undefined,
-			yield: optionalWholeNumber(recipeYield),
-			ingredients: savedIngredients,
-			ingredientCount: savedIngredients.length,
-			instructions: savedInstructions()
-		});
-		open = false;
+		saveBusy = true;
+		saveError = null;
+		try {
+			await onsaved?.({
+				...recipe,
+				title: title.trim() || recipe.title,
+				sourceUrl: sourceUrl.trim() || undefined,
+				sourceSiteName: sourceSiteName.trim() || undefined,
+				sourceAuthorName: sourceAuthorName.trim() || undefined,
+				sourcePublisherName: sourcePublisherName.trim() || undefined,
+				sourceIsBasedOnUrl: sourceIsBasedOnUrl.trim() || undefined,
+				description: description.trim(),
+				image: image.trim() || undefined,
+				prepTimeMinutes: optionalNumber(prepTimeMinutes),
+				cookTimeMinutes: optionalNumber(cookTimeMinutes),
+				totalTimeMinutes: undefined,
+				yield: optionalWholeNumber(recipeYield),
+				ingredients: savedIngredients,
+				ingredientCount: savedIngredients.length,
+				instructions: savedInstructions()
+			});
+			open = false;
+		} catch (error) {
+			saveError = error instanceof Error ? error.message : 'Could not save recipe.';
+		} finally {
+			saveBusy = false;
+		}
 	};
 
 	const openArchiveConfirm = () => {
@@ -466,7 +477,7 @@
 									bind:cookTimeMinutes
 									bind:recipeYield
 									{textareaClass}
-									{onimporturl}
+									canImportFromUrl={Boolean(onimporturl)}
 									{sourceUrlCanImport}
 									{importBusy}
 									{importError}
@@ -506,7 +517,9 @@
 							<RecipeEditorFooterActions
 								canArchive={Boolean(ondeleted)}
 								{openArchiveConfirm}
-								saveRecipe={() => saveRecipe()}
+								saveRecipe={() => void saveRecipe()}
+								{saveBusy}
+								{saveError}
 							/>
 						{/snippet}
 					</Sheet.Frame>

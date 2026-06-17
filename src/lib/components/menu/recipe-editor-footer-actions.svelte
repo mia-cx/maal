@@ -4,11 +4,15 @@
 	let {
 		canArchive,
 		openArchiveConfirm,
-		saveRecipe
+		saveRecipe,
+		saveBusy,
+		saveError
 	}: {
 		canArchive: boolean;
 		openArchiveConfirm: () => void;
 		saveRecipe: () => void;
+		saveBusy: boolean;
+		saveError: string | null;
 	} = $props();
 </script>
 
@@ -20,5 +24,12 @@
 			<Button.Root variant="destructive" onclick={openArchiveConfirm}>Archive</Button.Root>
 		{/if}
 	</div>
-	<Button.Root type="button" onclick={saveRecipe}>Save recipe</Button.Root>
+	<div class="grid justify-items-end gap-1">
+		<Button.Root type="button" disabled={saveBusy} onclick={saveRecipe}>
+			{saveBusy ? 'Saving…' : 'Save recipe'}
+		</Button.Root>
+		{#if saveError}
+			<p class="text-xs text-destructive">{saveError}</p>
+		{/if}
+	</div>
 </div>

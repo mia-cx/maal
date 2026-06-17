@@ -20,12 +20,28 @@ export const setActiveHouseholdId = (householdId: string | null) => {
 export const writeActiveHouseholdCookie = (householdId: string | null) => {
 	if (typeof document === 'undefined') return;
 	const normalizedHouseholdId = normalizeHouseholdId(householdId);
-	if (!normalizedHouseholdId) return;
+	if (!normalizedHouseholdId) {
+		clearActiveHouseholdCookie();
+		return;
+	}
 
 	document.cookie = [
 		`${activeHouseholdCookieName}=${encodeURIComponent(normalizedHouseholdId)}`,
 		'path=/',
 		`max-age=${householdCookieMaxAgeSeconds}`,
+		'samesite=lax',
+		location.protocol === 'https:' ? 'secure' : null
+	]
+		.filter(Boolean)
+		.join('; ');
+};
+
+export const clearActiveHouseholdCookie = () => {
+	if (typeof document === 'undefined') return;
+	document.cookie = [
+		`${activeHouseholdCookieName}=`,
+		'path=/',
+		'max-age=0',
 		'samesite=lax',
 		location.protocol === 'https:' ? 'secure' : null
 	]

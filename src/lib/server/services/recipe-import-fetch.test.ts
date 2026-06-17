@@ -15,6 +15,31 @@ describe('recipe import fetch boundary', () => {
 		expect(() => assertRecipeImportUrlForTest('file:///etc/passwd')).toThrow('Invalid recipe URL.');
 	});
 
+	it('rejects URLs over the configured import length', () => {
+		expect(() => assertRecipeImportUrlForTest('https://example.com/recipe', 10)).toThrow(
+			'Recipe URL is too long.'
+		);
+	});
+
+	it('rejects redirects whose target URL exceeds the configured max length', async () => {
+		const longPath = 'a'.repeat(3000);
+		const fetcher = vi.fn(
+			async () =>
+				new Response('', {
+					status: 302,
+					headers: { location: `http://93.184.216.35/${longPath}` }
+				})
+		) as unknown as typeof fetch;
+
+		await expect(
+			fetchRecipeImportPage('http://93.184.216.34/recipe', 1000, {
+				fetcher,
+				maxUrlLength: 2048
+			})
+		).rejects.toThrow('Recipe URL is too long.');
+		expect(fetcher).toHaveBeenCalledTimes(1);
+	});
+
 	it('rejects loopback, private, link-local, reserved, and single-label hosts', () => {
 		for (const url of [
 			'http://localhost/recipe',
@@ -30,7 +55,12 @@ describe('recipe import fetch boundary', () => {
 			'http://kitchen/recipe',
 			'http://printer.local/recipe',
 			'http://[::1]/recipe',
-			'http://[fd00::1]/recipe'
+			'http://[0:0:0:0:0:0:0:1]/recipe',
+			'http://[::ffff:127.0.0.1]/recipe',
+			'http://[0:0:0:0:0:ffff:7f00:1]/recipe',
+			'http://[0:0:0:0:0:ffff:a9fe:a9fe]/recipe',
+			'http://[fd00::1]/recipe',
+			'http://[fe80::1]/recipe'
 		]) {
 			expectBlocked(url);
 		}
@@ -43,25 +73,50 @@ describe('recipe import fetch boundary', () => {
 		);
 	});
 
-	it('fails closed for DNS hostnames because runtime fetch cannot pin the resolved address', async () => {
+	it('fails closed for DNS hosts in generic server runtimes', async () => {
 		const fetcher = vi.fn(async () => new Response('<html>recipe</html>', { status: 200 }));
 
 		await expect(
-			fetchRecipeImportPage('https://attacker.example/recipe', 1000, { fetcher })
-		).rejects.toThrow('Recipe URL host cannot be fetched safely.');
+			fetchRecipeImportPage('https://example.com/recipe', 1000, { fetcher })
+		).rejects.toThrow('Recipe URL host cannot be fetched safely in this runtime.');
 		expect(fetcher).not.toHaveBeenCalled();
 	});
 
-	it('rejects redirects to DNS hostnames before following them', async () => {
-		const fetcher = vi.fn(
-			async () =>
-				new Response('', { status: 302, headers: { location: 'https://example.com/admin' } })
-		) as unknown as typeof fetch;
+	it('fetches public DNS recipe hosts in the Cloudflare Workers runtime', async () => {
+		const fetcher = vi.fn(async () => new Response('<html>recipe</html>', { status: 200 }));
 
 		await expect(
-			fetchRecipeImportPage('http://93.184.216.34/recipe', 1000, { fetcher })
-		).rejects.toThrow('Recipe URL host cannot be fetched safely.');
+			fetchRecipeImportPage('https://example.com/recipe', 1000, {
+				fetcher,
+				runtime: 'cloudflare-workers'
+			})
+		).resolves.toEqual({
+			html: '<html>recipe</html>',
+			finalUrl: 'https://example.com/recipe'
+		});
 		expect(fetcher).toHaveBeenCalledTimes(1);
+	});
+
+	it('allows redirects to validated public DNS hostnames in the Cloudflare Workers runtime', async () => {
+		const fetcher = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response('', { status: 302, headers: { location: 'https://example.com/admin' } })
+			)
+			.mockResolvedValueOnce(
+				new Response('<html>recipe</html>', { status: 200 })
+			) as unknown as typeof fetch;
+
+		await expect(
+			fetchRecipeImportPage('http://93.184.216.34/recipe', 1000, {
+				fetcher,
+				runtime: 'cloudflare-workers'
+			})
+		).resolves.toEqual({
+			html: '<html>recipe</html>',
+			finalUrl: 'https://example.com/admin'
+		});
+		expect(fetcher).toHaveBeenCalledTimes(2);
 	});
 
 	it('rejects redirects to private hosts before following them', async () => {
