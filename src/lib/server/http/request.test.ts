@@ -33,7 +33,7 @@ describe('readJsonObject', () => {
 	it('rejects invalid JSON', async () => {
 		await expect(readJsonObject(jsonRequest('{'))).rejects.toMatchObject({
 			status: 400,
-			body: { message: 'Malformed JSON request body.' }
+			body: { message: 'Invalid request.' }
 		});
 	});
 
@@ -68,6 +68,19 @@ describe('readFormData', () => {
 		await expect(readFormData(jsonRequest('{"priceId":"price_123"}'))).rejects.toMatchObject({
 			status: 415,
 			body: { message: 'Expected form request body.' }
+		});
+	});
+
+	it('preserves the 400 contract when onParseError throws', async () => {
+		await expect(
+			readJsonObject(jsonRequest('{'), {
+				onParseError: () => {
+					throw new Error('logging failed');
+				}
+			})
+		).rejects.toMatchObject({
+			status: 400,
+			body: { message: 'Invalid request.' }
 		});
 	});
 });

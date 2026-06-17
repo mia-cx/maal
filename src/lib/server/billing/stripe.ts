@@ -50,7 +50,7 @@ export const getStripeProductId = (platform?: App.Platform): string => {
 
 export const currentPeriodEndIso = (subscription: Stripe.Subscription): string | null => {
 	const periodEnd = subscription.items.data[0]?.current_period_end;
-	return periodEnd ? new Date(periodEnd * 1000).toISOString() : null;
+	return periodEnd == null ? null : new Date(periodEnd * 1000).toISOString();
 };
 
 export const subscriptionPriceId = (subscription: Stripe.Subscription): string | null =>

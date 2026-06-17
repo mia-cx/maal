@@ -1,4 +1,4 @@
-import { type MealFeedbackVerdict } from '$lib/components/dashboard/meal-labels';
+import { type MealFeedbackVerdict } from '$lib/domain/meal-feedback';
 import type { RecipeMenuItem } from '$lib/menu/menu-types';
 
 export type MealLoad = 'low' | 'medium' | 'high';

@@ -95,7 +95,8 @@ export const createUserRecipe = async (input: {
 			sourceAuthorName: input.recipe.sourceAuthorName ?? null,
 			sourcePublisherName: input.recipe.sourcePublisherName ?? null,
 			sourceIsBasedOnUrl: input.recipe.sourceIsBasedOnUrl ?? null,
-			sourceClaimedMinutes: input.recipe.cookTimeMinutes ?? null,
+			sourceClaimedMinutes:
+				input.recipe.sourceClaimedMinutes ?? input.recipe.cookTimeMinutes ?? null,
 			userNotes: input.recipe.userNotes ?? null,
 			createdAt: now,
 			updatedAt: now
@@ -339,7 +340,7 @@ export const deleteUserRecipe = async (input: {
 		householdId: input.householdId
 	});
 	const deletedAt = new Date().toISOString();
-	const deleted = await input.db
+	const deletedRows = await input.db
 		.update(userRecipes)
 		.set({ deletedAt, updatedAt: deletedAt })
 		.where(
@@ -350,6 +351,5 @@ export const deleteUserRecipe = async (input: {
 			)
 		)
 		.returning({ id: userRecipes.id });
-	if (!deleted.length) throw new Error('Recipe not found.');
-	return { deleted: true, deletedAt };
+	return { deleted: deletedRows.length > 0, deletedAt: deletedRows.length > 0 ? deletedAt : null };
 };

@@ -1,13 +1,11 @@
 import { eq } from 'drizzle-orm';
-import { getDb } from '$lib/server/db';
+import type { WritableDb } from '$lib/server/db/recipe-mappers';
 import { householdMealIngredients, householdMealInstructions } from '$lib/server/db/schema';
 import { insertHouseholdMealInstructionEvents } from '$lib/server/taxonomy/instruction-events';
 import { mealIngredientLineToSidecar, mealInstructionLineToSidecar } from './meal-line-sidecars';
 
-type Db = ReturnType<typeof getDb>;
-
 export const replaceMealIngredientsFromLines = async (
-	db: Db,
+	db: WritableDb,
 	householdMealId: string,
 	ingredients: string[] = []
 ) => {
@@ -22,7 +20,7 @@ export const replaceMealIngredientsFromLines = async (
 };
 
 export const replaceMealInstructionsFromLines = async (
-	db: Db,
+	db: WritableDb,
 	householdMealId: string,
 	instructions: string[] = []
 ) => {

@@ -1,8 +1,7 @@
 import type { MealFamiliarity } from './schedule-types';
+import type { CapacityMode, MealFeedbackVerdict, MealRating } from '$lib/domain/meal-feedback';
 
-export type MealRating = 'repeat' | 'neutral' | 'avoid';
-export type MealFeedbackVerdict = MealRating;
-export type CapacityMode = 'adventurous' | 'normal' | 'low' | 'survival';
+export type { CapacityMode, MealFeedbackVerdict, MealRating };
 
 export const familiarityLabels: Record<MealFamiliarity, string> = {
 	safe: 'Safe',

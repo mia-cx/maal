@@ -6,7 +6,7 @@ import {
 } from '$lib/server/auth/household';
 import type { AuthSession } from '$lib/server/auth/session';
 import { getStripePublicConfig } from './stripe';
-import { loadBillingStatus, loadFreshBillingStatus } from './subscriptions';
+import { loadFreshBillingStatus } from './subscriptions';
 
 export const loadBillingStatusView = async ({
 	cookies,

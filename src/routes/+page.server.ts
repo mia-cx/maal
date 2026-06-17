@@ -1,6 +1,10 @@
 import type Stripe from 'stripe';
 import type { PageServerLoad } from './$types';
 import { resolveActiveHouseholdId } from '$lib/server/auth/household';
+import {
+	isSupportedFixedRecurringPrice,
+	supportedInterval
+} from '$lib/server/billing/pricing-options';
 import { createStripeClient, getStripePublicConfig } from '$lib/server/domains/billing';
 import { loadTrialAvailability } from '$lib/server/domains/billing';
 
@@ -21,13 +25,6 @@ const labelFor = (price: Stripe.Price): LandingPrice['label'] | null => {
 	return null;
 };
 
-const intervalFor = (
-	interval: Stripe.Price.Recurring.Interval
-): LandingPrice['interval'] | null => {
-	if (interval === 'week' || interval === 'month' || interval === 'year') return interval;
-	return null;
-};
-
 const priceOrder = new Map<LandingPrice['label'], number>([
 	['Weekly', 1],
 	['Monthly', 2],
@@ -35,26 +32,14 @@ const priceOrder = new Map<LandingPrice['label'], number>([
 ]);
 
 export const paidLandingPrice = (price: Stripe.Price): LandingPrice | null => {
-	const amount = price.unit_amount;
+	if (!isSupportedFixedRecurringPrice(price)) return null;
 	const label = labelFor(price);
-	const interval = price.recurring ? intervalFor(price.recurring.interval) : null;
-	if (
-		!price.active ||
-		price.type !== 'recurring' ||
-		price.billing_scheme !== 'per_unit' ||
-		price.recurring?.usage_type !== 'licensed' ||
-		amount === null ||
-		!Number.isFinite(amount) ||
-		!label ||
-		!price.recurring ||
-		!interval
-	) {
-		return null;
-	}
+	const interval = supportedInterval(price.recurring.interval);
+	if (!label || !interval) return null;
 	return {
 		id: price.id,
 		label,
-		amount,
+		amount: price.unit_amount,
 		currency: price.currency,
 		interval,
 		intervalCount: price.recurring.interval_count
@@ -62,16 +47,8 @@ export const paidLandingPrice = (price: Stripe.Price): LandingPrice | null => {
 };
 
 export const trialPriceIdFromPrices = (prices: Stripe.Price[]): string | null =>
-	prices.find((price) => priceToTrialPriceId(price))?.id ?? null;
-
-const priceToTrialPriceId = (price: Stripe.Price): string | null =>
-	price.active &&
-	price.type === 'recurring' &&
-	price.billing_scheme === 'per_unit' &&
-	price.recurring?.usage_type === 'licensed' &&
-	price.unit_amount === 0
-		? price.id
-		: null;
+	prices.find((price) => isSupportedFixedRecurringPrice(price) && price.unit_amount === 0)?.id ??
+	null;
 
 const findProduct = async (stripe: Stripe, configuredProductId: string) => {
 	if (configuredProductId) return stripe.products.retrieve(configuredProductId);

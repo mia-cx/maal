@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AuthSession } from '$lib/server/auth/session';
+import { createAuthSession } from '$lib/server/auth/session-test-fixtures';
 import type { AppContextInput } from './app-context';
 
 const resolveActiveHouseholdId = vi.fn();
@@ -8,27 +8,14 @@ const requireHouseholdAccess = vi.fn();
 vi.mock('$lib/server/auth/household', () => ({ resolveActiveHouseholdId }));
 vi.mock('$lib/server/domains/billing', () => ({ requireHouseholdAccess }));
 
-const { requireAppContext, requireBillingAppContext } = await import('./app-context');
+const {
+	requireActivatedHousehold,
+	requireAppContext,
+	requireBillingAppContext,
+	requireResolvedHouseholdId
+} = await import('./app-context');
 
-const session: AuthSession = {
-	user: {
-		id: 'user_1',
-		email: 'user@maal.test',
-		name: null,
-		firstName: null,
-		lastName: null,
-		profilePictureUrl: null,
-		emailVerified: true,
-		metadata: {}
-	},
-	sessionId: 'session_1',
-	organizationId: null,
-	role: null,
-	roles: [],
-	permissions: [],
-	entitlements: [],
-	featureFlags: []
-};
+const session = createAuthSession();
 const database = {} as D1Database;
 const cookies: AppContextInput['cookies'] = {
 	get: vi.fn(),
@@ -48,10 +35,69 @@ const input = (overrides: Partial<AppContextInput> = {}): AppContextInput => ({
 	...overrides
 });
 
+describe('requireResolvedHouseholdId', () => {
+	it('returns a resolved household id', () => {
+		expect(requireResolvedHouseholdId({ householdId: 'household_1', hasAnyHousehold: true })).toBe(
+			'household_1'
+		);
+	});
+
+	it('rejects users with no households', () => {
+		expect(() => requireResolvedHouseholdId({ householdId: null, hasAnyHousehold: false })).toThrow(
+			expect.objectContaining({ status: 404, body: { message: 'No households available.' } })
+		);
+	});
+
+	it('rejects unresolved active households', () => {
+		expect(() => requireResolvedHouseholdId({ householdId: null, hasAnyHousehold: true })).toThrow(
+			expect.objectContaining({ status: 400, body: { message: 'Household is required.' } })
+		);
+	});
+});
+
+describe('requireActivatedHousehold', () => {
+	it('returns an activated household id', () => {
+		expect(
+			requireActivatedHousehold({
+				status: 'activated',
+				householdId: 'household_1',
+				hasAnyHousehold: true
+			})
+		).toBe('household_1');
+	});
+
+	it('rejects inaccessible households when the user has none', () => {
+		expect(() =>
+			requireActivatedHousehold({
+				status: 'inaccessible',
+				householdId: 'household_2',
+				hasAnyHousehold: false
+			})
+		).toThrow(
+			expect.objectContaining({ status: 404, body: { message: 'No households available.' } })
+		);
+	});
+
+	it('rejects inaccessible households when the user has others', () => {
+		expect(() =>
+			requireActivatedHousehold({
+				status: 'inaccessible',
+				householdId: 'household_2',
+				hasAnyHousehold: true
+			})
+		).toThrow(
+			expect.objectContaining({ status: 403, body: { message: 'Household is not accessible.' } })
+		);
+	});
+});
+
 describe('requireAppContext', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		resolveActiveHouseholdId.mockResolvedValue({ householdId: 'household_1' });
+		resolveActiveHouseholdId.mockResolvedValue({
+			householdId: 'household_1',
+			hasAnyHousehold: true
+		});
 		requireHouseholdAccess.mockResolvedValue(undefined);
 	});
 
@@ -65,24 +111,45 @@ describe('requireAppContext', () => {
 	});
 
 	it('rejects requests without a database binding', async () => {
-		await expect(requireAppContext(input({ platform: { env: {} } as App.Platform }))).rejects.toMatchObject(
-			{
-				status: 503,
-				body: { message: 'Database unavailable.' }
-			}
-		);
+		await expect(
+			requireAppContext(input({ platform: { env: {} } as App.Platform }))
+		).rejects.toMatchObject({
+			status: 503,
+			body: { message: 'Database unavailable.' }
+		});
 		expect(resolveActiveHouseholdId).not.toHaveBeenCalled();
 		expect(requireHouseholdAccess).not.toHaveBeenCalled();
 	});
 
 	it('rejects requests without an active household', async () => {
-		resolveActiveHouseholdId.mockResolvedValue({ householdId: null });
+		resolveActiveHouseholdId.mockResolvedValue({ householdId: null, hasAnyHousehold: true });
 
 		await expect(requireAppContext(input())).rejects.toMatchObject({
 			status: 400,
 			body: { message: 'Household is required.' }
 		});
 		expect(resolveActiveHouseholdId).toHaveBeenCalledTimes(1);
+		expect(requireHouseholdAccess).not.toHaveBeenCalled();
+	});
+
+	it('rejects requests when the user has no households', async () => {
+		resolveActiveHouseholdId.mockResolvedValue({ householdId: null, hasAnyHousehold: false });
+
+		await expect(requireAppContext(input())).rejects.toMatchObject({
+			status: 404,
+			body: { message: 'No households available.' }
+		});
+		expect(resolveActiveHouseholdId).toHaveBeenCalledTimes(1);
+		expect(requireHouseholdAccess).not.toHaveBeenCalled();
+	});
+
+	it('maps household dependency failures to a service error', async () => {
+		resolveActiveHouseholdId.mockRejectedValue(new Error('WorkOS unavailable'));
+
+		await expect(requireAppContext(input())).rejects.toMatchObject({
+			status: 503,
+			body: { message: 'Household service unavailable.' }
+		});
 		expect(requireHouseholdAccess).not.toHaveBeenCalled();
 	});
 
@@ -100,7 +167,10 @@ describe('requireAppContext', () => {
 describe('requireBillingAppContext', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		resolveActiveHouseholdId.mockResolvedValue({ householdId: 'household_1' });
+		resolveActiveHouseholdId.mockResolvedValue({
+			householdId: 'household_1',
+			hasAnyHousehold: true
+		});
 		requireHouseholdAccess.mockResolvedValue(undefined);
 	});
 
@@ -128,8 +198,6 @@ describe('requireBillingAppContext', () => {
 		expect(requireHouseholdAccess).toHaveBeenCalledTimes(1);
 		expect(requireHouseholdAccess).toHaveBeenCalledWith({
 			platform,
-			database,
-			session,
 			householdId: 'household_1'
 		});
 	});

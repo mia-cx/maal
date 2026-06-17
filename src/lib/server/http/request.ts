@@ -9,7 +9,10 @@ export const isRecord = (value: unknown): value is Record<string, unknown> =>
 const contentType = (request: Request) =>
 	request.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
 
-export const readJsonObject = async (request: Request): Promise<Record<string, unknown>> => {
+export const readJsonObject = async (
+	request: Request,
+	options: { onParseError?: (cause: unknown) => void } = {}
+): Promise<Record<string, unknown>> => {
 	if (contentType(request) !== 'application/json') {
 		error(415, { message: 'Expected application/json request body.' });
 	}
@@ -17,8 +20,13 @@ export const readJsonObject = async (request: Request): Promise<Record<string, u
 	let body: unknown;
 	try {
 		body = await request.json();
-	} catch {
-		error(400, { message: 'Malformed JSON request body.' });
+	} catch (cause) {
+		try {
+			options.onParseError?.(cause);
+		} catch {
+			// Ignore parse-error hook failures to preserve the HTTP contract.
+		}
+		error(400, { message: 'Invalid request.' });
 	}
 
 	if (!isRecord(body)) error(400, { message: 'Expected a JSON object request body.' });
