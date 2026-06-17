@@ -13,7 +13,7 @@ Tighten remaining miscellaneous component reliability issues: public marketing c
 
 ## TODOs
 - [x] Clean up public marketing components: footer CDN/links, wordmark rendering, sticky header globals, pricing CTA typing, and gradient blur dead CSS.
-- [ ] Fix nav-user local state semantics and unreachable link branches.
+- [x] Fix nav-user local state semantics and unreachable link branches.
 - [ ] Harden household onboarding, team switching, and delete confirm async paths.
 - [ ] Harden user settings async handlers and remove dead imports/state.
 - [ ] Run final validation and file the PR.
@@ -21,3 +21,4 @@ Tighten remaining miscellaneous component reliability issues: public marketing c
 ## Notes
 - Svelte MCP server is not available in this session (`mcp` only lists the maal server), so Svelte docs/autofixer cannot be used.
 - Public marketing validation: `pnpm exec prettier --write ... && pnpm check` passed with 0 Svelte diagnostics.
+- Nav user validation: `pnpm exec prettier --write src/lib/components/nav-user.svelte && pnpm check` passed with 0 Svelte diagnostics.

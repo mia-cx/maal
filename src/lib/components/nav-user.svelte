@@ -15,8 +15,12 @@
 	let { user }: { user: NavUser } = $props();
 	const sidebar = useSidebar();
 
-	let localUser = $derived(user);
+	let localUser = $state<NavUser>({ name: '', email: '', avatar: '', emailVerified: false });
 	let settingsOpen = $state(false);
+
+	$effect(() => {
+		localUser = { ...user };
+	});
 
 	const initials = $derived(localUser.name.slice(0, 2).toUpperCase());
 	const homeHref = resolve('/');
@@ -88,28 +92,18 @@
 						User settings
 					</DropdownMenu.Item>
 					<DropdownMenu.Item>
-						{#if homeHref}
-							<a href={homeHref} class="flex w-full items-center gap-2">
-								<ArrowLeftIcon />
-								Back to home
-							</a>
-						{:else}
+						<a href={homeHref} class="flex w-full items-center gap-2">
 							<ArrowLeftIcon />
 							Back to home
-						{/if}
+						</a>
 					</DropdownMenu.Item>
 				</DropdownMenu.Group>
 				<DropdownMenu.Separator />
 				<DropdownMenu.Item>
-					{#if logoutHref}
-						<a href={logoutHref} class="flex w-full items-center gap-2">
-							<LogOutIcon />
-							Log out
-						</a>
-					{:else}
+					<a href={logoutHref} class="flex w-full items-center gap-2">
 						<LogOutIcon />
 						Log out
-					{/if}
+					</a>
 				</DropdownMenu.Item>
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>
