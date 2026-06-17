@@ -112,6 +112,9 @@
 		preferredFoodAlias: string;
 		preferredMeasureUnit: string;
 	};
+	const cloneUnitOverrideRows = (rows: UnitOverrideRow[]) => rows.map((row) => ({ ...row }));
+	const cloneIngredientOverrideRows = (rows: IngredientOverrideRow[]) =>
+		rows.map((row) => ({ ...row }));
 	const serializeUnitOverrideRows = (rows: UnitOverrideRow[]) =>
 		JSON.stringify(
 			rows
@@ -141,10 +144,10 @@
 	);
 	let nextOverrideRowId = 0;
 	let unitOverrideRows = $state<UnitOverrideRow[]>(
-		untrack(() => initialView.displayOverrideRows.unitOverrides)
+		untrack(() => cloneUnitOverrideRows(initialView.displayOverrideRows.unitOverrides))
 	);
 	let ingredientOverrideRows = $state<IngredientOverrideRow[]>(
-		untrack(() => initialView.displayOverrideRows.ingredientOverrides)
+		untrack(() => cloneIngredientOverrideRows(initialView.displayOverrideRows.ingredientOverrides))
 	);
 	const applyHouseholdView = (nextView: LocalPageData) => {
 		const { freshView: _freshView, ...resolvedView } = nextView;
@@ -170,8 +173,10 @@
 		initialIngredientOverrideRows = serializeIngredientOverrideRows(
 			nextView.displayOverrideRows.ingredientOverrides
 		);
-		unitOverrideRows = nextView.displayOverrideRows.unitOverrides;
-		ingredientOverrideRows = nextView.displayOverrideRows.ingredientOverrides;
+		unitOverrideRows = cloneUnitOverrideRows(nextView.displayOverrideRows.unitOverrides);
+		ingredientOverrideRows = cloneIngredientOverrideRows(
+			nextView.displayOverrideRows.ingredientOverrides
+		);
 		visibleInvites = nextView.invites;
 	};
 

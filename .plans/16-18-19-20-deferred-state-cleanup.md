@@ -12,7 +12,7 @@ Clean up the remaining cross-app deferred/stale state hazards mechanically: keep
 
 ## TODOs
 - [x] Guard household `freshView` hydration with a version token and rejection handling.
-- [ ] Replace household view state cleanly and clone mutable override rows when applying fresh data.
+- [x] Replace household view state cleanly and clone mutable override rows when applying fresh data.
 - [ ] Validate menu/plan synchronous route-data cache behavior and run focused checks.
 
 ## Notes
@@ -20,3 +20,5 @@ Clean up the remaining cross-app deferred/stale state hazards mechanically: keep
 - Svelte MCP server was unavailable in this session (`mcp` only listed `maal`), so local code and validation are the available Svelte checks.
 - `pnpm prettier --check 'src/routes/(app)/household/+page.svelte'` passed.
 - `pnpm check` passed after guarding `freshView` resolution/rejection.
+- `pnpm prettier --check 'src/routes/(app)/household/+page.svelte'` passed after cloning override rows.
+- `pnpm check` passed after cloning override rows.
