@@ -7,5 +7,8 @@ const routeNavItems: readonly { prefix: string; item: DashboardNavItem }[] = [
 	{ prefix: '/household', item: 'household' }
 ];
 
+const matchesRoutePrefix = (pathname: string, prefix: string): boolean =>
+	pathname === prefix || pathname.startsWith(`${prefix}/`);
+
 export const activeNavItemForPath = (pathname: string): DashboardNavItem =>
-	routeNavItems.find(({ prefix }) => pathname.startsWith(prefix))?.item ?? 'meal-plan';
+	routeNavItems.find(({ prefix }) => matchesRoutePrefix(pathname, prefix))?.item ?? 'meal-plan';
