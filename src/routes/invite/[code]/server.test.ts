@@ -25,8 +25,7 @@ const invite = {
 	usesCount: 0,
 	expiresAt: null,
 	revokedAt: null,
-	createdAt: '2026-06-17T00:00:00.000Z',
-	updatedAt: '2026-06-17T00:00:00.000Z'
+	createdAt: '2026-06-17T00:00:00.000Z'
 } satisfies HouseholdInvite;
 
 const event = (overrides: Partial<Parameters<typeof GET>[0]> = {}) =>
@@ -56,9 +55,7 @@ describe('/invite/[code]', () => {
 	});
 
 	it('reports unavailable invite storage without reading platform.env.DB unsafely', async () => {
-		await expect(
-			GET(event({ platform: { env: undefined } as App.Platform }))
-		).rejects.toMatchObject({
+		await expect(GET(event({ platform: undefined }))).rejects.toMatchObject({
 			status: 503,
 			body: { message: 'Invite storage is not available.' }
 		});
