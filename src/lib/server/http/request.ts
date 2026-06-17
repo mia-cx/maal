@@ -1,7 +1,10 @@
 import { error } from '@sveltejs/kit';
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === 'object' && value !== null;
+	value !== null &&
+	typeof value === 'object' &&
+	!Array.isArray(value) &&
+	Object.getPrototypeOf(value) === Object.prototype;
 
 export const readJsonObject = async (request: Request): Promise<Record<string, unknown>> => {
 	let body: unknown;

@@ -10,31 +10,20 @@ import {
 	uniqueIndex
 } from 'drizzle-orm/sqlite-core';
 import { applianceValues } from '../../../domain/household/appliances';
+import { confidenceRange, instructionEventPayload, nonEmptyMediaPayload } from './checks';
 import { createdAt, id, updatedAt } from './common';
 import { foods } from './food';
 import { households } from './households';
 import { units } from './units';
 import { users } from './users';
 
-const applianceSourceValues = ['schema_org', 'instruction_heuristic', 'user'] as const;
-const classificationKindValues = ['category', 'cuisine', 'keyword', 'diet'] as const;
-const mediaKindValues = ['image', 'video'] as const;
-const eventKindValues = ['temperature', 'duration', 'appliance', 'action'] as const;
-const nutrientValues = [
-	'calories',
-	'carbohydrate',
-	'cholesterol',
-	'fat',
-	'fiber',
-	'protein',
-	'saturated_fat',
-	'serving_size',
-	'sodium',
-	'sugar',
-	'trans_fat',
-	'unsaturated_fat',
-	'other'
-] as const;
+import {
+	applianceSourceValues,
+	classificationKindValues,
+	eventKindValues,
+	mediaKindValues,
+	nutrientValues
+} from './recipe-taxonomy';
 
 export const userRecipes = sqliteTable(
 	'user_recipes',
@@ -85,7 +74,14 @@ export const userRecipes = sqliteTable(
 		index('user_recipes_saved_from_household_id_idx').on(table.savedFromHouseholdId),
 		index('user_recipes_source_url_idx').on(table.sourceUrl),
 		index('user_recipes_source_html_hash_idx').on(table.sourceHtmlHash),
-		index('user_recipes_deleted_at_idx').on(table.deletedAt)
+		index('user_recipes_deleted_at_idx').on(table.deletedAt),
+		check('user_recipes_parse_confidence_range', confidenceRange(table.parseConfidence)),
+		check('user_recipes_ingredient_confidence_range', confidenceRange(table.ingredientConfidence)),
+		check(
+			'user_recipes_instruction_confidence_range',
+			confidenceRange(table.instructionConfidence)
+		),
+		check('user_recipes_nutrition_confidence_range', confidenceRange(table.nutritionConfidence))
 	]
 );
 
@@ -127,7 +123,8 @@ export const userRecipeIngredients = sqliteTable(
 		check(
 			'user_recipe_ingredients_base_unit_pair_check',
 			sql`(${table.baseUnitId} IS NULL AND ${table.baseUnitFamilyId} IS NULL) OR (${table.baseUnitId} IS NOT NULL AND ${table.baseUnitFamilyId} IS NOT NULL)`
-		)
+		),
+		check('user_recipe_ingredients_confidence_range', confidenceRange(table.confidence))
 	]
 );
 
@@ -151,7 +148,8 @@ export const userRecipeInstructions = sqliteTable(
 			table.userRecipeId,
 			table.stepIndex
 		),
-		index('user_recipe_instructions_user_recipe_id_idx').on(table.userRecipeId)
+		index('user_recipe_instructions_user_recipe_id_idx').on(table.userRecipeId),
+		check('user_recipe_instructions_confidence_range', confidenceRange(table.confidence))
 	]
 );
 
@@ -183,7 +181,9 @@ export const userRecipeInstructionEvents = sqliteTable(
 		check(
 			'user_recipe_instruction_events_unit_pair_check',
 			sql`(${table.unitId} IS NULL AND ${table.baseUnitId} IS NULL) OR (${table.unitId} IS NOT NULL AND ${table.baseUnitId} IS NOT NULL)`
-		)
+		),
+		check('user_recipe_instruction_events_payload_check', instructionEventPayload(table)),
+		check('user_recipe_instruction_events_confidence_range', confidenceRange(table.confidence))
 	]
 );
 
@@ -210,7 +210,8 @@ export const userRecipeApplianceRequirements = sqliteTable(
 			table.appliance
 		),
 		index('user_recipe_appliance_requirements_user_recipe_id_idx').on(table.userRecipeId),
-		index('user_recipe_appliance_requirements_appliance_idx').on(table.appliance)
+		index('user_recipe_appliance_requirements_appliance_idx').on(table.appliance),
+		check('user_recipe_appliance_requirements_confidence_range', confidenceRange(table.confidence))
 	]
 );
 
@@ -225,7 +226,7 @@ export const userRecipeClassifications = sqliteTable(
 		value: text('value').notNull(),
 		normalizedValue: text('normalized_value').notNull(),
 		schemaOrgValue: text('schema_org_value'),
-		locale: text('locale'),
+		locale: text('locale').notNull().default('en-US'),
 		confidence: real('confidence').notNull().default(1),
 		createdAt: createdAt()
 	},
@@ -237,7 +238,8 @@ export const userRecipeClassifications = sqliteTable(
 			table.locale
 		),
 		index('user_recipe_classifications_recipe_id_idx').on(table.userRecipeId),
-		index('user_recipe_classifications_kind_value_idx').on(table.kind, table.normalizedValue)
+		index('user_recipe_classifications_kind_value_idx').on(table.kind, table.normalizedValue),
+		check('user_recipe_classifications_confidence_range', confidenceRange(table.confidence))
 	]
 );
 
@@ -260,7 +262,8 @@ export const userRecipeMedia = sqliteTable(
 	},
 	(table) => [
 		index('user_recipe_media_recipe_id_idx').on(table.userRecipeId),
-		index('user_recipe_media_kind_idx').on(table.kind)
+		index('user_recipe_media_kind_idx').on(table.kind),
+		check('user_recipe_media_payload_check', nonEmptyMediaPayload(table))
 	]
 );
 
@@ -278,7 +281,7 @@ export const userRecipeNutritionFacts = sqliteTable(
 		unitId: text('unit_id'),
 		baseAmount: real('base_amount'),
 		baseUnitId: text('base_unit_id'),
-		locale: text('locale'),
+		locale: text('locale').notNull().default('en-US'),
 		confidence: real('confidence').notNull().default(0),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()
@@ -298,6 +301,7 @@ export const userRecipeNutritionFacts = sqliteTable(
 		check(
 			'user_recipe_nutrition_facts_unit_pair_check',
 			sql`(${table.unitId} IS NULL AND ${table.baseUnitId} IS NULL) OR (${table.unitId} IS NOT NULL AND ${table.baseUnitId} IS NOT NULL)`
-		)
+		),
+		check('user_recipe_nutrition_facts_confidence_range', confidenceRange(table.confidence))
 	]
 );

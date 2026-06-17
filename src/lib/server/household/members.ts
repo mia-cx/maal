@@ -12,6 +12,12 @@ export type HouseholdMemberRow = {
 	createdAt: string | null;
 };
 
+export const lastManagerMessage =
+	'You are the last manager. Add another manager or delete the household instead.';
+
+export const isLastAdmin = ({ isAdmin, adminCount }: { isAdmin: boolean; adminCount: number }) =>
+	isAdmin && adminCount <= 1;
+
 export const canCurrentUserLeaveHousehold = (
 	members: HouseholdMemberRow[],
 	currentUserId: string
@@ -19,11 +25,8 @@ export const canCurrentUserLeaveHousehold = (
 	const currentMember = members.find((member) => member.userId === currentUserId);
 	if (!currentMember) return { canLeave: false, reason: 'You are not a member of this household.' };
 	const adminCount = members.filter((member) => member.role === 'admin').length;
-	if (currentMember.role === 'admin' && adminCount <= 1) {
-		return {
-			canLeave: false,
-			reason: 'You are the last manager. Add another manager or delete the household instead.'
-		};
+	if (isLastAdmin({ isAdmin: currentMember.role === 'admin', adminCount })) {
+		return { canLeave: false, reason: lastManagerMessage };
 	}
 	return { canLeave: true, reason: null };
 };
@@ -35,19 +38,28 @@ export const membershipHasAdminRole = (membership: {
 	membership.role.slug === 'admin' ||
 	Boolean(membership.roles?.some((role) => role.slug === 'admin'));
 
+export const listActiveHouseholdMemberships = async (
+	platform: App.Platform | undefined,
+	householdId: string
+) => {
+	const runtime = createAuthRuntime(platform);
+	return (
+		await runtime.workos.userManagement.listOrganizationMemberships({
+			organizationId: householdId,
+			statuses: ['active']
+		})
+	).autoPagination();
+};
+
 export const loadMembers = async (
 	platform: App.Platform | undefined,
 	householdId: string
 ): Promise<HouseholdMemberRow[]> => {
 	const runtime = createAuthRuntime(platform);
-	const memberships = await runtime.workos.userManagement.listOrganizationMemberships({
-		organizationId: householdId,
-		statuses: ['active'],
-		limit: 100
-	});
+	const memberships = await listActiveHouseholdMemberships(platform, householdId);
 
 	return Promise.all(
-		memberships.data.map(async (membership) => {
+		memberships.map(async (membership) => {
 			try {
 				const user = await runtime.workos.userManagement.getUser(membership.userId);
 				return {

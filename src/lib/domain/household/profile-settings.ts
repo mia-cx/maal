@@ -1,10 +1,11 @@
+import { integerFromForm, stringFromForm } from './form-parsing';
 import {
-	asWeekStartDay,
 	localeFromForm,
-	numberFromForm,
 	timeFromForm,
 	timezoneFromForm,
-	weekStartValue
+	weekStartDays,
+	weekStartValue,
+	type WeekStartDay
 } from './settings-parsing';
 
 export type HouseholdProfileUpdate = Partial<{
@@ -22,10 +23,14 @@ export type HouseholdProfileParseResult =
 export const profileUpdateFromForm = (form: FormData): HouseholdProfileParseResult => {
 	const update: HouseholdProfileUpdate = {};
 	if (form.has('defaultServings')) {
-		update.defaultPlannedYield = Math.min(
-			24,
-			Math.max(1, numberFromForm(form.get('defaultServings'), 1))
-		);
+		const defaultServings = integerFromForm({
+			value: form.get('defaultServings'),
+			message: 'Default servings must be a whole number from 1 to 24.',
+			min: 1,
+			max: 24
+		});
+		if (!defaultServings.ok) return { ok: false, message: defaultServings.message };
+		update.defaultPlannedYield = defaultServings.value;
 	}
 	if (form.has('locale')) {
 		const locale = localeFromForm(form.get('locale'));
@@ -38,10 +43,25 @@ export const profileUpdateFromForm = (form: FormData): HouseholdProfileParseResu
 		update.timezone = timezone;
 	}
 	if (form.has('weekStartsOn')) {
-		update.weekStartsOn = weekStartValue(asWeekStartDay(form.get('weekStartsOn')));
+		const parsed = stringFromForm(form.get('weekStartsOn'), 'Week start day is invalid.');
+		if (!parsed.ok || !weekStartDays.includes(parsed.value as WeekStartDay)) {
+			return { ok: false, message: 'Week start day is invalid.' };
+		}
+		update.weekStartsOn = weekStartValue(parsed.value as WeekStartDay);
 	}
 	if (form.has('preferredDinnerTime')) {
-		update.preferredDinnerTime = timeFromForm(form.get('preferredDinnerTime'));
+		const rawTime = stringFromForm(
+			form.get('preferredDinnerTime'),
+			'Preferred dinner time is invalid.'
+		);
+		if (!rawTime.ok) return { ok: false, message: rawTime.message };
+		if (!rawTime.value) {
+			update.preferredDinnerTime = null;
+		} else {
+			const preferredDinnerTime = timeFromForm(rawTime.value);
+			if (!preferredDinnerTime) return { ok: false, message: 'Preferred dinner time is invalid.' };
+			update.preferredDinnerTime = preferredDinnerTime;
+		}
 	}
 	return { ok: true, update };
 };

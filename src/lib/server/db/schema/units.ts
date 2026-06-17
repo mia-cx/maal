@@ -13,7 +13,7 @@ import { createdAt, id, updatedAt } from './common';
 import { households } from './households';
 import { users } from './users';
 
-const adoptionStatusValues = ['pending_review', 'accepted', 'rejected'] as const;
+import { adoptionStatusValues, DEFAULT_ADOPTION_STATUS } from './adoption-status';
 
 export const units = sqliteTable(
 	'units',
@@ -76,7 +76,7 @@ const scopedUnitAliasColumns = () => ({
 	sourceDomain: text('source_domain'),
 	adoptionStatus: text('adoption_status', { enum: adoptionStatusValues })
 		.notNull()
-		.default('pending_review')
+		.default(DEFAULT_ADOPTION_STATUS)
 });
 
 export const unitUserAliases = sqliteTable(
@@ -122,6 +122,12 @@ export const unitHouseholdAliases = sqliteTable(
 		}).onDelete('cascade'),
 		index('unit_household_aliases_household_idx').on(table.householdId),
 		index('unit_household_aliases_unit_idx').on(table.unitId),
+		uniqueIndex('unit_household_aliases_identity_unique').on(
+			table.householdId,
+			table.baseUnitId,
+			table.locale,
+			table.alias
+		),
 		index('unit_household_aliases_lookup_idx').on(table.householdId, table.locale, table.alias),
 		index('unit_household_aliases_adoption_idx').on(table.adoptionStatus)
 	]
@@ -136,7 +142,7 @@ const scopedUnitEntryColumns = () => ({
 	toBaseOffset: real('to_base_offset').notNull().default(0),
 	adoptionStatus: text('adoption_status', { enum: adoptionStatusValues })
 		.notNull()
-		.default('pending_review')
+		.default(DEFAULT_ADOPTION_STATUS)
 });
 
 export const unitUserEntries = sqliteTable(

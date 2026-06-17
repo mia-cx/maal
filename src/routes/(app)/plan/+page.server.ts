@@ -58,7 +58,6 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 		meals: loadMealPlanMeals(db, {
 			workosUserId: session.user.id,
 			householdId,
-			defaultMealServings,
 			startDate: initialStartDate,
 			endDate: initialEndDate,
 			unitPreferences

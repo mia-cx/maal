@@ -1,13 +1,17 @@
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, or, sql } from 'drizzle-orm';
 import type { Cookies } from '@sveltejs/kit';
 import { getDb } from '$lib/server/db';
 import { householdInvites } from '$lib/server/db/schema';
 import { commitHouseholdCookie } from './household';
+import { timestampExpired } from './expiry';
 import { provisionAuthSession } from './provisioning';
 import { createAuthRuntime } from './workos';
 
 const inviteCodeBytes = 12;
 const inviteCodeAlphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const inviteCreateAttempts = 5;
+const uniqueConstraintMessage = 'UNIQUE constraint failed';
+const inviteUniqueColumns = ['household_invites.id', 'household_invites.code'];
 export const householdRoleSlugs = ['admin', 'member', 'child'] as const;
 export type HouseholdRoleSlug = (typeof householdRoleSlugs)[number];
 const defaultMemberRole: HouseholdRoleSlug = 'member';
@@ -25,7 +29,7 @@ const randomInviteCode = (): string => {
 };
 
 export const inviteExpired = (invite: Pick<HouseholdInvite, 'expiresAt'>): boolean =>
-	Boolean(invite.expiresAt && new Date(invite.expiresAt).getTime() <= Date.now());
+	timestampExpired(invite.expiresAt);
 
 export const inviteExhausted = (invite: Pick<HouseholdInvite, 'maxUses' | 'usesCount'>): boolean =>
 	invite.maxUses !== null && invite.usesCount >= invite.maxUses;
@@ -44,6 +48,14 @@ export const listHouseholdInvites = async (
 		.where(eq(householdInvites.householdId, householdId))
 		.orderBy(desc(householdInvites.createdAt));
 
+const isInviteUniquenessFailure = (cause: unknown): boolean => {
+	const message = cause instanceof Error ? cause.message : String(cause);
+	return (
+		message.includes(uniqueConstraintMessage) &&
+		inviteUniqueColumns.some((column) => message.includes(column))
+	);
+};
+
 export const createHouseholdInvite = async (input: {
 	database: D1Database;
 	householdId: string;
@@ -54,7 +66,7 @@ export const createHouseholdInvite = async (input: {
 }): Promise<HouseholdInvite> => {
 	const db = getDb(input.database);
 
-	for (let attempt = 0; attempt < 5; attempt += 1) {
+	for (let attempt = 0; attempt < inviteCreateAttempts; attempt += 1) {
 		const id = crypto.randomUUID();
 		const code = randomInviteCode();
 		try {
@@ -74,7 +86,9 @@ export const createHouseholdInvite = async (input: {
 				.limit(1);
 			if (invite) return invite;
 		} catch (cause) {
-			if (attempt === 4) throw cause;
+			if (!isInviteUniquenessFailure(cause) || attempt === inviteCreateAttempts - 1) {
+				throw new Error('Could not create household invite.', { cause });
+			}
 		}
 	}
 
@@ -86,8 +100,8 @@ export const updateHouseholdInviteRole = async (input: {
 	householdId: string;
 	inviteId: string;
 	roleSlug: HouseholdRoleSlug;
-}): Promise<void> => {
-	await getDb(input.database)
+}): Promise<number> => {
+	const rows = await getDb(input.database)
 		.update(householdInvites)
 		.set({ roleSlug: input.roleSlug })
 		.where(
@@ -95,15 +109,17 @@ export const updateHouseholdInviteRole = async (input: {
 				eq(householdInvites.id, input.inviteId),
 				eq(householdInvites.householdId, input.householdId)
 			)
-		);
+		)
+		.returning({ id: householdInvites.id });
+	return rows.length;
 };
 
 export const revokeHouseholdInvite = async (input: {
 	database: D1Database;
 	householdId: string;
 	inviteId: string;
-}): Promise<void> => {
-	await getDb(input.database)
+}): Promise<number> => {
+	const rows = await getDb(input.database)
 		.update(householdInvites)
 		.set({ revokedAt: new Date().toISOString() })
 		.where(
@@ -111,22 +127,26 @@ export const revokeHouseholdInvite = async (input: {
 				eq(householdInvites.id, input.inviteId),
 				eq(householdInvites.householdId, input.householdId)
 			)
-		);
+		)
+		.returning({ id: householdInvites.id });
+	return rows.length;
 };
 
 export const deleteHouseholdInvite = async (input: {
 	database: D1Database;
 	householdId: string;
 	inviteId: string;
-}): Promise<void> => {
-	await getDb(input.database)
+}): Promise<number> => {
+	const rows = await getDb(input.database)
 		.delete(householdInvites)
 		.where(
 			and(
 				eq(householdInvites.id, input.inviteId),
 				eq(householdInvites.householdId, input.householdId)
 			)
-		);
+		)
+		.returning({ id: householdInvites.id });
+	return rows.length;
 };
 
 export const loadHouseholdInviteByCode = async (
@@ -139,6 +159,38 @@ export const loadHouseholdInviteByCode = async (
 		.where(and(eq(householdInvites.code, code), isNull(householdInvites.revokedAt)))
 		.limit(1);
 	return invite && inviteUsable(invite) ? invite : null;
+};
+
+const consumeHouseholdInvite = async (
+	database: D1Database,
+	invite: HouseholdInvite
+): Promise<HouseholdInvite | null> => {
+	const [consumed] = await getDb(database)
+		.update(householdInvites)
+		.set({ usesCount: sql`${householdInvites.usesCount} + 1` })
+		.where(
+			and(
+				eq(householdInvites.id, invite.id),
+				isNull(householdInvites.revokedAt),
+				or(
+					isNull(householdInvites.expiresAt),
+					gt(householdInvites.expiresAt, new Date().toISOString())
+				),
+				or(
+					isNull(householdInvites.maxUses),
+					gt(householdInvites.maxUses, householdInvites.usesCount)
+				)
+			)
+		)
+		.returning();
+	return consumed ?? null;
+};
+
+const releaseHouseholdInviteUse = async (database: D1Database, inviteId: string): Promise<void> => {
+	await getDb(database)
+		.update(householdInvites)
+		.set({ usesCount: sql`${householdInvites.usesCount} - 1` })
+		.where(and(eq(householdInvites.id, inviteId), gt(householdInvites.usesCount, 0)));
 };
 
 export const joinHouseholdFromInvite = async (input: {
@@ -160,15 +212,26 @@ export const joinHouseholdFromInvite = async (input: {
 	});
 
 	if (!memberships.data[0]) {
-		await runtime.workos.userManagement.createOrganizationMembership({
-			organizationId: invite.householdId,
-			userId: input.userId,
-			roleSlug: householdRoleSlug(invite.roleSlug)
-		});
-		await getDb(input.platform.env.DB)
-			.update(householdInvites)
-			.set({ usesCount: sql`${householdInvites.usesCount} + 1` })
-			.where(eq(householdInvites.id, invite.id));
+		const consumedInvite = await consumeHouseholdInvite(input.platform.env.DB, invite);
+		if (!consumedInvite) throw new Error('Invite not found.');
+
+		try {
+			await runtime.workos.userManagement.createOrganizationMembership({
+				organizationId: consumedInvite.householdId,
+				userId: input.userId,
+				roleSlug: householdRoleSlug(consumedInvite.roleSlug)
+			});
+		} catch (cause) {
+			try {
+				await releaseHouseholdInviteUse(input.platform.env.DB, consumedInvite.id);
+			} catch (releaseCause) {
+				console.error('Failed to release household invite use after membership creation failed', {
+					inviteId: consumedInvite.id,
+					cause: releaseCause
+				});
+			}
+			throw cause;
+		}
 	}
 
 	await provisionAuthSession(input.platform, {

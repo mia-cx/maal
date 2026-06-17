@@ -1,13 +1,13 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq } from 'drizzle-orm';
 import type { Meal } from '$lib/components/dashboard/schedule-types';
-import { countActiveHouseholdMembers } from '$lib/server/auth/household';
-import { requireAppContext } from '$lib/server/http/app-context';
+import { requireBillingAppContext } from '$lib/server/http/app-context';
 import { mapKnownError } from '$lib/server/http/domain-errors';
 import { readJsonObject } from '$lib/server/http/request';
 import { householdMeals } from '$lib/server/db/schema';
 import {
 	createHouseholdMeal,
+	defaultMealServings,
 	deleteHouseholdMeal,
 	listHouseholdPlanMeals,
 	updateHouseholdMeal
@@ -36,7 +36,7 @@ const readMealId = async (request: Request): Promise<string> => {
 };
 
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
-	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
 	const startDate = dateParam(url, 'start');
 	const endDate = dateParam(url, 'end');
 	if (!startDate || !endDate) error(400, { message: 'Date range is required.' });
@@ -54,7 +54,7 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 };
 
 export const POST: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
 	const meal = await readMeal(request);
 
 	try {
@@ -67,14 +67,17 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		});
 	} catch (cause) {
 		return mapKnownError(cause, {
-			'Recipe not found.': 404,
-			'Choose an active household member as the cook.': 400
+			recipe_not_found: { status: 404, message: 'Recipe not found.' },
+			active_household_cook_required: {
+				status: 400,
+				message: 'Choose an active household member as the cook.'
+			}
 		});
 	}
 };
 
 export const DELETE: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const { db, householdId } = await requireAppContext({ cookies, locals, platform, url });
+	const { db, householdId } = await requireBillingAppContext({ cookies, locals, platform, url });
 
 	const mealId = await readMealId(request);
 	await deleteHouseholdMeal({ db, householdId, mealId });
@@ -82,7 +85,7 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 };
 
 export const PUT: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
 	const meal = await readMeal(request);
 
 	const existingMeal = await db
@@ -106,14 +109,17 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 					householdId,
 					session.user.id,
 					existingMeal,
-					await countActiveHouseholdMembers(platform, householdId)
+					await defaultMealServings(platform, householdId)
 				)
 			})
 		});
 	} catch (cause) {
 		return mapKnownError(cause, {
-			'Choose an active household member as the cook.': 400,
-			'Meal not found.': 404
+			active_household_cook_required: {
+				status: 400,
+				message: 'Choose an active household member as the cook.'
+			},
+			meal_not_found: { status: 404, message: 'Meal not found.' }
 		});
 	}
 };

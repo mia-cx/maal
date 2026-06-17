@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm';
-import type { MealFeedbackVerdict } from '$lib/components/dashboard/meal-labels';
+import type { MealFeedbackVerdict } from '$lib/domain/meal-feedback';
 import { getDb } from '$lib/server/db';
+import { DomainError } from '$lib/server/domain-errors';
 import { householdMeals, mealCheckIns } from '$lib/server/db/schema';
 
 export type MealCheckInInput = {
@@ -23,7 +24,7 @@ export const upsertMealCheckIn = async (db: Db, input: MealCheckInInput) => {
 			and(eq(householdMeals.id, input.mealId), eq(householdMeals.householdId, input.householdId))
 		)
 		.get();
-	if (!existingMeal) throw new Error('Meal not found.');
+	if (!existingMeal) throw new DomainError('meal_not_found', 'Meal not found.');
 
 	const cookTime =
 		input.cooked && existingMeal.plannedCookWorkosUserId === input.workosUserId
@@ -32,31 +33,33 @@ export const upsertMealCheckIn = async (db: Db, input: MealCheckInInput) => {
 	const reason = input.reason?.trim() || null;
 	const updatedAt = new Date().toISOString();
 
-	await db
-		.insert(mealCheckIns)
-		.values({
-			workosUserId: input.workosUserId,
-			householdMealId: input.mealId,
-			verdict: input.verdict,
-			cookTime,
-			reason,
-			updatedAt
-		})
-		.onConflictDoUpdate({
-			target: [mealCheckIns.householdMealId, mealCheckIns.workosUserId],
-			set: {
+	await db.transaction(async (tx) => {
+		await tx
+			.insert(mealCheckIns)
+			.values({
+				workosUserId: input.workosUserId,
+				householdMealId: input.mealId,
 				verdict: input.verdict,
 				cookTime,
 				reason,
 				updatedAt
-			}
-		});
+			})
+			.onConflictDoUpdate({
+				target: [mealCheckIns.householdMealId, mealCheckIns.workosUserId],
+				set: {
+					verdict: input.verdict,
+					cookTime,
+					reason,
+					updatedAt
+				}
+			});
 
-	await db
-		.update(householdMeals)
-		.set({
-			status: input.cooked ? 'cooked' : 'skipped',
-			updatedAt
-		})
-		.where(eq(householdMeals.id, input.mealId));
+		await tx
+			.update(householdMeals)
+			.set({
+				status: input.cooked ? 'cooked' : 'skipped',
+				updatedAt
+			})
+			.where(eq(householdMeals.id, input.mealId));
+	});
 };

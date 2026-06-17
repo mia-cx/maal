@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { getDb } from '$lib/server/db';
+import type { WritableDb } from '$lib/server/db/recipe-mappers';
 import {
 	householdMealClassifications,
 	householdMealIngredients,
@@ -21,9 +21,7 @@ import {
 	recipeNutritionFactToMealNutritionFact
 } from './meal-sidecar-projections';
 
-type Db = ReturnType<typeof getDb>;
-
-const insertInstructionEventsForMeal = async (db: Db, householdMealId: string) => {
+const insertInstructionEventsForMeal = async (db: WritableDb, householdMealId: string) => {
 	const insertedInstructions = await db
 		.select({ id: householdMealInstructions.id, text: householdMealInstructions.text })
 		.from(householdMealInstructions)
@@ -31,7 +29,7 @@ const insertInstructionEventsForMeal = async (db: Db, householdMealId: string) =
 	await insertHouseholdMealInstructionEvents(db, insertedInstructions);
 };
 
-const loadRecipeCoreSidecars = async (db: Db, userRecipeId: string) =>
+const loadRecipeCoreSidecars = async (db: WritableDb, userRecipeId: string) =>
 	Promise.all([
 		db
 			.select()
@@ -44,7 +42,7 @@ const loadRecipeCoreSidecars = async (db: Db, userRecipeId: string) =>
 	]);
 
 export const replaceMealRecipeSidecars = async (
-	db: Db,
+	db: WritableDb,
 	householdMealId: string,
 	userRecipeId: string
 ) => {
@@ -71,7 +69,7 @@ export const replaceMealRecipeSidecars = async (
 };
 
 export const copyRecipeSidecarsToMeal = async (
-	db: Db,
+	db: WritableDb,
 	userRecipeId: string,
 	householdMealId: string
 ) => {
