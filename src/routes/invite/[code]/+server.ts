@@ -15,17 +15,13 @@ const inviteCode = (code: string | undefined): string => {
 	return trimmed;
 };
 
-const inviteDatabase = (platform: App.Platform | undefined): D1Database => {
-	const db = platform?.env?.DB;
-	if (!db) error(503, inviteStorageUnavailable);
-	return db;
+const invitePlatform = (platform: App.Platform | undefined): App.Platform => {
+	if (!platform?.env?.DB) error(503, inviteStorageUnavailable);
+	return platform;
 };
 
-const loadInvite = async (
-	platform: App.Platform | undefined,
-	code: string
-): Promise<HouseholdInvite> => {
-	const invite = await loadHouseholdInviteByCode(inviteDatabase(platform), code);
+const loadInvite = async (platform: App.Platform, code: string): Promise<HouseholdInvite> => {
+	const invite = await loadHouseholdInviteByCode(platform.env.DB, code);
 	if (!invite) error(404, inviteNotFound);
 	return invite;
 };
@@ -66,23 +62,24 @@ const invitePreview = (invite: HouseholdInvite): Response =>
 	);
 
 export const GET: RequestHandler = async ({ locals, platform, url, params }) => {
-	const code = inviteCode(params.code);
-	const invite = await loadInvite(platform, code);
-
 	if (!locals.session) redirect(303, loginLocation(url));
+
+	const code = inviteCode(params.code);
+	const invite = await loadInvite(invitePlatform(platform), code);
 
 	return invitePreview(invite);
 };
 
 export const POST: RequestHandler = async ({ cookies, locals, platform, url, params }) => {
-	const code = inviteCode(params.code);
-	await loadInvite(platform, code);
-
 	if (!locals.session) redirect(303, loginLocation(url));
+
+	const code = inviteCode(params.code);
+	const inviteRuntime = invitePlatform(platform);
+	await loadInvite(inviteRuntime, code);
 
 	try {
 		await joinHouseholdFromInvite({
-			platform: platform as App.Platform,
+			platform: inviteRuntime,
 			cookies,
 			url,
 			code,

@@ -54,7 +54,17 @@ describe('/invite/[code]', () => {
 		expect(joinHouseholdFromInvite).not.toHaveBeenCalled();
 	});
 
-	it('reports unavailable invite storage without reading platform.env.DB unsafely', async () => {
+	it('redirects anonymous users before checking invite storage or code validity', async () => {
+		await expect(
+			GET(event({ locals: { session: null }, platform: undefined, params: { code: '' } }))
+		).rejects.toMatchObject({
+			status: 303,
+			location: '/auth/login?screen_hint=sign-up&returnTo=%2Finvite%2Fabc%3Ffrom%3Demail'
+		});
+		expect(loadHouseholdInviteByCode).not.toHaveBeenCalled();
+	});
+
+	it('reports unavailable invite storage for authenticated users without reading platform.env.DB unsafely', async () => {
 		await expect(GET(event({ platform: undefined }))).rejects.toMatchObject({
 			status: 503,
 			body: { message: 'Invite storage is not available.' }
