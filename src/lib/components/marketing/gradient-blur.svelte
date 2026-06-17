@@ -51,29 +51,3 @@
 		></div>
 	{/each}
 </div>
-
-<style lang="scss">
-	@property --top {
-		syntax: '<length-percentage>';
-		initial-value: -1rem;
-		inherits: false;
-	}
-
-	@property --right {
-		syntax: '<length-percentage>';
-		initial-value: -1rem;
-		inherits: false;
-	}
-
-	@property --bottom {
-		syntax: '<length-percentage>';
-		initial-value: -1rem;
-		inherits: false;
-	}
-
-	@property --left {
-		syntax: '<length-percentage>';
-		initial-value: -1rem;
-		inherits: false;
-	}
-</style>

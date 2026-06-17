@@ -3,6 +3,7 @@ export { createBillingPortalSession } from '$lib/server/billing/portal';
 export {
 	priceToPricingOption,
 	pricingOptionsFromPrices,
+	trialDefaultPricingOptionFromPrices,
 	type PricingOption
 } from '$lib/server/billing/pricing-options';
 export { loadBillingStatusView } from '$lib/server/billing/status-view';

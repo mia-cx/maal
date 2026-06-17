@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
-import { landingPricingFallback, paidLandingPrice, trialPriceIdFromPrices } from './+page.server';
+import {
+	_landingPricingFallback,
+	_paidLandingPrice,
+	_trialPriceIdFromPrices
+} from './+page.server';
 
 const price = (overrides: Partial<Stripe.Price>): Stripe.Price =>
 	({
@@ -14,9 +18,9 @@ const price = (overrides: Partial<Stripe.Price>): Stripe.Price =>
 		...overrides
 	}) as Stripe.Price;
 
-describe('paidLandingPrice', () => {
+describe('_paidLandingPrice', () => {
 	it('projects fixed recurring paid prices', () => {
-		expect(paidLandingPrice(price({ id: 'monthly' }))).toEqual({
+		expect(_paidLandingPrice(price({ id: 'monthly' }))).toEqual({
 			id: 'monthly',
 			label: 'Monthly',
 			amount: 500,
@@ -27,11 +31,11 @@ describe('paidLandingPrice', () => {
 	});
 
 	it('skips free, nullable, tiered, metered, inactive, and one-time prices', () => {
-		expect(paidLandingPrice(price({ unit_amount: 0 }))).toBeNull();
-		expect(paidLandingPrice(price({ unit_amount: null }))).toBeNull();
-		expect(paidLandingPrice(price({ billing_scheme: 'tiered' }))).toBeNull();
+		expect(_paidLandingPrice(price({ unit_amount: 0 }))).toBeNull();
+		expect(_paidLandingPrice(price({ unit_amount: null }))).toBeNull();
+		expect(_paidLandingPrice(price({ billing_scheme: 'tiered' }))).toBeNull();
 		expect(
-			paidLandingPrice(
+			_paidLandingPrice(
 				price({
 					recurring: {
 						interval: 'month',
@@ -41,15 +45,15 @@ describe('paidLandingPrice', () => {
 				})
 			)
 		).toBeNull();
-		expect(paidLandingPrice(price({ active: false }))).toBeNull();
-		expect(paidLandingPrice(price({ type: 'one_time', recurring: null }))).toBeNull();
+		expect(_paidLandingPrice(price({ active: false }))).toBeNull();
+		expect(_paidLandingPrice(price({ type: 'one_time', recurring: null }))).toBeNull();
 	});
 });
 
-describe('trialPriceIdFromPrices', () => {
+describe('_trialPriceIdFromPrices', () => {
 	it('selects only fixed recurring zero-amount trial prices', () => {
 		expect(
-			trialPriceIdFromPrices([
+			_trialPriceIdFromPrices([
 				price({ id: 'nullable', unit_amount: null }),
 				price({
 					id: 'metered-trial',
@@ -66,12 +70,12 @@ describe('trialPriceIdFromPrices', () => {
 	});
 });
 
-describe('landingPricingFallback', () => {
+describe('_landingPricingFallback', () => {
 	it('logs the cause and returns an explicit unavailable pricing state', () => {
 		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 		const cause = new Error('stripe unavailable');
 
-		expect(landingPricingFallback(cause)).toEqual({
+		expect(_landingPricingFallback(cause)).toEqual({
 			productName: 'Maal',
 			pricing: [],
 			pricingStatus: 'unavailable',

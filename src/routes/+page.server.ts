@@ -3,7 +3,8 @@ import type { PageServerLoad } from './$types';
 import { resolveActiveHouseholdId } from '$lib/server/auth/household';
 import {
 	isSupportedFixedRecurringPrice,
-	supportedInterval
+	supportedInterval,
+	trialDefaultPricingOptionFromPrices
 } from '$lib/server/billing/pricing-options';
 import { createStripeClient, getStripePublicConfig } from '$lib/server/domains/billing';
 import { loadTrialAvailability } from '$lib/server/domains/billing';
@@ -15,11 +16,13 @@ export type LandingPrice = {
 	currency: string;
 	interval: 'week' | 'month' | 'year';
 	intervalCount: number;
+	supportsTrial?: boolean;
+	trialPriceId?: string | null;
 };
 
 export type LandingPricingStatus = 'available' | 'empty' | 'unavailable';
 
-export const landingPricingFallback = (cause: unknown) => {
+export const _landingPricingFallback = (cause: unknown) => {
 	console.error('Failed to load landing pricing', cause);
 	return {
 		productName: 'Maal',
@@ -44,7 +47,7 @@ const priceOrder = new Map<LandingPrice['label'], number>([
 	['Yearly', 3]
 ]);
 
-export const paidLandingPrice = (price: Stripe.Price): LandingPrice | null => {
+export const _paidLandingPrice = (price: Stripe.Price): LandingPrice | null => {
 	if (!isSupportedFixedRecurringPrice(price)) return null;
 	const label = labelFor(price);
 	const interval = supportedInterval(price.recurring.interval);
@@ -59,7 +62,7 @@ export const paidLandingPrice = (price: Stripe.Price): LandingPrice | null => {
 	};
 };
 
-export const trialPriceIdFromPrices = (prices: Stripe.Price[]): string | null =>
+export const _trialPriceIdFromPrices = (prices: Stripe.Price[]): string | null =>
 	prices.find((price) => isSupportedFixedRecurringPrice(price) && price.unit_amount === 0)?.id ??
 	null;
 
@@ -87,13 +90,19 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 			active: true,
 			limit: 20
 		});
+		const trialPriceId = _trialPriceIdFromPrices(prices.data);
+		const trialDefaultOption = trialDefaultPricingOptionFromPrices(prices.data, product.id);
 		const pricing = prices.data
-			.map(paidLandingPrice)
+			.map(_paidLandingPrice)
 			.filter((price): price is LandingPrice => Boolean(price))
+			.map((price) => ({
+				...price,
+				supportsTrial: price.id === trialDefaultOption?.id,
+				trialPriceId: price.id === trialDefaultOption?.id ? trialPriceId : null
+			}))
 			.sort(
 				(left, right) => (priceOrder.get(left.label) ?? 99) - (priceOrder.get(right.label) ?? 99)
 			);
-		const trialPriceId = trialPriceIdFromPrices(prices.data);
 		let trialAvailable = false;
 		if (locals.session && platform?.env.DB && trialPriceId) {
 			const { householdId } = await resolveActiveHouseholdId({
@@ -121,6 +130,6 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 			trialAvailable
 		};
 	} catch (cause) {
-		return landingPricingFallback(cause);
+		return _landingPricingFallback(cause);
 	}
 };

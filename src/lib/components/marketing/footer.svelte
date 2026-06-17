@@ -2,20 +2,21 @@
 	import { resolve } from '$app/paths';
 	import Anchor from '$lib/components/marketing/anchor.svelte';
 	import WordmarkLogo from '$lib/components/wordmark-logo.svelte';
+	import GithubIcon from '@lucide/svelte/icons/github';
 
 	const year = new Date().getFullYear();
+	const landingHref = (fragment: string) => `${resolve('/')}${fragment}`;
 </script>
-
-<svelte:head>
-	<script src="https://code.iconify.design/iconify-icon/3.0.0/iconify-icon.min.js"></script>
-</svelte:head>
 
 <footer class="border-t border-border py-14 md:py-16">
 	<div class="mx-auto grid max-w-7xl grid-cols-1 items-start gap-4 px-4 md:grid-cols-4 md:px-6">
 		<section class="flex h-full flex-col justify-between md:col-span-2">
 			<div class="grid justify-items-start gap-4">
 				<WordmarkLogo class="h-10 w-auto" />
-				<Anchor class="gap-0.5 font-bold text-muted-foreground" href="https://github.com/mia-cx/maal">
+				<Anchor
+					class="gap-0.5 font-bold text-muted-foreground"
+					href="https://github.com/mia-cx/maal"
+				>
 					Contribute to Maal
 				</Anchor>
 			</div>
@@ -28,7 +29,7 @@
 							aria-label="Maal on GitHub"
 							showIcon={false}
 						>
-							<iconify-icon icon="fa6-brands:github" class="block text-2xl md:text-xl"></iconify-icon>
+							<GithubIcon class="block size-6 md:size-5" />
 						</Anchor>
 					</li>
 				</ul>
@@ -50,13 +51,13 @@
 					<Anchor href={resolve('/')}>Home</Anchor>
 				</li>
 				<li>
-					<Anchor href="#features">Features</Anchor>
+					<Anchor href={landingHref('#features')}>Features</Anchor>
 				</li>
 				<li>
-					<Anchor href="#how-it-works">How it works</Anchor>
+					<Anchor href={landingHref('#how-it-works')}>How it works</Anchor>
 				</li>
 				<li>
-					<Anchor href="#pricing">Pricing</Anchor>
+					<Anchor href={landingHref('#pricing')}>Pricing</Anchor>
 				</li>
 			</ul>
 		</section>

@@ -15,9 +15,10 @@
 	let { user }: { user: NavUser } = $props();
 	const sidebar = useSidebar();
 
-	let localUser = $derived(user);
+	let localUserOverride = $state<NavUser | null>(null);
 	let settingsOpen = $state(false);
 
+	const localUser = $derived(localUserOverride ?? user);
 	const initials = $derived(localUser.name.slice(0, 2).toUpperCase());
 	const homeHref = resolve('/');
 	const logoutHref = resolve('/auth/logout');
@@ -27,7 +28,7 @@
 		email: string;
 		emailVerified: boolean;
 	}) => {
-		localUser = {
+		localUserOverride = {
 			...localUser,
 			name: updatedUser.name ?? updatedUser.email,
 			email: updatedUser.email,
@@ -88,28 +89,18 @@
 						User settings
 					</DropdownMenu.Item>
 					<DropdownMenu.Item>
-						{#if homeHref}
-							<a href={homeHref} class="flex w-full items-center gap-2">
-								<ArrowLeftIcon />
-								Back to home
-							</a>
-						{:else}
+						<a href={homeHref} class="flex w-full items-center gap-2">
 							<ArrowLeftIcon />
 							Back to home
-						{/if}
+						</a>
 					</DropdownMenu.Item>
 				</DropdownMenu.Group>
 				<DropdownMenu.Separator />
 				<DropdownMenu.Item>
-					{#if logoutHref}
-						<a href={logoutHref} class="flex w-full items-center gap-2">
-							<LogOutIcon />
-							Log out
-						</a>
-					{:else}
+					<a href={logoutHref} class="flex w-full items-center gap-2">
 						<LogOutIcon />
 						Log out
-					{/if}
+					</a>
 				</DropdownMenu.Item>
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>

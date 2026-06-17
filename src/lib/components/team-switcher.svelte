@@ -24,6 +24,9 @@
 	const sidebar = useSidebar();
 	let clientActiveHouseholdId = $state<string | null>(null);
 	let lastServerActiveHouseholdId = $state<string | null>(null);
+	let switchError = $state<string | null>(null);
+	let storedActiveHouseholdId = $state<string | null>(null);
+	let switchRequestId = 0;
 
 	const activeHousehold = $derived(
 		households.find((household) => household.id === clientActiveHouseholdId) ??
@@ -32,20 +35,27 @@
 	);
 	const householdName = $derived(activeHousehold?.name ?? 'No household');
 	const householdMeta = $derived(activeHousehold ? 'Household' : 'Create one from Meal Plan');
+	const isKnownHouseholdId = (householdId: string | null): householdId is string =>
+		Boolean(householdId && households.some((household) => household.id === householdId));
 	const startHouseholdCreation = () => goto(resolve('/onboarding?new=1'));
 	const switchHousehold = async (householdId: string) => {
 		if (householdId === clientActiveHouseholdId) return;
+		const requestId = ++switchRequestId;
 		const previousHouseholdId = clientActiveHouseholdId;
+		switchError = null;
 		clientActiveHouseholdId = householdId;
 		setActiveHouseholdId(householdId);
 		writeActiveHouseholdCookie(householdId);
 
 		try {
 			await invalidateAll();
-		} catch {
+		} catch (cause) {
+			if (requestId !== switchRequestId) return;
+			console.error('Failed to switch household', cause);
 			clientActiveHouseholdId = previousHouseholdId;
 			setActiveHouseholdId(previousHouseholdId);
 			writeActiveHouseholdCookie(previousHouseholdId);
+			switchError = 'Could not switch households. Please try again.';
 		}
 	};
 
@@ -56,10 +66,15 @@
 		}
 	});
 
+	$effect(() => {
+		if (!isKnownHouseholdId(storedActiveHouseholdId)) return;
+		clientActiveHouseholdId = storedActiveHouseholdId;
+	});
+
 	let unsubscribeActiveHousehold: (() => void) | null = null;
 	onMount(() => {
 		unsubscribeActiveHousehold = activeHouseholdIdStore.subscribe((householdId) => {
-			if (householdId) clientActiveHouseholdId = householdId;
+			storedActiveHouseholdId = householdId;
 		});
 	});
 	onDestroy(() => unsubscribeActiveHousehold?.());
@@ -94,6 +109,9 @@
 				sideOffset={4}
 			>
 				<DropdownMenu.Label class="text-xs text-muted-foreground">{label}</DropdownMenu.Label>
+				{#if switchError}
+					<p class="px-2 py-1 text-xs text-destructive">{switchError}</p>
+				{/if}
 				{#if households.length > 0}
 					{#each households as household (household.id)}
 						<DropdownMenu.Item

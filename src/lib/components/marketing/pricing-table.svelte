@@ -2,13 +2,17 @@
 	import { resolve } from '$app/paths';
 	import { Button } from '$lib/components/ui/button';
 
+	type BillingInterval = 'week' | 'month' | 'year';
+
 	type Price = {
 		id: string;
 		label: string;
 		amount: number;
 		currency: string;
-		interval: string;
+		interval: BillingInterval;
 		intervalCount: number;
+		supportsTrial?: boolean;
+		trialPriceId?: string | null;
 	};
 
 	let {
@@ -32,8 +36,10 @@
 			maximumFractionDigits: amount % 100 === 0 ? 0 : 2
 		}).format(amount / 100);
 
-	const intervalLabel = (interval: string): string =>
-		interval === 'week' ? 'week' : interval === 'year' ? 'year' : 'month';
+	const intervalLabel = (interval: BillingInterval, intervalCount: number): string => {
+		const label = intervalCount === 1 ? interval : `${interval}s`;
+		return intervalCount === 1 ? label : `${intervalCount} ${label}`;
+	};
 
 	const planUseCase = (label: string): string => {
 		if (label === 'Weekly') return 'Trying Maal without committing to a month.';
@@ -44,11 +50,14 @@
 	const checkoutAction = resolve('/billing/checkout');
 	const loginHref = resolve(`/auth/login?returnTo=${encodeURIComponent(resolve('/subscribe'))}`);
 
-	const showTrialCta = $derived(Boolean(trialPriceId && (!signedIn || trialAvailable)));
-	const ctaPriceId = (priceId: string): string =>
-		showTrialCta && trialPriceId ? trialPriceId : priceId;
-
-	const ctaLabel = $derived(showTrialCta ? 'Start trial' : 'Start subscription');
+	const trialEligible = $derived(!signedIn || trialAvailable);
+	const trialIdFor = (price: Price): string | null => price.trialPriceId ?? trialPriceId;
+	const showTrialCta = (price: Price): boolean =>
+		Boolean(trialEligible && price.supportsTrial && trialIdFor(price));
+	const ctaPriceId = (price: Price): string =>
+		showTrialCta(price) ? (trialIdFor(price) ?? price.id) : price.id;
+	const ctaLabel = (price: Price): string =>
+		showTrialCta(price) ? 'Start trial' : 'Start subscription';
 </script>
 
 {#if pricing.length}
@@ -66,7 +75,9 @@
 				</div>
 				<p class="mt-4">
 					<span class="text-3xl font-bold">{money(price.amount, price.currency)}</span>
-					<span class="text-sm text-muted-foreground"> / {intervalLabel(price.interval)}</span>
+					<span class="text-sm text-muted-foreground">
+						/ {intervalLabel(price.interval, price.intervalCount)}</span
+					>
 				</p>
 				<p class="mt-3 min-h-12 text-sm leading-6 text-muted-foreground">
 					{planUseCase(price.label)}
@@ -74,15 +85,15 @@
 				<div class="mt-6 grid gap-2">
 					{#if signedIn}
 						<form method="POST" action={checkoutAction}>
-							<input type="hidden" name="priceId" value={ctaPriceId(price.id)} />
-							{#if showTrialCta}
+							<input type="hidden" name="priceId" value={ctaPriceId(price)} />
+							{#if showTrialCta(price)}
 								<input type="hidden" name="trial" value="1" />
 							{/if}
 							<Button
 								type="submit"
 								size="lg"
 								class="w-full bg-[var(--brand)] text-white hover:bg-[var(--brand)]/90"
-								style={`--brand:${brand}`}>{ctaLabel}</Button
+								style={`--brand:${brand}`}>{ctaLabel(price)}</Button
 							>
 						</form>
 					{:else}
@@ -90,7 +101,7 @@
 							href={loginHref}
 							size="lg"
 							class="bg-[var(--brand)] text-white hover:bg-[var(--brand)]/90"
-							style={`--brand:${brand}`}>{ctaLabel}</Button
+							style={`--brand:${brand}`}>{ctaLabel(price)}</Button
 						>
 					{/if}
 				</div>

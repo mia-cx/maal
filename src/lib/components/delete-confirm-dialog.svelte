@@ -35,7 +35,13 @@
 	} = $props();
 
 	let confirmButton = $state<HTMLButtonElement | null>(null);
-	const displayedConfirmLabel = $derived(busy && confirmingLabel ? confirmingLabel : confirmLabel);
+	let localSubmitting = $state(false);
+	let localError = $state<string | null>(null);
+	const isBusy = $derived(busy || localSubmitting);
+	const displayError = $derived(error ?? localError);
+	const displayedConfirmLabel = $derived(
+		isBusy && confirmingLabel ? confirmingLabel : confirmLabel
+	);
 	const hiddenInputEntries = $derived(
 		Object.entries(hiddenInputs).filter((entry): entry is [string, string | number] => {
 			const [, value] = entry;
@@ -44,9 +50,28 @@
 	);
 
 	$effect(() => {
-		if (!open || busy) return;
-		setTimeout(() => confirmButton?.focus());
+		if (open) return;
+		localError = null;
 	});
+
+	$effect(() => {
+		if (!open || isBusy) return;
+		const focusTimeout = window.setTimeout(() => confirmButton?.focus());
+		return () => window.clearTimeout(focusTimeout);
+	});
+
+	const confirm = async () => {
+		if (!onconfirm || localSubmitting) return;
+		localSubmitting = true;
+		localError = null;
+		try {
+			await onconfirm();
+		} catch (cause) {
+			localError = cause instanceof Error ? cause.message : 'Could not complete the request.';
+		} finally {
+			localSubmitting = false;
+		}
+	};
 </script>
 
 <Dialog.Root bind:open>
@@ -56,18 +81,19 @@
 			<Dialog.Description>{description}</Dialog.Description>
 		</Dialog.Header>
 
-		{#if error}
-			<p class="text-xs text-destructive">{error}</p>
+		{#if displayError}
+			<p class="text-xs text-destructive">{displayError}</p>
 		{/if}
 
 		<div class="flex justify-end gap-2">
-			<Button variant="ghost" disabled={busy} onclick={() => (open = false)}>{cancelLabel}</Button>
+			<Button variant="ghost" disabled={isBusy} onclick={() => (open = false)}>{cancelLabel}</Button
+			>
 			{#if formAction}
 				<form method={formMethod} action={formAction}>
 					{#each hiddenInputEntries as [name, value] (name)}
 						<input type="hidden" {name} value={String(value)} />
 					{/each}
-					<Button type="submit" variant="destructive" disabled={busy} bind:ref={confirmButton}>
+					<Button type="submit" variant="destructive" disabled={isBusy} bind:ref={confirmButton}>
 						{displayedConfirmLabel}
 					</Button>
 				</form>
@@ -75,9 +101,9 @@
 				<Button
 					type="button"
 					variant="destructive"
-					disabled={busy}
+					disabled={isBusy}
 					bind:ref={confirmButton}
-					onclick={() => void onconfirm?.()}
+					onclick={confirm}
 				>
 					{displayedConfirmLabel}
 				</Button>
