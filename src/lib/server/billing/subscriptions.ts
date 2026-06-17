@@ -1,4 +1,4 @@
-import { eq, or } from 'drizzle-orm';
+import { and, eq, or } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { getDb } from '$lib/server/db';
 import { billingSubscriptions } from '$lib/server/db/schema';
@@ -108,6 +108,92 @@ export const upsertSubscription = async (input: {
 				updatedAt: now
 			}
 		});
+};
+
+export const deleteSubscriptionRecord = async (input: {
+	database: D1Database;
+	householdId?: string | null;
+	customerId: string;
+	subscriptionId: string;
+}) => {
+	await getDb(input.database)
+		.delete(billingSubscriptions)
+		.where(
+			and(
+				...(input.householdId ? [eq(billingSubscriptions.householdId, input.householdId)] : []),
+				eq(billingSubscriptions.stripeCustomerId, input.customerId),
+				eq(billingSubscriptions.stripeSubscriptionId, input.subscriptionId)
+			)
+		);
+};
+
+export type StripeSubscriptionRecord = {
+	householdId: string;
+	customerId: string;
+	subscriptionId: string | null;
+	status: string;
+};
+
+export const markSubscriptionRollbackPending = async (input: {
+	database: D1Database;
+	householdId: string;
+	customerId: string;
+	subscriptionId: string;
+}) => {
+	await upsertSubscription({
+		database: input.database,
+		householdId: input.householdId,
+		customerId: input.customerId,
+		subscription: null,
+		status: 'trial_rollback_pending'
+	});
+	await getDb(input.database)
+		.update(billingSubscriptions)
+		.set({ stripeSubscriptionId: input.subscriptionId, updatedAt: new Date().toISOString() })
+		.where(eq(billingSubscriptions.householdId, input.householdId));
+};
+
+export const findStripeSubscriptionRecordBySubscriptionId = async (input: {
+	database: D1Database;
+	subscriptionId: string;
+}): Promise<StripeSubscriptionRecord | null> => {
+	const rows = await getDb(input.database)
+		.select({
+			householdId: billingSubscriptions.householdId,
+			customerId: billingSubscriptions.stripeCustomerId,
+			subscriptionId: billingSubscriptions.stripeSubscriptionId,
+			status: billingSubscriptions.status
+		})
+		.from(billingSubscriptions)
+		.where(eq(billingSubscriptions.stripeSubscriptionId, input.subscriptionId))
+		.limit(1);
+	return rows[0] ?? null;
+};
+
+export const findHouseholdIdForStripeSubscriptionId = async (input: {
+	database: D1Database;
+	subscriptionId: string;
+}): Promise<string | null> =>
+	(
+		await findStripeSubscriptionRecordBySubscriptionId({
+			database: input.database,
+			subscriptionId: input.subscriptionId
+		})
+	)?.householdId ?? null;
+
+export const findStripeCustomerSubscription = async (input: {
+	database: D1Database;
+	customerId: string;
+}): Promise<{ householdId: string; subscriptionId: string | null } | null> => {
+	const rows = await getDb(input.database)
+		.select({
+			householdId: billingSubscriptions.householdId,
+			subscriptionId: billingSubscriptions.stripeSubscriptionId
+		})
+		.from(billingSubscriptions)
+		.where(eq(billingSubscriptions.stripeCustomerId, input.customerId))
+		.limit(1);
+	return rows[0] ?? null;
 };
 
 export const findHouseholdIdForStripeSubscription = async (input: {

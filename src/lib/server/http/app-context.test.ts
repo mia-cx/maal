@@ -128,8 +128,6 @@ describe('requireBillingAppContext', () => {
 		expect(requireHouseholdAccess).toHaveBeenCalledTimes(1);
 		expect(requireHouseholdAccess).toHaveBeenCalledWith({
 			platform,
-			database,
-			session,
 			householdId: 'household_1'
 		});
 	});
