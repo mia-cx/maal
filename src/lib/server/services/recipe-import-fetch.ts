@@ -11,6 +11,7 @@ const blockedHostnameSuffixes = ['.localhost', '.local', '.internal', '.lan', '.
 
 export type RecipeImportFetchOptions = {
 	fetcher?: typeof fetch;
+	maxUrlLength?: number;
 };
 
 export class RecipeImportFetchError extends Error {
@@ -20,7 +21,8 @@ export class RecipeImportFetchError extends Error {
 	}
 }
 
-const parseRecipeImportUrl = (url: string): URL => {
+const parseRecipeImportUrl = (url: string, maxUrlLength = 2048): URL => {
+	if (url.length > maxUrlLength) throw new RecipeImportFetchError('Recipe URL is too long.');
 	let parsed: URL;
 	try {
 		parsed = new URL(url);
@@ -170,9 +172,9 @@ const fetchWithTimeout = async (url: URL, fetcher: typeof fetch): Promise<Respon
 export const fetchRecipeImportPage = async (
 	url: string,
 	maxBytes: number,
-	{ fetcher = fetch }: RecipeImportFetchOptions = {}
+	{ fetcher = fetch, maxUrlLength }: RecipeImportFetchOptions = {}
 ): Promise<{ html: string; finalUrl: string }> => {
-	let currentUrl = parseRecipeImportUrl(url);
+	let currentUrl = parseRecipeImportUrl(url, maxUrlLength);
 	for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
 		let response: Response;
 		try {
@@ -186,7 +188,7 @@ export const fetchRecipeImportPage = async (
 		if (response.status >= 300 && response.status < 400) {
 			const location = response.headers.get('location');
 			if (!location) throw new RecipeImportFetchError('Could not fetch recipe page.');
-			currentUrl = parseRecipeImportUrl(new URL(location, currentUrl).toString());
+			currentUrl = parseRecipeImportUrl(new URL(location, currentUrl).toString(), maxUrlLength);
 			continue;
 		}
 
@@ -198,4 +200,5 @@ export const fetchRecipeImportPage = async (
 	throw new RecipeImportFetchError('Recipe page redirects too many times.');
 };
 
-export const assertRecipeImportUrlForTest = (url: string): URL => parseRecipeImportUrl(url);
+export const assertRecipeImportUrlForTest = (url: string, maxUrlLength?: number): URL =>
+	parseRecipeImportUrl(url, maxUrlLength);

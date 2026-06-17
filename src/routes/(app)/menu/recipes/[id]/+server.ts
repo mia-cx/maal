@@ -13,6 +13,7 @@ import {
 	updateRecipeInstructions
 } from '$lib/server/db/recipe-mappers';
 import type { RecipeMenuItem } from '$lib/menu/menu-types';
+import { parseRecipeMenuItemPayload } from '$lib/menu/recipe-payload';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -26,11 +27,18 @@ const readRecipe = async (request: Request): Promise<RecipeMenuItem> => {
 		error(400, { message: 'Invalid request.' });
 	}
 	if (!isRecord(body) || !isRecord(body.recipe)) error(400, { message: 'Recipe is required.' });
-	return body.recipe as RecipeMenuItem;
+	const recipe = parseRecipeMenuItemPayload(body.recipe);
+	if (!recipe) error(400, { message: 'Recipe payload is invalid.' });
+	return recipe;
 };
 
 export const PUT: RequestHandler = async ({ cookies, locals, params, platform, request, url }) => {
-	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({
+		cookies,
+		locals,
+		platform,
+		url
+	});
 	const recipeId = params.id;
 	if (!recipeId) error(400, { message: 'Recipe is required.' });
 
@@ -104,7 +112,12 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 };
 
 export const PATCH: RequestHandler = async ({ cookies, locals, params, platform, url }) => {
-	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({
+		cookies,
+		locals,
+		platform,
+		url
+	});
 	const recipeId = params.id;
 	if (!recipeId) error(400, { message: 'Recipe is required.' });
 

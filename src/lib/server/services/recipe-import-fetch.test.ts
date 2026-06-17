@@ -15,6 +15,12 @@ describe('recipe import fetch boundary', () => {
 		expect(() => assertRecipeImportUrlForTest('file:///etc/passwd')).toThrow('Invalid recipe URL.');
 	});
 
+	it('rejects URLs over the configured import length', () => {
+		expect(() => assertRecipeImportUrlForTest('https://example.com/recipe', 10)).toThrow(
+			'Recipe URL is too long.'
+		);
+	});
+
 	it('rejects loopback, private, link-local, reserved, and single-label hosts', () => {
 		for (const url of [
 			'http://localhost/recipe',

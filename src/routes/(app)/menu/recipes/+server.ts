@@ -31,6 +31,7 @@ import {
 	type UnitPreferences
 } from '$lib/recipes/ingredient-text';
 import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
+import { parseRecipeMenuItemPayload } from '$lib/menu/recipe-payload';
 import { emptyRecipeMenuStats } from '$lib/menu/recipe-defaults';
 import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
 import { boundedPagination } from '$lib/shared/pagination';
@@ -280,10 +281,13 @@ const fetchRecipeFromUrl = async (url: string) => {
 	let html: string;
 	let finalUrl: string;
 	try {
-		({ html, finalUrl } = await fetchRecipeImportPage(url, maxImportBytes));
+		({ html, finalUrl } = await fetchRecipeImportPage(url, maxImportBytes, { maxUrlLength }));
 	} catch (cause) {
 		if (cause instanceof RecipeImportFetchError && cause.message === 'Invalid recipe URL.') {
 			error(400, { message: 'Enter a valid recipe URL.' });
+		}
+		if (cause instanceof RecipeImportFetchError && cause.message === 'Recipe URL is too long.') {
+			error(400, { message: 'Recipe URL is too long.' });
 		}
 		if (cause instanceof RecipeImportFetchError) {
 			error(502, { message: cause.message });
@@ -526,8 +530,10 @@ const saveRecipeSidecars = async (
 };
 
 const recipeBody = (value: unknown): RecipeMenuItem | undefined => {
-	if (!isRecord(value) || typeof value.title !== 'string') return;
-	return value as RecipeMenuItem;
+	if (value === undefined) return;
+	const recipe = parseRecipeMenuItemPayload(value);
+	if (!recipe) error(400, { message: 'Recipe payload is invalid.' });
+	return recipe;
 };
 
 const urlKeys = (value?: string | null): string[] => {
@@ -673,7 +679,12 @@ const draftRecipeFromImport = (
 };
 
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
-	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({
+		cookies,
+		locals,
+		platform,
+		url
+	});
 
 	const importUrl = url.searchParams.get('importUrl')?.trim();
 	if (importUrl) {
@@ -786,7 +797,12 @@ const matchingExistingRecipe = (
 };
 
 export const POST: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({
+		cookies,
+		locals,
+		platform,
+		url
+	});
 
 	const body = await readBody(request);
 	if (body.url && body.url.length > maxUrlLength)
@@ -897,7 +913,12 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 };
 
 export const PATCH: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({
+		cookies,
+		locals,
+		platform,
+		url
+	});
 
 	const { recipeIds } = await readBulkBody(request);
 	const updatedAt = new Date().toISOString();
