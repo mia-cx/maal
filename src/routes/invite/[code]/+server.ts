@@ -2,29 +2,84 @@ import { error, redirect, type RequestHandler } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import {
 	joinHouseholdFromInvite,
-	loadHouseholdInviteByCode
+	loadHouseholdInviteByCode,
+	type HouseholdInvite
 } from '$lib/server/auth/household-invites';
 
-export const GET: RequestHandler = async ({ cookies, locals, platform, url, params }) => {
-	const code = params.code?.trim() ?? '';
-	if (!code) error(404, { message: 'Invite not found.' });
-	if (!platform?.env.DB) error(503, { message: 'Invite storage is not available.' });
+const inviteNotFound = { message: 'Invite not found.' };
+const inviteStorageUnavailable = { message: 'Invite storage is not available.' };
 
+const inviteCode = (code: string | undefined): string => {
+	const trimmed = code?.trim() ?? '';
+	if (!trimmed) error(404, inviteNotFound);
+	return trimmed;
+};
+
+const invitePlatform = (platform: App.Platform | undefined): App.Platform => {
+	if (!platform?.env?.DB) error(503, inviteStorageUnavailable);
+	return platform;
+};
+
+const loadInvite = async (platform: App.Platform, code: string): Promise<HouseholdInvite> => {
 	const invite = await loadHouseholdInviteByCode(platform.env.DB, code);
-	if (!invite) error(404, { message: 'Invite not found.' });
+	if (!invite) error(404, inviteNotFound);
+	return invite;
+};
 
-	if (!locals.session) {
-		redirect(
-			303,
-			resolve(
-				`/auth/login?screen_hint=sign-up&returnTo=${encodeURIComponent(`${url.pathname}${url.search}`)}`
-			)
-		);
-	}
+const loginLocation = (url: URL): string =>
+	resolve(
+		`/auth/login?screen_hint=sign-up&returnTo=${encodeURIComponent(`${url.pathname}${url.search}`)}`
+	);
+
+const escapeHtml = (value: string): string =>
+	value
+		.replaceAll('&', '&amp;')
+		.replaceAll('<', '&lt;')
+		.replaceAll('>', '&gt;')
+		.replaceAll('"', '&quot;')
+		.replaceAll("'", '&#39;');
+
+const invitePreview = (invite: HouseholdInvite): Response =>
+	new Response(
+		`<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Accept household invite · Maal</title>
+	</head>
+	<body>
+		<main>
+			<h1>Accept household invite</h1>
+			<p>You have been invited to join household ${escapeHtml(invite.householdId)}.</p>
+			<form method="post">
+				<button type="submit">Accept invite</button>
+			</form>
+		</main>
+	</body>
+</html>`,
+		{ headers: { 'content-type': 'text/html; charset=utf-8' } }
+	);
+
+export const GET: RequestHandler = async ({ locals, platform, url, params }) => {
+	if (!locals.session) redirect(303, loginLocation(url));
+
+	const code = inviteCode(params.code);
+	const invite = await loadInvite(invitePlatform(platform), code);
+
+	return invitePreview(invite);
+};
+
+export const POST: RequestHandler = async ({ cookies, locals, platform, url, params }) => {
+	if (!locals.session) redirect(303, loginLocation(url));
+
+	const code = inviteCode(params.code);
+	const inviteRuntime = invitePlatform(platform);
+	await loadInvite(inviteRuntime, code);
 
 	try {
 		await joinHouseholdFromInvite({
-			platform,
+			platform: inviteRuntime,
 			cookies,
 			url,
 			code,

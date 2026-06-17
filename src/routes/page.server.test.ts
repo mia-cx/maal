@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
-import { _paidLandingPrice, _trialPriceIdFromPrices } from './+page.server';
+import {
+	_landingPricingFallback,
+	_paidLandingPrice,
+	_trialPriceIdFromPrices
+} from './+page.server';
 
 const price = (overrides: Partial<Stripe.Price>): Stripe.Price =>
 	({
@@ -63,5 +67,23 @@ describe('_trialPriceIdFromPrices', () => {
 				price({ id: 'trial', unit_amount: 0 })
 			])
 		).toBe('trial');
+	});
+});
+
+describe('_landingPricingFallback', () => {
+	it('logs the cause and returns an explicit unavailable pricing state', () => {
+		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const cause = new Error('stripe unavailable');
+
+		expect(_landingPricingFallback(cause)).toEqual({
+			productName: 'Maal',
+			pricing: [],
+			pricingStatus: 'unavailable',
+			trialPriceId: null,
+			trialAvailable: false
+		});
+		expect(consoleError).toHaveBeenCalledWith('Failed to load landing pricing', cause);
+
+		consoleError.mockRestore();
 	});
 });

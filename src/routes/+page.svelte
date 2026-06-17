@@ -281,13 +281,22 @@
 						<p class="mt-3 text-base leading-7 text-muted-foreground">Subscribe per household.</p>
 					</div>
 
-					<PricingTable
-						pricing={data.pricing}
-						signedIn={Boolean(data.session)}
-						trialAvailable={data.trialAvailable}
-						trialPriceId={data.trialPriceId}
-						{brand}
-					/>
+					{#if data.pricingStatus === 'unavailable'}
+						<p
+							class="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm leading-6 text-destructive"
+						>
+							Pricing is temporarily unavailable because billing data could not be loaded. Try again
+							in a moment.
+						</p>
+					{:else}
+						<PricingTable
+							pricing={data.pricing}
+							signedIn={Boolean(data.session)}
+							trialAvailable={data.trialAvailable}
+							trialPriceId={data.trialPriceId}
+							{brand}
+						/>
+					{/if}
 				</div>
 			</section>
 		</main>

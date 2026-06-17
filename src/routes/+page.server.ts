@@ -20,6 +20,19 @@ export type LandingPrice = {
 	trialPriceId?: string | null;
 };
 
+export type LandingPricingStatus = 'available' | 'empty' | 'unavailable';
+
+export const _landingPricingFallback = (cause: unknown) => {
+	console.error('Failed to load landing pricing', cause);
+	return {
+		productName: 'Maal',
+		pricing: [],
+		pricingStatus: 'unavailable' satisfies LandingPricingStatus,
+		trialPriceId: null,
+		trialAvailable: false
+	};
+};
+
 const labelFor = (price: Stripe.Price): LandingPrice['label'] | null => {
 	if (price.unit_amount === 0) return null;
 	if (price.recurring?.interval === 'week') return 'Weekly';
@@ -64,7 +77,13 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 		const stripe = createStripeClient(platform);
 		const product = await findProduct(stripe, getStripePublicConfig(platform).productId);
 		if (!product || 'deleted' in product)
-			return { productName: 'Maal', pricing: [], trialPriceId: null, trialAvailable: false };
+			return {
+				productName: 'Maal',
+				pricing: [],
+				pricingStatus: 'empty' satisfies LandingPricingStatus,
+				trialPriceId: null,
+				trialAvailable: false
+			};
 
 		const prices = await stripe.prices.list({
 			product: product.id,
@@ -103,8 +122,14 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 			}
 		}
 
-		return { productName: product.name, pricing, trialPriceId, trialAvailable };
-	} catch {
-		return { productName: 'Maal', pricing: [], trialPriceId: null, trialAvailable: false };
+		return {
+			productName: product.name,
+			pricing,
+			pricingStatus: pricing.length ? 'available' : 'empty',
+			trialPriceId,
+			trialAvailable
+		};
+	} catch (cause) {
+		return _landingPricingFallback(cause);
 	}
 };
