@@ -23,7 +23,7 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 		householdId
 	});
 	if (!activeHouseholdHasAccess) {
-		const households = await listUserHouseholds(platform, session.user.id).catch(() => []);
+		const households = await listUserHouseholds(platform, session.user.id);
 		const accessibleHouseholdId = await firstAccessibleHouseholdId({ platform, households });
 		if (!accessibleHouseholdId) redirect(303, '/subscribe');
 		householdId = accessibleHouseholdId;
@@ -41,20 +41,18 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 		householdId,
 		locale: profileRows[0]?.locale ?? 'en-US'
 	});
-	const recipeRows = loadMenuRecipes(db, session.user.id, householdId, {
+	const recipeRows = await loadMenuRecipes(db, session.user.id, householdId, {
 		limit: MENU_RECIPE_PAGE_SIZE + 1,
 		unitPreferences: taxonomyPreferences.unitPreferences
 	});
-	const recipes = recipeRows.then((rows) =>
-		rankRecipesByRelevance(rows).slice(0, MENU_RECIPE_PAGE_SIZE)
+	const recipes = rankRecipesByRelevance(recipeRows).slice(0, MENU_RECIPE_PAGE_SIZE);
+	const archivedRecipes = rankRecipesByRelevance(
+		await loadMenuRecipes(db, session.user.id, householdId, {
+			archive: 'archived',
+			unitPreferences: taxonomyPreferences.unitPreferences
+		})
 	);
-	const archivedRecipes = loadMenuRecipes(db, session.user.id, householdId, {
-		archive: 'archived',
-		unitPreferences: taxonomyPreferences.unitPreferences
-	}).then((rows) => rankRecipesByRelevance(rows));
-	const nextRecipeOffset = recipeRows.then((rows) =>
-		rows.length > MENU_RECIPE_PAGE_SIZE ? MENU_RECIPE_PAGE_SIZE : null
-	);
+	const nextRecipeOffset = recipeRows.length > MENU_RECIPE_PAGE_SIZE ? MENU_RECIPE_PAGE_SIZE : null;
 	return {
 		recipes,
 		archivedRecipes,

@@ -69,3 +69,7 @@ export const setCachedMenuRouteData = (
 	if (!householdId) return;
 	menuCache.set(householdId, cloneMenuEntry(entry));
 };
+
+export const clearMenuRouteDataCache = (): void => {
+	menuCache.clear();
+};
