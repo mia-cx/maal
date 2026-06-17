@@ -15,7 +15,7 @@ Convert authenticated app UI copy to Paraglide message tokens, establish message
 
 ## TODOs
 - [ ] Inventory authenticated app copy, Paraglide setup, and household locale resolution seams.
-- [ ] Add shared localization utilities, documentation, and household-locale resolution tests.
+- [x] Add shared localization utilities, documentation, and household-locale resolution tests.
 - [ ] Convert app shell, shared components, and settings copy to Paraglide messages.
 - [ ] Convert planning, menu, subscribe, and household feature copy to Paraglide messages.
 - [ ] Run Paraglide generation plus focused type/test validation and fix regressions.
@@ -26,3 +26,5 @@ Convert authenticated app UI copy to Paraglide message tokens, establish message
 - Branch: `issue/24-localize-ui-copy`
 - Svelte MCP server was not available in this runtime, so Svelte docs could not be fetched through MCP.
 - Main worktree has pre-existing local changes (`.gitignore`, `src/lib/assets/logo.af`, `Untitled.md`); this worktree was created from `origin/main` to avoid mixing them.
+- Added household-to-Paraglide locale mapping and authenticated app path gating.
+- Validation: `pnpm exec vitest run src/hooks.server.test.ts` — pass.
