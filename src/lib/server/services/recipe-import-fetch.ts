@@ -39,15 +39,6 @@ const parseRecipeImportUrl = (url: string, maxUrlLength = 2048): URL => {
 const normalizedHostname = (hostname: string): string =>
 	hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '').replace(/\.$/, '');
 
-const isIpv4Hostname = (hostname: string): boolean => parseIpv4(hostname) !== undefined;
-
-const isIpv6Hostname = (hostname: string): boolean => normalizedHostname(hostname).includes(':');
-
-const hostnameRequiresDnsResolution = (hostname: string): boolean => {
-	const normalized = normalizedHostname(hostname);
-	return !isIpv4Hostname(normalized) && !isIpv6Hostname(normalized);
-};
-
 const assertPublicHostname = (hostname: string) => {
 	const normalized = normalizedHostname(hostname);
 	if (!normalized) throw new RecipeImportFetchError('Invalid recipe URL.');
@@ -75,11 +66,6 @@ const assertPublicHostname = (hostname: string) => {
 	if (!normalized.includes('.')) {
 		throw new RecipeImportFetchError('Recipe URL must point to a public website.');
 	}
-};
-
-const assertRuntimeFetchCanTargetUrl = (url: URL) => {
-	if (!hostnameRequiresDnsResolution(url.hostname)) return;
-	throw new RecipeImportFetchError('Recipe URL host cannot be fetched safely.');
 };
 
 const parseIpv4 = (hostname: string): [number, number, number, number] | undefined => {
@@ -209,7 +195,6 @@ export const fetchRecipeImportPage = async (
 	for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
 		let response: Response;
 		try {
-			assertRuntimeFetchCanTargetUrl(currentUrl);
 			response = await fetchWithTimeout(currentUrl, fetcher);
 		} catch (cause) {
 			if (cause instanceof RecipeImportFetchError) throw cause;

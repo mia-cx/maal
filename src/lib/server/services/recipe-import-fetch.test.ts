@@ -54,25 +54,35 @@ describe('recipe import fetch boundary', () => {
 		);
 	});
 
-	it('fails closed for DNS hostnames because runtime fetch cannot pin the resolved address', async () => {
+	it('fetches public DNS recipe hosts', async () => {
 		const fetcher = vi.fn(async () => new Response('<html>recipe</html>', { status: 200 }));
 
 		await expect(
-			fetchRecipeImportPage('https://attacker.example/recipe', 1000, { fetcher })
-		).rejects.toThrow('Recipe URL host cannot be fetched safely.');
-		expect(fetcher).not.toHaveBeenCalled();
+			fetchRecipeImportPage('https://example.com/recipe', 1000, { fetcher })
+		).resolves.toEqual({
+			html: '<html>recipe</html>',
+			finalUrl: 'https://example.com/recipe'
+		});
+		expect(fetcher).toHaveBeenCalledTimes(1);
 	});
 
-	it('rejects redirects to DNS hostnames before following them', async () => {
-		const fetcher = vi.fn(
-			async () =>
+	it('allows redirects to validated public DNS hostnames', async () => {
+		const fetcher = vi
+			.fn()
+			.mockResolvedValueOnce(
 				new Response('', { status: 302, headers: { location: 'https://example.com/admin' } })
-		) as unknown as typeof fetch;
+			)
+			.mockResolvedValueOnce(
+				new Response('<html>recipe</html>', { status: 200 })
+			) as unknown as typeof fetch;
 
 		await expect(
 			fetchRecipeImportPage('http://93.184.216.34/recipe', 1000, { fetcher })
-		).rejects.toThrow('Recipe URL host cannot be fetched safely.');
-		expect(fetcher).toHaveBeenCalledTimes(1);
+		).resolves.toEqual({
+			html: '<html>recipe</html>',
+			finalUrl: 'https://example.com/admin'
+		});
+		expect(fetcher).toHaveBeenCalledTimes(2);
 	});
 
 	it('rejects redirects to private hosts before following them', async () => {
