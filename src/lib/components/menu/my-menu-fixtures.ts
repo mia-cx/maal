@@ -16,7 +16,6 @@ export const myMenuRecipes: RecipeMenuItem[] = (
 			cookTimeMinutes: 25,
 			totalTimeMinutes: 35,
 			yield: 3,
-			ingredientCount: 9,
 			ingredients: [
 				{ amount: '1 lb', item: 'chicken thighs' },
 				{ amount: '1 cup', item: 'rice' },
@@ -58,7 +57,6 @@ export const myMenuRecipes: RecipeMenuItem[] = (
 			cookTimeMinutes: 35,
 			totalTimeMinutes: 43,
 			yield: 4,
-			ingredientCount: 7,
 			ingredients: [
 				{ amount: '28 oz', item: 'canned tomatoes' },
 				{ amount: '1', item: 'onion' },
@@ -99,7 +97,6 @@ export const myMenuRecipes: RecipeMenuItem[] = (
 			cookTimeMinutes: 30,
 			totalTimeMinutes: 40,
 			yield: 4,
-			ingredientCount: 8,
 			ingredients: [
 				{ amount: '12 oz', item: 'pasta' },
 				{ amount: '14 oz', item: 'tomatoes' },
@@ -140,7 +137,6 @@ export const myMenuRecipes: RecipeMenuItem[] = (
 			cookTimeMinutes: 45,
 			totalTimeMinutes: 60,
 			yield: 2,
-			ingredientCount: 10,
 			ingredients: [
 				{ amount: '2 fillets', item: 'salmon' },
 				{ amount: '1 lb', item: 'potatoes' },
@@ -180,7 +176,6 @@ export const myMenuRecipes: RecipeMenuItem[] = (
 			cookTimeMinutes: 40,
 			totalTimeMinutes: 60,
 			yield: 4,
-			ingredientCount: 13,
 			ingredients: [
 				{ amount: '8', item: 'tortillas' },
 				{ amount: '1 lb', item: 'spiced filling' },
@@ -221,7 +216,6 @@ export const myMenuRecipes: RecipeMenuItem[] = (
 			cookTimeMinutes: 20,
 			totalTimeMinutes: 35,
 			yield: 3,
-			ingredientCount: 8,
 			ingredients: [
 				{ amount: '1 cup', item: 'lentils' },
 				{ amount: '1', item: 'cucumber' },
@@ -248,7 +242,7 @@ export const myMenuRecipes: RecipeMenuItem[] = (
 				notes: ['Best cold', 'Good backup when plans shift']
 			}
 		}
-	] satisfies RecipeMenuItem[]
+	] satisfies Omit<RecipeMenuItem, 'ingredientCount'>[]
 ).map((recipe) => ({
 	...recipe,
 	ingredientCount: recipe.ingredients?.length ?? 0

@@ -173,6 +173,7 @@ export const PATCH: RequestHandler = async ({ cookies, locals, params, platform,
 			recipeIds: [recipeId]
 		})
 	)[0];
+	if (!recipe) error(500, { message: 'Recipe was restored but could not be loaded.' });
 
 	return json({ restored: true, recipe });
 };

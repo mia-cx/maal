@@ -21,6 +21,25 @@ describe('recipe import fetch boundary', () => {
 		);
 	});
 
+	it('rejects redirects whose target URL exceeds the configured max length', async () => {
+		const longPath = 'a'.repeat(3000);
+		const fetcher = vi.fn(
+			async () =>
+				new Response('', {
+					status: 302,
+					headers: { location: `http://93.184.216.35/${longPath}` }
+				})
+		) as unknown as typeof fetch;
+
+		await expect(
+			fetchRecipeImportPage('http://93.184.216.34/recipe', 1000, {
+				fetcher,
+				maxUrlLength: 2048
+			})
+		).rejects.toThrow('Recipe URL is too long.');
+		expect(fetcher).toHaveBeenCalledTimes(1);
+	});
+
 	it('rejects loopback, private, link-local, reserved, and single-label hosts', () => {
 		for (const url of [
 			'http://localhost/recipe',

@@ -953,23 +953,22 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 	});
 
 	const { recipeIds, permanent } = await readBulkBody(request);
-	const existingRows = await db
-		.select({ id: userRecipes.id })
-		.from(userRecipes)
-		.where(
-			and(
-				eq(userRecipes.workosUserId, session.user.id),
-				inArray(userRecipes.id, recipeIds),
-				permanent ? isNotNull(userRecipes.deletedAt) : isNull(userRecipes.deletedAt)
-			)
-		);
-	const existingRecipeIds = existingRows.map((recipe) => recipe.id);
-	if (!existingRecipeIds.length) {
-		error(404, { message: permanent ? 'Archived recipes not found.' : 'Recipes not found.' });
-	}
 
 	if (permanent) {
-		const deletedMealCount = await db.transaction(async (tx) => {
+		const { deletedMealCount, existingRecipeIds } = await db.transaction(async (tx) => {
+			const existingRows = await tx
+				.select({ id: userRecipes.id })
+				.from(userRecipes)
+				.where(
+					and(
+						eq(userRecipes.workosUserId, session.user.id),
+						inArray(userRecipes.id, recipeIds),
+						isNotNull(userRecipes.deletedAt)
+					)
+				);
+			const existingRecipeIds = existingRows.map((recipe) => recipe.id);
+			if (!existingRecipeIds.length) error(404, { message: 'Archived recipes not found.' });
+
 			const mealLinks = await tx
 				.select({ householdMealId: householdMealUserRecipes.householdMealId })
 				.from(householdMealUserRecipes)
@@ -1008,7 +1007,7 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 						isNotNull(userRecipes.deletedAt)
 					)
 				);
-			return mealIdsWithoutLinks.length;
+			return { deletedMealCount: mealIdsWithoutLinks.length, existingRecipeIds };
 		});
 		return json({
 			deleted: true,
@@ -1017,6 +1016,19 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 			deletedMealCount
 		});
 	}
+
+	const existingRows = await db
+		.select({ id: userRecipes.id })
+		.from(userRecipes)
+		.where(
+			and(
+				eq(userRecipes.workosUserId, session.user.id),
+				inArray(userRecipes.id, recipeIds),
+				isNull(userRecipes.deletedAt)
+			)
+		);
+	const existingRecipeIds = existingRows.map((recipe) => recipe.id);
+	if (!existingRecipeIds.length) error(404, { message: 'Recipes not found.' });
 
 	const deletedAt = new Date().toISOString();
 	await db.transaction((tx) =>
