@@ -69,11 +69,6 @@ export const shouldDeleteRollbackSubscription = (input: {
 	(input.localStatus === 'trial_rollback_pending' ||
 		isRollbackMarkedTrialSubscription(input.subscription));
 
-export const shouldSuppressRollbackSubscription = (input: {
-	subscription: Stripe.Subscription;
-	localStatus?: string | null;
-}): boolean => shouldDeleteRollbackSubscription(input);
-
 const stripeEventFromRequest = async (platform: App.Platform, request: Request) => {
 	const stripe = createStripeClient(platform);
 	const webhookSecret = getStripeWebhookSecret(platform);
