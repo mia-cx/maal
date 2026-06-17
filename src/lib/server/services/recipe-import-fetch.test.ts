@@ -54,11 +54,23 @@ describe('recipe import fetch boundary', () => {
 		);
 	});
 
-	it('fetches public DNS recipe hosts', async () => {
+	it('fails closed for DNS hosts in generic server runtimes', async () => {
 		const fetcher = vi.fn(async () => new Response('<html>recipe</html>', { status: 200 }));
 
 		await expect(
 			fetchRecipeImportPage('https://example.com/recipe', 1000, { fetcher })
+		).rejects.toThrow('Recipe URL host cannot be fetched safely in this runtime.');
+		expect(fetcher).not.toHaveBeenCalled();
+	});
+
+	it('fetches public DNS recipe hosts in the Cloudflare Workers runtime', async () => {
+		const fetcher = vi.fn(async () => new Response('<html>recipe</html>', { status: 200 }));
+
+		await expect(
+			fetchRecipeImportPage('https://example.com/recipe', 1000, {
+				fetcher,
+				runtime: 'cloudflare-workers'
+			})
 		).resolves.toEqual({
 			html: '<html>recipe</html>',
 			finalUrl: 'https://example.com/recipe'
@@ -66,7 +78,7 @@ describe('recipe import fetch boundary', () => {
 		expect(fetcher).toHaveBeenCalledTimes(1);
 	});
 
-	it('allows redirects to validated public DNS hostnames', async () => {
+	it('allows redirects to validated public DNS hostnames in the Cloudflare Workers runtime', async () => {
 		const fetcher = vi
 			.fn()
 			.mockResolvedValueOnce(
@@ -77,7 +89,10 @@ describe('recipe import fetch boundary', () => {
 			) as unknown as typeof fetch;
 
 		await expect(
-			fetchRecipeImportPage('http://93.184.216.34/recipe', 1000, { fetcher })
+			fetchRecipeImportPage('http://93.184.216.34/recipe', 1000, {
+				fetcher,
+				runtime: 'cloudflare-workers'
+			})
 		).resolves.toEqual({
 			html: '<html>recipe</html>',
 			finalUrl: 'https://example.com/admin'

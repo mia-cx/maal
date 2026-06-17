@@ -282,7 +282,10 @@ const fetchRecipeFromUrl = async (url: string) => {
 	let html: string;
 	let finalUrl: string;
 	try {
-		({ html, finalUrl } = await fetchRecipeImportPage(url, maxImportBytes, { maxUrlLength }));
+		({ html, finalUrl } = await fetchRecipeImportPage(url, maxImportBytes, {
+			maxUrlLength,
+			runtime: 'cloudflare-workers'
+		}));
 	} catch (cause) {
 		if (cause instanceof RecipeImportFetchError && cause.message === 'Invalid recipe URL.') {
 			error(400, { message: 'Enter a valid recipe URL.' });

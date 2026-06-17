@@ -9,9 +9,12 @@ const maxRedirects = 3;
 const requestTimeoutMs = 8_000;
 const blockedHostnameSuffixes = ['.localhost', '.local', '.internal', '.lan', '.home', '.corp'];
 
+export type RecipeImportFetchRuntime = 'generic-server' | 'cloudflare-workers';
+
 export type RecipeImportFetchOptions = {
 	fetcher?: typeof fetch;
 	maxUrlLength?: number;
+	runtime?: RecipeImportFetchRuntime;
 };
 
 export class RecipeImportFetchError extends Error {
@@ -38,6 +41,16 @@ const parseRecipeImportUrl = (url: string, maxUrlLength = 2048): URL => {
 
 const normalizedHostname = (hostname: string): string =>
 	hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '').replace(/\.$/, '');
+
+const isIpLiteralHostname = (hostname: string): boolean => {
+	const normalized = normalizedHostname(hostname);
+	return parseIpv4(normalized) !== undefined || normalized.includes(':');
+};
+
+const assertRuntimeCanFetchHostname = (hostname: string, runtime: RecipeImportFetchRuntime) => {
+	if (isIpLiteralHostname(hostname) || runtime === 'cloudflare-workers') return;
+	throw new RecipeImportFetchError('Recipe URL host cannot be fetched safely in this runtime.');
+};
 
 const assertPublicHostname = (hostname: string) => {
 	const normalized = normalizedHostname(hostname);
@@ -189,12 +202,13 @@ const fetchWithTimeout = async (url: URL, fetcher: typeof fetch): Promise<Respon
 export const fetchRecipeImportPage = async (
 	url: string,
 	maxBytes: number,
-	{ fetcher = fetch, maxUrlLength }: RecipeImportFetchOptions = {}
+	{ fetcher = fetch, maxUrlLength, runtime = 'generic-server' }: RecipeImportFetchOptions = {}
 ): Promise<{ html: string; finalUrl: string }> => {
 	let currentUrl = parseRecipeImportUrl(url, maxUrlLength);
 	for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
 		let response: Response;
 		try {
+			assertRuntimeCanFetchHostname(currentUrl.hostname, runtime);
 			response = await fetchWithTimeout(currentUrl, fetcher);
 		} catch (cause) {
 			if (cause instanceof RecipeImportFetchError) throw cause;
