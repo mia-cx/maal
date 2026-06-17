@@ -34,7 +34,7 @@ const priceOrder = new Map<LandingPrice['label'], number>([
 	['Yearly', 3]
 ]);
 
-export const paidLandingPrice = (price: Stripe.Price): LandingPrice | null => {
+export const _paidLandingPrice = (price: Stripe.Price): LandingPrice | null => {
 	if (!isSupportedFixedRecurringPrice(price)) return null;
 	const label = labelFor(price);
 	const interval = supportedInterval(price.recurring.interval);
@@ -49,7 +49,7 @@ export const paidLandingPrice = (price: Stripe.Price): LandingPrice | null => {
 	};
 };
 
-export const trialPriceIdFromPrices = (prices: Stripe.Price[]): string | null =>
+export const _trialPriceIdFromPrices = (prices: Stripe.Price[]): string | null =>
 	prices.find((price) => isSupportedFixedRecurringPrice(price) && price.unit_amount === 0)?.id ??
 	null;
 
@@ -71,10 +71,10 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 			active: true,
 			limit: 20
 		});
-		const trialPriceId = trialPriceIdFromPrices(prices.data);
+		const trialPriceId = _trialPriceIdFromPrices(prices.data);
 		const trialDefaultOption = trialDefaultPricingOptionFromPrices(prices.data, product.id);
 		const pricing = prices.data
-			.map(paidLandingPrice)
+			.map(_paidLandingPrice)
 			.filter((price): price is LandingPrice => Boolean(price))
 			.map((price) => ({
 				...price,
