@@ -1,12 +1,7 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { requireBillingAppContext } from '$lib/server/http/app-context';
-import {
-	householdMeals,
-	householdMealUserRecipes,
-	households,
-	userRecipes
-} from '$lib/server/db/schema';
+import { householdMeals, householdMealUserRecipes, userRecipes } from '$lib/server/db/schema';
 import {
 	loadMenuRecipes,
 	replaceRecipeIngredients,
@@ -14,7 +9,7 @@ import {
 } from '$lib/server/db/recipe-mappers';
 import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import { parseRecipeMenuItemPayload } from '$lib/menu/recipe-payload';
-import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
+import { loadHouseholdUnitPreferences } from '$lib/server/taxonomy/household-preferences';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
@@ -90,22 +85,10 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 		await replaceRecipeInstructions(tx, recipeId, recipe.instructions ?? []);
 	});
 
-	const profileRows = householdId
-		? await db
-				.select({ locale: households.locale })
-				.from(households)
-				.where(eq(households.householdId, householdId))
-				.limit(1)
-		: [];
-	const unitPreferences = householdId
-		? (
-				await loadEffectiveTaxonomyPreferences(db, {
-					workosUserId: session.user.id,
-					householdId,
-					locale: profileRows[0]?.locale ?? 'en-US'
-				})
-			).unitPreferences
-		: {};
+	const unitPreferences = await loadHouseholdUnitPreferences(db, {
+		workosUserId: session.user.id,
+		householdId
+	});
 	const freshRecipe = (
 		await loadMenuRecipes(db, session.user.id, householdId, { unitPreferences })
 	).find((candidate) => candidate.id === recipeId);
@@ -151,22 +134,10 @@ export const PATCH: RequestHandler = async ({ cookies, locals, params, platform,
 			)
 	);
 
-	const profileRows = householdId
-		? await db
-				.select({ locale: households.locale })
-				.from(households)
-				.where(eq(households.householdId, householdId))
-				.limit(1)
-		: [];
-	const unitPreferences = householdId
-		? (
-				await loadEffectiveTaxonomyPreferences(db, {
-					workosUserId: session.user.id,
-					householdId,
-					locale: profileRows[0]?.locale ?? 'en-US'
-				})
-			).unitPreferences
-		: {};
+	const unitPreferences = await loadHouseholdUnitPreferences(db, {
+		workosUserId: session.user.id,
+		householdId
+	});
 	const recipe = (
 		await loadMenuRecipes(db, session.user.id, householdId, {
 			unitPreferences,

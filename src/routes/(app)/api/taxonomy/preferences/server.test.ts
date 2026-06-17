@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAuthSession } from '$lib/server/auth/session-test-fixtures';
 
 const requireAppContext = vi.fn();
-const loadEffectiveTaxonomyPreferences = vi.fn();
+const loadHouseholdTaxonomyPreferences = vi.fn();
 
 vi.mock('$lib/server/http/app-context', () => ({ requireAppContext }));
-vi.mock('$lib/server/taxonomy/effective-preferences', () => ({ loadEffectiveTaxonomyPreferences }));
+vi.mock('$lib/server/taxonomy/household-preferences', () => ({
+	loadHouseholdTaxonomyPreferences
+}));
 
 const { GET } = await import('./+server');
 
@@ -21,17 +23,7 @@ const cookies: TaxonomyPreferencesEvent['cookies'] = {
 	serialize: vi.fn()
 };
 const platform = { env: { DB: {} as D1Database } } as App.Platform;
-
-const localeQuery = vi.fn();
-const db = {
-	select: vi.fn(() => ({
-		from: vi.fn(() => ({
-			where: vi.fn(() => ({
-				limit: localeQuery
-			}))
-		}))
-	}))
-};
+const db = {};
 
 const url = new URL('https://maal.test/api/taxonomy/preferences');
 
@@ -49,13 +41,12 @@ const readJson = async (response: Response) => response.json() as Promise<Record
 describe('taxonomy preferences API', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		localeQuery.mockResolvedValue([{ locale: 'nl-NL' }]);
 		requireAppContext.mockResolvedValue({
 			db,
 			householdId: 'household_1',
 			session
 		});
-		loadEffectiveTaxonomyPreferences.mockResolvedValue({
+		loadHouseholdTaxonomyPreferences.mockResolvedValue({
 			locale: 'nl-NL',
 			diets: ['vegetarian']
 		});
@@ -76,10 +67,10 @@ describe('taxonomy preferences API', () => {
 			platform,
 			url
 		});
-		expect(loadEffectiveTaxonomyPreferences).toHaveBeenCalledWith(db, {
+		expect(loadHouseholdTaxonomyPreferences).toHaveBeenCalledWith(db, {
 			workosUserId: 'user_1',
 			householdId: 'household_1',
-			locale: 'nl-NL'
+			locale: null
 		});
 	});
 
@@ -87,7 +78,7 @@ describe('taxonomy preferences API', () => {
 		const requestUrl = new URL('https://maal.test/api/taxonomy/preferences?locale=en-GB');
 		await GET(event({ url: requestUrl }));
 
-		expect(loadEffectiveTaxonomyPreferences).toHaveBeenCalledWith(db, {
+		expect(loadHouseholdTaxonomyPreferences).toHaveBeenCalledWith(db, {
 			workosUserId: 'user_1',
 			householdId: 'household_1',
 			locale: 'en-GB'
@@ -95,7 +86,7 @@ describe('taxonomy preferences API', () => {
 	});
 
 	it('maps preference dependency failures to a JSON service error', async () => {
-		loadEffectiveTaxonomyPreferences.mockRejectedValue(new Error('taxonomy offline'));
+		loadHouseholdTaxonomyPreferences.mockRejectedValue(new Error('taxonomy offline'));
 
 		await expect(GET(event())).rejects.toMatchObject({
 			status: 503,

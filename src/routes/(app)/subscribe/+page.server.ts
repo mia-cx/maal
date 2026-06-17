@@ -8,6 +8,7 @@ import {
 import {
 	createStripeClient,
 	getStripeProductId,
+	listActiveProductPrices,
 	loadFreshBillingStatus,
 	loadTrialAvailability,
 	pricingOptionsFromPrices,
@@ -29,17 +30,23 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 	if (billing.isPaid) redirect(302, '/plan');
 	if (!(await canManageActiveHousehold(platform, session, householdId))) redirect(302, '/plan');
 
-	const accessibleHouseholds = await listUserHouseholds(platform, session.user.id).catch(() => []);
+	let accessibleHouseholds;
+	try {
+		accessibleHouseholds = await listUserHouseholds(platform, session.user.id);
+	} catch (cause) {
+		console.error('Failed to load households for subscribe page', cause);
+		error(503, { message: 'Could not load your households. Try again in a moment.' });
+	}
 	const householdName =
 		accessibleHouseholds.find((household) => household.id === householdId)?.name ??
 		'Current household';
 
 	const stripe = createStripeClient(platform);
 	const productId = getStripeProductId(platform);
-	const prices = await stripe.prices.list({ product: productId, active: true, limit: 20 });
-	const options = pricingOptionsFromPrices(prices.data);
+	const prices = await listActiveProductPrices(stripe, productId);
+	const options = pricingOptionsFromPrices(prices);
 	const trialOption = options.find((option) => option.amount === 0) ?? null;
-	const trialDefaultOption = trialDefaultPricingOptionFromPrices(prices.data, productId);
+	const trialDefaultOption = trialDefaultPricingOptionFromPrices(prices, productId);
 
 	const trialAvailability = await loadTrialAvailability({
 		database: platform.env.DB,

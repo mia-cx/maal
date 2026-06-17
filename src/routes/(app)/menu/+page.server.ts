@@ -1,11 +1,9 @@
 import { error, redirect } from '@sveltejs/kit';
 import { commitHouseholdCookie, listUserHouseholds } from '$lib/server/auth/household';
-import { eq } from 'drizzle-orm';
 import { getDb } from '$lib/server/db';
 import { loadMenuRecipes } from '$lib/server/db/recipe-mappers';
-import { households } from '$lib/server/db/schema';
 import { firstAccessibleHouseholdId, hasHouseholdAccess } from '$lib/server/domains/billing';
-import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
+import { loadHouseholdTaxonomyPreferences } from '$lib/server/taxonomy/household-preferences';
 import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
 import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
 import type { PageServerLoad } from './$types';
@@ -43,15 +41,9 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 	commitHouseholdCookie(cookies, householdId, url);
 
 	const db = getDb(platform.env.DB);
-	const profileRows = await db
-		.select({ locale: households.locale })
-		.from(households)
-		.where(eq(households.householdId, householdId))
-		.limit(1);
-	const taxonomyPreferences = await loadEffectiveTaxonomyPreferences(db, {
+	const taxonomyPreferences = await loadHouseholdTaxonomyPreferences(db, {
 		workosUserId: session.user.id,
-		householdId,
-		locale: profileRows[0]?.locale ?? 'en-US'
+		householdId
 	});
 	const recipeRows = await loadMenuRecipes(db, session.user.id, householdId, {
 		limit: MENU_RECIPE_PAGE_SIZE + 1,

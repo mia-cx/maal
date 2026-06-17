@@ -82,6 +82,27 @@ export const pricingOptionsFromPrices = (prices: Stripe.Price[]): PricingOption[
 			(left, right) => (optionOrder.get(left.label) ?? 99) - (optionOrder.get(right.label) ?? 99)
 		);
 
+export const listActiveProductPrices = async (
+	stripe: Stripe,
+	productId: string
+): Promise<Stripe.Price[]> => {
+	const prices: Stripe.Price[] = [];
+	let startingAfter: string | undefined;
+
+	while (true) {
+		const page = await stripe.prices.list({
+			product: productId,
+			active: true,
+			limit: 100,
+			...(startingAfter ? { starting_after: startingAfter } : {})
+		});
+		prices.push(...page.data);
+		if (!page.has_more) return prices;
+		startingAfter = page.data.at(-1)?.id;
+		if (!startingAfter) return prices;
+	}
+};
+
 export const pricingOptionForProductPrice = (
 	price: Stripe.Price,
 	productId: string
