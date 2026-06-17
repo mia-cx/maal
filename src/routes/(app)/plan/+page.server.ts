@@ -34,8 +34,7 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 	const profileRows = await db
 		.select({
 			defaultPlannedYield: households.defaultPlannedYield,
-			weekStartsOn: households.weekStartsOn,
-			locale: households.locale
+			weekStartsOn: households.weekStartsOn
 		})
 		.from(households)
 		.where(eq(households.householdId, householdId))

@@ -16,18 +16,20 @@ export const defaultUnitPreferences: UnitPreferences = {
 
 export const loadHouseholdTaxonomyPreferences = async (
 	db: TaxonomyPreferenceDb,
-	input: { workosUserId: string; householdId: string }
+	input: { workosUserId: string; householdId: string; locale?: string | null }
 ): Promise<EffectiveTaxonomyPreferences> => {
-	const profileRows = await db
-		.select({ locale: households.locale })
-		.from(households)
-		.where(eq(households.householdId, input.householdId))
-		.limit(1);
+	const profileRows = input.locale
+		? []
+		: await db
+				.select({ locale: households.locale })
+				.from(households)
+				.where(eq(households.householdId, input.householdId))
+				.limit(1);
 
 	return loadEffectiveTaxonomyPreferences(db, {
 		workosUserId: input.workosUserId,
 		householdId: input.householdId,
-		locale: profileRows[0]?.locale ?? 'en-US'
+		locale: input.locale ?? profileRows[0]?.locale ?? 'en-US'
 	});
 };
 
