@@ -45,6 +45,14 @@ const optionalDateKey = (value: unknown, field: string): string | undefined => {
 	error(400, { message: `${field} must be a valid YYYY-MM-DD date.` });
 };
 
+const optionalMealStatus = (value: unknown): MealStatus | undefined => {
+	if (value === undefined || value === null) return undefined;
+	if (typeof value !== 'string') error(400, { message: 'meal.status must be a string.' });
+	const status = value.trim();
+	if (!mealStatuses.has(status as MealStatus)) error(400, { message: 'Meal status is invalid.' });
+	return status as MealStatus;
+};
+
 const dateParam = (url: URL, key: string): string | undefined => {
 	const value = url.searchParams.get(key)?.trim();
 	return value && isDateKey(value) ? value : undefined;
@@ -58,10 +66,7 @@ const readMeal = async (request: Request, options: { requireId?: boolean } = {})
 	if (options.requireId && !id) error(400, { message: 'Meal id is required.' });
 	const title = optionalString(meal.title, 'meal.title');
 	if (typeof title !== 'string') error(400, { message: 'Meal title is required.' });
-	const status = optionalString(meal.status, 'meal.status');
-	if (status && !mealStatuses.has(status as MealStatus)) {
-		error(400, { message: 'Meal status is invalid.' });
-	}
+	const status = optionalMealStatus(meal.status);
 
 	return {
 		id: id ?? '',
@@ -71,7 +76,7 @@ const readMeal = async (request: Request, options: { requireId?: boolean } = {})
 		date: optionalDateKey(meal.date, 'meal.date'),
 		time: optionalString(meal.time, 'meal.time'),
 		sortOrder: optionalNumber(meal.sortOrder, 'meal.sortOrder'),
-		status: status as MealStatus | undefined,
+		status,
 		plannedCookWorkosUserId: optionalString(
 			meal.plannedCookWorkosUserId,
 			'meal.plannedCookWorkosUserId'
