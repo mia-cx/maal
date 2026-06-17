@@ -20,7 +20,7 @@ Harden the meal planning/schedule data flow across dashboard helpers and plan ro
 - [x] Harden schedule date helpers and API client response/error handling.
 - [x] Make dashboard range loading queue latest requests and allow retries.
 - [x] Await plan page route data server-side and simplify client hydration.
-- [ ] Run focused unit/check validation and update PR notes.
+- [x] Run focused unit/check validation and update PR notes.
 
 ## Notes
 
@@ -35,3 +35,4 @@ Harden the meal planning/schedule data flow across dashboard helpers and plan ro
 - Validation: `pnpm check` passed with 0 errors/warnings.
 - Plan route now awaits initial meals and household members in `load`; page hydration synchronously caches resolved data without unhandled promise chains.
 - Validation: `pnpm check` passed with 0 errors/warnings.
+- Final validation: `pnpm test:unit -- --run src/lib/server/services src/lib/components/dashboard` passed (50 files, 176 tests); `pnpm architecture:check` passed; `pnpm check` passed.
