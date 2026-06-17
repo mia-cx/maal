@@ -1,3 +1,4 @@
+import { error } from '@sveltejs/kit';
 import type { LayoutServerLoad } from './$types';
 import {
 	canManageActiveHousehold,
@@ -10,9 +11,15 @@ import { loadFreshBillingStatus } from '$lib/server/domains/billing';
 
 export const load: LayoutServerLoad = async ({ cookies, locals, platform, url }) => {
 	const session = locals.session;
-	const userHouseholds = session
-		? await listUserHouseholds(platform, session.user.id).catch(() => [])
-		: [];
+	let userHouseholds: Awaited<ReturnType<typeof listUserHouseholds>> = [];
+	if (session) {
+		try {
+			userHouseholds = await listUserHouseholds(platform, session.user.id);
+		} catch (cause) {
+			console.error('Failed to load app households', cause);
+			error(503, { message: 'Could not load your households. Try again in a moment.' });
+		}
+	}
 	const { householdId: activeHouseholdId } = session
 		? await resolveActiveHouseholdId({
 				platform,

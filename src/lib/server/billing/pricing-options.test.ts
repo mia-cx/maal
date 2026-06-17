@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type Stripe from 'stripe';
 import {
+	listActiveProductPrices,
 	pricingOptionForProductPrice,
 	pricingOptionsFromPrices,
 	trialDefaultPricingOptionFromPrices
@@ -12,10 +13,7 @@ const recurring = (interval: Stripe.Price.Recurring.Interval, intervalCount = 1)
 		'interval' | 'interval_count' | 'usage_type'
 	>;
 
-type RecurringOverride = Pick<
-	Stripe.Price.Recurring,
-	'interval' | 'interval_count' | 'usage_type'
->;
+type RecurringOverride = Pick<Stripe.Price.Recurring, 'interval' | 'interval_count' | 'usage_type'>;
 
 type PriceOverrides = Omit<Partial<Stripe.Price>, 'recurring'> & {
 	recurring?: RecurringOverride | null;
@@ -100,5 +98,30 @@ describe('pricingOptionsFromPrices', () => {
 				'prod_maal'
 			)?.id
 		).toBe('monthly');
+	});
+
+	it('loads all active product price pages', async () => {
+		const firstPage = [price({ id: 'price_a' })];
+		const secondPage = [price({ id: 'price_b' })];
+		const listCalls: Stripe.PriceListParams[] = [];
+		const stripe = {
+			prices: {
+				list: async (params: Stripe.PriceListParams) => {
+					listCalls.push(params);
+					return listCalls.length === 1
+						? { data: firstPage, has_more: true }
+						: { data: secondPage, has_more: false };
+				}
+			}
+		} as Stripe;
+
+		await expect(listActiveProductPrices(stripe, 'prod_maal')).resolves.toEqual([
+			...firstPage,
+			...secondPage
+		]);
+		expect(listCalls).toEqual([
+			{ product: 'prod_maal', active: true, limit: 100 },
+			{ product: 'prod_maal', active: true, limit: 100, starting_after: 'price_a' }
+		]);
 	});
 });

@@ -1,6 +1,7 @@
 export { createCheckoutRedirect } from '$lib/server/billing/checkout';
 export { createBillingPortalSession } from '$lib/server/billing/portal';
 export {
+	listActiveProductPrices,
 	priceToPricingOption,
 	pricingOptionsFromPrices,
 	trialDefaultPricingOptionFromPrices,
