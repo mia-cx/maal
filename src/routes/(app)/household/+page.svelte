@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { Button } from '$lib/components/ui/button';
+	import { inviteExpiryDays, maxHouseholdNameLength } from '$lib/domain/household/settings-parsing';
 	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
@@ -69,6 +70,7 @@
 	let inviteDialogOpen = $state(false);
 	let inviteRole = $state('member');
 	let inviteExpiresInDays = $state('7');
+	let inviteCopyMessage = $state('');
 	let visibleInvites = $state<InviteRow[]>(initialView.invites);
 
 	const currentView = $derived(view ?? initialView);
@@ -276,12 +278,25 @@
 	] as const;
 	const roleLabel = (role: string): string =>
 		roleOptions.find((option) => option.value === role)?.label ?? role;
+	const inviteExpiryOptions = inviteExpiryDays.map((days) => ({
+		value: String(days),
+		label: `${days} ${days === 1 ? 'day' : 'days'}`
+	}));
 	const formatInviteExpiry = (expiresAt: string | null) =>
 		expiresAt ? new Date(expiresAt).toLocaleDateString() : 'No expiry';
 	const inviteUsageLabel = (invite: { usesCount: number; maxUses: number | null }) =>
 		invite.maxUses === null
 			? `${invite.usesCount} used`
 			: `${invite.usesCount}/${invite.maxUses} used`;
+	const copyInviteUrl = async (url: string) => {
+		try {
+			await navigator.clipboard.writeText(url);
+			inviteCopyMessage = 'Invite URL copied.';
+		} catch (cause) {
+			console.error('Failed to copy invite URL', cause);
+			inviteCopyMessage = 'Could not copy invite URL. Copy it manually.';
+		}
+	};
 
 	const deleteInviteEnhance =
 		(inviteId: string): SubmitFunction =>
@@ -343,6 +358,14 @@
 					{form.message}
 				</p>
 			{/if}
+			{#if inviteCopyMessage}
+				<p
+					class="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+					aria-live="polite"
+				>
+					{inviteCopyMessage}
+				</p>
+			{/if}
 
 			<section class="grid gap-3 border-t border-border pt-4" aria-label="Basic settings">
 				<form method="post" action="?/updateSettings" class="grid gap-4">
@@ -353,7 +376,7 @@
 							<Input
 								name={householdNameChanged ? 'name' : undefined}
 								bind:value={householdName}
-								maxlength={120}
+								maxlength={maxHouseholdNameLength}
 								readonly={fieldDisabled}
 								class="h-8 w-full"
 							/>
@@ -757,7 +780,7 @@
 											type="button"
 											variant="outline"
 											size="sm"
-											onclick={() => navigator.clipboard.writeText(invite.url)}
+											onclick={() => copyInviteUrl(invite.url)}
 										>
 											Copy URL
 										</Button>
@@ -916,9 +939,9 @@
 							{inviteExpiresInDays === '1' ? 'day' : 'days'}
 						</Select.Trigger>
 						<Select.Content>
-							<Select.Item value="1">1 day</Select.Item>
-							<Select.Item value="7">7 days</Select.Item>
-							<Select.Item value="30">30 days</Select.Item>
+							{#each inviteExpiryOptions as option (option.value)}
+								<Select.Item value={option.value}>{option.label}</Select.Item>
+							{/each}
 						</Select.Content>
 					</Select.Root>
 				</label>
@@ -948,7 +971,7 @@
 							type="button"
 							variant="outline"
 							size="sm"
-							onclick={() => navigator.clipboard.writeText(invite.url)}
+							onclick={() => copyInviteUrl(invite.url)}
 						>
 							Copy URL
 						</Button>
