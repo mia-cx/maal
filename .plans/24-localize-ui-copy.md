@@ -4,22 +4,22 @@
 Convert authenticated app UI copy to Paraglide message tokens, establish message naming conventions, and make the authenticated app use the active household locale when available while preserving public route locale behavior.
 
 ## Acceptance criteria
-- [ ] User-visible copy in authenticated app UI is represented by Paraglide message tokens instead of hardcoded strings.
-- [ ] Dynamic/interpolated copy uses typed Paraglide parameters rather than manual string concatenation where practical.
-- [ ] Active household locale drives Paraglide locale for authenticated app routes after household resolution.
-- [ ] Changing household locale updates app UI language without requiring query-param based locale switching.
-- [ ] Public routes keep a clear locale-resolution policy and do not depend on an active household.
-- [ ] Locale fallback is explicit for users with no active household or households with unsupported/invalid locales.
-- [ ] Tests or smoke checks cover household-locale selection, fallback behavior, and at least one translated message render path.
-- [ ] Documentation explains message naming, where to add copy, and how household locale interacts with Paraglide.
+- [x] User-visible copy in authenticated app UI is represented by Paraglide message tokens instead of hardcoded strings.
+- [x] Dynamic/interpolated copy uses typed Paraglide parameters rather than manual string concatenation where practical.
+- [x] Active household locale drives Paraglide locale for authenticated app routes after household resolution.
+- [x] Changing household locale updates app UI language without requiring query-param based locale switching.
+- [x] Public routes keep a clear locale-resolution policy and do not depend on an active household.
+- [x] Locale fallback is explicit for users with no active household or households with unsupported/invalid locales.
+- [x] Tests or smoke checks cover household-locale selection, fallback behavior, and at least one translated message render path.
+- [x] Documentation explains message naming, where to add copy, and how household locale interacts with Paraglide.
 
 ## TODOs
-- [ ] Inventory authenticated app copy, Paraglide setup, and household locale resolution seams.
+- [x] Inventory authenticated app copy, Paraglide setup, and household locale resolution seams.
 - [x] Add shared localization utilities, documentation, and household-locale resolution tests.
 - [x] Convert app shell, shared components, and settings copy to Paraglide messages.
 - [x] Convert planning, menu, subscribe, and household feature copy to Paraglide messages.
 - [x] Run Paraglide generation plus focused type/test validation and fix regressions.
-- [ ] Push branch and file PR.
+- [x] Push branch and file PR.
 
 ## Notes
 - Worktree: `.worktrees/24-localize-ui-copy`
@@ -33,3 +33,5 @@ Convert authenticated app UI copy to Paraglide message tokens, establish message
 - Validation: `pnpm check` — pass.
 - Validation: `pnpm exec vitest run src/hooks.server.test.ts` — pass.
 - Residual scan: no remaining uppercase hardcoded authenticated app copy found by targeted scanner; one false positive in `schedule-keyboard.ts` for `Array.from(document.querySelectorAll...)`.
+- Validation: `pnpm architecture:check` — pass.
+- Validation: `pnpm test:unit -- --run src/hooks.server.test.ts` — pass (Vitest runs the unit suite; 67 files / 248 tests passed).
