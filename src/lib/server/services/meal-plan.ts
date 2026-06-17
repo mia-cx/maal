@@ -2,16 +2,11 @@ import { and, eq } from 'drizzle-orm';
 import type { Meal } from '$lib/plan/plan-types';
 import { countActiveHouseholdMembers, listHouseholdMembers } from '$lib/server/auth/household';
 import { getDb } from '$lib/server/db';
-import {
-	householdMeals,
-	householdMealUserRecipes,
-	households,
-	userRecipes
-} from '$lib/server/db/schema';
+import { householdMeals, householdMealUserRecipes, userRecipes } from '$lib/server/db/schema';
 import { loadMealPlanMeals } from '$lib/server/db/recipe-mappers';
 import { DomainError } from '$lib/server/domain-errors';
-import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
+import { loadHouseholdUnitPreferences } from '$lib/server/taxonomy/household-preferences';
 import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
 import {
 	replaceMealIngredientsFromLines,
@@ -63,20 +58,8 @@ export type UpdateHouseholdMealInput = {
 	}>;
 };
 
-const loadUnitPreferences = async (db: Db, workosUserId: string, householdId: string) => {
-	const profileRows = await db
-		.select({ locale: households.locale })
-		.from(households)
-		.where(eq(households.householdId, householdId))
-		.limit(1);
-	return (
-		await loadEffectiveTaxonomyPreferences(db, {
-			workosUserId,
-			householdId,
-			locale: profileRows[0]?.locale ?? 'en-US'
-		})
-	).unitPreferences;
-};
+const loadUnitPreferences = (db: Db, workosUserId: string, householdId: string) =>
+	loadHouseholdUnitPreferences(db, { workosUserId, householdId });
 
 const ownedRecipe = async (db: Db, userRecipeId: string, workosUserId: string) =>
 	db

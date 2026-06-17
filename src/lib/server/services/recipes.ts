@@ -2,7 +2,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
 import { getDb } from '$lib/server/db';
-import { households, userRecipes } from '$lib/server/db/schema';
+import { userRecipes } from '$lib/server/db/schema';
 import {
 	loadMenuRecipes,
 	replaceRecipeIngredients,
@@ -17,26 +17,13 @@ import {
 	userRecipeIngredients,
 	userRecipeInstructions
 } from '$lib/server/db/schema';
-import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 import { replaceMealRecipeSidecars } from '$lib/server/services/meal-sidecars';
+import { loadHouseholdUnitPreferences } from '$lib/server/taxonomy/household-preferences';
 
 type Db = ReturnType<typeof getDb>;
 
-const unitPreferences = async (db: Db, workosUserId: string, householdId?: string | null) => {
-	if (!householdId) return {};
-	const profileRows = await db
-		.select({ locale: households.locale })
-		.from(households)
-		.where(eq(households.householdId, householdId))
-		.limit(1);
-	return (
-		await loadEffectiveTaxonomyPreferences(db, {
-			workosUserId,
-			householdId,
-			locale: profileRows[0]?.locale ?? 'en-US'
-		})
-	).unitPreferences;
-};
+const unitPreferences = (db: Db, workosUserId: string, householdId?: string | null) =>
+	loadHouseholdUnitPreferences(db, { workosUserId, householdId });
 
 export const listUserRecipes = async (input: {
 	db: Db;

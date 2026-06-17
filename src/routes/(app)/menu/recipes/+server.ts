@@ -5,7 +5,6 @@ import { getDb } from '$lib/server/db';
 import {
 	householdMeals,
 	householdMealUserRecipes,
-	households,
 	unitAliases,
 	userRecipeClassifications,
 	userRecipeMedia,
@@ -36,7 +35,10 @@ import { parseRecipeMenuItemPayload } from '$lib/menu/recipe-payload';
 import { emptyRecipeMenuStats } from '$lib/menu/recipe-defaults';
 import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
 import { boundedPagination } from '$lib/shared/pagination';
-import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
+import {
+	defaultUnitPreferences,
+	loadHouseholdUnitPreferences
+} from '$lib/server/taxonomy/household-preferences';
 import { cleanImportedText } from '$lib/server/services/html-text';
 import {
 	fetchRecipeImportPage,
@@ -566,33 +568,16 @@ const recipeUrlKeys = (recipe: RecipeIdentity): Set<string> => {
 	return keys;
 };
 
-const loadHouseholdUnitPreferences = async (
+const loadRecipeUnitPreferences = (
 	db: ReturnType<typeof getDb>,
 	workosUserId: string,
 	householdId: string | null
-): Promise<UnitPreferences> => {
-	if (!householdId) {
-		return {
-			preferredMassUnit: 'g',
-			preferredVolumeUnit: 'ml',
-			preferredTemperatureUnit: 'celsius',
-			preferredTemperatureUnitLabel: '°C'
-		};
-	}
-	const profileRows = await db
-		.select({ locale: households.locale })
-		.from(households)
-		.where(eq(households.householdId, householdId))
-		.limit(1);
-	const unitPreferences = (
-		await loadEffectiveTaxonomyPreferences(db, {
-			workosUserId,
-			householdId,
-			locale: profileRows[0]?.locale ?? 'en-US'
-		})
-	).unitPreferences;
-	return unitPreferences;
-};
+): Promise<UnitPreferences> =>
+	loadHouseholdUnitPreferences(db, {
+		workosUserId,
+		householdId,
+		fallback: defaultUnitPreferences
+	});
 
 const normalizedUnitAliasKey = (value: string): string =>
 	value
@@ -686,7 +671,7 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 	if (importUrl) {
 		const [unitAliasMap, unitPreferences] = await Promise.all([
 			loadIngredientUnitAliases(db),
-			loadHouseholdUnitPreferences(db, session.user.id, householdId)
+			loadRecipeUnitPreferences(db, session.user.id, householdId)
 		]);
 		return json({
 			recipe: draftRecipeFromImport(
@@ -707,7 +692,7 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 	);
 	const query = url.searchParams.get('q') ?? '';
 	const picker = url.searchParams.get('picker') === 'meal';
-	const unitPreferences = await loadHouseholdUnitPreferences(db, session.user.id, householdId);
+	const unitPreferences = await loadRecipeUnitPreferences(db, session.user.id, householdId);
 	const recipes = await loadMenuRecipes(db, session.user.id, householdId, {
 		limit: query ? undefined : limit + (picker ? 0 : 1),
 		offset: query || picker ? 0 : offset,
@@ -812,7 +797,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	}
 
 	const [unitPreferences, unitAliasMap, recipeIdentities] = await Promise.all([
-		loadHouseholdUnitPreferences(db, session.user.id, householdId),
+		loadRecipeUnitPreferences(db, session.user.id, householdId),
 		loadIngredientUnitAliases(db),
 		loadRecipeIdentities(db, session.user.id)
 	]);
@@ -936,7 +921,7 @@ export const PATCH: RequestHandler = async ({ cookies, locals, platform, request
 			)
 	);
 
-	const unitPreferences = await loadHouseholdUnitPreferences(db, session.user.id, householdId);
+	const unitPreferences = await loadRecipeUnitPreferences(db, session.user.id, householdId);
 	const recipes = await loadMenuRecipes(db, session.user.id, householdId, {
 		unitPreferences,
 		recipeIds

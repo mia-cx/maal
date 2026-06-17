@@ -4,7 +4,7 @@ import { commitHouseholdCookie, listHouseholdMembers } from '$lib/server/auth/ho
 import { getDb } from '$lib/server/db';
 import { loadMealPlanMeals } from '$lib/server/db/recipe-mappers';
 import { households } from '$lib/server/db/schema';
-import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
+import { loadHouseholdTaxonomyPreferences } from '$lib/server/taxonomy/household-preferences';
 import type { PageServerLoad } from './$types';
 
 const dateKey = (date: Date): string => date.toISOString().slice(0, 10);
@@ -42,10 +42,9 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 		.limit(1);
 	const householdProfile = profileRows[0];
 	const defaultMealServings = householdProfile?.defaultPlannedYield ?? 1;
-	const taxonomyPreferences = await loadEffectiveTaxonomyPreferences(db, {
+	const taxonomyPreferences = await loadHouseholdTaxonomyPreferences(db, {
 		workosUserId: session.user.id,
-		householdId,
-		locale: householdProfile?.locale ?? 'en-US'
+		householdId
 	});
 	const unitPreferences = taxonomyPreferences.unitPreferences;
 	const [householdMembers, meals] = await Promise.all([
