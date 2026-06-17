@@ -920,16 +920,18 @@ export const PATCH: RequestHandler = async ({ cookies, locals, platform, request
 
 	const { recipeIds } = await readBulkBody(request);
 	const updatedAt = new Date().toISOString();
-	await db
-		.update(userRecipes)
-		.set({ deletedAt: null, updatedAt })
-		.where(
-			and(
-				eq(userRecipes.workosUserId, session.user.id),
-				inArray(userRecipes.id, recipeIds),
-				isNotNull(userRecipes.deletedAt)
+	await db.transaction((tx) =>
+		tx
+			.update(userRecipes)
+			.set({ deletedAt: null, updatedAt })
+			.where(
+				and(
+					eq(userRecipes.workosUserId, session.user.id),
+					inArray(userRecipes.id, recipeIds),
+					isNotNull(userRecipes.deletedAt)
+				)
 			)
-		);
+	);
 
 	const unitPreferences = await loadHouseholdUnitPreferences(db, session.user.id, householdId);
 	const recipes = await loadMenuRecipes(db, session.user.id, householdId, {
@@ -940,7 +942,12 @@ export const PATCH: RequestHandler = async ({ cookies, locals, platform, request
 };
 
 export const DELETE: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
-	const { db, session } = await requireBillingAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({
+		cookies,
+		locals,
+		platform,
+		url
+	});
 
 	const { recipeIds, permanent } = await readBulkBody(request);
 	const existingRows = await db
@@ -963,7 +970,13 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 			const mealLinks = await tx
 				.select({ householdMealId: householdMealUserRecipes.householdMealId })
 				.from(householdMealUserRecipes)
-				.where(inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds));
+				.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
+				.where(
+					and(
+						inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds),
+						eq(householdMeals.householdId, householdId)
+					)
+				);
 			const householdMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
 
 			await tx
@@ -1003,16 +1016,18 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 	}
 
 	const deletedAt = new Date().toISOString();
-	await db
-		.update(userRecipes)
-		.set({ deletedAt, updatedAt: deletedAt })
-		.where(
-			and(
-				eq(userRecipes.workosUserId, session.user.id),
-				inArray(userRecipes.id, existingRecipeIds),
-				isNull(userRecipes.deletedAt)
+	await db.transaction((tx) =>
+		tx
+			.update(userRecipes)
+			.set({ deletedAt, updatedAt: deletedAt })
+			.where(
+				and(
+					eq(userRecipes.workosUserId, session.user.id),
+					inArray(userRecipes.id, existingRecipeIds),
+					isNull(userRecipes.deletedAt)
+				)
 			)
-		);
+	);
 
 	return json({ deleted: true, recipeIds: existingRecipeIds, deletedAt });
 };

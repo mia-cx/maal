@@ -105,15 +105,46 @@ const isPublicIpv4 = ([a, b, c]: [number, number, number, number]): boolean => {
 	return true;
 };
 
+const parseIpv6Groups = (hostname: string): number[] | undefined => {
+	const [head = '', tail = ''] = hostname.toLowerCase().split('::');
+	if (hostname.split('::').length > 2) return;
+	const headGroups = head ? head.split(':') : [];
+	const tailGroups = tail ? tail.split(':') : [];
+	const parseGroup = (group: string): number | undefined => {
+		if (!/^[0-9a-f]{1,4}$/i.test(group)) return;
+		return Number.parseInt(group, 16);
+	};
+	const parsedHead = headGroups.map(parseGroup);
+	const parsedTail = tailGroups.map(parseGroup);
+	if (parsedHead.some((group) => group === undefined)) return;
+	if (parsedTail.some((group) => group === undefined)) return;
+	const missingGroupCount = hostname.includes('::') ? 8 - parsedHead.length - parsedTail.length : 0;
+	if (missingGroupCount < 0) return;
+	const groups = [
+		...(parsedHead as number[]),
+		...Array.from({ length: missingGroupCount }, () => 0),
+		...(parsedTail as number[])
+	];
+	return groups.length === 8 ? groups : undefined;
+};
+
+const ipv4FromMappedIpv6 = (groups: number[]): [number, number, number, number] | undefined => {
+	if (!groups.slice(0, 5).every((group) => group === 0) || groups[5] !== 0xffff) return;
+	return [groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff];
+};
+
 const isPublicIpv6 = (hostname: string): boolean => {
-	const normalized = hostname.replace(/^0+/, '');
-	if (normalized === '::' || normalized === '::1') return false;
-	if (/^(?:fc|fd|fe80|ff)/i.test(normalized)) return false;
-	if (/^2001:db8:/i.test(normalized)) return false;
-	if (/^::ffff:/i.test(normalized)) {
-		const mapped = parseIpv4(normalized.slice('::ffff:'.length));
-		return mapped ? isPublicIpv4(mapped) : false;
-	}
+	const groups = parseIpv6Groups(hostname);
+	if (!groups) return false;
+	const [first, second] = groups;
+	if (groups.every((group) => group === 0)) return false;
+	if (groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1) return false;
+	if ((first & 0xfe00) === 0xfc00) return false;
+	if ((first & 0xffc0) === 0xfe80) return false;
+	if ((first & 0xff00) === 0xff00) return false;
+	if (first === 0x2001 && second === 0x0db8) return false;
+	const mappedIpv4 = ipv4FromMappedIpv6(groups);
+	if (mappedIpv4) return isPublicIpv4(mappedIpv4);
 	return true;
 };
 

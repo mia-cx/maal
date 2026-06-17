@@ -36,7 +36,12 @@ describe('recipe import fetch boundary', () => {
 			'http://kitchen/recipe',
 			'http://printer.local/recipe',
 			'http://[::1]/recipe',
-			'http://[fd00::1]/recipe'
+			'http://[0:0:0:0:0:0:0:1]/recipe',
+			'http://[::ffff:127.0.0.1]/recipe',
+			'http://[0:0:0:0:0:ffff:7f00:1]/recipe',
+			'http://[0:0:0:0:0:ffff:a9fe:a9fe]/recipe',
+			'http://[fd00::1]/recipe',
+			'http://[fe80::1]/recipe'
 		]) {
 			expectBlocked(url);
 		}

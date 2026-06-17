@@ -138,16 +138,18 @@ export const PATCH: RequestHandler = async ({ cookies, locals, params, platform,
 	if (!existing) error(404, { message: 'Archived recipe not found.' });
 
 	const updatedAt = new Date().toISOString();
-	await db
-		.update(userRecipes)
-		.set({ deletedAt: null, updatedAt })
-		.where(
-			and(
-				eq(userRecipes.id, recipeId),
-				eq(userRecipes.workosUserId, session.user.id),
-				isNotNull(userRecipes.deletedAt)
+	await db.transaction((tx) =>
+		tx
+			.update(userRecipes)
+			.set({ deletedAt: null, updatedAt })
+			.where(
+				and(
+					eq(userRecipes.id, recipeId),
+					eq(userRecipes.workosUserId, session.user.id),
+					isNotNull(userRecipes.deletedAt)
+				)
 			)
-		);
+	);
 
 	const profileRows = householdId
 		? await db
@@ -176,7 +178,12 @@ export const PATCH: RequestHandler = async ({ cookies, locals, params, platform,
 };
 
 export const DELETE: RequestHandler = async ({ cookies, locals, params, platform, url }) => {
-	const { db, session } = await requireBillingAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({
+		cookies,
+		locals,
+		platform,
+		url
+	});
 	const recipeId = params.id;
 	if (!recipeId) error(400, { message: 'Recipe is required.' });
 
@@ -200,7 +207,13 @@ export const DELETE: RequestHandler = async ({ cookies, locals, params, platform
 			const mealLinks = await tx
 				.select({ householdMealId: householdMealUserRecipes.householdMealId })
 				.from(householdMealUserRecipes)
-				.where(eq(householdMealUserRecipes.userRecipeId, recipeId));
+				.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
+				.where(
+					and(
+						eq(householdMealUserRecipes.userRecipeId, recipeId),
+						eq(householdMeals.householdId, householdId)
+					)
+				);
 			const householdMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
 
 			await tx
@@ -235,16 +248,18 @@ export const DELETE: RequestHandler = async ({ cookies, locals, params, platform
 	}
 
 	const deletedAt = new Date().toISOString();
-	await db
-		.update(userRecipes)
-		.set({ deletedAt, updatedAt: deletedAt })
-		.where(
-			and(
-				eq(userRecipes.id, recipeId),
-				eq(userRecipes.workosUserId, session.user.id),
-				isNull(userRecipes.deletedAt)
+	await db.transaction((tx) =>
+		tx
+			.update(userRecipes)
+			.set({ deletedAt, updatedAt: deletedAt })
+			.where(
+				and(
+					eq(userRecipes.id, recipeId),
+					eq(userRecipes.workosUserId, session.user.id),
+					isNull(userRecipes.deletedAt)
+				)
 			)
-		);
+	);
 
 	return json({ deleted: true, deletedAt });
 };
