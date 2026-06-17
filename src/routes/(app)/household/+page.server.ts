@@ -246,7 +246,9 @@ export const actions: Actions = {
 				form: await event.request.formData()
 			});
 			if (!result.ok) return fail(result.status, { message: result.message });
-			return { message: result.changedCount > 0 ? 'Appliances saved.' : 'No changes.' };
+			return {
+				message: result.changedCount > 0 ? m.household_appliances_saved() : m.household_no_changes()
+			};
 		} catch (cause) {
 			console.error('Failed to update household appliances', cause);
 			return fail(502, { message: m.household_could_not_update_appliances() });

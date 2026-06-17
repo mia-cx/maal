@@ -22,10 +22,10 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 
 	if (!currentPassword) error(400, { message: m.settings_current_password_is_required() });
 	if (newPassword.length < minPasswordLength) {
-		error(400, { message: `Use at least ${minPasswordLength} characters.` });
+		error(400, { message: m.settings_password_min_length({ min: minPasswordLength }) });
 	}
 	if (newPassword.length > maxPasswordLength) {
-		error(400, { message: `Use ${maxPasswordLength} characters or fewer.` });
+		error(400, { message: m.settings_password_max_length({ max: maxPasswordLength }) });
 	}
 	if (currentPassword === newPassword)
 		error(400, { message: m.settings_choose_a_different_password() });

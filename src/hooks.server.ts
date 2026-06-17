@@ -5,8 +5,7 @@ import { paraglideMiddleware } from '$lib/paraglide/server';
 import { authenticatedAppPathUsesHouseholdLocale } from '$lib/i18n/app-locale';
 import {
 	commitParaglideLocaleCookie,
-	loadHouseholdParaglideLocale,
-	readActiveHouseholdIdForLocale
+	loadHouseholdParaglideLocale
 } from '$lib/server/i18n/household-locale';
 import {
 	authenticateSealedSession,
@@ -122,9 +121,15 @@ const requestWithCookie = (request: Request, name: string, value: string): Reque
 
 const handleParaglide: Handle = async ({ event, resolve }) => {
 	if (event.locals.session && authenticatedAppPathUsesHouseholdLocale(event.url.pathname)) {
+		const { householdId } = await resolveActiveHouseholdId({
+			platform: event.platform,
+			cookies: event.cookies,
+			url: event.url,
+			session: event.locals.session
+		});
 		const householdLocale = await loadHouseholdParaglideLocale({
 			platform: event.platform,
-			householdId: readActiveHouseholdIdForLocale(event.cookies)
+			householdId
 		});
 		if (householdLocale) {
 			commitParaglideLocaleCookie(event.cookies, householdLocale, event.url);

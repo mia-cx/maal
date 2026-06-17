@@ -348,8 +348,8 @@
 				bind:value={plannedCookDraft}
 				options={plannedCookOptions}
 				placeholder={m.plan_unassigned()}
-				searchPlaceholder="Search cooks…"
-				emptyText="No cooks found."
+				searchPlaceholder={m.plan_search_cooks()}
+				emptyText={m.plan_no_cooks_found()}
 				class="h-9 px-3 text-sm md:text-xs/relaxed"
 			/>
 		</label>

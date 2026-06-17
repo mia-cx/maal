@@ -19,6 +19,6 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 	} catch (cause) {
 		if (isHttpError(cause)) throw cause;
 		console.error('Failed to load taxonomy preferences', cause);
-		error(503, { message: m.app_taxonomy_preferences_unavailable() });
+		throw error(503, { message: m.app_taxonomy_preferences_unavailable() });
 	}
 };

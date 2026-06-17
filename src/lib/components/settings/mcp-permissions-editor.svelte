@@ -28,8 +28,8 @@
 			{@const level = mcpScopeLevels[group.id] ?? 'none'}
 			<div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
 				<div class="min-w-0">
-					<p class="font-medium">{group.label}</p>
-					<p class="text-muted-foreground">{group.description}</p>
+					<p class="font-medium">{group.label()}</p>
+					<p class="text-muted-foreground">{group.description()}</p>
 				</div>
 				<div class="flex flex-wrap items-center gap-3">
 					{#if group.read}

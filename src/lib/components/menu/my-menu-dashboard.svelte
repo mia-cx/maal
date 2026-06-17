@@ -78,13 +78,19 @@
 	const selectedRecipes = $derived(
 		displayedRecipes.filter((recipe) => selectedRecipeIds.includes(recipe.id))
 	);
-	const permanentDeleteRecipeLabel = $derived(
-		permanentDeleteRecipes.length === 1 ? 'recipe' : 'recipes'
-	);
-	const permanentDeleteTargetLabel = $derived(
+	const recipeWord = (count: number): string =>
+		count === 1 ? m.menu_recipe_word_singular() : m.menu_recipe_word_plural();
+	const archivedRecipeWord = (count: number): string =>
+		count === 1 ? m.menu_archived_recipe_word_singular() : m.menu_archived_recipe_word_plural();
+	const linkedMealWord = (count: number): string =>
+		count === 1 ? m.menu_linked_meal_word_singular() : m.menu_linked_meal_word_plural();
+	const permanentDeleteTarget = $derived(
 		permanentDeleteRecipes.length === 1
-			? `“${permanentDeleteRecipes[0]?.title ?? 'this recipe'}”`
-			: `${permanentDeleteRecipes.length} recipes`
+			? (permanentDeleteRecipes[0]?.title ?? m.menu_this_recipe())
+			: m.menu_archived_recipes_selected({
+					count: permanentDeleteRecipes.length,
+					recipeWord: archivedRecipeWord(permanentDeleteRecipes.length)
+				})
 	);
 	const selectedArchivedRecipes = $derived(
 		archivedRecipes.filter((recipe) => selectedArchivedRecipeIds.includes(recipe.id))
@@ -415,7 +421,7 @@
 			<p class="py-4 text-center text-xs text-destructive">{searchLoadError}</p>
 		{:else if recipeSearchQuery.trim() && displayedRecipes.length === 0}
 			<p class="py-8 text-center text-sm text-muted-foreground">
-				{m.menu_no_recipes_match()}{recipeSearchQuery}”.
+				{m.menu_no_recipes_match_query({ query: recipeSearchQuery })}
 			</p>
 		{/if}
 		<div bind:this={loadMoreElement} class="flex min-h-10 items-center justify-center py-4">
@@ -435,7 +441,7 @@
 		<Accordion.Root type="multiple" class="border-border bg-background">
 			<Accordion.Item value="archive">
 				<Accordion.Trigger level={2} class="px-3 py-2">
-					<span>{m.menu_archive()}{archivedRecipes.length})</span>
+					<span>{m.menu_archive_with_count({ count: archivedRecipes.length })}</span>
 				</Accordion.Trigger>
 				<Accordion.Content class="px-3 pb-3">
 					{#if archiveActionError}
@@ -445,8 +451,10 @@
 						class="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 p-3"
 					>
 						<p class="mr-2 text-sm font-medium">
-							{selectedArchivedRecipes.length}
-							{m.menu_archived_recipe()}{selectedArchivedRecipes.length === 1 ? '' : 's'} selected
+							{m.menu_archived_recipes_selected({
+								count: selectedArchivedRecipes.length,
+								recipeWord: archivedRecipeWord(selectedArchivedRecipes.length)
+							})}
 						</p>
 						<div class="flex flex-wrap gap-2">
 							<Button
@@ -487,7 +495,7 @@
 									<div class="flex min-w-0 gap-3">
 										<Checkbox
 											checked={selectedArchivedRecipeIds.includes(recipe.id)}
-											aria-label={`Select ${recipe.title}`}
+											aria-label={m.menu_select_recipe({ title: recipe.title })}
 											onpointerdown={(event) => (archivedRangeSelection = event.shiftKey)}
 											onkeydown={(event) => {
 												if (event.key === ' ' || event.key === 'Enter') {
@@ -502,12 +510,14 @@
 										<div class="min-w-0">
 											<p class="truncate text-sm font-medium">{recipe.title}</p>
 											<p class="text-xs text-muted-foreground">
-												{m.menu_archived()}{recipe.archivedAt
-													? ` ${archivedDate(recipe.archivedAt)}`
-													: ''}
+												{recipe.archivedAt
+													? m.menu_archived_recipe_status({ date: archivedDate(recipe.archivedAt) })
+													: m.menu_archived_recipe_status_no_date()}
 												{#if recipe.plannedCount}
-													· {recipe.plannedCount}
-													{m.menu_linked_meal()}{recipe.plannedCount === 1 ? '' : 's'}
+													· {m.menu_linked_meals_count({
+														count: recipe.plannedCount,
+														mealWord: linkedMealWord(recipe.plannedCount)
+													})}
 												{/if}
 											</p>
 										</div>
@@ -547,9 +557,15 @@
 <DeleteConfirmDialog
 	bind:open={permanentDeleteOpen}
 	contentClass="sm:max-w-[24rem]"
-	title={m.menu_permanently_delete_recipes_title({ recipeLabel: permanentDeleteRecipeLabel })}
-	description={m.menu_permanently_delete_recipes_description({ label: permanentDeleteTargetLabel })}
-	confirmLabel={m.menu_delete_recipes_and_meals({ recipeLabel: permanentDeleteRecipeLabel })}
+	title={m.menu_permanently_delete_recipes_title({
+		count: permanentDeleteRecipes.length,
+		recipeWord: recipeWord(permanentDeleteRecipes.length)
+	})}
+	description={m.menu_permanently_delete_recipes_description({ target: permanentDeleteTarget })}
+	confirmLabel={m.menu_delete_recipes_and_meals({
+		count: permanentDeleteRecipes.length,
+		recipeWord: recipeWord(permanentDeleteRecipes.length)
+	})}
 	busy={Boolean(archiveActionRecipeId)}
 	error={archiveActionError}
 	onconfirm={permanentlyDeleteArchivedRecipe}

@@ -88,6 +88,7 @@
 
 	const canManageHousehold = $derived(currentView.canManageHousehold);
 	const fieldDisabled = $derived(!canManageHousehold);
+	const memberRemovalName = $derived(memberToRemove?.name ?? m.household_this_member());
 	const weekStartLabels = {
 		sunday: 'Sunday',
 		monday: 'Monday'
@@ -405,7 +406,7 @@
 									options={localeOptions}
 									disabled={fieldDisabled}
 									placeholder={m.household_select_locale()}
-									searchPlaceholder="Search or type a BCP 47 locale..."
+									searchPlaceholder={m.household_search_locales()}
 									allowCustom
 									customOptionLabel={(input) => `Use custom locale “${input}”`}
 								/>
@@ -418,7 +419,7 @@
 									options={timezoneOptions}
 									disabled={fieldDisabled}
 									placeholder={m.household_select_timezone()}
-									searchPlaceholder="Search timezones..."
+									searchPlaceholder={m.household_search_timezones()}
 								/>
 							</label>
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
@@ -545,7 +546,7 @@
 									options={currentView.taxonomyOptions.weightPresetOptions}
 									disabled={fieldDisabled}
 									placeholder={m.household_select_weight_unit()}
-									searchPlaceholder="Search weight units..."
+									searchPlaceholder={m.household_search_units()}
 								/>
 							</label>
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
@@ -558,7 +559,7 @@
 									options={currentView.taxonomyOptions.volumePresetOptions}
 									disabled={fieldDisabled}
 									placeholder={m.household_select_volume_unit()}
-									searchPlaceholder="Search volume units..."
+									searchPlaceholder={m.household_search_units()}
 								/>
 							</label>
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
@@ -575,7 +576,7 @@
 									options={currentView.taxonomyOptions.temperaturePresetOptions}
 									disabled={fieldDisabled}
 									placeholder={m.household_select_temperature_unit()}
-									searchPlaceholder="Search temperature units..."
+									searchPlaceholder={m.household_search_units()}
 								/>
 							</label>
 						</div>
@@ -597,7 +598,7 @@
 											options={currentView.taxonomyOptions.baseUnitOptions}
 											disabled={fieldDisabled}
 											placeholder={m.household_base_unit_2()}
-											searchPlaceholder="Search base units..."
+											searchPlaceholder={m.household_search_units()}
 										/>
 									</label>
 									<label class="grid min-w-0 gap-1 text-xs font-medium">
@@ -607,7 +608,7 @@
 											options={currentView.taxonomyOptions.unitAliasOptions}
 											disabled={fieldDisabled}
 											placeholder={m.household_alias_placeholder()}
-											searchPlaceholder="Search unit aliases..."
+											searchPlaceholder={m.household_search_units()}
 											allowCustom
 											customOptionLabel={(input) => `Use custom alias “${input}”`}
 										/>
@@ -654,7 +655,7 @@
 											options={currentView.taxonomyOptions.foodOptions}
 											disabled={fieldDisabled}
 											placeholder={m.household_base_food_2()}
-											searchPlaceholder="Search foods..."
+											searchPlaceholder={m.household_search_foods()}
 										/>
 									</label>
 									<label class="grid min-w-0 gap-1 text-xs font-medium">
@@ -664,7 +665,7 @@
 											options={currentView.taxonomyOptions.foodAliasOptions}
 											disabled={fieldDisabled}
 											placeholder={m.household_alias_placeholder()}
-											searchPlaceholder="Search food aliases..."
+											searchPlaceholder={m.household_search_foods()}
 											allowCustom
 											customOptionLabel={(input) => `Use custom alias “${input}”`}
 										/>
@@ -676,7 +677,7 @@
 											options={currentView.taxonomyOptions.measureUnitOptions}
 											disabled={fieldDisabled}
 											placeholder={m.household_unit_placeholder()}
-											searchPlaceholder="Search measure units..."
+											searchPlaceholder={m.household_search_units()}
 										/>
 									</label>
 									{#if canManageHousehold}
@@ -853,7 +854,7 @@
 																event.currentTarget.closest('form')?.requestSubmit();
 														}}
 													>
-														{invite.revokedAt ? 'Revoked' : 'Revoke'}
+														{invite.revokedAt ? m.household_revoked() : m.household_revoke()}
 													</DropdownMenu.Item>
 												</form>
 												<form
@@ -923,8 +924,7 @@
 		<Dialog.Header>
 			<Dialog.Title>{m.household_invite_people_to_your_household()}</Dialog.Title>
 			<Dialog.Description>
-				{m.household_create_an_invite_link_for()}
-				{currentView.household.name}{m.household_people_who_use_it_will_join_with_the_role_yo()}
+				{m.household_invite_description({ householdName: currentView.household.name })}
 			</Dialog.Description>
 		</Dialog.Header>
 
@@ -960,8 +960,10 @@
 					{m.household_expires()}
 					<Select.Root type="single" bind:value={inviteExpiresInDays}>
 						<Select.Trigger class="!h-9 w-full text-sm">
-							{inviteExpiresInDays}
-							{inviteExpiresInDays === '1' ? 'day' : 'days'}
+							{m.household_invite_expiry_days({
+								days: inviteExpiresInDays,
+								unit: inviteExpiresInDays === '1' ? m.household_day() : m.household_days()
+							})}
 						</Select.Trigger>
 						<Select.Content>
 							{#each inviteExpiryOptions as option (option.value)}
@@ -1012,8 +1014,8 @@
 <DeleteConfirmDialog
 	bind:open={removeMemberDialogOpen}
 	title={m.household_remove_member()}
-	description="Remove {memberToRemove?.name ?? 'this member'} from this household."
-	confirmLabel="Remove"
+	description={m.household_remove_member_description({ name: memberRemovalName })}
+	confirmLabel={m.settings_remove()}
 	formAction="?/removeMember"
 	hiddenInputs={{ membershipId: memberToRemove?.id, userId: memberToRemove?.userId }}
 />
@@ -1021,18 +1023,16 @@
 <DeleteConfirmDialog
 	bind:open={leaveHouseholdDialogOpen}
 	title={m.household_leave_household_2()}
-	description="You will lose access to {currentView.household
-		.name}. Your personal menu and check-in history stay with your account."
-	confirmLabel="Leave household"
+	description={m.household_leave_description({ householdName: currentView.household.name })}
+	confirmLabel={m.household_leave_household()}
 	formAction="?/leaveHousehold"
 />
 
 <DeleteConfirmDialog
 	bind:open={deleteHouseholdFirstOpen}
 	title={m.household_delete_household_2()}
-	description="This deletes the WorkOS organization and Maal household data for {currentView
-		.household.name}."
-	confirmLabel="Continue"
+	description={m.household_delete_description({ householdName: currentView.household.name })}
+	confirmLabel={m.app_continue()}
 	onconfirm={() => {
 		deleteHouseholdFirstOpen = false;
 		deleteHouseholdSecondOpen = true;
@@ -1042,7 +1042,7 @@
 <DeleteConfirmDialog
 	bind:open={deleteHouseholdSecondOpen}
 	title={m.household_really_delete_household()}
-	description="This cannot be undone. Recipes saved to your menu stay, but household settings and planned meals are deleted."
-	confirmLabel="Delete household"
+	description={m.household_delete_final_description()}
+	confirmLabel={m.household_delete_household()}
 	formAction="?/deleteHousehold"
 />

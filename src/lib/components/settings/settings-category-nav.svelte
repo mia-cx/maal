@@ -37,7 +37,7 @@
 				onclick={() => onchoose(category)}
 			>
 				<category.icon class="size-3.5 shrink-0" />
-				<span class="truncate font-medium">{category.label}</span>
+				<span class="truncate font-medium">{category.label()}</span>
 				{#if category.disabled}
 					<span class="ml-auto text-[0.625rem] font-medium">{m.settings_soon()}</span>
 				{/if}

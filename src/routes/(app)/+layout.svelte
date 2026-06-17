@@ -211,11 +211,12 @@
 									</div>
 								{:else}
 									<p class="mt-2 text-sm text-muted-foreground">
-										{m.app_tell_the_household_manager_to_resume_their_s()}
-										<a class="font-medium underline underline-offset-4" href="/export-data"
-											>{m.app_export_your_data()}</a
-										>.
+										{m.app_subscription_locked_export_sentence()}
 									</p>
+									<a
+										class="mt-1 inline-block text-sm font-medium underline underline-offset-4"
+										href="/export-data">{m.app_export_your_data()}</a
+									>
 								{/if}
 							</div>
 						</div>

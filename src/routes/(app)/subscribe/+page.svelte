@@ -20,12 +20,10 @@
 			<WordmarkLogo class="h-8 w-auto" />
 			<div class="grid gap-3">
 				<h1 class="text-3xl font-semibold tracking-tight md:text-4xl">
-					{m.billing_choose_a_plan_for()}
-					{data.householdName}
+					{m.billing_choose_a_plan_for_household({ householdName: data.householdName })}
 				</h1>
 				<p class="mx-auto max-w-2xl text-sm text-muted-foreground">
-					{m.billing_this_subscription_applies_only_to()}
-					{data.householdName}.
+					{m.billing_subscription_applies_to_household({ householdName: data.householdName })}
 				</p>
 			</div>
 		</div>

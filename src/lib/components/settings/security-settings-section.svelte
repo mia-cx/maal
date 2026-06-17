@@ -37,7 +37,11 @@
 		<div class="flex items-center justify-between gap-4">
 			<div>{m.settings_two_factor_authentication()}</div>
 			<Button variant="outline" disabled={mfaSetupBusy} onclick={startMfaSetup}>
-				{mfaSetupBusy ? 'Starting…' : mfaFactors.length ? 'Replace' : 'Set up'}
+				{mfaSetupBusy
+					? m.settings_starting()
+					: mfaFactors.length
+						? m.settings_replace()
+						: m.settings_set_up()}
 			</Button>
 		</div>
 		{#if mfaFactorsBusy}
@@ -58,7 +62,7 @@
 							disabled={deletingMfaFactorId === factor.id}
 							onclick={() => confirmDeleteMfaFactor(factor)}
 						>
-							{deletingMfaFactorId === factor.id ? 'Removing…' : 'Remove'}
+							{deletingMfaFactorId === factor.id ? m.settings_removing() : m.settings_remove()}
 						</Button>
 					</li>
 				{/each}
