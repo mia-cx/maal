@@ -12,13 +12,9 @@
 	let unsubscribeActiveHousehold: (() => void) | null = null;
 
 	$effect(() => {
-		void Promise.all([Promise.resolve(data.meals), Promise.resolve(data.householdMembers)]).then(
-			([resolvedMeals, resolvedMembers]) => {
-				meals = resolvedMeals ?? [];
-				householdMembers = resolvedMembers ?? [];
-				setCachedPlanRouteData(data.activeHouseholdId, { meals, householdMembers });
-			}
-		);
+		meals = data.meals ?? [];
+		householdMembers = data.householdMembers ?? [];
+		setCachedPlanRouteData(data.activeHouseholdId, { meals, householdMembers });
 	});
 
 	onMount(() => {

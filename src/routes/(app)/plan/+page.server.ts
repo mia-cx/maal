@@ -30,7 +30,7 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 	const initialDate = new Date();
 	const initialStartDate = dateKey(addDays(initialDate, -7));
 	const initialEndDate = dateKey(addDays(initialDate, 14));
-	const householdMembers = listHouseholdMembers(platform, householdId);
+	const householdMembersPromise = listHouseholdMembers(platform, householdId);
 	const profileRows = await db
 		.select({
 			defaultPlannedYield: households.defaultPlannedYield,
@@ -48,6 +48,16 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 		locale: householdProfile?.locale ?? 'en-US'
 	});
 	const unitPreferences = taxonomyPreferences.unitPreferences;
+	const [householdMembers, meals] = await Promise.all([
+		householdMembersPromise,
+		loadMealPlanMeals(db, {
+			workosUserId: session.user.id,
+			householdId,
+			startDate: initialStartDate,
+			endDate: initialEndDate,
+			unitPreferences
+		})
+	]);
 	return {
 		recipes: [],
 		defaultMealServings,
@@ -55,12 +65,6 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 		householdMembers,
 		unitPreferences,
 		initialMealRange: { start: initialStartDate, end: initialEndDate },
-		meals: loadMealPlanMeals(db, {
-			workosUserId: session.user.id,
-			householdId,
-			startDate: initialStartDate,
-			endDate: initialEndDate,
-			unitPreferences
-		})
+		meals
 	};
 };
