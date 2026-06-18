@@ -12,7 +12,7 @@ Recipe creation/import currently wraps the initial recipe write and sidecar writ
 
 ## TODOs
 - [x] Add a focused regression test and refactor `POST /menu/recipes` create writes out of the failing D1 transaction path.
-- [ ] Run focused route tests and type checks, then record final validation.
+- [x] Run focused route tests and type checks, then record final validation.
 
 ## Notes
 - Issue #46 reports Drizzle/D1 failing on `begin` in `src/routes/(app)/menu/recipes/+server.ts` line ~848.
@@ -21,3 +21,4 @@ Recipe creation/import currently wraps the initial recipe write and sidecar writ
 - Root cause: the POST create path used Drizzle's interactive `db.transaction`, which issues `BEGIN`; Cloudflare D1 rejects that path in local/dev worker execution, so the request fails before inserts.
 - Fix: keep the same write order but issue direct D1-compatible writes: insert the recipe row, replace ingredients, replace instructions, then save sidecars.
 - Focused validation: `pnpm vitest run 'src/routes/(app)/menu/recipes/server.test.ts'` — passed.
+- Final validation: `pnpm vitest run 'src/routes/(app)/menu/recipes/server.test.ts' && pnpm check` — passed; `svelte-check found 0 errors and 0 warnings`.
