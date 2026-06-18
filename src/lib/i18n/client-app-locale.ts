@@ -1,6 +1,6 @@
 import { browser } from '$app/environment';
 import { authenticatedAppPathUsesHouseholdLocale } from '$lib/i18n/app-locale';
-import { getLocale, overwriteGetLocale, type Locale } from '$lib/paraglide/runtime';
+import { baseLocale, getLocale, overwriteGetLocale, type Locale } from '$lib/paraglide/runtime';
 
 const generatedGetLocale = getLocale;
 let appLocale: Locale | null = null;
@@ -12,9 +12,10 @@ export const setClientAppLocale = (locale: Locale | null): void => {
 	if (installed) return;
 	installed = true;
 	overwriteGetLocale(() => {
-		if (appLocale && authenticatedAppPathUsesHouseholdLocale(window.location.pathname)) {
-			return appLocale;
+		if (!authenticatedAppPathUsesHouseholdLocale(window.location.pathname)) {
+			return generatedGetLocale();
 		}
-		return generatedGetLocale();
+
+		return appLocale ?? baseLocale;
 	});
 };

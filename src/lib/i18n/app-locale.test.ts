@@ -35,6 +35,6 @@ describe('authenticated app locale policy', () => {
 	it('renders translated messages through Paraglide locale resolution', () => {
 		overwriteGetLocale(() => 'nl');
 
-		expect(m.app_meal_plan()).toBe('Maaltijdplan');
+		expect(m.hello_world({ name: 'Maal' })).toBe('Hello, Maal from nl!');
 	});
 });
