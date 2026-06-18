@@ -235,18 +235,16 @@ export const updateHouseholdMeal = async (input: {
 			: meal.patch.plannedCookUserId;
 	await validateCook(input.platform, meal.householdId, plannedCookWorkosUserId);
 	const updatedAt = new Date().toISOString();
-	await db.transaction(async (tx) => {
-		await tx
-			.update(householdMeals)
-			.set(mealUpdatePayload(meal.patch, existingMeal, plannedCookWorkosUserId, updatedAt))
-			.where(eq(householdMeals.id, existingMeal.id));
-		if (meal.patch.ingredients !== undefined) {
-			await replaceMealIngredientsFromLines(tx, existingMeal.id, meal.patch.ingredients);
-		}
-		if (meal.patch.instructions !== undefined) {
-			await replaceMealInstructionsFromLines(tx, existingMeal.id, meal.patch.instructions);
-		}
-	});
+	await db
+		.update(householdMeals)
+		.set(mealUpdatePayload(meal.patch, existingMeal, plannedCookWorkosUserId, updatedAt))
+		.where(eq(householdMeals.id, existingMeal.id));
+	if (meal.patch.ingredients !== undefined) {
+		await replaceMealIngredientsFromLines(db, existingMeal.id, meal.patch.ingredients);
+	}
+	if (meal.patch.instructions !== undefined) {
+		await replaceMealInstructionsFromLines(db, existingMeal.id, meal.patch.instructions);
+	}
 	return getHouseholdMeal({
 		db,
 		workosUserId: meal.workosUserId,

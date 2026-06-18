@@ -47,10 +47,15 @@ export const displayIngredient = (
 		item,
 		ingredient.baseFoodId
 	);
+	const text = [amount, item].filter(Boolean).join(' ');
+	const originalAmount =
+		!amount && item && ingredient.originalText.endsWith(item)
+			? ingredient.originalText.slice(0, -item.length).trim()
+			: '';
 	return {
 		amount,
 		item,
-		text: [amount, item].filter(Boolean).join(' ') || ingredient.originalText
+		text: originalAmount ? ingredient.originalText : text || ingredient.originalText
 	};
 };
 

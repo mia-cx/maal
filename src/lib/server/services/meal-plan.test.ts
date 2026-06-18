@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const countActiveHouseholdMembers = vi.fn();
 const listHouseholdMembers = vi.fn();
@@ -22,16 +22,27 @@ vi.mock('$lib/server/taxonomy/household-preferences', () => ({
 	loadHouseholdUnitPreferences
 }));
 
-const { createHouseholdMeal } = await import('./meal-plan');
+const { createHouseholdMeal, updateHouseholdMeal } = await import('./meal-plan');
 
-const createDb = () => ({
+const createDb = (existingMeal?: Record<string, unknown>) => ({
 	insert: vi.fn(() => ({ values: vi.fn().mockResolvedValue(undefined) })),
+	update: vi.fn(() => ({
+		set: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }))
+	})),
+	select: vi.fn(() => ({
+		from: vi.fn(() => ({
+			where: vi.fn(() => ({ get: vi.fn().mockResolvedValue(existingMeal) }))
+		}))
+	})),
 	transaction: vi.fn(() => {
 		throw new Error('Failed query: begin');
 	})
 });
 
 describe('meal plan service', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
 	it('creates custom meals without entering the D1 transaction begin path', async () => {
 		const db = createDb();
 		countActiveHouseholdMembers.mockResolvedValue(2);
@@ -64,5 +75,42 @@ describe('meal plan service', () => {
 		expect(replaceMealInstructionsFromLines).toHaveBeenCalledWith(db, expect.any(String), [
 			'Simmer'
 		]);
+	});
+
+	it('updates meals without entering the D1 transaction begin path', async () => {
+		const db = createDb({
+			id: 'meal_1',
+			householdId: 'household_1',
+			plannedCookWorkosUserId: 'user_1',
+			plannedYield: 2,
+			status: 'planned'
+		});
+		listHouseholdMembers.mockResolvedValue([{ userId: 'user_1' }]);
+		loadHouseholdUnitPreferences.mockResolvedValue({ system: 'metric' });
+		loadMealPlanMeals.mockResolvedValue([
+			{
+				id: 'meal_1',
+				title: 'Soup',
+				householdId: 'household_1',
+				plannedCookUserId: 'user_1'
+			}
+		]);
+
+		await expect(
+			updateHouseholdMeal({
+				platform: undefined,
+				db: db as never,
+				meal: {
+					householdId: 'household_1',
+					workosUserId: 'user_1',
+					mealId: 'meal_1',
+					patch: { servingsPlanned: 4, ingredients: ['4 cups water'] }
+				}
+			})
+		).resolves.toMatchObject({ id: 'meal_1' });
+
+		expect(db.transaction).not.toHaveBeenCalled();
+		expect(db.update).toHaveBeenCalledOnce();
+		expect(replaceMealIngredientsFromLines).toHaveBeenCalledWith(db, 'meal_1', ['4 cups water']);
 	});
 });

@@ -55,4 +55,16 @@ describe('taxonomy display helpers', () => {
 			).text
 		).toBe('a knob of butter');
 	});
+
+	it('keeps source amounts visible when taxonomy base amounts are unavailable', () => {
+		expect(
+			displayIngredient({
+				baseQuantity: null,
+				baseUnitId: null,
+				baseFoodId: null,
+				sourceFoodLabel: 'gerookte-paprikapoeder',
+				originalText: '2 el gerookte-paprikapoeder'
+			}).text
+		).toBe('2 el gerookte-paprikapoeder');
+	});
 });
