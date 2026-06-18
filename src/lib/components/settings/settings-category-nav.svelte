@@ -33,7 +33,7 @@
 						'bg-background text-foreground shadow-sm ring-1 ring-border'
 				)}
 				aria-current={activeCategory === category.id ? 'page' : undefined}
-				title={category.disabled ? 'Coming soon' : undefined}
+				title={category.disabled ? m.settings_coming_soon() : undefined}
 				onclick={() => onchoose(category)}
 			>
 				<category.icon class="size-3.5 shrink-0" />

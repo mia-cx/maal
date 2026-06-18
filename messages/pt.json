@@ -429,5 +429,18 @@
 	"household_locale_spanish_spain": "Spanish (Spain)",
 	"household_locale_spanish_mexico": "Spanish (Mexico)",
 	"household_locale_italian_italy": "Italian (Italy)",
-	"household_locale_portuguese_brazil": "Portuguese (Brazil)"
+	"household_locale_portuguese_brazil": "Portuguese (Brazil)",
+	"settings_coming_soon": "Coming soon",
+	"menu_could_not_load_menu_try_again": "We could not load your menu. Try again in a moment.",
+	"billing_current_household": "Current household",
+	"household_role_manager": "Manager",
+	"household_role_adult": "Adult",
+	"household_role_child": "Child",
+	"household_no_expiry": "No expiry",
+	"household_invite_url_copied": "Invite URL copied.",
+	"household_invite_url_copy_failed": "Could not copy invite URL. Copy it manually.",
+	"household_invite_uses_count": "{count} used",
+	"household_invite_uses_limit": "{count}/{max} used",
+	"household_invite_expiry_option": "{days} {unit}",
+	"household_no_household_found": "No household found."
 }

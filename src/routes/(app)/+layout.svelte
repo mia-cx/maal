@@ -3,6 +3,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import { navigating, page } from '$app/state';
 	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
+	import { setClientAppLocale } from '$lib/i18n/client-app-locale';
 	import { activeNavItemForPath } from '$lib/components/dashboard/active-nav';
 	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
 	import type { DashboardNavItem } from '$lib/components/dashboard/dashboard-nav';
@@ -92,6 +93,10 @@
 		}
 
 		householdStateHydrated = true;
+	});
+
+	$effect(() => {
+		setClientAppLocale(data.householdParaglideLocale);
 	});
 
 	$effect(() => {

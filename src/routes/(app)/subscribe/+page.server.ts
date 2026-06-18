@@ -40,7 +40,7 @@ export const load: PageServerLoad = async ({ cookies, locals, platform, url }) =
 	}
 	const householdName =
 		accessibleHouseholds.find((household) => household.id === householdId)?.name ??
-		'Current household';
+		m.billing_current_household();
 
 	const stripe = createStripeClient(platform);
 	const productId = getStripeProductId(platform);

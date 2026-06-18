@@ -3,9 +3,7 @@
 	import { page } from '$app/state';
 	import * as Button from '$lib/components/ui/button';
 
-	const message = $derived(
-		page.error?.message ?? 'We could not load your menu. Try again in a moment.'
-	);
+	const message = $derived(page.error?.message ?? m.menu_could_not_load_menu_try_again());
 </script>
 
 <svelte:head>

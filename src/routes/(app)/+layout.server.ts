@@ -9,6 +9,7 @@ import {
 import { toPublicSession } from '$lib/server/auth/session';
 import { hasHouseholdBillingGrant } from '$lib/server/domains/billing';
 import { loadFreshBillingStatus } from '$lib/server/domains/billing';
+import { loadHouseholdParaglideLocale } from '$lib/server/i18n/household-locale';
 
 export const load: LayoutServerLoad = async ({ cookies, locals, platform, url }) => {
 	const session = locals.session;
@@ -30,6 +31,10 @@ export const load: LayoutServerLoad = async ({ cookies, locals, platform, url })
 				householdIds: userHouseholds.map((household) => household.id)
 			})
 		: { householdId: null };
+
+	const householdParaglideLocale = session
+		? await loadHouseholdParaglideLocale({ platform, householdId: activeHouseholdId })
+		: null;
 
 	let subscriptionLock = null;
 	if (session && activeHouseholdId && platform?.env.DB) {
@@ -53,6 +58,7 @@ export const load: LayoutServerLoad = async ({ cookies, locals, platform, url })
 		session: toPublicSession(session),
 		households: userHouseholds,
 		activeHouseholdId,
+		householdParaglideLocale,
 		subscriptionLock
 	};
 };

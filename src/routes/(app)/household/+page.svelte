@@ -300,30 +300,33 @@
 		})
 	);
 	const appliancesChanged = $derived(changedAppliances.length > 0);
-	const roleOptions = [
-		{ value: 'admin', label: 'Manager' },
-		{ value: 'member', label: 'Adult' },
-		{ value: 'child', label: 'Child' }
-	] as const;
+	const roleOptions = $derived([
+		{ value: 'admin', label: m.household_role_manager() },
+		{ value: 'member', label: m.household_role_adult() },
+		{ value: 'child', label: m.household_role_child() }
+	] as const);
 	const roleLabel = (role: string): string =>
 		roleOptions.find((option) => option.value === role)?.label ?? role;
 	const inviteExpiryOptions = inviteExpiryDays.map((days) => ({
 		value: String(days),
-		label: `${days} ${days === 1 ? 'day' : 'days'}`
+		label: m.household_invite_expiry_option({
+			days: String(days),
+			unit: days === 1 ? m.household_day() : m.household_days()
+		})
 	}));
 	const formatInviteExpiry = (expiresAt: string | null) =>
-		expiresAt ? new Date(expiresAt).toLocaleDateString() : 'No expiry';
+		expiresAt ? new Date(expiresAt).toLocaleDateString() : m.household_no_expiry();
 	const inviteUsageLabel = (invite: { usesCount: number; maxUses: number | null }) =>
 		invite.maxUses === null
-			? `${invite.usesCount} used`
-			: `${invite.usesCount}/${invite.maxUses} used`;
+			? m.household_invite_uses_count({ count: invite.usesCount })
+			: m.household_invite_uses_limit({ count: invite.usesCount, max: invite.maxUses });
 	const copyInviteUrl = async (url: string) => {
 		try {
 			await navigator.clipboard.writeText(url);
-			inviteCopyMessage = 'Invite URL copied.';
+			inviteCopyMessage = m.household_invite_url_copied();
 		} catch (cause) {
 			console.error('Failed to copy invite URL', cause);
-			inviteCopyMessage = 'Could not copy invite URL. Copy it manually.';
+			inviteCopyMessage = m.household_invite_url_copy_failed();
 		}
 	};
 
