@@ -273,7 +273,13 @@ export const loadEffectiveTaxonomyPreferences = async (
 
 	const defaultUnitAliasesByCanonical = bestByKey(
 		globalUnitAliases
-			.map((alias) => ({ ...alias, scopeRank: alias.defaultForLocale ? 0 : 1 }))
+			.map((alias) => ({
+				...alias,
+				// Locale defaults mean “use this locale's labels first”. Some locales have
+				// aliases but no explicit default row yet, so rank locale before the
+				// fallback locale's default alias (e.g. nl-NL `teen` before en-US `clove`).
+				scopeRank: (ranks.get(alias.locale) ?? 100) * 2 + (alias.defaultForLocale ? 0 : 1)
+			}))
 			.filter((alias) => Boolean(unitIdToIngredientUnit[alias.unitId])),
 		(alias) => unitIdToIngredientUnit[alias.unitId],
 		ranks
