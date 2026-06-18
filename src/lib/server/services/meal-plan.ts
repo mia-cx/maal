@@ -157,37 +157,33 @@ export const createHouseholdMeal = async (input: {
 	if (meal.userRecipeId && !recipe) throw new DomainError('recipe_not_found', 'Recipe not found.');
 
 	const householdMealId = crypto.randomUUID();
-	await db.transaction(async (tx) => {
-		await tx.insert(householdMeals).values({
-			id: householdMealId,
-			householdId: meal.householdId,
-			title: recipe?.title ?? meal.customMeal?.title?.trim() ?? 'New meal',
-			description: recipe?.description ?? meal.customMeal?.description ?? null,
-			imageUrl: recipe?.imageUrl ?? meal.customMeal?.imageUrl ?? null,
-			prepTimeMinutes: recipe?.prepTimeMinutes ?? meal.customMeal?.prepTimeMinutes ?? null,
-			cookTimeMinutes: recipe?.cookTimeMinutes ?? meal.customMeal?.cookTimeMinutes ?? null,
-			yield: recipe?.yield ?? meal.customMeal?.yield ?? servingsDefault,
-			plannedYield: normalizeServingsPlanned(
-				{ servingsPlanned: meal.servingsPlanned },
-				servingsDefault
-			),
-			plannedCookWorkosUserId,
-			date: meal.date ?? null,
-			time: meal.time ?? null,
-			sortOrder: meal.sortOrder ?? null,
-			status: 'planned'
-		});
-
-		if (recipe) {
-			await tx
-				.insert(householdMealUserRecipes)
-				.values({ householdMealId, userRecipeId: recipe.id });
-			await copyRecipeSidecarsToMeal(tx, recipe.id, householdMealId);
-		} else {
-			await replaceMealIngredientsFromLines(tx, householdMealId, meal.customMeal?.ingredients);
-			await replaceMealInstructionsFromLines(tx, householdMealId, meal.customMeal?.instructions);
-		}
+	// Cloudflare D1 rejects Drizzle's interactive transaction `begin` path in local/dev
+	// and worker runtimes. Keep meal creation D1-compatible by issuing ordered writes
+	// directly: parent meal first, then link/sidecar rows that depend on it.
+	await db.insert(householdMeals).values({
+		id: householdMealId,
+		householdId: meal.householdId,
+		title: recipe?.title ?? meal.customMeal?.title?.trim() ?? 'New meal',
+		description: recipe?.description ?? meal.customMeal?.description ?? null,
+		imageUrl: recipe?.imageUrl ?? meal.customMeal?.imageUrl ?? null,
+		prepTimeMinutes: recipe?.prepTimeMinutes ?? meal.customMeal?.prepTimeMinutes ?? null,
+		cookTimeMinutes: recipe?.cookTimeMinutes ?? meal.customMeal?.cookTimeMinutes ?? null,
+		yield: recipe?.yield ?? meal.customMeal?.yield ?? servingsDefault,
+		plannedYield: normalizeServingsPlanned({ servingsPlanned: meal.servingsPlanned }, servingsDefault),
+		plannedCookWorkosUserId,
+		date: meal.date ?? null,
+		time: meal.time ?? null,
+		sortOrder: meal.sortOrder ?? null,
+		status: 'planned'
 	});
+
+	if (recipe) {
+		await db.insert(householdMealUserRecipes).values({ householdMealId, userRecipeId: recipe.id });
+		await copyRecipeSidecarsToMeal(db, recipe.id, householdMealId);
+	} else {
+		await replaceMealIngredientsFromLines(db, householdMealId, meal.customMeal?.ingredients);
+		await replaceMealInstructionsFromLines(db, householdMealId, meal.customMeal?.instructions);
+	}
 
 	return getHouseholdMeal({
 		db,

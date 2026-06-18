@@ -12,6 +12,7 @@ Recipe creation/import currently wraps the initial recipe write and sidecar writ
 
 ## TODOs
 - [x] Add a focused regression test and refactor `POST /menu/recipes` create writes out of the failing D1 transaction path.
+- [x] Refactor `POST /plan/meals` creation out of the same failing D1 transaction path after import succeeded and scheduling exposed the next `begin` failure.
 - [x] Run focused route tests and type checks, then record final validation.
 
 ## Notes
@@ -22,3 +23,6 @@ Recipe creation/import currently wraps the initial recipe write and sidecar writ
 - Fix: keep the same write order but issue direct D1-compatible writes: insert the recipe row, replace ingredients, replace instructions, then save sidecars.
 - Focused validation: `pnpm vitest run 'src/routes/(app)/menu/recipes/server.test.ts'` — passed.
 - Final validation: `pnpm vitest run 'src/routes/(app)/menu/recipes/server.test.ts' && pnpm check` — passed; `svelte-check found 0 errors and 0 warnings`.
+- Follow-up user repro after import succeeded: `POST /plan/meals` failed at `createHouseholdMeal` line ~160 with the same Drizzle/D1 `Failed query: begin` error.
+- Added `src/lib/server/services/meal-plan.test.ts` to reproduce the scheduling `begin` failure and moved meal creation to ordered D1-compatible writes: insert meal first, then recipe link/sidecars or custom meal sidecars.
+- Focused validation: `pnpm vitest run src/lib/server/services/meal-plan.test.ts 'src/routes/(app)/menu/recipes/server.test.ts'` — passed.
