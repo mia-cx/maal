@@ -845,48 +845,47 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	const recipeInstructions = body.recipe?.instructions ?? instructionsFromRecipe(recipeJson);
 	const recipeId = crypto.randomUUID();
 
-	await db.transaction(async (tx) => {
-		await tx.insert(userRecipes).values({
-			id: recipeId,
-			workosUserId: session.user.id,
-			savedFromHouseholdId: householdId,
-			title:
-				firstString(recipeJson.name, recipeJson.headline) ?? body.recipe?.title ?? fallbackTitle,
-			description: stringValue(recipeJson.description) ?? body.recipe?.description ?? null,
-			imageUrl: firstString(recipeJson.image) ?? body.recipe?.image ?? null,
-			prepTimeMinutes: body.recipe?.prepTimeMinutes ?? durationMinutes(recipeJson.prepTime) ?? null,
-			cookTimeMinutes: body.recipe?.cookTimeMinutes ?? cookMinutesFromRecipe(recipeJson) ?? null,
-			totalTimeMinutes:
-				body.recipe?.totalTimeMinutes ?? durationMinutes(recipeJson.totalTime) ?? null,
-			yield: body.recipe?.yield ?? firstNumber(recipeJson.recipeYield, recipeJson.yield) ?? null,
-			sourceYieldText: firstString(recipeJson.recipeYield, recipeJson.yield) ?? null,
-			sourceDatePublished: stringValue(recipeJson.datePublished) ?? null,
-			sourceDateModified: stringValue(recipeJson.dateModified) ?? null,
-			sourceLanguage: stringValue(recipeJson.inLanguage) ?? null,
-			sourceUrl: imported?.sourceUrl ?? body.recipe?.sourceUrl ?? null,
-			sourceSiteName: imported?.sourceSiteName ?? body.recipe?.sourceSiteName ?? null,
-			sourceAuthorName: imported?.sourceAuthorName ?? body.recipe?.sourceAuthorName ?? null,
-			sourcePublisherName:
-				imported?.sourcePublisherName ?? body.recipe?.sourcePublisherName ?? null,
-			sourceIsBasedOnUrl: imported?.sourceIsBasedOnUrl ?? body.recipe?.sourceIsBasedOnUrl ?? null,
-			sourceRatingValue: ratingValue(recipeJson.aggregateRating, 'ratingValue') ?? null,
-			sourceRatingCount: ratingValue(recipeJson.aggregateRating, 'ratingCount') ?? null,
-			sourceReviewCount: ratingValue(recipeJson.aggregateRating, 'reviewCount') ?? null,
-			sourceClaimedMinutes:
-				body.recipe?.cookTimeMinutes ?? cookMinutesFromRecipe(recipeJson) ?? null,
-			parseConfidence: imported ? 1 : 0.4,
-			ingredientConfidence: imported ? 1 : body.recipe ? 1 : 0,
-			instructionConfidence: imported ? 1 : body.recipe ? 1 : 0
-		});
-
-		await replaceRecipeIngredients(
-			tx,
-			recipeId,
-			body.recipe?.ingredients ?? ingredientsFromRecipe(recipeJson, unitAliasMap)
-		);
-		await replaceRecipeInstructions(tx, recipeId, recipeInstructions);
-		await saveRecipeSidecars(tx, recipeId, recipeJson);
+	// Cloudflare D1 rejects Drizzle's interactive transaction `begin` path in local/dev
+	// and worker runtimes. Keep this create path D1-compatible by issuing the same writes
+	// directly; the recipe row is inserted first so dependent sidecars keep FK order.
+	await db.insert(userRecipes).values({
+		id: recipeId,
+		workosUserId: session.user.id,
+		savedFromHouseholdId: householdId,
+		title:
+			firstString(recipeJson.name, recipeJson.headline) ?? body.recipe?.title ?? fallbackTitle,
+		description: stringValue(recipeJson.description) ?? body.recipe?.description ?? null,
+		imageUrl: firstString(recipeJson.image) ?? body.recipe?.image ?? null,
+		prepTimeMinutes: body.recipe?.prepTimeMinutes ?? durationMinutes(recipeJson.prepTime) ?? null,
+		cookTimeMinutes: body.recipe?.cookTimeMinutes ?? cookMinutesFromRecipe(recipeJson) ?? null,
+		totalTimeMinutes: body.recipe?.totalTimeMinutes ?? durationMinutes(recipeJson.totalTime) ?? null,
+		yield: body.recipe?.yield ?? firstNumber(recipeJson.recipeYield, recipeJson.yield) ?? null,
+		sourceYieldText: firstString(recipeJson.recipeYield, recipeJson.yield) ?? null,
+		sourceDatePublished: stringValue(recipeJson.datePublished) ?? null,
+		sourceDateModified: stringValue(recipeJson.dateModified) ?? null,
+		sourceLanguage: stringValue(recipeJson.inLanguage) ?? null,
+		sourceUrl: imported?.sourceUrl ?? body.recipe?.sourceUrl ?? null,
+		sourceSiteName: imported?.sourceSiteName ?? body.recipe?.sourceSiteName ?? null,
+		sourceAuthorName: imported?.sourceAuthorName ?? body.recipe?.sourceAuthorName ?? null,
+		sourcePublisherName:
+			imported?.sourcePublisherName ?? body.recipe?.sourcePublisherName ?? null,
+		sourceIsBasedOnUrl: imported?.sourceIsBasedOnUrl ?? body.recipe?.sourceIsBasedOnUrl ?? null,
+		sourceRatingValue: ratingValue(recipeJson.aggregateRating, 'ratingValue') ?? null,
+		sourceRatingCount: ratingValue(recipeJson.aggregateRating, 'ratingCount') ?? null,
+		sourceReviewCount: ratingValue(recipeJson.aggregateRating, 'reviewCount') ?? null,
+		sourceClaimedMinutes: body.recipe?.cookTimeMinutes ?? cookMinutesFromRecipe(recipeJson) ?? null,
+		parseConfidence: imported ? 1 : 0.4,
+		ingredientConfidence: imported ? 1 : body.recipe ? 1 : 0,
+		instructionConfidence: imported ? 1 : body.recipe ? 1 : 0
 	});
+
+	await replaceRecipeIngredients(
+		db,
+		recipeId,
+		body.recipe?.ingredients ?? ingredientsFromRecipe(recipeJson, unitAliasMap)
+	);
+	await replaceRecipeInstructions(db, recipeId, recipeInstructions);
+	await saveRecipeSidecars(db, recipeId, recipeJson);
 
 	const recipe = await loadSingleMenuRecipe(
 		db,
