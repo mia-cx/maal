@@ -17,6 +17,10 @@ export const commitParaglideLocaleCookie = (cookies: Cookies, locale: Locale, ur
 	cookies.set(cookieName, locale, localeCookieOptions(url));
 };
 
+export const clearParaglideLocaleCookie = (cookies: Cookies, url: URL): void => {
+	cookies.delete(cookieName, { ...localeCookieOptions(url), maxAge: undefined });
+};
+
 export const loadHouseholdParaglideLocale = async ({
 	platform,
 	householdId

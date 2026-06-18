@@ -251,7 +251,8 @@
 							onpointerenter={() => (activeIndex = index)}
 							onclick={() => chooseOption(option)}
 						>
-							<span class="min-w-0 truncate">{m.app_new_recipe()} {option.title}</span>
+							<span class="min-w-0 truncate">{m.app_new_recipe_title({ title: option.title })}</span
+							>
 							<span class="shrink-0 text-xs text-muted-foreground">{m.app_create()}</span>
 						</button>
 					{:else}

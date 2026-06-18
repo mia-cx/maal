@@ -54,7 +54,9 @@
 		<div class="grid gap-2 text-xs">
 			<div class="flex items-center justify-between gap-3">
 				<span class={accountEmailVerified ? 'text-meal-load-low' : 'text-muted-foreground'}>
-					{accountEmailVerified ? 'Email verified' : 'Verify this email to save'}
+					{accountEmailVerified
+						? m.settings_email_verified()
+						: m.settings_verify_this_email_to_save()}
 				</span>
 				{#if emailVerificationRequired}
 					<Button
@@ -63,7 +65,7 @@
 						disabled={emailVerificationBusy || !normalizedAccountEmail}
 						onclick={sendVerificationEmail}
 					>
-						{emailVerificationBusy ? 'Sending…' : 'Send code'}
+						{emailVerificationBusy ? m.settings_sending() : m.settings_send_code()}
 					</Button>
 				{/if}
 			</div>
@@ -84,7 +86,9 @@
 		</div>
 	{/if}
 	<div class="flex items-center gap-3 pt-1">
-		<Button type="submit" disabled={!accountCanSave}>{accountSaving ? 'Saving…' : 'Save'}</Button>
+		<Button type="submit" disabled={!accountCanSave}
+			>{accountSaving ? m.settings_saving() : m.settings_save()}</Button
+		>
 		{#if accountMessage}<span class="text-xs text-muted-foreground">{accountMessage}</span>{/if}
 		{#if accountError}<span class="text-xs text-destructive">{accountError}</span>{/if}
 	</div>

@@ -4,6 +4,7 @@ import { cookieName, getTextDirection } from '$lib/paraglide/runtime';
 import { paraglideMiddleware } from '$lib/paraglide/server';
 import { authenticatedAppPathUsesHouseholdLocale } from '$lib/i18n/app-locale';
 import {
+	clearParaglideLocaleCookie,
 	commitParaglideLocaleCookie,
 	loadHouseholdParaglideLocale
 } from '$lib/server/i18n/household-locale';
@@ -107,7 +108,7 @@ const handleSubscriptionGate: Handle = async ({ event, resolve }) => {
 	redirect(303, '/subscribe');
 };
 
-const requestWithCookie = (request: Request, name: string, value: string): Request => {
+const requestWithoutCookie = (request: Request, name: string): Request => {
 	const headers = new Headers(request.headers);
 	const cookies =
 		headers
@@ -115,8 +116,19 @@ const requestWithCookie = (request: Request, name: string, value: string): Reque
 			?.split(';')
 			.map((cookie) => cookie.trim())
 			.filter((cookie) => cookie && !cookie.startsWith(`${name}=`)) ?? [];
-	headers.set('cookie', [...cookies, `${name}=${encodeURIComponent(value)}`].join('; '));
+	headers.set('cookie', cookies.join('; '));
 	return new Request(request, { headers });
+};
+
+const requestWithCookie = (request: Request, name: string, value: string): Request => {
+	const requestWithoutExistingCookie = requestWithoutCookie(request, name);
+	const headers = new Headers(requestWithoutExistingCookie.headers);
+	const cookieHeader = headers.get('cookie');
+	headers.set(
+		'cookie',
+		[cookieHeader, `${name}=${encodeURIComponent(value)}`].filter(Boolean).join('; ')
+	);
+	return new Request(requestWithoutExistingCookie, { headers });
 };
 
 const handleParaglide: Handle = async ({ event, resolve }) => {
@@ -134,6 +146,9 @@ const handleParaglide: Handle = async ({ event, resolve }) => {
 		if (householdLocale) {
 			commitParaglideLocaleCookie(event.cookies, householdLocale, event.url);
 			event.request = requestWithCookie(event.request, cookieName, householdLocale);
+		} else {
+			clearParaglideLocaleCookie(event.cookies, event.url);
+			event.request = requestWithoutCookie(event.request, cookieName);
 		}
 	}
 

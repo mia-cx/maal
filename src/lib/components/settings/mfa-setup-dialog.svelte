@@ -58,7 +58,7 @@
 					<VerificationCodeInput
 						length={verificationCodeMinLength}
 						bind:value={mfaCode}
-						label="Authenticator code"
+						label={m.settings_authenticator_code()}
 						class=""
 					/>
 				</div>

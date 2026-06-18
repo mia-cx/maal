@@ -46,7 +46,7 @@
 	data-sveltekit-preload-data="hover"
 >
 	<Sidebar.Header>
-		<TeamSwitcher {households} {activeHouseholdId} label="Households" />
+		<TeamSwitcher {households} {activeHouseholdId} label={m.settings_households()} />
 	</Sidebar.Header>
 
 	<Sidebar.Content>
@@ -59,7 +59,7 @@
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton
 							isActive={activeNav === 'meal-plan'}
-							tooltipContent="Meal Plan"
+							tooltipContent={m.app_meal_plan()}
 							class="h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
 						>
 							{#snippet child({ props })}
@@ -73,7 +73,7 @@
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton
 							isActive={activeNav === 'my-menu'}
-							tooltipContent="My Menu"
+							tooltipContent={m.app_my_menu()}
 							class="h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
 						>
 							{#snippet child({ props })}
@@ -88,7 +88,7 @@
 						<Sidebar.MenuButton
 							isActive={activeNav === 'pantry'}
 							aria-disabled={!features.pantry}
-							tooltipContent={features.pantry ? 'Pantry' : 'Pantry preview unavailable'}
+							tooltipContent={features.pantry ? m.app_pantry() : m.app_pantry_preview_unavailable()}
 							class={`h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2! ${features.pantry ? '' : 'text-muted-foreground'}`}
 						>
 							{#snippet child({ props })}
@@ -111,8 +111,8 @@
 							isActive={activeNav === 'grocery-rollup'}
 							aria-disabled={!features.groceryRollup}
 							tooltipContent={features.groceryRollup
-								? 'Grocery rollup'
-								: 'Grocery rollup preview unavailable'}
+								? m.app_grocery_rollup()
+								: m.app_grocery_rollup_preview_unavailable()}
 							class={`h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2! ${features.groceryRollup ? '' : 'text-muted-foreground'}`}
 						>
 							{#snippet child({ props })}
@@ -133,7 +133,7 @@
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton
 							isActive={activeNav === 'household'}
-							tooltipContent="Household"
+							tooltipContent={m.app_household()}
 							class="h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
 						>
 							{#snippet child({ props })}

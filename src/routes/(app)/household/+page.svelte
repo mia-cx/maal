@@ -715,9 +715,7 @@
 				<div class="grid gap-1">
 					<h2 class="text-sm font-medium">{m.household_members()}</h2>
 					<p class="text-xs text-muted-foreground">
-						{m.household_manage_who_can_access()}
-						{currentView.household.name}
-						{m.household_and_what_role_new_invitees_receive()}
+						{m.household_manage_access_description({ householdName: currentView.household.name })}
 					</p>
 				</div>
 
