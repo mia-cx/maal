@@ -1,6 +1,7 @@
 import { applianceValues } from '$lib/domain/household/appliances';
 import { optionalStringFromForm } from '$lib/domain/household/form-parsing';
 import { getDb } from '$lib/server/db';
+import { d1Batch } from '$lib/server/db/d1-batch';
 import { householdAppliances } from '$lib/server/db/schema';
 
 export const updateHouseholdAppliancesFromForm = async ({
@@ -37,20 +38,23 @@ export const updateHouseholdAppliancesFromForm = async ({
 		parsedUpdates.push({ appliance, available, notes: notes.value });
 	}
 
-	for (const row of parsedUpdates) {
-		await db
-			.insert(householdAppliances)
-			.values({
-				householdId,
-				appliance: row.appliance,
-				available: row.available,
-				notes: row.notes
-			})
-			.onConflictDoUpdate({
-				target: [householdAppliances.householdId, householdAppliances.appliance],
-				set: { available: row.available, notes: row.notes, updatedAt: now }
-			});
-	}
+	await d1Batch(
+		database,
+		parsedUpdates.map((row) =>
+			db
+				.insert(householdAppliances)
+				.values({
+					householdId,
+					appliance: row.appliance,
+					available: row.available,
+					notes: row.notes
+				})
+				.onConflictDoUpdate({
+					target: [householdAppliances.householdId, householdAppliances.appliance],
+					set: { available: row.available, notes: row.notes, updatedAt: now }
+				})
+		)
+	);
 
 	return { ok: true, changedCount: parsedUpdates.length };
 };

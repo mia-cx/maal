@@ -3,6 +3,7 @@ import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { requireBillingAppContext } from '$lib/server/http/app-context';
 import { getDb } from '$lib/server/db';
+import { d1Batch, requireD1Database } from '$lib/server/db/d1-batch';
 import {
 	householdMeals,
 	householdMealUserRecipes,
@@ -907,16 +908,18 @@ export const PATCH: RequestHandler = async ({ cookies, locals, platform, request
 
 	const { recipeIds } = await readBulkBody(request);
 	const updatedAt = new Date().toISOString();
-	await db
-		.update(userRecipes)
-		.set({ deletedAt: null, updatedAt })
-		.where(
-			and(
-				eq(userRecipes.workosUserId, session.user.id),
-				inArray(userRecipes.id, recipeIds),
-				isNotNull(userRecipes.deletedAt)
+	await d1Batch(requireD1Database(platform), [
+		db
+			.update(userRecipes)
+			.set({ deletedAt: null, updatedAt })
+			.where(
+				and(
+					eq(userRecipes.workosUserId, session.user.id),
+					inArray(userRecipes.id, recipeIds),
+					isNotNull(userRecipes.deletedAt)
+				)
 			)
-		);
+	]);
 
 	const unitPreferences = await loadRecipeUnitPreferences(db, session.user.id, householdId);
 	const recipes = await loadMenuRecipes(db, session.user.id, householdId, {
@@ -962,9 +965,11 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 			);
 		const householdMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
 
-		await db
-			.delete(householdMealUserRecipes)
-			.where(inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds));
+		await d1Batch(requireD1Database(platform), [
+			db
+				.delete(householdMealUserRecipes)
+				.where(inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds))
+		]);
 
 		let mealIdsWithoutLinks: string[] = [];
 		if (householdMealIds.length) {
@@ -979,15 +984,17 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 			}
 		}
 
-		await db
-			.delete(userRecipes)
-			.where(
-				and(
-					eq(userRecipes.workosUserId, session.user.id),
-					inArray(userRecipes.id, existingRecipeIds),
-					isNotNull(userRecipes.deletedAt)
+		await d1Batch(requireD1Database(platform), [
+			db
+				.delete(userRecipes)
+				.where(
+					and(
+						eq(userRecipes.workosUserId, session.user.id),
+						inArray(userRecipes.id, existingRecipeIds),
+						isNotNull(userRecipes.deletedAt)
+					)
 				)
-			);
+		]);
 		return json({
 			deleted: true,
 			permanent: true,
@@ -1010,16 +1017,18 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 	if (!existingRecipeIds.length) error(404, { message: m.menu_recipes_not_found() });
 
 	const deletedAt = new Date().toISOString();
-	await db
-		.update(userRecipes)
-		.set({ deletedAt, updatedAt: deletedAt })
-		.where(
-			and(
-				eq(userRecipes.workosUserId, session.user.id),
-				inArray(userRecipes.id, existingRecipeIds),
-				isNull(userRecipes.deletedAt)
+	await d1Batch(requireD1Database(platform), [
+		db
+			.update(userRecipes)
+			.set({ deletedAt, updatedAt: deletedAt })
+			.where(
+				and(
+					eq(userRecipes.workosUserId, session.user.id),
+					inArray(userRecipes.id, existingRecipeIds),
+					isNull(userRecipes.deletedAt)
+				)
 			)
-		);
+	]);
 
 	return json({ deleted: true, recipeIds: existingRecipeIds, deletedAt });
 };

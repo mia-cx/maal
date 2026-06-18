@@ -15,6 +15,7 @@ Recipe creation/import currently wraps the initial recipe write and sidecar writ
 - [x] Refactor `POST /plan/meals` creation out of the same failing D1 transaction path after import succeeded and scheduling exposed the next `begin` failure.
 - [x] Refactor `PUT /plan/meals` updates out of the D1 transaction path and restore source amount/unit text on the meal sheet when taxonomy base amounts are unavailable.
 - [x] Remove remaining Drizzle `.transaction(...)` calls across app routes and server services because D1 rejects SQL `BEGIN`/`SAVEPOINT` in this runtime.
+- [x] Add a D1 batch helper that uses Drizzle-generated SQL for D1-native batched transactions where statements can be prepared up front.
 - [x] Run focused route tests and type checks, then record final validation.
 
 ## Notes
@@ -36,3 +37,7 @@ Recipe creation/import currently wraps the initial recipe write and sidecar writ
 - Swept all remaining Drizzle `.transaction(...)` calls from `src`: recipe restore/delete/edit routes, saved recipe service helpers, household settings/appliance/delete commands, meal check-ins, instruction event insertion, and taxonomy display override helpers now issue ordered D1-compatible writes directly.
 - Verification sweep: `rg -n "\\.transaction\\(" src -g '*.ts'` returns no production transaction calls; remaining `transaction` text is only regression tests, comments, and type aliases.
 - Validation after sweep: `pnpm vitest run src/lib/server/services/meal-plan.test.ts src/lib/taxonomy/display.test.ts 'src/routes/(app)/menu/recipes/server.test.ts'` — passed; `pnpm check` — passed.
+- Added `src/lib/server/db/d1-batch.ts`: converts Drizzle query builders via `.toSQL()` into `D1Database.prepare(sql).bind(...params)` statements and executes them with `database.batch(...)`.
+- Applied D1-native batches where statements are known up front: appliance settings upserts, bulk/single recipe restore, soft delete, and permanent-delete write phases.
+- Kept ordered Drizzle writes where flows need reads/results between writes or rely on reusable sidecar helpers; those still avoid Drizzle `.transaction(...)`.
+- Validation after D1 batch helper: `rg -n "d1Batch|requireD1Database|\\.transaction\\(" src -g '*.ts'` shows D1 batch usage and no `.transaction(...)`; `pnpm vitest run src/lib/server/services/meal-plan.test.ts src/lib/taxonomy/display.test.ts 'src/routes/(app)/menu/recipes/server.test.ts'` — passed; `pnpm check` — passed.
