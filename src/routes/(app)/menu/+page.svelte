@@ -16,13 +16,17 @@
 	let unsubscribeActiveHousehold: (() => void) | null = null;
 
 	$effect(() => {
-		recipes = data.recipes ?? [];
-		archivedRecipes = data.archivedRecipes ?? [];
-		nextRecipeOffset = data.nextRecipeOffset ?? null;
+		const routeRecipes = data.recipes ?? [];
+		const routeArchivedRecipes = data.archivedRecipes ?? [];
+		const routeNextRecipeOffset = data.nextRecipeOffset ?? null;
+
+		recipes = routeRecipes;
+		archivedRecipes = routeArchivedRecipes;
+		nextRecipeOffset = routeNextRecipeOffset;
 		setCachedMenuRouteData(data.activeHouseholdId, {
-			recipes,
-			archivedRecipes,
-			nextRecipeOffset
+			recipes: routeRecipes,
+			archivedRecipes: routeArchivedRecipes,
+			nextRecipeOffset: routeNextRecipeOffset
 		});
 	});
 

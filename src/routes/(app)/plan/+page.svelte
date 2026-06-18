@@ -13,9 +13,15 @@
 	let unsubscribeActiveHousehold: (() => void) | null = null;
 
 	$effect(() => {
-		meals = data.meals ?? [];
-		householdMembers = data.householdMembers ?? [];
-		setCachedPlanRouteData(data.activeHouseholdId, { meals, householdMembers });
+		const routeMeals = data.meals ?? [];
+		const routeHouseholdMembers = data.householdMembers ?? [];
+
+		meals = routeMeals;
+		householdMembers = routeHouseholdMembers;
+		setCachedPlanRouteData(data.activeHouseholdId, {
+			meals: routeMeals,
+			householdMembers: routeHouseholdMembers
+		});
 	});
 
 	onMount(() => {
