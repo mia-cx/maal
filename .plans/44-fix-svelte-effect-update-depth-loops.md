@@ -12,7 +12,7 @@ Fix route-cache `$effect` blocks that assign `$state` and then read the same sta
 - [ ] `pnpm check` passes.
 
 ## TODOs
-- [ ] Audit existing `$effect` blocks and identify confirmed self-invalidating read-after-write cases.
+- [x] Audit existing `$effect` blocks and identify confirmed self-invalidating read-after-write cases.
 - [ ] Fix `/plan` and `/menu` route-cache effects to cache non-reactive locals.
 - [ ] Add or document regression coverage for the route-cache effect class.
 - [ ] Run final validation and update this plan with results.
@@ -20,3 +20,4 @@ Fix route-cache `$effect` blocks that assign `$state` and then read the same sta
 ## Notes
 - Svelte MCP server is not configured in this Pi session (`mcp({ server: "svelte" })` returned not found), so documentation lookup was unavailable.
 - Initial issue/code read confirmed the reported `/plan` and `/menu` effects read state variables in the cache payload immediately after assigning them.
+- Audited all `rg '$effect' src` matches. Confirmed route-cache self-invalidating read-after-write cases only in `src/routes/(app)/plan/+page.svelte` and `src/routes/(app)/menu/+page.svelte`; other hits either read before write as guards, write in async callbacks/event handlers, or do not read the same state after assignment in the same effect.
