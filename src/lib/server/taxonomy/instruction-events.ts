@@ -98,8 +98,6 @@ type InsertInstructionEventsParams<TInstruction> = {
 	insert: (db: WritableDb, rows: ParsedInstructionEvent[]) => Promise<void>;
 };
 
-const hasTransaction = (db: WritableDb): db is Db => 'transaction' in db;
-
 const instructionEventKey = (event: ParsedInstructionEvent): string =>
 	[
 		event.instructionId,
@@ -139,12 +137,7 @@ const insertInstructionEvents = async <TInstruction>({
 		)
 	);
 	if (!rows.length) return;
-	const write = (targetDb: WritableDb) => insert(targetDb, rows);
-	if (hasTransaction(db)) {
-		await db.transaction((tx) => write(tx));
-		return;
-	}
-	await write(db);
+	await insert(db, rows);
 };
 
 export const insertUserRecipeInstructionEvents = async (

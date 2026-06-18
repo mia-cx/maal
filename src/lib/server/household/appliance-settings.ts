@@ -37,22 +37,20 @@ export const updateHouseholdAppliancesFromForm = async ({
 		parsedUpdates.push({ appliance, available, notes: notes.value });
 	}
 
-	await db.transaction(async (tx) => {
-		for (const row of parsedUpdates) {
-			await tx
-				.insert(householdAppliances)
-				.values({
-					householdId,
-					appliance: row.appliance,
-					available: row.available,
-					notes: row.notes
-				})
-				.onConflictDoUpdate({
-					target: [householdAppliances.householdId, householdAppliances.appliance],
-					set: { available: row.available, notes: row.notes, updatedAt: now }
-				});
-		}
-	});
+	for (const row of parsedUpdates) {
+		await db
+			.insert(householdAppliances)
+			.values({
+				householdId,
+				appliance: row.appliance,
+				available: row.available,
+				notes: row.notes
+			})
+			.onConflictDoUpdate({
+				target: [householdAppliances.householdId, householdAppliances.appliance],
+				set: { available: row.available, notes: row.notes, updatedAt: now }
+			});
+	}
 
 	return { ok: true, changedCount: parsedUpdates.length };
 };

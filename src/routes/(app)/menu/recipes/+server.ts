@@ -852,13 +852,13 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		id: recipeId,
 		workosUserId: session.user.id,
 		savedFromHouseholdId: householdId,
-		title:
-			firstString(recipeJson.name, recipeJson.headline) ?? body.recipe?.title ?? fallbackTitle,
+		title: firstString(recipeJson.name, recipeJson.headline) ?? body.recipe?.title ?? fallbackTitle,
 		description: stringValue(recipeJson.description) ?? body.recipe?.description ?? null,
 		imageUrl: firstString(recipeJson.image) ?? body.recipe?.image ?? null,
 		prepTimeMinutes: body.recipe?.prepTimeMinutes ?? durationMinutes(recipeJson.prepTime) ?? null,
 		cookTimeMinutes: body.recipe?.cookTimeMinutes ?? cookMinutesFromRecipe(recipeJson) ?? null,
-		totalTimeMinutes: body.recipe?.totalTimeMinutes ?? durationMinutes(recipeJson.totalTime) ?? null,
+		totalTimeMinutes:
+			body.recipe?.totalTimeMinutes ?? durationMinutes(recipeJson.totalTime) ?? null,
 		yield: body.recipe?.yield ?? firstNumber(recipeJson.recipeYield, recipeJson.yield) ?? null,
 		sourceYieldText: firstString(recipeJson.recipeYield, recipeJson.yield) ?? null,
 		sourceDatePublished: stringValue(recipeJson.datePublished) ?? null,
@@ -867,8 +867,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		sourceUrl: imported?.sourceUrl ?? body.recipe?.sourceUrl ?? null,
 		sourceSiteName: imported?.sourceSiteName ?? body.recipe?.sourceSiteName ?? null,
 		sourceAuthorName: imported?.sourceAuthorName ?? body.recipe?.sourceAuthorName ?? null,
-		sourcePublisherName:
-			imported?.sourcePublisherName ?? body.recipe?.sourcePublisherName ?? null,
+		sourcePublisherName: imported?.sourcePublisherName ?? body.recipe?.sourcePublisherName ?? null,
 		sourceIsBasedOnUrl: imported?.sourceIsBasedOnUrl ?? body.recipe?.sourceIsBasedOnUrl ?? null,
 		sourceRatingValue: ratingValue(recipeJson.aggregateRating, 'ratingValue') ?? null,
 		sourceRatingCount: ratingValue(recipeJson.aggregateRating, 'ratingCount') ?? null,
@@ -908,18 +907,16 @@ export const PATCH: RequestHandler = async ({ cookies, locals, platform, request
 
 	const { recipeIds } = await readBulkBody(request);
 	const updatedAt = new Date().toISOString();
-	await db.transaction((tx) =>
-		tx
-			.update(userRecipes)
-			.set({ deletedAt: null, updatedAt })
-			.where(
-				and(
-					eq(userRecipes.workosUserId, session.user.id),
-					inArray(userRecipes.id, recipeIds),
-					isNotNull(userRecipes.deletedAt)
-				)
+	await db
+		.update(userRecipes)
+		.set({ deletedAt: null, updatedAt })
+		.where(
+			and(
+				eq(userRecipes.workosUserId, session.user.id),
+				inArray(userRecipes.id, recipeIds),
+				isNotNull(userRecipes.deletedAt)
 			)
-	);
+		);
 
 	const unitPreferences = await loadRecipeUnitPreferences(db, session.user.id, householdId);
 	const recipes = await loadMenuRecipes(db, session.user.id, householdId, {
@@ -940,65 +937,62 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 	const { recipeIds, permanent } = await readBulkBody(request);
 
 	if (permanent) {
-		const { deletedMealCount, existingRecipeIds } = await db.transaction(async (tx) => {
-			const existingRows = await tx
-				.select({ id: userRecipes.id })
-				.from(userRecipes)
-				.where(
-					and(
-						eq(userRecipes.workosUserId, session.user.id),
-						inArray(userRecipes.id, recipeIds),
-						isNotNull(userRecipes.deletedAt)
-					)
-				);
-			const existingRecipeIds = existingRows.map((recipe) => recipe.id);
-			if (!existingRecipeIds.length) error(404, { message: m.menu_archived_recipes_not_found() });
+		const existingRows = await db
+			.select({ id: userRecipes.id })
+			.from(userRecipes)
+			.where(
+				and(
+					eq(userRecipes.workosUserId, session.user.id),
+					inArray(userRecipes.id, recipeIds),
+					isNotNull(userRecipes.deletedAt)
+				)
+			);
+		const existingRecipeIds = existingRows.map((recipe) => recipe.id);
+		if (!existingRecipeIds.length) error(404, { message: m.menu_archived_recipes_not_found() });
 
-			const mealLinks = await tx
+		const mealLinks = await db
+			.select({ householdMealId: householdMealUserRecipes.householdMealId })
+			.from(householdMealUserRecipes)
+			.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
+			.where(
+				and(
+					inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds),
+					eq(householdMeals.householdId, householdId)
+				)
+			);
+		const householdMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
+
+		await db
+			.delete(householdMealUserRecipes)
+			.where(inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds));
+
+		let mealIdsWithoutLinks: string[] = [];
+		if (householdMealIds.length) {
+			const remainingLinks = await db
 				.select({ householdMealId: householdMealUserRecipes.householdMealId })
 				.from(householdMealUserRecipes)
-				.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
-				.where(
-					and(
-						inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds),
-						eq(householdMeals.householdId, householdId)
-					)
-				);
-			const householdMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
-
-			await tx
-				.delete(householdMealUserRecipes)
-				.where(inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds));
-
-			let mealIdsWithoutLinks: string[] = [];
-			if (householdMealIds.length) {
-				const remainingLinks = await tx
-					.select({ householdMealId: householdMealUserRecipes.householdMealId })
-					.from(householdMealUserRecipes)
-					.where(inArray(householdMealUserRecipes.householdMealId, householdMealIds));
-				const linkedMealIds = new Set(remainingLinks.map((link) => link.householdMealId));
-				mealIdsWithoutLinks = householdMealIds.filter((mealId) => !linkedMealIds.has(mealId));
-				if (mealIdsWithoutLinks.length) {
-					await tx.delete(householdMeals).where(inArray(householdMeals.id, mealIdsWithoutLinks));
-				}
+				.where(inArray(householdMealUserRecipes.householdMealId, householdMealIds));
+			const linkedMealIds = new Set(remainingLinks.map((link) => link.householdMealId));
+			mealIdsWithoutLinks = householdMealIds.filter((mealId) => !linkedMealIds.has(mealId));
+			if (mealIdsWithoutLinks.length) {
+				await db.delete(householdMeals).where(inArray(householdMeals.id, mealIdsWithoutLinks));
 			}
+		}
 
-			await tx
-				.delete(userRecipes)
-				.where(
-					and(
-						eq(userRecipes.workosUserId, session.user.id),
-						inArray(userRecipes.id, existingRecipeIds),
-						isNotNull(userRecipes.deletedAt)
-					)
-				);
-			return { deletedMealCount: mealIdsWithoutLinks.length, existingRecipeIds };
-		});
+		await db
+			.delete(userRecipes)
+			.where(
+				and(
+					eq(userRecipes.workosUserId, session.user.id),
+					inArray(userRecipes.id, existingRecipeIds),
+					isNotNull(userRecipes.deletedAt)
+				)
+			);
 		return json({
 			deleted: true,
 			permanent: true,
 			recipeIds: existingRecipeIds,
-			deletedMealCount
+			deletedMealCount: mealIdsWithoutLinks.length
 		});
 	}
 
@@ -1016,18 +1010,16 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 	if (!existingRecipeIds.length) error(404, { message: m.menu_recipes_not_found() });
 
 	const deletedAt = new Date().toISOString();
-	await db.transaction((tx) =>
-		tx
-			.update(userRecipes)
-			.set({ deletedAt, updatedAt: deletedAt })
-			.where(
-				and(
-					eq(userRecipes.workosUserId, session.user.id),
-					inArray(userRecipes.id, existingRecipeIds),
-					isNull(userRecipes.deletedAt)
-				)
+	await db
+		.update(userRecipes)
+		.set({ deletedAt, updatedAt: deletedAt })
+		.where(
+			and(
+				eq(userRecipes.workosUserId, session.user.id),
+				inArray(userRecipes.id, existingRecipeIds),
+				isNull(userRecipes.deletedAt)
 			)
-	);
+		);
 
 	return json({ deleted: true, recipeIds: existingRecipeIds, deletedAt });
 };

@@ -35,70 +35,66 @@ export const deleteHouseholdCascade = async ({
 }) => {
 	const db = getDb(database);
 
-	await db.transaction(async (tx) => {
-		const mealRows = await tx
-			.select({ id: householdMeals.id })
-			.from(householdMeals)
-			.where(eq(householdMeals.householdId, householdId));
-		const mealIds = mealRows.map((meal) => meal.id);
-		const instructionRows = mealIds.length
-			? await tx
-					.select({ id: householdMealInstructions.id })
-					.from(householdMealInstructions)
-					.where(inArray(householdMealInstructions.householdMealId, mealIds))
-			: [];
-		const instructionIds = instructionRows.map((instruction) => instruction.id);
+	const mealRows = await db
+		.select({ id: householdMeals.id })
+		.from(householdMeals)
+		.where(eq(householdMeals.householdId, householdId));
+	const mealIds = mealRows.map((meal) => meal.id);
+	const instructionRows = mealIds.length
+		? await db
+				.select({ id: householdMealInstructions.id })
+				.from(householdMealInstructions)
+				.where(inArray(householdMealInstructions.householdMealId, mealIds))
+		: [];
+	const instructionIds = instructionRows.map((instruction) => instruction.id);
 
-		if (instructionIds.length > 0) {
-			await tx
-				.delete(householdMealInstructionEvents)
-				.where(inArray(householdMealInstructionEvents.householdMealInstructionId, instructionIds));
-		}
+	if (instructionIds.length > 0) {
+		await db
+			.delete(householdMealInstructionEvents)
+			.where(inArray(householdMealInstructionEvents.householdMealInstructionId, instructionIds));
+	}
 
-		if (mealIds.length > 0) {
-			await tx
-				.delete(householdMealUserRecipes)
-				.where(inArray(householdMealUserRecipes.householdMealId, mealIds));
-			await tx
-				.delete(householdMealIngredients)
-				.where(inArray(householdMealIngredients.householdMealId, mealIds));
-			await tx
-				.delete(householdMealApplianceRequirements)
-				.where(inArray(householdMealApplianceRequirements.householdMealId, mealIds));
-			await tx
-				.delete(householdMealInstructions)
-				.where(inArray(householdMealInstructions.householdMealId, mealIds));
-			await tx
-				.delete(householdMealClassifications)
-				.where(inArray(householdMealClassifications.householdMealId, mealIds));
-			await tx
-				.delete(householdMealMedia)
-				.where(inArray(householdMealMedia.householdMealId, mealIds));
-			await tx
-				.delete(householdMealNutritionFacts)
-				.where(inArray(householdMealNutritionFacts.householdMealId, mealIds));
-		}
+	if (mealIds.length > 0) {
+		await db
+			.delete(householdMealUserRecipes)
+			.where(inArray(householdMealUserRecipes.householdMealId, mealIds));
+		await db
+			.delete(householdMealIngredients)
+			.where(inArray(householdMealIngredients.householdMealId, mealIds));
+		await db
+			.delete(householdMealApplianceRequirements)
+			.where(inArray(householdMealApplianceRequirements.householdMealId, mealIds));
+		await db
+			.delete(householdMealInstructions)
+			.where(inArray(householdMealInstructions.householdMealId, mealIds));
+		await db
+			.delete(householdMealClassifications)
+			.where(inArray(householdMealClassifications.householdMealId, mealIds));
+		await db.delete(householdMealMedia).where(inArray(householdMealMedia.householdMealId, mealIds));
+		await db
+			.delete(householdMealNutritionFacts)
+			.where(inArray(householdMealNutritionFacts.householdMealId, mealIds));
+	}
 
-		await tx.delete(householdMeals).where(eq(householdMeals.householdId, householdId));
-		await tx.delete(billingSubscriptions).where(eq(billingSubscriptions.householdId, householdId));
-		await tx.delete(householdInvites).where(eq(householdInvites.householdId, householdId));
-		await tx
-			.delete(householdFoodDisplayOverrides)
-			.where(eq(householdFoodDisplayOverrides.householdId, householdId));
-		await tx
-			.delete(householdUnitDisplayOverrides)
-			.where(eq(householdUnitDisplayOverrides.householdId, householdId));
-		await tx.delete(foodHouseholdAliases).where(eq(foodHouseholdAliases.householdId, householdId));
-		await tx.delete(foodHouseholdEntries).where(eq(foodHouseholdEntries.householdId, householdId));
-		await tx.delete(unitHouseholdAliases).where(eq(unitHouseholdAliases.householdId, householdId));
-		await tx.delete(unitHouseholdEntries).where(eq(unitHouseholdEntries.householdId, householdId));
-		await tx.delete(householdAppliances).where(eq(householdAppliances.householdId, householdId));
-		await tx
-			.update(userRecipes)
-			.set({ savedFromHouseholdId: null })
-			.where(eq(userRecipes.savedFromHouseholdId, householdId));
-		await tx.delete(households).where(eq(households.householdId, householdId));
-	});
+	await db.delete(householdMeals).where(eq(householdMeals.householdId, householdId));
+	await db.delete(billingSubscriptions).where(eq(billingSubscriptions.householdId, householdId));
+	await db.delete(householdInvites).where(eq(householdInvites.householdId, householdId));
+	await db
+		.delete(householdFoodDisplayOverrides)
+		.where(eq(householdFoodDisplayOverrides.householdId, householdId));
+	await db
+		.delete(householdUnitDisplayOverrides)
+		.where(eq(householdUnitDisplayOverrides.householdId, householdId));
+	await db.delete(foodHouseholdAliases).where(eq(foodHouseholdAliases.householdId, householdId));
+	await db.delete(foodHouseholdEntries).where(eq(foodHouseholdEntries.householdId, householdId));
+	await db.delete(unitHouseholdAliases).where(eq(unitHouseholdAliases.householdId, householdId));
+	await db.delete(unitHouseholdEntries).where(eq(unitHouseholdEntries.householdId, householdId));
+	await db.delete(householdAppliances).where(eq(householdAppliances.householdId, householdId));
+	await db
+		.update(userRecipes)
+		.set({ savedFromHouseholdId: null })
+		.where(eq(userRecipes.savedFromHouseholdId, householdId));
+	await db.delete(households).where(eq(households.householdId, householdId));
 
 	await createAuthRuntime(platform).workos.organizations.deleteOrganization(householdId);
 };

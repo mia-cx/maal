@@ -55,37 +55,35 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 		.get();
 	if (!existing) error(404, { message: m.plan_recipe_not_found() });
 
-	await db.transaction(async (tx) => {
-		await tx
-			.update(userRecipes)
-			.set({
-				title: recipe.title,
-				description: recipe.description ?? null,
-				imageUrl: recipe.image ?? null,
-				prepTimeMinutes: recipe.prepTimeMinutes ?? null,
-				cookTimeMinutes: recipe.cookTimeMinutes ?? null,
-				totalTimeMinutes: recipe.totalTimeMinutes ?? null,
-				yield: recipe.yield ?? null,
-				sourceUrl: recipe.sourceUrl ?? null,
-				sourceSiteName: recipe.sourceSiteName ?? null,
-				sourceAuthorName: recipe.sourceAuthorName ?? null,
-				sourcePublisherName: recipe.sourcePublisherName ?? null,
-				sourceIsBasedOnUrl: recipe.sourceIsBasedOnUrl ?? null,
-				sourceClaimedMinutes: recipe.cookTimeMinutes ?? null,
-				userNotes: recipe.userNotes ?? null,
-				updatedAt: new Date().toISOString()
-			})
-			.where(
-				and(
-					eq(userRecipes.id, recipeId),
-					eq(userRecipes.workosUserId, session.user.id),
-					isNull(userRecipes.deletedAt)
-				)
-			);
+	await db
+		.update(userRecipes)
+		.set({
+			title: recipe.title,
+			description: recipe.description ?? null,
+			imageUrl: recipe.image ?? null,
+			prepTimeMinutes: recipe.prepTimeMinutes ?? null,
+			cookTimeMinutes: recipe.cookTimeMinutes ?? null,
+			totalTimeMinutes: recipe.totalTimeMinutes ?? null,
+			yield: recipe.yield ?? null,
+			sourceUrl: recipe.sourceUrl ?? null,
+			sourceSiteName: recipe.sourceSiteName ?? null,
+			sourceAuthorName: recipe.sourceAuthorName ?? null,
+			sourcePublisherName: recipe.sourcePublisherName ?? null,
+			sourceIsBasedOnUrl: recipe.sourceIsBasedOnUrl ?? null,
+			sourceClaimedMinutes: recipe.cookTimeMinutes ?? null,
+			userNotes: recipe.userNotes ?? null,
+			updatedAt: new Date().toISOString()
+		})
+		.where(
+			and(
+				eq(userRecipes.id, recipeId),
+				eq(userRecipes.workosUserId, session.user.id),
+				isNull(userRecipes.deletedAt)
+			)
+		);
 
-		await replaceRecipeIngredients(tx, recipeId, recipe.ingredients ?? []);
-		await replaceRecipeInstructions(tx, recipeId, recipe.instructions ?? []);
-	});
+	await replaceRecipeIngredients(db, recipeId, recipe.ingredients ?? []);
+	await replaceRecipeInstructions(db, recipeId, recipe.instructions ?? []);
 
 	const unitPreferences = await loadHouseholdUnitPreferences(db, {
 		workosUserId: session.user.id,
@@ -123,18 +121,16 @@ export const PATCH: RequestHandler = async ({ cookies, locals, params, platform,
 	if (!existing) error(404, { message: m.menu_archived_recipe_not_found() });
 
 	const updatedAt = new Date().toISOString();
-	await db.transaction((tx) =>
-		tx
-			.update(userRecipes)
-			.set({ deletedAt: null, updatedAt })
-			.where(
-				and(
-					eq(userRecipes.id, recipeId),
-					eq(userRecipes.workosUserId, session.user.id),
-					isNotNull(userRecipes.deletedAt)
-				)
+	await db
+		.update(userRecipes)
+		.set({ deletedAt: null, updatedAt })
+		.where(
+			and(
+				eq(userRecipes.id, recipeId),
+				eq(userRecipes.workosUserId, session.user.id),
+				isNotNull(userRecipes.deletedAt)
 			)
-	);
+		);
 
 	const unitPreferences = await loadHouseholdUnitPreferences(db, {
 		workosUserId: session.user.id,
@@ -177,63 +173,58 @@ export const DELETE: RequestHandler = async ({ cookies, locals, params, platform
 		error(404, { message: permanent ? 'Archived recipe not found.' : 'Recipe not found.' });
 
 	if (permanent) {
-		const deletedMealCount = await db.transaction(async (tx) => {
-			const mealLinks = await tx
+		const mealLinks = await db
+			.select({ householdMealId: householdMealUserRecipes.householdMealId })
+			.from(householdMealUserRecipes)
+			.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
+			.where(
+				and(
+					eq(householdMealUserRecipes.userRecipeId, recipeId),
+					eq(householdMeals.householdId, householdId)
+				)
+			);
+		const householdMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
+
+		await db
+			.delete(householdMealUserRecipes)
+			.where(eq(householdMealUserRecipes.userRecipeId, recipeId));
+
+		let mealIdsWithoutLinks: string[] = [];
+		if (householdMealIds.length) {
+			const remainingLinks = await db
 				.select({ householdMealId: householdMealUserRecipes.householdMealId })
 				.from(householdMealUserRecipes)
-				.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
-				.where(
-					and(
-						eq(householdMealUserRecipes.userRecipeId, recipeId),
-						eq(householdMeals.householdId, householdId)
-					)
-				);
-			const householdMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
-
-			await tx
-				.delete(householdMealUserRecipes)
-				.where(eq(householdMealUserRecipes.userRecipeId, recipeId));
-
-			let mealIdsWithoutLinks: string[] = [];
-			if (householdMealIds.length) {
-				const remainingLinks = await tx
-					.select({ householdMealId: householdMealUserRecipes.householdMealId })
-					.from(householdMealUserRecipes)
-					.where(inArray(householdMealUserRecipes.householdMealId, householdMealIds));
-				const linkedMealIds = new Set(remainingLinks.map((link) => link.householdMealId));
-				mealIdsWithoutLinks = householdMealIds.filter((mealId) => !linkedMealIds.has(mealId));
-				if (mealIdsWithoutLinks.length) {
-					await tx.delete(householdMeals).where(inArray(householdMeals.id, mealIdsWithoutLinks));
-				}
+				.where(inArray(householdMealUserRecipes.householdMealId, householdMealIds));
+			const linkedMealIds = new Set(remainingLinks.map((link) => link.householdMealId));
+			mealIdsWithoutLinks = householdMealIds.filter((mealId) => !linkedMealIds.has(mealId));
+			if (mealIdsWithoutLinks.length) {
+				await db.delete(householdMeals).where(inArray(householdMeals.id, mealIdsWithoutLinks));
 			}
+		}
 
-			await tx
-				.delete(userRecipes)
-				.where(
-					and(
-						eq(userRecipes.id, recipeId),
-						eq(userRecipes.workosUserId, session.user.id),
-						isNotNull(userRecipes.deletedAt)
-					)
-				);
-			return mealIdsWithoutLinks.length;
-		});
-		return json({ deleted: true, permanent: true, deletedMealCount });
-	}
-
-	const deletedAt = new Date().toISOString();
-	await db.transaction((tx) =>
-		tx
-			.update(userRecipes)
-			.set({ deletedAt, updatedAt: deletedAt })
+		await db
+			.delete(userRecipes)
 			.where(
 				and(
 					eq(userRecipes.id, recipeId),
 					eq(userRecipes.workosUserId, session.user.id),
-					isNull(userRecipes.deletedAt)
+					isNotNull(userRecipes.deletedAt)
 				)
+			);
+		return json({ deleted: true, permanent: true, deletedMealCount: mealIdsWithoutLinks.length });
+	}
+
+	const deletedAt = new Date().toISOString();
+	await db
+		.update(userRecipes)
+		.set({ deletedAt, updatedAt: deletedAt })
+		.where(
+			and(
+				eq(userRecipes.id, recipeId),
+				eq(userRecipes.workosUserId, session.user.id),
+				isNull(userRecipes.deletedAt)
 			)
-	);
+		);
 
 	return json({ deleted: true, deletedAt });
 };

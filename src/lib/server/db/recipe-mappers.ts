@@ -664,7 +664,7 @@ export const updateRecipeIngredients = async (
 	db: Db,
 	recipeId: string,
 	ingredients: RecipeIngredientItem[]
-) => db.transaction((tx) => replaceRecipeIngredients(tx, recipeId, ingredients));
+) => replaceRecipeIngredients(db, recipeId, ingredients);
 
 export const replaceRecipeInstructions = async (
 	db: WritableDb,
@@ -696,4 +696,4 @@ export const updateRecipeInstructions = async (
 	db: Db,
 	recipeId: string,
 	instructions: RecipeInstructionItem[]
-) => db.transaction((tx) => replaceRecipeInstructions(tx, recipeId, instructions));
+) => replaceRecipeInstructions(db, recipeId, instructions);

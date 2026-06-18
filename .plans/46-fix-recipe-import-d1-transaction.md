@@ -14,6 +14,7 @@ Recipe creation/import currently wraps the initial recipe write and sidecar writ
 - [x] Add a focused regression test and refactor `POST /menu/recipes` create writes out of the failing D1 transaction path.
 - [x] Refactor `POST /plan/meals` creation out of the same failing D1 transaction path after import succeeded and scheduling exposed the next `begin` failure.
 - [x] Refactor `PUT /plan/meals` updates out of the D1 transaction path and restore source amount/unit text on the meal sheet when taxonomy base amounts are unavailable.
+- [x] Remove remaining Drizzle `.transaction(...)` calls across app routes and server services because D1 rejects SQL `BEGIN`/`SAVEPOINT` in this runtime.
 - [x] Run focused route tests and type checks, then record final validation.
 
 ## Notes
@@ -31,3 +32,7 @@ Recipe creation/import currently wraps the initial recipe write and sidecar writ
 - Fix: moved `updateHouseholdMeal` to ordered D1-compatible writes and added regression coverage proving update does not call `db.transaction`.
 - Screenshot showed ingredient source amounts/units hidden in the meal sheet because display only used taxonomy `baseQuantity/baseUnitId`; imported ingredients currently have source amount text but not taxonomy base amounts. Display now preserves original source text when canonical amounts are unavailable, e.g. `2 el gerookte-paprikapoeder`.
 - Final validation: `pnpm vitest run src/lib/server/services/meal-plan.test.ts src/lib/taxonomy/display.test.ts 'src/routes/(app)/menu/recipes/server.test.ts' && pnpm check` — passed; `svelte-check found 0 errors and 0 warnings`.
+- Follow-up user repro: household settings failed at `updateHouseholdSettingsFromForm` with D1 explicitly rejecting SQL `BEGIN` and instructing use of D1 JavaScript transaction APIs instead of SQL statements.
+- Swept all remaining Drizzle `.transaction(...)` calls from `src`: recipe restore/delete/edit routes, saved recipe service helpers, household settings/appliance/delete commands, meal check-ins, instruction event insertion, and taxonomy display override helpers now issue ordered D1-compatible writes directly.
+- Verification sweep: `rg -n "\\.transaction\\(" src -g '*.ts'` returns no production transaction calls; remaining `transaction` text is only regression tests, comments, and type aliases.
+- Validation after sweep: `pnpm vitest run src/lib/server/services/meal-plan.test.ts src/lib/taxonomy/display.test.ts 'src/routes/(app)/menu/recipes/server.test.ts'` — passed; `pnpm check` — passed.
