@@ -16,6 +16,15 @@ describe('ingredient text units', () => {
 		expect(displayIngredientAmount(2, 'knobs', { preferredMassUnit: 'lb' })).toBe('2 knobs');
 	});
 
+	it('uses locale unit labels for canonical count units', () => {
+		expect(
+			displayIngredientAmount(2, 'clove', {
+				unitLabelOverrides: { clove: 'teen' },
+				unitPluralLabelOverrides: { clove: 'tenen' }
+			})
+		).toBe('2 tenen');
+	});
+
 	it('uses plural unit labels when displaying converted quantities', () => {
 		expect(
 			displayIngredientAmount(200, 'ml', {

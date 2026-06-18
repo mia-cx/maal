@@ -271,6 +271,14 @@ export const loadEffectiveTaxonomyPreferences = async (
 		ranks
 	);
 
+	const defaultUnitAliasesByCanonical = bestByKey(
+		globalUnitAliases
+			.map((alias) => ({ ...alias, scopeRank: alias.defaultForLocale ? 0 : 1 }))
+			.filter((alias) => Boolean(unitIdToIngredientUnit[alias.unitId])),
+		(alias) => unitIdToIngredientUnit[alias.unitId],
+		ranks
+	);
+
 	const unitPreferences: UnitPreferences = {
 		unitConversions: Object.fromEntries(
 			unitRows.map((unit) => [
@@ -293,6 +301,14 @@ export const loadEffectiveTaxonomyPreferences = async (
 				(alias) => alias.unitId,
 				(left, right) => left.scopeRank - right.scopeRank || byLocalePreference(ranks)(left, right)
 			)
+		),
+		unitLabelOverrides: Object.fromEntries(
+			[...defaultUnitAliasesByCanonical].map(([unit, alias]) => [unit, alias.alias])
+		),
+		unitPluralLabelOverrides: Object.fromEntries(
+			[...defaultUnitAliasesByCanonical]
+				.filter(([, alias]) => alias.pluralAlias)
+				.map(([unit, alias]) => [unit, alias.pluralAlias!])
 		),
 		ingredientUnitOverrides: {},
 		ingredientUnitLabelOverrides: {},

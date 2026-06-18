@@ -67,4 +67,24 @@ describe('taxonomy display helpers', () => {
 			}).text
 		).toBe('2 el gerookte-paprikapoeder');
 	});
+
+	it('localizes source unit labels when source quantities are available', () => {
+		expect(
+			displayIngredient(
+				{
+					baseQuantity: null,
+					baseUnitId: null,
+					sourceQuantity: 2,
+					sourceUnitLabel: 'clove',
+					baseFoodId: null,
+					sourceFoodLabel: 'knoflook',
+					originalText: '2 cloves knoflook'
+				},
+				{
+					unitLabelOverrides: { clove: 'teen' },
+					unitPluralLabelOverrides: { clove: 'tenen' }
+				}
+			).text
+		).toBe('2 tenen knoflook');
+	});
 });

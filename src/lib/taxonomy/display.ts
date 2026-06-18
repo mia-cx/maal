@@ -7,6 +7,8 @@ import type { EffectiveTaxonomyPreferences } from './preferences';
 export type TaxonomyIngredient = {
 	baseQuantity?: number | null;
 	baseUnitId?: string | null;
+	sourceQuantity?: number | null;
+	sourceUnitLabel?: string | null;
 	baseFoodId?: string | null;
 	sourceFoodLabel?: string | null;
 	originalText: string;
@@ -40,13 +42,9 @@ export const displayIngredient = (
 ): { amount: string; item: string; text: string } => {
 	const fallbackItem = ingredient.sourceFoodLabel ?? ingredient.originalText;
 	const item = displayFoodName(ingredient.baseFoodId, fallbackItem, preferences);
-	const amount = displayIngredientAmount(
-		ingredient.baseQuantity,
-		ingredient.baseUnitId,
-		preferences,
-		item,
-		ingredient.baseFoodId
-	);
+	const quantity = ingredient.baseQuantity ?? ingredient.sourceQuantity;
+	const unit = ingredient.baseUnitId ?? ingredient.sourceUnitLabel;
+	const amount = displayIngredientAmount(quantity, unit, preferences, item, ingredient.baseFoodId);
 	const text = [amount, item].filter(Boolean).join(' ');
 	const originalAmount =
 		!amount && item && ingredient.originalText.endsWith(item)
