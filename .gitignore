@@ -65,3 +65,5 @@ pnpm-debug.log*
 # OS
 .DS_Store
 Thumbs.db
+.ant-colony/
+.worktrees/
