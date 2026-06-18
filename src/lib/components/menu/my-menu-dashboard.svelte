@@ -117,7 +117,7 @@
 			appendMenuRecipes(body.recipes);
 			nextRecipeOffset = body.nextRecipeOffset;
 		} catch {
-			recipesLoadError = 'Could not load more recipes.';
+			recipesLoadError = m.menu_could_not_load_more_recipes();
 		} finally {
 			recipesLoading = false;
 		}
@@ -213,7 +213,7 @@
 
 	const readAddRecipeError = (error: unknown): string => {
 		if (error instanceof Error) return error.message;
-		return 'Could not add that recipe.';
+		return m.menu_could_not_add_that_recipe();
 	};
 
 	const openAddRecipe = () => {

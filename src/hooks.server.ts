@@ -3,11 +3,7 @@ import { sequence } from '@sveltejs/kit/hooks';
 import { cookieName, getTextDirection } from '$lib/paraglide/runtime';
 import { paraglideMiddleware } from '$lib/paraglide/server';
 import { authenticatedAppPathUsesHouseholdLocale } from '$lib/i18n/app-locale';
-import {
-	clearParaglideLocaleCookie,
-	commitParaglideLocaleCookie,
-	loadHouseholdParaglideLocale
-} from '$lib/server/i18n/household-locale';
+import { loadHouseholdParaglideLocale } from '$lib/server/i18n/household-locale';
 import {
 	authenticateSealedSession,
 	clearSealedSession,
@@ -144,10 +140,8 @@ const handleParaglide: Handle = async ({ event, resolve }) => {
 			householdId
 		});
 		if (householdLocale) {
-			commitParaglideLocaleCookie(event.cookies, householdLocale, event.url);
 			event.request = requestWithCookie(event.request, cookieName, householdLocale);
 		} else {
-			clearParaglideLocaleCookie(event.cookies, event.url);
 			event.request = requestWithoutCookie(event.request, cookieName);
 		}
 	}

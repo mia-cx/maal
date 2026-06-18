@@ -1,25 +1,8 @@
-import type { Cookies } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { paraglideLocaleFromHouseholdLocale } from '$lib/i18n/app-locale';
-import { cookieName, type Locale } from '$lib/paraglide/runtime';
+import type { Locale } from '$lib/paraglide/runtime';
 import { getDb } from '$lib/server/db';
 import { households } from '$lib/server/db/schema';
-
-const localeCookieOptions = (url: URL) => ({
-	path: '/',
-	httpOnly: false,
-	sameSite: 'lax' as const,
-	secure: url.protocol === 'https:',
-	maxAge: 60 * 60 * 24 * 365
-});
-
-export const commitParaglideLocaleCookie = (cookies: Cookies, locale: Locale, url: URL): void => {
-	cookies.set(cookieName, locale, localeCookieOptions(url));
-};
-
-export const clearParaglideLocaleCookie = (cookies: Cookies, url: URL): void => {
-	cookies.delete(cookieName, { ...localeCookieOptions(url), maxAge: undefined });
-};
 
 export const loadHouseholdParaglideLocale = async ({
 	platform,

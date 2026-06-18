@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { untrack } from 'svelte';
 	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
 	import {
@@ -308,7 +309,7 @@
 
 	const readAddMealError = (error: unknown): string => {
 		if (error instanceof Error) return error.message;
-		return 'Could not add that recipe.';
+		return m.menu_could_not_add_that_recipe();
 	};
 
 	const createRecipeFromTitle = (title: string) => {

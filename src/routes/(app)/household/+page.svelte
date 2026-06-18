@@ -89,27 +89,47 @@
 	const canManageHousehold = $derived(currentView.canManageHousehold);
 	const fieldDisabled = $derived(!canManageHousehold);
 	const memberRemovalName = $derived(memberToRemove?.name ?? m.household_this_member());
-	const weekStartLabels = {
-		sunday: 'Sunday',
-		monday: 'Monday'
-	};
-	const localeOptions = [
-		{ value: 'en', label: 'English', keywords: ['english'] },
-		{ value: 'en-US', label: 'English (United States)', keywords: ['english', 'us', 'usa'] },
-		{ value: 'en-GB', label: 'English (United Kingdom)', keywords: ['english', 'uk', 'gb'] },
-		{ value: 'nl', label: 'Dutch', keywords: ['dutch', 'nederlands'] },
-		{ value: 'nl-NL', label: 'Dutch (Netherlands)', keywords: ['dutch', 'nederlands'] },
-		{ value: 'fr', label: 'French', keywords: ['french', 'français'] },
-		{ value: 'fr-FR', label: 'French (France)', keywords: ['french', 'français'] },
-		{ value: 'fr-CA', label: 'French (Canada)', keywords: ['french', 'canada', 'québec'] },
-		{ value: 'de', label: 'German', keywords: ['german', 'deutsch'] },
-		{ value: 'de-DE', label: 'German (Germany)', keywords: ['german', 'deutsch'] },
-		{ value: 'es', label: 'Spanish', keywords: ['spanish', 'español'] },
-		{ value: 'es-ES', label: 'Spanish (Spain)', keywords: ['spanish', 'español'] },
-		{ value: 'es-MX', label: 'Spanish (Mexico)', keywords: ['spanish', 'mexico', 'español'] },
-		{ value: 'it-IT', label: 'Italian (Italy)', keywords: ['italian', 'italiano'] },
-		{ value: 'pt-BR', label: 'Portuguese (Brazil)', keywords: ['portuguese', 'brazil'] }
-	];
+	const weekStartLabels = $derived({
+		sunday: m.household_sunday(),
+		monday: m.household_monday()
+	});
+	const localeOptions = $derived([
+		{ value: 'en', label: m.household_locale_english(), keywords: ['english'] },
+		{ value: 'en-US', label: m.household_locale_english_us(), keywords: ['english', 'us', 'usa'] },
+		{ value: 'en-GB', label: m.household_locale_english_uk(), keywords: ['english', 'uk', 'gb'] },
+		{ value: 'nl', label: m.household_locale_dutch(), keywords: ['dutch', 'nederlands'] },
+		{
+			value: 'nl-NL',
+			label: m.household_locale_dutch_netherlands(),
+			keywords: ['dutch', 'nederlands']
+		},
+		{ value: 'fr', label: m.household_locale_french(), keywords: ['french', 'français'] },
+		{ value: 'fr-FR', label: m.household_locale_french_france(), keywords: ['french', 'français'] },
+		{
+			value: 'fr-CA',
+			label: m.household_locale_french_canada(),
+			keywords: ['french', 'canada', 'québec']
+		},
+		{ value: 'de', label: m.household_locale_german(), keywords: ['german', 'deutsch'] },
+		{ value: 'de-DE', label: m.household_locale_german_germany(), keywords: ['german', 'deutsch'] },
+		{ value: 'es', label: m.household_locale_spanish(), keywords: ['spanish', 'español'] },
+		{ value: 'es-ES', label: m.household_locale_spanish_spain(), keywords: ['spanish', 'español'] },
+		{
+			value: 'es-MX',
+			label: m.household_locale_spanish_mexico(),
+			keywords: ['spanish', 'mexico', 'español']
+		},
+		{
+			value: 'it-IT',
+			label: m.household_locale_italian_italy(),
+			keywords: ['italian', 'italiano']
+		},
+		{
+			value: 'pt-BR',
+			label: m.household_locale_portuguese_brazil(),
+			keywords: ['portuguese', 'brazil']
+		}
+	]);
 	const timezoneOptions = ['UTC', ...Intl.supportedValuesOf('timeZone')].map((timezone) => ({
 		value: timezone,
 		label: timezone.replaceAll('_', ' '),
@@ -408,7 +428,7 @@
 									placeholder={m.household_select_locale()}
 									searchPlaceholder={m.household_search_locales()}
 									allowCustom
-									customOptionLabel={(input) => `Use custom locale “${input}”`}
+									customOptionLabel={(input) => m.household_use_custom_locale({ locale: input })}
 								/>
 							</label>
 							<label class="grid min-w-0 gap-1 text-xs font-medium">
