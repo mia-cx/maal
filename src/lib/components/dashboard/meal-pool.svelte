@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { cn } from '$lib/utils.js';
 	import MealDropSkeleton from './meal-drop-skeleton.svelte';
 	import MealPlanCard from './meal-plan-card.svelte';
@@ -59,14 +60,14 @@
 	>
 		<button
 			type="button"
-			aria-label="Add meal"
+			aria-label={m.plan_add_meal()}
 			class="flex shrink-0 flex-col items-center justify-center rounded-md border border-dashed border-border bg-muted/20 px-1 text-[0.625rem] leading-none font-medium text-muted-foreground transition hover:border-foreground/30 hover:bg-muted/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
 			style:width={`${addButtonSize}px`}
 			style:height={`${addButtonSize}px`}
 			onclick={() => onaddmeal?.()}
 		>
 			<span class="text-lg leading-none">+</span>
-			<span class={cardDensity === 'title' ? 'sr-only' : ''}>Meal</span>
+			<span class={cardDensity === 'title' ? 'sr-only' : ''}>{m.plan_meal()}</span>
 		</button>
 		{#each previewMeals as meal, index (meal.id)}
 			{#if previewIndex === index}

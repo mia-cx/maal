@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import { error, isHttpError, json, type RequestHandler } from '@sveltejs/kit';
 import { createAuthRuntime } from '$lib/server/auth/workos';
 import { readJsonObject } from '$lib/server/http/request';
@@ -19,16 +20,16 @@ const textField = (body: Record<string, unknown>, key: string): string => {
 
 export const POST: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
 	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
+	if (!session) error(401, { message: m.app_sign_in_required() });
 
 	const body = await readJsonObject(request);
 	const name = textField(body, 'name');
 	const email = textField(body, 'email').toLowerCase();
 
-	if (!name) error(400, { message: 'Name is required.' });
-	if (name.length > maxNameLength) error(400, { message: 'Name is too long.' });
+	if (!name) error(400, { message: m.settings_name_is_required() });
+	if (name.length > maxNameLength) error(400, { message: m.settings_name_is_too_long() });
 	if (!emailPattern.test(email) || email.length > maxEmailLength) {
-		error(400, { message: 'Enter a valid email address.' });
+		error(400, { message: m.settings_enter_a_valid_email_address() });
 	}
 
 	try {
@@ -64,6 +65,6 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	} catch (cause) {
 		if (isHttpError(cause)) throw cause;
 		console.error('Failed to update WorkOS user', cause);
-		error(502, { message: 'Could not update account.' });
+		error(502, { message: m.settings_could_not_update_account() });
 	}
 };

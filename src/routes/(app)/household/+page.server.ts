@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import { fail, redirect } from '@sveltejs/kit';
 import { clearHouseholdCookie } from '$lib/server/auth/household';
 import { applianceLabels, applianceValues } from '$lib/domain/household/appliances';
@@ -114,7 +115,7 @@ export const actions: Actions = {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
 		const database = requireInviteStorage(event.platform);
-		if (!database) return fail(503, { message: 'Invite storage is not available.' });
+		if (!database) return fail(503, { message: m.household_invite_storage_is_not_available() });
 
 		try {
 			return inviteCommandResponse(
@@ -127,7 +128,7 @@ export const actions: Actions = {
 			);
 		} catch (cause) {
 			console.error('Failed to create household invite', cause);
-			return fail(500, { message: 'Could not create invite link.' });
+			return fail(500, { message: m.household_could_not_create_invite_link() });
 		}
 	},
 
@@ -135,7 +136,7 @@ export const actions: Actions = {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
 		const database = requireInviteStorage(event.platform);
-		if (!database) return fail(503, { message: 'Invite storage is not available.' });
+		if (!database) return fail(503, { message: m.household_invite_storage_is_not_available() });
 
 		try {
 			return inviteCommandResponse(
@@ -147,7 +148,7 @@ export const actions: Actions = {
 			);
 		} catch (cause) {
 			console.error('Failed to revoke household invite', cause);
-			return fail(502, { message: 'Could not revoke invite.' });
+			return fail(502, { message: m.household_could_not_revoke_invite() });
 		}
 	},
 
@@ -155,7 +156,7 @@ export const actions: Actions = {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
 		const database = requireInviteStorage(event.platform);
-		if (!database) return fail(503, { message: 'Invite storage is not available.' });
+		if (!database) return fail(503, { message: m.household_invite_storage_is_not_available() });
 
 		try {
 			return inviteCommandResponse(
@@ -167,7 +168,7 @@ export const actions: Actions = {
 			);
 		} catch (cause) {
 			console.error('Failed to delete household invite', cause);
-			return fail(502, { message: 'Could not delete invite.' });
+			return fail(502, { message: m.household_could_not_delete_invite() });
 		}
 	},
 
@@ -175,7 +176,7 @@ export const actions: Actions = {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
 		const database = requireInviteStorage(event.platform);
-		if (!database) return fail(503, { message: 'Invite storage is not available.' });
+		if (!database) return fail(503, { message: m.household_invite_storage_is_not_available() });
 
 		try {
 			return inviteCommandResponse(
@@ -187,14 +188,15 @@ export const actions: Actions = {
 			);
 		} catch (cause) {
 			console.error('Failed to update household invite role', cause);
-			return fail(502, { message: 'Could not update invite role.' });
+			return fail(502, { message: m.household_could_not_update_invite_role() });
 		}
 	},
 
 	updateMemberRole: async (event) => {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
-		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
+		if (!event.platform?.env.DB)
+			return fail(500, { message: m.household_database_is_not_available() });
 
 		try {
 			return memberCommandResponse(
@@ -208,13 +210,14 @@ export const actions: Actions = {
 			);
 		} catch (cause) {
 			console.error('Failed to update household member role', cause);
-			return fail(502, { message: 'Could not update member role.' });
+			return fail(502, { message: m.household_could_not_update_member_role() });
 		}
 	},
 	updateSettings: async (event) => {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
-		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
+		if (!event.platform?.env.DB)
+			return fail(500, { message: m.household_database_is_not_available() });
 
 		try {
 			const result = await updateHouseholdSettingsFromForm({
@@ -227,13 +230,14 @@ export const actions: Actions = {
 			return { message: result.message };
 		} catch (cause) {
 			console.error('Failed to update household settings', cause);
-			return fail(502, { message: 'Could not update household settings.' });
+			return fail(502, { message: m.household_could_not_update_household_settings() });
 		}
 	},
 	updateAppliances: async (event) => {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
-		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
+		if (!event.platform?.env.DB)
+			return fail(500, { message: m.household_database_is_not_available() });
 
 		try {
 			const result = await updateHouseholdAppliancesFromForm({
@@ -242,20 +246,23 @@ export const actions: Actions = {
 				form: await event.request.formData()
 			});
 			if (!result.ok) return fail(result.status, { message: result.message });
-			return { message: result.changedCount > 0 ? 'Appliances saved.' : 'No changes.' };
+			return {
+				message: result.changedCount > 0 ? m.household_appliances_saved() : m.household_no_changes()
+			};
 		} catch (cause) {
 			console.error('Failed to update household appliances', cause);
-			return fail(502, { message: 'Could not update appliances.' });
+			return fail(502, { message: m.household_could_not_update_appliances() });
 		}
 	},
 	leaveHousehold: async (event) => {
 		const household = await requireActionHousehold(event);
 		const { session, householdId } = household;
 		if (smokeAuthEnabled(event.platform) && householdId === SMOKE_HOUSEHOLD_ID) {
-			return fail(400, { message: 'Smoke household cannot be left.' });
+			return fail(400, { message: m.household_smoke_household_cannot_be_left() });
 		}
 
-		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
+		if (!event.platform?.env.DB)
+			return fail(500, { message: m.household_database_is_not_available() });
 
 		try {
 			const result = await leaveHouseholdMembership({
@@ -268,7 +275,7 @@ export const actions: Actions = {
 			if (result.clearHousehold) clearHouseholdCookie(event.cookies, event.url);
 		} catch (cause) {
 			console.error('Failed to leave household', cause);
-			return fail(502, { message: 'Could not leave household.' });
+			return fail(502, { message: m.household_could_not_leave_household() });
 		}
 
 		redirect(303, '/onboarding');
@@ -277,7 +284,8 @@ export const actions: Actions = {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
 
-		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
+		if (!event.platform?.env.DB)
+			return fail(500, { message: m.household_database_is_not_available() });
 
 		try {
 			return memberCommandResponse(
@@ -291,7 +299,7 @@ export const actions: Actions = {
 			);
 		} catch (cause) {
 			console.error('Failed to remove household member', cause);
-			return fail(502, { message: 'Could not remove member.' });
+			return fail(502, { message: m.household_could_not_remove_member() });
 		}
 	},
 	deleteHousehold: async (event) => {
@@ -299,9 +307,10 @@ export const actions: Actions = {
 		if ('status' in managedHousehold) return managedHousehold;
 		const { householdId } = managedHousehold;
 		if (smokeAuthEnabled(event.platform) && householdId === SMOKE_HOUSEHOLD_ID) {
-			return fail(400, { message: 'Smoke household cannot be deleted.' });
+			return fail(400, { message: m.household_smoke_household_cannot_be_deleted() });
 		}
-		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
+		if (!event.platform?.env.DB)
+			return fail(500, { message: m.household_database_is_not_available() });
 
 		try {
 			await deleteHouseholdCascade({
@@ -312,7 +321,7 @@ export const actions: Actions = {
 			clearHouseholdCookie(event.cookies, event.url);
 		} catch (cause) {
 			console.error('Failed to delete household', cause);
-			return fail(502, { message: 'Could not delete household.' });
+			return fail(502, { message: m.household_could_not_delete_household() });
 		}
 
 		redirect(303, '/onboarding');

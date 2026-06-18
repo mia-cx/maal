@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import * as Button from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
@@ -42,7 +43,7 @@
 </script>
 
 <section class="grid gap-2">
-	<h3 class="text-xs font-medium text-foreground">Instructions</h3>
+	<h3 class="text-xs font-medium text-foreground">{m.menu_instructions()}</h3>
 	<div bind:this={instructionListElement} role="list" class="grid gap-3">
 		{#if draggedInstruction && instructionDropIndex === 0}
 			<div class="h-20 rounded-md border border-dashed border-primary/70 bg-primary/10"></div>
@@ -69,7 +70,7 @@
 							size="sm"
 							class="h-7 px-1"
 							disabled={instruction.position === 1}
-							aria-label="Move instruction up"
+							aria-label={m.menu_move_instruction_up()}
 							onclick={() => swapInstructionPosition(instruction.draftId, -1)}
 						>
 							<ChevronUpIcon class="size-4" />
@@ -82,7 +83,7 @@
 								updateInstructionPositionDraft(instruction.draftId, event.currentTarget.value)}
 							onblur={() => commitInstructionPosition(instruction.draftId)}
 							onkeydown={(event) => handleInstructionPositionKeydown(instruction.draftId, event)}
-							aria-label="Instruction position"
+							aria-label={m.menu_instruction_position()}
 							class="px-1 text-center"
 						/>
 						<Button.Root
@@ -91,7 +92,7 @@
 							size="sm"
 							class="h-7 px-1"
 							disabled={instruction.position === sortedInstructionCount}
-							aria-label="Move instruction down"
+							aria-label={m.menu_move_instruction_down()}
 							onclick={() => swapInstructionPosition(instruction.draftId, 1)}
 						>
 							<ChevronDownIcon class="size-4" />
@@ -111,7 +112,7 @@
 						size="sm"
 						onclick={() => removeInstruction(instruction.draftId)}
 					>
-						Remove
+						{m.menu_remove()}
 					</Button.Root>
 				</div>
 			</div>
@@ -122,7 +123,7 @@
 	</div>
 	<div>
 		<Button.Root variant="outline" size="sm" class="w-full" onclick={addInstruction}
-			>Add step</Button.Root
+			>{m.menu_add_step()}</Button.Root
 		>
 	</div>
 </section>

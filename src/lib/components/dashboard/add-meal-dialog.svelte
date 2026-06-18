@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
@@ -47,13 +48,13 @@
 	const showExistingRecipeOptions = $derived(showExistingRecipes ?? true);
 	const shouldFetchFuzzyRecipes = $derived(normalizedSearch.length > 3);
 	const recipeFetchQuery = $derived(shouldFetchFuzzyRecipes ? normalizedSearch : '');
-	const dialogTitle = 'Add meal';
+	const dialogTitle = m.app_add_meal();
 	const dialogDescription = $derived(
 		showExistingRecipeOptions
 			? date
-				? 'Choose a saved recipe, import one from a URL, or start a new recipe for this day.'
-				: 'Choose a saved recipe, import one from a URL, or start a new meal-pool recipe.'
-			: 'Import one from a URL or start a new recipe for your menu.'
+				? m.app_add_meal_for_day_description()
+				: m.app_add_meal_pool_description()
+			: m.app_add_menu_recipe_description()
 	);
 
 	const matches = $derived(
@@ -205,7 +206,7 @@
 				bind:value={query}
 				type={isUrl ? 'url' : 'text'}
 				autocomplete="off"
-				placeholder="Recipe name or https://…"
+				placeholder={m.app_recipe_name_or_https()}
 				class="h-9"
 				disabled={busy}
 				onkeydown={handleInputKeydown}
@@ -214,12 +215,12 @@
 			<div
 				class="max-h-72 overflow-y-auto rounded-md border border-border bg-background p-1"
 				role="listbox"
-				aria-label="Recipe options"
+				aria-label={m.app_recipe_options()}
 			>
 				{#if showExistingRecipeOptions && !isUrl && fetchRecipesBusy}
-					<p class="px-3 py-2 text-sm text-muted-foreground">Loading recipes…</p>
+					<p class="px-3 py-2 text-sm text-muted-foreground">{m.menu_loading_recipes()}</p>
 				{:else if showExistingRecipeOptions && !isUrl && matches.length === 0}
-					<p class="px-3 py-2 text-sm text-muted-foreground">No saved recipes match.</p>
+					<p class="px-3 py-2 text-sm text-muted-foreground">{m.app_no_saved_recipes_match()}</p>
 				{/if}
 				{#each options as option, index (option.id)}
 					{#if option.type === 'existing'}
@@ -250,8 +251,9 @@
 							onpointerenter={() => (activeIndex = index)}
 							onclick={() => chooseOption(option)}
 						>
-							<span class="min-w-0 truncate">New recipe: {option.title}</span>
-							<span class="shrink-0 text-xs text-muted-foreground">Create</span>
+							<span class="min-w-0 truncate">{m.app_new_recipe_title({ title: option.title })}</span
+							>
+							<span class="shrink-0 text-xs text-muted-foreground">{m.app_create()}</span>
 						</button>
 					{:else}
 						<button
@@ -263,7 +265,7 @@
 							onpointerenter={() => (activeIndex = index)}
 							onclick={() => chooseOption(option)}
 						>
-							<span class="min-w-0 truncate">Import recipe from URL</span>
+							<span class="min-w-0 truncate">{m.app_import_recipe_from_url()}</span>
 							<span class="shrink-0 text-xs text-muted-foreground">schema.org</span>
 						</button>
 					{/if}
@@ -277,11 +279,13 @@
 				<p class="text-xs text-destructive">{error}</p>
 			{/if}
 			{#if busy}
-				<p class="text-xs text-muted-foreground">Working…</p>
+				<p class="text-xs text-muted-foreground">{m.app_working()}</p>
 			{/if}
 
 			<div class="flex justify-end">
-				<Button variant="outline" onclick={() => (open = false)} disabled={busy}>Cancel</Button>
+				<Button variant="outline" onclick={() => (open = false)} disabled={busy}
+					>{m.settings_cancel()}</Button
+				>
 			</div>
 		</div>
 	</Dialog.Content>

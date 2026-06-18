@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { createHouseholdForUser } from '$lib/server/auth/household';
 import { maxHouseholdNameLength } from '$lib/domain/household/settings-parsing';
@@ -8,21 +9,22 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 export const POST: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
 	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
+	if (!session) error(401, { message: m.app_sign_in_required() });
 
 	let body: unknown;
 	try {
 		body = await request.json();
 	} catch {
-		error(400, { message: 'Invalid request.' });
+		error(400, { message: m.household_invalid_request() });
 	}
 	if (!isRecord(body) || typeof body.name !== 'string') {
-		error(400, { message: 'Household name is required.' });
+		error(400, { message: m.household_household_name_is_required() });
 	}
 
 	const name = body.name.trim();
-	if (!name) error(400, { message: 'Household name is required.' });
-	if (name.length > maxHouseholdNameLength) error(400, { message: 'Household name is too long.' });
+	if (!name) error(400, { message: m.household_household_name_is_required() });
+	if (name.length > maxHouseholdNameLength)
+		error(400, { message: m.household_household_name_is_too_long() });
 
 	let household: Awaited<ReturnType<typeof createHouseholdForUser>>;
 	try {
@@ -35,7 +37,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		});
 	} catch (cause) {
 		console.error('Failed to create household', cause);
-		error(502, { message: 'Could not create household.' });
+		error(502, { message: m.household_could_not_create_household() });
 	}
 
 	let trialStarted = false;

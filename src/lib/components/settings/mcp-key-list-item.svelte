@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { Button } from '$lib/components/ui/button';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { presetLabel, type McpKey } from '$lib/settings/mcp-key-model';
@@ -27,7 +28,7 @@
 				? 'All households'
 				: `${keyRecord.householdScope.householdIds.length} households`}
 			{#if keyRecord.revokedAt}
-				· Revoked{/if}
+				{m.settings_revoked()}{/if}
 		</p>
 	</div>
 	<DropdownMenu.Root>

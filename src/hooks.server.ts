@@ -1,7 +1,9 @@
 import { redirect, type Handle } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
-import { getTextDirection } from '$lib/paraglide/runtime';
+import { cookieName, getTextDirection } from '$lib/paraglide/runtime';
 import { paraglideMiddleware } from '$lib/paraglide/server';
+import { authenticatedAppPathUsesHouseholdLocale } from '$lib/i18n/app-locale';
+import { loadHouseholdParaglideLocale } from '$lib/server/i18n/household-locale';
 import {
 	authenticateSealedSession,
 	clearSealedSession,
@@ -102,8 +104,49 @@ const handleSubscriptionGate: Handle = async ({ event, resolve }) => {
 	redirect(303, '/subscribe');
 };
 
-const handleParaglide: Handle = ({ event, resolve }) =>
-	paraglideMiddleware(event.request, ({ request, locale }) => {
+const requestWithoutCookie = (request: Request, name: string): Request => {
+	const headers = new Headers(request.headers);
+	const cookies =
+		headers
+			.get('cookie')
+			?.split(';')
+			.map((cookie) => cookie.trim())
+			.filter((cookie) => cookie && !cookie.startsWith(`${name}=`)) ?? [];
+	headers.set('cookie', cookies.join('; '));
+	return new Request(request, { headers });
+};
+
+const requestWithCookie = (request: Request, name: string, value: string): Request => {
+	const requestWithoutExistingCookie = requestWithoutCookie(request, name);
+	const headers = new Headers(requestWithoutExistingCookie.headers);
+	const cookieHeader = headers.get('cookie');
+	headers.set(
+		'cookie',
+		[cookieHeader, `${name}=${encodeURIComponent(value)}`].filter(Boolean).join('; ')
+	);
+	return new Request(requestWithoutExistingCookie, { headers });
+};
+
+const handleParaglide: Handle = async ({ event, resolve }) => {
+	if (event.locals.session && authenticatedAppPathUsesHouseholdLocale(event.url.pathname)) {
+		const { householdId } = await resolveActiveHouseholdId({
+			platform: event.platform,
+			cookies: event.cookies,
+			url: event.url,
+			session: event.locals.session
+		});
+		const householdLocale = await loadHouseholdParaglideLocale({
+			platform: event.platform,
+			householdId
+		});
+		if (householdLocale) {
+			event.request = requestWithCookie(event.request, cookieName, householdLocale);
+		} else {
+			event.request = requestWithoutCookie(event.request, cookieName);
+		}
+	}
+
+	return paraglideMiddleware(event.request, ({ request, locale }) => {
 		event.request = request;
 
 		return resolve(event, {
@@ -113,5 +156,6 @@ const handleParaglide: Handle = ({ event, resolve }) =>
 					.replace('%paraglide.dir%', getTextDirection(locale))
 		});
 	});
+};
 
 export const handle: Handle = sequence(handleAuth, handleSubscriptionGate, handleParaglide);

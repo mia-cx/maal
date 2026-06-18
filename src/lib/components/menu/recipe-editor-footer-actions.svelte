@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import * as Button from '$lib/components/ui/button';
 
 	let {
@@ -21,7 +22,9 @@
 >
 	<div>
 		{#if canArchive}
-			<Button.Root variant="destructive" onclick={openArchiveConfirm}>Archive</Button.Root>
+			<Button.Root variant="destructive" onclick={openArchiveConfirm}
+				>{m.menu_archive_2()}</Button.Root
+			>
 		{/if}
 	</div>
 	<div class="grid justify-items-end gap-1">

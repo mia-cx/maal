@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import * as Button from '$lib/components/ui/button';
 	import * as Calendar from '$lib/components/ui/calendar';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -314,41 +315,41 @@
 	<Separator class="my-2" />
 	<div class="grid gap-2 sm:grid-cols-2">
 		<label class="grid gap-1">
-			<span class="text-xs font-medium text-muted-foreground">Start cooking</span>
+			<span class="text-xs font-medium text-muted-foreground">{m.plan_start_cooking()}</span>
 			<Input
 				type="text"
 				inputmode="numeric"
 				autocomplete="off"
 				maxlength={5}
 				pattern="[0-9]{2}:[0-9]{2}"
-				placeholder="18:00"
+				placeholder={m.plan_default_start_cooking_time()}
 				value={timeInputValue(startCookingTime)}
 				oninput={(event) => updateStartCooking(event.currentTarget.value)}
 				class="h-9 px-3 tabular-nums"
 			/>
 		</label>
 		<label class="grid gap-1">
-			<span class="text-xs font-medium text-muted-foreground">Start eating</span>
+			<span class="text-xs font-medium text-muted-foreground">{m.plan_start_eating()}</span>
 			<Input
 				type="text"
 				inputmode="numeric"
 				autocomplete="off"
 				maxlength={5}
 				pattern="[0-9]{2}:[0-9]{2}"
-				placeholder="18:30"
+				placeholder={m.plan_default_start_eating_time()}
 				value={timeInputValue(startEatingTime)}
 				oninput={(event) => updateStartEating(event.currentTarget.value)}
 				class="h-9 px-3 tabular-nums"
 			/>
 		</label>
 		<label class="grid gap-1 sm:col-span-2">
-			<span class="text-xs font-medium text-muted-foreground">Cook</span>
+			<span class="text-xs font-medium text-muted-foreground">{m.plan_cook()}</span>
 			<SearchCombobox
 				bind:value={plannedCookDraft}
 				options={plannedCookOptions}
-				placeholder="Unassigned"
-				searchPlaceholder="Search cooks…"
-				emptyText="No cooks found."
+				placeholder={m.plan_unassigned()}
+				searchPlaceholder={m.plan_search_cooks()}
+				emptyText={m.plan_no_cooks_found()}
 				class="h-9 px-3 text-sm md:text-xs/relaxed"
 			/>
 		</label>
@@ -403,11 +404,15 @@
 									{#if customMeal}
 										<div class="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_8rem]">
 											<label class="grid gap-1">
-												<span class="text-xs font-medium text-muted-foreground">Meal name</span>
+												<span class="text-xs font-medium text-muted-foreground"
+													>{m.plan_meal_name()}</span
+												>
 												<Input type="text" bind:value={titleDraft} class="h-9 px-3" />
 											</label>
 											<label class="grid gap-1">
-												<span class="text-xs font-medium text-muted-foreground">Cook minutes</span>
+												<span class="text-xs font-medium text-muted-foreground"
+													>{m.menu_cook_minutes()}</span
+												>
 												<Input
 													type="text"
 													inputmode="numeric"
@@ -428,10 +433,10 @@
 
 									<div class="space-y-2 text-sm leading-relaxed">
 										<p>
-											<span class="font-medium">Cook time:</span>
+											<span class="font-medium">{m.plan_cook_time()}</span>
 											<span class="tabular-nums">{formatDuration(cookTimeMinutes)}</span>
 											<span class="mx-1 text-muted-foreground">•</span>
-											<span class="font-medium">Adjusted:</span>
+											<span class="font-medium">{m.plan_adjusted()}</span>
 											<span class="tabular-nums">{formatDuration(adjustedCookTimeMinutes)}</span>
 										</p>
 
@@ -472,10 +477,10 @@
 							<section class="min-w-0">
 								<div class="flex items-center justify-between gap-3">
 									<h3 class="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-										Ingredients
+										{m.menu_ingredients()}
 									</h3>
 									<label class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-										Serves
+										{m.plan_serves()}
 										<Input
 											type="number"
 											min="1"
@@ -497,13 +502,15 @@
 										{/each}
 									</ul>
 								{:else}
-									<p class="mt-3 text-sm text-muted-foreground">Ingredients are not saved yet.</p>
+									<p class="mt-3 text-sm text-muted-foreground">
+										{m.plan_ingredients_are_not_saved_yet()}
+									</p>
 								{/if}
 							</section>
 
 							<section class="min-w-0">
 								<h3 class="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-									Instructions
+									{m.menu_instructions()}
 								</h3>
 								{#if instructions.length > 0}
 									<ol class="mt-3 space-y-3 text-sm leading-relaxed">
@@ -519,7 +526,9 @@
 										{/each}
 									</ol>
 								{:else}
-									<p class="mt-3 text-sm text-muted-foreground">Instructions are not saved yet.</p>
+									<p class="mt-3 text-sm text-muted-foreground">
+										{m.plan_instructions_are_not_saved_yet()}
+									</p>
 								{/if}
 							</section>
 						</div>
@@ -528,26 +537,28 @@
 							<div
 								class="flex items-center justify-between gap-3 rounded-b-xl border-t border-border bg-popover/95 px-5 py-3 shadow-[0_-12px_24px_-18px_rgba(0,0,0,0.45)] backdrop-blur"
 							>
-								<Button.Root variant="destructive" onclick={openDeleteConfirm}>Delete</Button.Root>
-								<Button.Root onclick={saveMealDraft}>Save meal</Button.Root>
+								<Button.Root variant="destructive" onclick={openDeleteConfirm}
+									>{m.plan_delete()}</Button.Root
+								>
+								<Button.Root onclick={saveMealDraft}>{m.plan_save_meal()}</Button.Root>
 							</div>
 						{/snippet}
 					</Sheet.Frame>
 					{#if scheduleEditorOpen}
 						<button
 							type="button"
-							aria-label="Close schedule editor"
+							aria-label={m.plan_close_schedule_editor()}
 							class="pointer-events-auto fixed inset-0 z-[70] bg-background/55 backdrop-blur-[1px] sm:hidden"
 							onclick={() => (scheduleEditorOpen = false)}
 						></button>
 						<section
-							aria-label="Edit schedule"
+							aria-label={m.plan_edit_schedule()}
 							class="pointer-events-auto fixed inset-x-0 bottom-0 z-[80] max-h-[82svh] overflow-y-auto rounded-t-xl border border-border bg-popover px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] text-popover-foreground shadow-2xl ring-1 ring-foreground/10 sm:hidden"
 						>
 							<div class="mx-auto mb-3 h-1.5 w-16 rounded-full bg-muted-foreground/25"></div>
 							<div class="mb-3 flex items-center justify-between gap-3">
 								<div class="min-w-0">
-									<h3 class="text-sm font-semibold">Schedule meal</h3>
+									<h3 class="text-sm font-semibold">{m.plan_schedule_meal()}</h3>
 									<p class="truncate text-xs text-muted-foreground">
 										{scheduleSummary} · {cookSummary}
 									</p>
@@ -557,7 +568,7 @@
 									class="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted"
 									onclick={() => (scheduleEditorOpen = false)}
 								>
-									Done
+									{m.plan_done()}
 								</button>
 							</div>
 							{@render scheduleEditorControls()}
@@ -571,7 +582,7 @@
 
 <DeleteConfirmDialog
 	bind:open={deleteConfirmOpen}
-	title="Are you sure you want to delete?"
+	title={m.plan_are_you_sure_you_want_to_delete()}
 	description="This removes the meal from your plan. It does not delete the recipe from My Menu."
 	confirmLabel="Delete meal"
 	cancelLabel="Keep meal"

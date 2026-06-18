@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { cn } from '$lib/utils.js';
 	import { onMount, tick } from 'svelte';
 	import { dateKey, isSameMonth, isToday } from './schedule-date';
@@ -120,7 +121,7 @@
 		class:bg-primary={isToday(day)}
 		class:text-primary-foreground={isToday(day)}
 		onclick={() => onselectdate?.(day)}
-		aria-label={`Open ${dayKey} in day view`}
+		aria-label={m.app_open_date_day_view({ date: dayKey })}
 	>
 		{day.getDate()}
 	</button>
@@ -129,7 +130,7 @@
 		bind:this={contentElement}
 		role="button"
 		tabindex="-1"
-		aria-label={`Add meal on ${dayKey}`}
+		aria-label={m.app_add_meal_on_date({ date: dayKey })}
 		class="min-h-0 flex-1 space-y-1 overflow-hidden"
 	>
 		<ScheduledMealList

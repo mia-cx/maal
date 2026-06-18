@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import {
 		createFastScrollGate,
 		createGridSnapper,
@@ -701,7 +702,7 @@
 			bind:clientHeight={contentHeight}
 			data-drag-secondary-scroll
 			role="region"
-			aria-label="Monthly schedule"
+			aria-label={m.app_monthly_schedule()}
 			onscroll={handleScroll}
 			onpointerdown={startDragScroll}
 			onpointermove={dragScroll}

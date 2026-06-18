@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { requireBillingAppContext } from '$lib/server/http/app-context';
@@ -19,11 +20,12 @@ const readRecipe = async (request: Request): Promise<RecipeMenuItem> => {
 	try {
 		body = await request.json();
 	} catch {
-		error(400, { message: 'Invalid request.' });
+		error(400, { message: m.household_invalid_request() });
 	}
-	if (!isRecord(body) || !isRecord(body.recipe)) error(400, { message: 'Recipe is required.' });
+	if (!isRecord(body) || !isRecord(body.recipe))
+		error(400, { message: m.menu_recipe_is_required() });
 	const recipe = parseRecipeMenuItemPayload(body.recipe);
-	if (!recipe) error(400, { message: 'Recipe payload is invalid.' });
+	if (!recipe) error(400, { message: m.menu_recipe_payload_is_invalid() });
 	return recipe;
 };
 
@@ -35,10 +37,10 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 		url
 	});
 	const recipeId = params.id;
-	if (!recipeId) error(400, { message: 'Recipe is required.' });
+	if (!recipeId) error(400, { message: m.menu_recipe_is_required() });
 
 	const recipe = await readRecipe(request);
-	if (recipe.id !== recipeId) error(400, { message: 'Recipe id mismatch.' });
+	if (recipe.id !== recipeId) error(400, { message: m.menu_recipe_id_mismatch() });
 
 	const existing = await db
 		.select({ id: userRecipes.id })
@@ -51,7 +53,7 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 			)
 		)
 		.get();
-	if (!existing) error(404, { message: 'Recipe not found.' });
+	if (!existing) error(404, { message: m.plan_recipe_not_found() });
 
 	await db.transaction(async (tx) => {
 		await tx
@@ -93,7 +95,7 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 		await loadMenuRecipes(db, session.user.id, householdId, { unitPreferences })
 	).find((candidate) => candidate.id === recipeId);
 
-	if (!freshRecipe) error(500, { message: 'Recipe was updated but could not be loaded.' });
+	if (!freshRecipe) error(500, { message: m.menu_recipe_was_updated_but_could_not_be_loaded() });
 	return json({ recipe: freshRecipe });
 };
 
@@ -105,7 +107,7 @@ export const PATCH: RequestHandler = async ({ cookies, locals, params, platform,
 		url
 	});
 	const recipeId = params.id;
-	if (!recipeId) error(400, { message: 'Recipe is required.' });
+	if (!recipeId) error(400, { message: m.menu_recipe_is_required() });
 
 	const existing = await db
 		.select({ id: userRecipes.id })
@@ -118,7 +120,7 @@ export const PATCH: RequestHandler = async ({ cookies, locals, params, platform,
 			)
 		)
 		.get();
-	if (!existing) error(404, { message: 'Archived recipe not found.' });
+	if (!existing) error(404, { message: m.menu_archived_recipe_not_found() });
 
 	const updatedAt = new Date().toISOString();
 	await db.transaction((tx) =>
@@ -144,7 +146,7 @@ export const PATCH: RequestHandler = async ({ cookies, locals, params, platform,
 			recipeIds: [recipeId]
 		})
 	)[0];
-	if (!recipe) error(500, { message: 'Recipe was restored but could not be loaded.' });
+	if (!recipe) error(500, { message: m.menu_recipe_was_restored_but_could_not_be_loaded() });
 
 	return json({ restored: true, recipe });
 };
@@ -157,7 +159,7 @@ export const DELETE: RequestHandler = async ({ cookies, locals, params, platform
 		url
 	});
 	const recipeId = params.id;
-	if (!recipeId) error(400, { message: 'Recipe is required.' });
+	if (!recipeId) error(400, { message: m.menu_recipe_is_required() });
 
 	const permanent = url.searchParams.get('permanent') === 'true';
 	const existing = await db

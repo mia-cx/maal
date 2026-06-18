@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import {
 		mcpScopeGroups,
@@ -19,16 +20,16 @@
 
 <div class="grid gap-2 text-xs">
 	<div>
-		<p class="font-medium">Permissions</p>
-		<p class="text-muted-foreground">Write automatically includes read.</p>
+		<p class="font-medium">{m.settings_permissions()}</p>
+		<p class="text-muted-foreground">{m.settings_write_automatically_includes_read()}</p>
 	</div>
 	<div class="grid gap-2">
 		{#each mcpScopeGroups as group (group.id)}
 			{@const level = mcpScopeLevels[group.id] ?? 'none'}
 			<div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
 				<div class="min-w-0">
-					<p class="font-medium">{group.label}</p>
-					<p class="text-muted-foreground">{group.description}</p>
+					<p class="font-medium">{group.label()}</p>
+					<p class="text-muted-foreground">{group.description()}</p>
 				</div>
 				<div class="flex flex-wrap items-center gap-3">
 					{#if group.read}
@@ -38,7 +39,7 @@
 								disabled={level === 'write'}
 								onCheckedChange={(checked) => setMcpScopeRead(group.id, checked === true)}
 							/>
-							<span>Read</span>
+							<span>{m.settings_read()}</span>
 						</label>
 					{/if}
 					{#if group.write}
@@ -47,7 +48,7 @@
 								checked={level === 'write'}
 								onCheckedChange={(checked) => setMcpScopeWrite(group.id, checked === true)}
 							/>
-							<span>Write</span>
+							<span>{m.settings_write()}</span>
 						</label>
 					{/if}
 				</div>

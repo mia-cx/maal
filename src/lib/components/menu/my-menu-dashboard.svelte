@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import * as Accordion from '$lib/components/ui/accordion';
 	import * as Card from '$lib/components/ui/card';
 	import * as Sidebar from '$lib/components/ui/sidebar';
@@ -77,6 +78,20 @@
 	const selectedRecipes = $derived(
 		displayedRecipes.filter((recipe) => selectedRecipeIds.includes(recipe.id))
 	);
+	const recipeWord = (count: number): string =>
+		count === 1 ? m.menu_recipe_word_singular() : m.menu_recipe_word_plural();
+	const archivedRecipeWord = (count: number): string =>
+		count === 1 ? m.menu_archived_recipe_word_singular() : m.menu_archived_recipe_word_plural();
+	const linkedMealWord = (count: number): string =>
+		count === 1 ? m.menu_linked_meal_word_singular() : m.menu_linked_meal_word_plural();
+	const permanentDeleteTarget = $derived(
+		permanentDeleteRecipes.length === 1
+			? (permanentDeleteRecipes[0]?.title ?? m.menu_this_recipe())
+			: m.menu_archived_recipes_selected({
+					count: permanentDeleteRecipes.length,
+					recipeWord: archivedRecipeWord(permanentDeleteRecipes.length)
+				})
+	);
 	const selectedArchivedRecipes = $derived(
 		archivedRecipes.filter((recipe) => selectedArchivedRecipeIds.includes(recipe.id))
 	);
@@ -102,7 +117,7 @@
 			appendMenuRecipes(body.recipes);
 			nextRecipeOffset = body.nextRecipeOffset;
 		} catch {
-			recipesLoadError = 'Could not load more recipes.';
+			recipesLoadError = m.menu_could_not_load_more_recipes();
 		} finally {
 			recipesLoading = false;
 		}
@@ -198,7 +213,7 @@
 
 	const readAddRecipeError = (error: unknown): string => {
 		if (error instanceof Error) return error.message;
-		return 'Could not add that recipe.';
+		return m.menu_could_not_add_that_recipe();
 	};
 
 	const openAddRecipe = () => {
@@ -315,7 +330,7 @@
 </script>
 
 <svelte:head>
-	<title>My Menu · Maal</title>
+	<title>{m.menu_my_menu_maal()}</title>
 </svelte:head>
 
 <section class="flex h-svh min-w-0 flex-col overflow-hidden bg-background text-foreground">
@@ -344,7 +359,7 @@
 						lastSelectedRecipeId = null;
 					}}
 				>
-					Deselect all
+					{m.menu_deselect_all()}
 				</Button>
 				<Button
 					variant="destructive"
@@ -352,15 +367,19 @@
 					disabled={!selectedRecipes.length || Boolean(archiveActionRecipeId)}
 					onclick={archiveSelectedRecipes}
 				>
-					Archive selected
+					{m.menu_archive_selected()}
 				</Button>
 			</div>
 			<label class="relative ml-auto min-w-56 flex-1 sm:max-w-80">
-				<span class="sr-only">Search recipes</span>
+				<span class="sr-only">{m.menu_search_recipes()}</span>
 				<SearchIcon
 					class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
 				/>
-				<Input bind:value={recipeSearchQuery} placeholder="Search recipes…" class="h-8 pl-8" />
+				<Input
+					bind:value={recipeSearchQuery}
+					placeholder={m.menu_search_recipes_2()}
+					class="h-8 pl-8"
+				/>
 			</label>
 		</div>
 
@@ -381,8 +400,10 @@
 					>
 						<PlusIcon class="size-5" />
 					</span>
-					<span class="text-sm font-semibold text-foreground">Add recipe</span>
-					<span class="max-w-40 text-xs leading-5">Create a recipe or import from a URL.</span>
+					<span class="text-sm font-semibold text-foreground">{m.menu_add_recipe()}</span>
+					<span class="max-w-40 text-xs leading-5"
+						>{m.menu_create_a_recipe_or_import_from_a_url()}</span
+					>
 				</button>
 			</Card.Root>
 			{#each displayedRecipes as recipe (recipe.id)}
@@ -395,17 +416,17 @@
 			{/each}
 		</div>
 		{#if serverSearchActive && searchLoading}
-			<p class="py-4 text-center text-xs text-muted-foreground">Searching recipes…</p>
+			<p class="py-4 text-center text-xs text-muted-foreground">{m.menu_searching_recipes()}</p>
 		{:else if searchLoadError}
 			<p class="py-4 text-center text-xs text-destructive">{searchLoadError}</p>
 		{:else if recipeSearchQuery.trim() && displayedRecipes.length === 0}
 			<p class="py-8 text-center text-sm text-muted-foreground">
-				No recipes match “{recipeSearchQuery}”.
+				{m.menu_no_recipes_match_query({ query: recipeSearchQuery })}
 			</p>
 		{/if}
 		<div bind:this={loadMoreElement} class="flex min-h-10 items-center justify-center py-4">
 			{#if !serverSearchActive && recipesLoading}
-				<p class="text-xs text-muted-foreground">Loading recipes…</p>
+				<p class="text-xs text-muted-foreground">{m.menu_loading_recipes()}</p>
 			{:else if !serverSearchActive && recipesLoadError}
 				<button
 					type="button"
@@ -420,7 +441,7 @@
 		<Accordion.Root type="multiple" class="border-border bg-background">
 			<Accordion.Item value="archive">
 				<Accordion.Trigger level={2} class="px-3 py-2">
-					<span>Archive ({archivedRecipes.length})</span>
+					<span>{m.menu_archive_with_count({ count: archivedRecipes.length })}</span>
 				</Accordion.Trigger>
 				<Accordion.Content class="px-3 pb-3">
 					{#if archiveActionError}
@@ -430,9 +451,10 @@
 						class="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 p-3"
 					>
 						<p class="mr-2 text-sm font-medium">
-							{selectedArchivedRecipes.length} archived recipe{selectedArchivedRecipes.length === 1
-								? ''
-								: 's'} selected
+							{m.menu_archived_recipes_selected({
+								count: selectedArchivedRecipes.length,
+								recipeWord: archivedRecipeWord(selectedArchivedRecipes.length)
+							})}
 						</p>
 						<div class="flex flex-wrap gap-2">
 							<Button
@@ -444,7 +466,7 @@
 									lastSelectedArchivedRecipeId = null;
 								}}
 							>
-								Deselect all
+								{m.menu_deselect_all()}
 							</Button>
 							<Button
 								variant="outline"
@@ -452,7 +474,7 @@
 								disabled={!selectedArchivedRecipes.length || Boolean(archiveActionRecipeId)}
 								onclick={restoreSelectedArchivedRecipes}
 							>
-								Restore selected
+								{m.menu_restore_selected()}
 							</Button>
 							<Button
 								variant="destructive"
@@ -460,7 +482,7 @@
 								disabled={!selectedArchivedRecipes.length || Boolean(archiveActionRecipeId)}
 								onclick={() => confirmPermanentDelete(selectedArchivedRecipes)}
 							>
-								Delete selected forever
+								{m.menu_delete_selected_forever()}
 							</Button>
 						</div>
 					</div>
@@ -473,7 +495,7 @@
 									<div class="flex min-w-0 gap-3">
 										<Checkbox
 											checked={selectedArchivedRecipeIds.includes(recipe.id)}
-											aria-label={`Select ${recipe.title}`}
+											aria-label={m.menu_select_recipe({ title: recipe.title })}
 											onpointerdown={(event) => (archivedRangeSelection = event.shiftKey)}
 											onkeydown={(event) => {
 												if (event.key === ' ' || event.key === 'Enter') {
@@ -488,9 +510,14 @@
 										<div class="min-w-0">
 											<p class="truncate text-sm font-medium">{recipe.title}</p>
 											<p class="text-xs text-muted-foreground">
-												Archived{recipe.archivedAt ? ` ${archivedDate(recipe.archivedAt)}` : ''}
+												{recipe.archivedAt
+													? m.menu_archived_recipe_status({ date: archivedDate(recipe.archivedAt) })
+													: m.menu_archived_recipe_status_no_date()}
 												{#if recipe.plannedCount}
-													· {recipe.plannedCount} linked meal{recipe.plannedCount === 1 ? '' : 's'}
+													· {m.menu_linked_meals_count({
+														count: recipe.plannedCount,
+														mealWord: linkedMealWord(recipe.plannedCount)
+													})}
 												{/if}
 											</p>
 										</div>
@@ -502,7 +529,7 @@
 											disabled={archiveActionRecipeId === recipe.id}
 											onclick={() => restoreArchivedRecipe(recipe)}
 										>
-											Restore
+											{m.menu_restore()}
 										</Button>
 										<Button
 											variant="destructive"
@@ -510,14 +537,16 @@
 											disabled={archiveActionRecipeId === recipe.id}
 											onclick={() => confirmPermanentDelete(recipe)}
 										>
-											Delete forever
+											{m.menu_delete_forever()}
 										</Button>
 									</div>
 								</div>
 							{/each}
 						</div>
 					{:else}
-						<p class="text-xs text-muted-foreground">Archived recipes will show up here.</p>
+						<p class="text-xs text-muted-foreground">
+							{m.menu_archived_recipes_will_show_up_here()}
+						</p>
 					{/if}
 				</Accordion.Content>
 			</Accordion.Item>
@@ -528,11 +557,15 @@
 <DeleteConfirmDialog
 	bind:open={permanentDeleteOpen}
 	contentClass="sm:max-w-[24rem]"
-	title="Permanently delete recipe{permanentDeleteRecipes.length === 1 ? '' : 's'}?"
-	description="This cannot be undone. All meals linked to {permanentDeleteRecipes.length === 1
-		? `“${permanentDeleteRecipes[0]?.title ?? 'this recipe'}”`
-		: `${permanentDeleteRecipes.length} recipes`} will also be deleted."
-	confirmLabel="Delete recipe{permanentDeleteRecipes.length === 1 ? '' : 's'} and meals"
+	title={m.menu_permanently_delete_recipes_title({
+		count: permanentDeleteRecipes.length,
+		recipeWord: recipeWord(permanentDeleteRecipes.length)
+	})}
+	description={m.menu_permanently_delete_recipes_description({ target: permanentDeleteTarget })}
+	confirmLabel={m.menu_delete_recipes_and_meals({
+		count: permanentDeleteRecipes.length,
+		recipeWord: recipeWord(permanentDeleteRecipes.length)
+	})}
 	busy={Boolean(archiveActionRecipeId)}
 	error={archiveActionError}
 	onconfirm={permanentlyDeleteArchivedRecipe}

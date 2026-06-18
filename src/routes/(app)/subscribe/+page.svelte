@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import PricingTable from '$lib/components/marketing/pricing-table.svelte';
 	import WordmarkLogo from '$lib/components/wordmark-logo.svelte';
 	import type { PageData } from './$types';
@@ -8,7 +9,7 @@
 </script>
 
 <svelte:head>
-	<title>Start subscription · Maal</title>
+	<title>{m.billing_start_subscription_maal()}</title>
 </svelte:head>
 
 <section
@@ -19,10 +20,10 @@
 			<WordmarkLogo class="h-8 w-auto" />
 			<div class="grid gap-3">
 				<h1 class="text-3xl font-semibold tracking-tight md:text-4xl">
-					Choose a plan for {data.householdName}
+					{m.billing_choose_a_plan_for_household({ householdName: data.householdName })}
 				</h1>
 				<p class="mx-auto max-w-2xl text-sm text-muted-foreground">
-					This subscription applies only to {data.householdName}.
+					{m.billing_subscription_applies_to_household({ householdName: data.householdName })}
 				</p>
 			</div>
 		</div>

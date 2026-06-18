@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import {
 	activateRequiredHouseholdId,
@@ -7,7 +8,7 @@ import { readJsonObject } from '$lib/server/http/request';
 
 export const GET: RequestHandler = async ({ cookies, locals, platform, url }) => {
 	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
+	if (!session) error(401, { message: m.app_sign_in_required() });
 
 	const householdId = await resolveRequiredActiveHouseholdId({
 		platform,
@@ -20,7 +21,7 @@ export const GET: RequestHandler = async ({ cookies, locals, platform, url }) =>
 
 export const POST: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
 	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
+	if (!session) error(401, { message: m.app_sign_in_required() });
 
 	const body = await readJsonObject(request, {
 		onParseError: (cause) => console.warn('Invalid active-household request body', cause)
@@ -29,7 +30,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		typeof body.householdId === 'string' && body.householdId.trim()
 			? body.householdId.trim()
 			: null;
-	if (!householdId) error(400, { message: 'Household ID is required.' });
+	if (!householdId) error(400, { message: m.app_household_id_is_required() });
 
 	const activatedHouseholdId = await activateRequiredHouseholdId({
 		platform,

@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import BellIcon from '@lucide/svelte/icons/bell';
 import CreditCardIcon from '@lucide/svelte/icons/credit-card';
 import KeyRoundIcon from '@lucide/svelte/icons/key-round';
@@ -8,17 +9,17 @@ import type { SettingsCategoryId } from './types';
 
 export type SettingsCategory = {
 	id: SettingsCategoryId;
-	label: string;
+	label: () => string;
 	icon: Component;
 	disabled?: boolean;
 };
 
 export const settingsCategories: SettingsCategory[] = [
-	{ id: 'account', label: 'Account', icon: UserRoundIcon },
-	{ id: 'security', label: 'Security', icon: LockKeyholeIcon },
-	{ id: 'mcp', label: 'MCP keys', icon: KeyRoundIcon },
-	{ id: 'notifications', label: 'Notifications', icon: BellIcon, disabled: true },
-	{ id: 'billing', label: 'Billing', icon: CreditCardIcon }
+	{ id: 'account', label: m.settings_account, icon: UserRoundIcon },
+	{ id: 'security', label: m.settings_security, icon: LockKeyholeIcon },
+	{ id: 'mcp', label: m.settings_mcp_keys, icon: KeyRoundIcon },
+	{ id: 'notifications', label: m.settings_notifications, icon: BellIcon, disabled: true },
+	{ id: 'billing', label: m.settings_billing, icon: CreditCardIcon }
 ];
 
 export const settingsCategoryFromParam = (value: string | null): SettingsCategoryId | null => {

@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import { error, redirect } from '@sveltejs/kit';
 import { commitHouseholdCookie, listUserHouseholds } from '$lib/server/auth/household';
 import { getDb } from '$lib/server/db';
@@ -17,7 +18,7 @@ const resolveFallbackHouseholdId = async (
 		return await firstAccessibleHouseholdId({ platform, households });
 	} catch (cause) {
 		console.error('Failed to resolve fallback household for menu route', cause);
-		error(503, { message: 'Could not load your households. Try again in a moment.' });
+		error(503, { message: m.billing_could_not_load_your_households_try_again_in_() });
 	}
 };
 

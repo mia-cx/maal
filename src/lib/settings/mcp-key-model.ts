@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import type { SettingsHousehold } from './types';
 
 export type McpScope =
@@ -17,8 +18,8 @@ export type McpScopeGroupId = 'households' | 'recipes' | 'meals' | 'checkIns' | 
 export type McpScopeLevels = Partial<Record<McpScopeGroupId, McpScopeLevel>>;
 export type McpScopeGroup = {
 	id: McpScopeGroupId;
-	label: string;
-	description: string;
+	label: () => string;
+	description: () => string;
 	read?: McpScope;
 	write?: McpScope;
 };
@@ -39,36 +40,36 @@ export type McpKey = {
 export const mcpScopeGroups = [
 	{
 		id: 'households',
-		label: 'Households',
-		description: 'Read or manage household membership and settings.',
+		label: m.settings_households,
+		description: m.settings_read_or_manage_household_membership_and_sett,
 		read: 'households:read',
 		write: 'households:write'
 	},
 	{
 		id: 'recipes',
-		label: 'Recipes',
-		description: 'Read, create, and update saved recipes.',
+		label: m.settings_recipes,
+		description: m.settings_read_create_and_update_saved_recipes,
 		read: 'recipes:read',
 		write: 'recipes:write'
 	},
 	{
 		id: 'meals',
-		label: 'Meal plan',
-		description: 'Read and manage planned meals.',
+		label: m.settings_meal_plan,
+		description: m.settings_read_and_manage_planned_meals,
 		read: 'meals:read',
 		write: 'meals:write'
 	},
 	{
 		id: 'checkIns',
-		label: 'Check-ins',
-		description: 'Record meal feedback after cooking.',
+		label: m.settings_check_ins,
+		description: m.settings_record_meal_feedback_after_cooking,
 		read: 'check_ins:read',
 		write: 'check_ins:write'
 	},
 	{
 		id: 'foodProfile',
-		label: 'Food profile',
-		description: 'Read or update taxonomy preferences.',
+		label: m.settings_food_profile,
+		description: m.settings_read_or_update_taxonomy_preferences,
 		read: 'food_profile:read',
 		write: 'food_profile:write'
 	}
@@ -78,10 +79,10 @@ const isMcpScopeGroupId = (groupId: string): groupId is McpScopeGroupId =>
 	mcpScopeGroups.some((group) => group.id === groupId);
 
 export const presetLabel = (preset?: McpKeyPreset): string => {
-	if (preset === 'read_only_planner') return 'Read-only planner';
-	if (preset === 'meal_planner') return 'Meal planner';
-	if (preset === 'full_access') return 'Full access';
-	return 'Custom';
+	if (preset === 'read_only_planner') return m.settings_read_only_planner();
+	if (preset === 'meal_planner') return m.settings_meal_planner();
+	if (preset === 'full_access') return m.settings_full_access();
+	return m.settings_custom();
 };
 
 export const selectedMcpScopesForLevels = (scopeLevels: McpScopeLevels): McpScope[] =>
@@ -98,9 +99,9 @@ export const selectedMcpHouseholds = (
 ): SettingsHousehold[] => households.filter((household) => householdIds.includes(household.id));
 
 export const mcpHouseholdPickerLabel = (households: SettingsHousehold[]): string => {
-	if (households.length === 0) return 'Select households';
+	if (households.length === 0) return m.settings_select_households();
 	if (households.length === 1) return households[0].name;
-	return `${households.length} households selected`;
+	return m.settings_households_selected({ count: households.length });
 };
 
 export const filterMcpHouseholds = (

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import * as Button from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 
@@ -43,12 +44,12 @@
 
 <div class="grid gap-4">
 	<label class="grid gap-1 text-xs font-medium">
-		Title
+		{m.menu_title()}
 		<Input bind:value={title} />
 	</label>
 
 	<label class="grid gap-1 text-xs font-medium">
-		Source URL
+		{m.menu_source_url()}
 		<div class="flex gap-2">
 			<Input bind:value={sourceUrl} />
 			{#if canImportFromUrl}
@@ -64,7 +65,7 @@
 		</div>
 		{#if canImportFromUrl && sourceUrlCanImport}
 			<span class="text-muted-foreground">
-				Import will fill this sheet from schema.org recipe data before you save.
+				{m.menu_import_will_fill_this_sheet_from_schema_org_()}
 			</span>
 		{/if}
 		{#if importError}
@@ -74,44 +75,44 @@
 
 	<div class="grid gap-3 sm:grid-cols-2">
 		<label class="grid gap-1 text-xs font-medium">
-			Source site
+			{m.menu_source_site()}
 			<Input bind:value={sourceSiteName} />
 		</label>
 		<label class="grid gap-1 text-xs font-medium">
-			Author
+			{m.menu_author()}
 			<Input bind:value={sourceAuthorName} />
 		</label>
 		<label class="grid gap-1 text-xs font-medium">
-			Publisher
+			{m.menu_publisher()}
 			<Input bind:value={sourcePublisherName} />
 		</label>
 		<label class="grid gap-1 text-xs font-medium">
-			Based on URL
+			{m.menu_based_on_url()}
 			<Input bind:value={sourceIsBasedOnUrl} />
 		</label>
 	</div>
 
 	<label class="grid gap-1 text-xs font-medium">
-		Description
+		{m.menu_description()}
 		<textarea bind:value={description} rows="4" class={textareaClass}></textarea>
 	</label>
 
 	<label class="grid gap-1 text-xs font-medium">
-		Image URL
+		{m.menu_image_url()}
 		<Input bind:value={image} />
 	</label>
 
 	<div class="grid gap-3 sm:grid-cols-3">
 		<label class="grid gap-1 text-xs font-medium">
-			Prep minutes
+			{m.menu_prep_minutes()}
 			<Input type="number" min="0" bind:value={prepTimeMinutes} />
 		</label>
 		<label class="grid gap-1 text-xs font-medium">
-			Cook minutes
+			{m.menu_cook_minutes()}
 			<Input type="number" min="0" bind:value={cookTimeMinutes} />
 		</label>
 		<label class="grid gap-1 text-xs font-medium">
-			Yield
+			{m.menu_yield()}
 			<Input type="number" min="1" step="1" bind:value={recipeYield} />
 		</label>
 	</div>

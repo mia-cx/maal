@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import McpHouseholdAccessPicker from '$lib/components/settings/mcp-household-access-picker.svelte';
@@ -43,12 +44,14 @@
 
 <div class="grid gap-3">
 	<div>
-		<p class="text-xs font-medium">Create MCP key</p>
-		<p class="text-xs text-muted-foreground">Choose permissions and household access.</p>
+		<p class="text-xs font-medium">{m.settings_create_mcp_key()}</p>
+		<p class="text-xs text-muted-foreground">
+			{m.settings_choose_permissions_and_household_access()}
+		</p>
 	</div>
 	<label class="grid gap-1 text-xs font-medium">
-		Label
-		<Input bind:value={mcpKeyLabel} placeholder="Claude on my laptop" class="h-8" />
+		{m.settings_label()}
+		<Input bind:value={mcpKeyLabel} placeholder={m.settings_claude_on_my_laptop()} class="h-8" />
 	</label>
 	<McpPermissionsEditor {mcpScopeLevels} {setMcpScopeRead} {setMcpScopeWrite} />
 	<McpHouseholdAccessPicker
@@ -61,7 +64,8 @@
 		{toggleMcpHousehold}
 	/>
 	<div class="flex justify-end gap-2">
-		<Button variant="ghost" disabled={mcpKeyCreating} onclick={cancel}>Cancel</Button>
+		<Button variant="ghost" disabled={mcpKeyCreating} onclick={cancel}>{m.settings_cancel()}</Button
+		>
 		<Button
 			disabled={mcpKeyCreating ||
 				!mcpKeyLabel.trim() ||

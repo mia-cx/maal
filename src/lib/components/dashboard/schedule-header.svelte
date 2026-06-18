@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { Button } from '$lib/components/ui/button';
 	import * as ButtonGroup from '$lib/components/ui/button-group';
 	import * as Sidebar from '$lib/components/ui/sidebar';
@@ -32,7 +33,7 @@
 		</div>
 	</div>
 	<ButtonGroup.Root
-		aria-label="Meal plan view"
+		aria-label={m.plan_meal_plan_view()}
 		class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
 	>
 		<Button
@@ -40,21 +41,21 @@
 			size="sm"
 			onclick={() => onmodechange?.('daily')}
 		>
-			Day
+			{m.plan_day()}
 		</Button>
 		<Button
 			variant={mode === 'multi-day' ? 'default' : 'outline'}
 			size="sm"
 			onclick={() => onmodechange?.('multi-day')}
 		>
-			Multi-day
+			{m.plan_multi_day()}
 		</Button>
 		<Button
 			variant={mode === 'monthly' ? 'default' : 'outline'}
 			size="sm"
 			onclick={() => onmodechange?.('monthly')}
 		>
-			Month
+			{m.plan_month()}
 		</Button>
 	</ButtonGroup.Root>
 
@@ -62,13 +63,18 @@
 		{#if showDateControls}
 			<div class="hidden items-center gap-2 md:flex">
 				{#if showStepControls}
-					<Button variant="outline" size="icon-sm" onclick={onprevious} aria-label="Previous"
-						>‹</Button
+					<Button
+						variant="outline"
+						size="icon-sm"
+						onclick={onprevious}
+						aria-label={m.plan_previous()}>‹</Button
 					>
 				{/if}
-				<Button variant="outline" size="sm" onclick={ontoday}>Today</Button>
+				<Button variant="outline" size="sm" onclick={ontoday}>{m.plan_today()}</Button>
 				{#if showStepControls}
-					<Button variant="outline" size="icon-sm" onclick={onnext} aria-label="Next">›</Button>
+					<Button variant="outline" size="icon-sm" onclick={onnext} aria-label={m.plan_next()}
+						>›</Button
+					>
 				{/if}
 			</div>
 		{/if}
@@ -82,6 +88,6 @@
 		onclick={ontoday}
 		class="fixed bottom-[calc(env(safe-area-inset-bottom)+1rem)] left-[calc(env(safe-area-inset-left)+1rem)] z-[45] bg-popover text-popover-foreground opacity-100 shadow-none hover:bg-popover md:hidden dark:bg-popover dark:hover:bg-popover"
 	>
-		Today
+		{m.plan_today()}
 	</Button>
 {/if}

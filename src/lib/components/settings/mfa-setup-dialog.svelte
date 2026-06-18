@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import VerificationCodeInput from '$lib/components/settings/verification-code-input.svelte';
@@ -32,9 +33,10 @@
 <Dialog.Root bind:open>
 	<Dialog.Content class="sm:max-w-[26rem]">
 		<Dialog.Header>
-			<Dialog.Title>Set up two-factor authentication</Dialog.Title>
+			<Dialog.Title>{m.settings_set_up_two_factor_authentication()}</Dialog.Title>
 			<Dialog.Description>
-				Scan the QR code with your authenticator app, then enter the {codeLengthLabel}.
+				{m.settings_scan_the_qr_code_with_your_authenticator_app()}
+				{codeLengthLabel}.
 			</Dialog.Description>
 		</Dialog.Header>
 		{#if mfaSetup}
@@ -42,12 +44,12 @@
 				<div class="flex justify-center">
 					<img
 						src={mfaSetup.qrCode}
-						alt="Authenticator app QR code"
+						alt={m.settings_authenticator_app_qr_code()}
 						class="size-44 rounded-md border border-border bg-white p-2"
 					/>
 				</div>
 				<div class="grid gap-1 text-xs text-muted-foreground">
-					<span>Manual setup key</span>
+					<span>{m.settings_manual_setup_key()}</span>
 					<code class="rounded-md bg-muted px-2 py-1 break-all text-foreground"
 						>{mfaSetup.secret}</code
 					>
@@ -56,13 +58,13 @@
 					<VerificationCodeInput
 						length={verificationCodeMinLength}
 						bind:value={mfaCode}
-						label="Authenticator code"
+						label={m.settings_authenticator_code()}
 						class=""
 					/>
 				</div>
 				<div class="flex justify-end gap-2">
 					<Button variant="ghost" disabled={mfaVerifyBusy} onclick={() => (open = false)}>
-						Cancel
+						{m.settings_cancel()}
 					</Button>
 					<Button
 						disabled={mfaVerifyBusy || mfaCode.trim().length < verificationCodeMinLength}

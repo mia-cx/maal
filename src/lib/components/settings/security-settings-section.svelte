@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { Button } from '$lib/components/ui/button';
 	import { Separator } from '$lib/components/ui/separator';
 	import type { MfaFactor } from '$lib/settings/types';
@@ -28,21 +29,25 @@
 
 <div class="grid max-w-lg gap-5 text-sm">
 	<div class="flex items-center justify-between gap-4">
-		<div>Password</div>
-		<Button variant="outline" onclick={openPasswordChange}>Change</Button>
+		<div>{m.settings_password()}</div>
+		<Button variant="outline" onclick={openPasswordChange}>{m.settings_change()}</Button>
 	</div>
 	<Separator />
 	<div class="grid gap-3">
 		<div class="flex items-center justify-between gap-4">
-			<div>Two-factor authentication</div>
+			<div>{m.settings_two_factor_authentication()}</div>
 			<Button variant="outline" disabled={mfaSetupBusy} onclick={startMfaSetup}>
-				{mfaSetupBusy ? 'Starting…' : mfaFactors.length ? 'Replace' : 'Set up'}
+				{mfaSetupBusy
+					? m.settings_starting()
+					: mfaFactors.length
+						? m.settings_replace()
+						: m.settings_set_up()}
 			</Button>
 		</div>
 		{#if mfaFactorsBusy}
-			<p class="text-xs text-muted-foreground">Loading methods…</p>
+			<p class="text-xs text-muted-foreground">{m.settings_loading_methods()}</p>
 		{:else if mfaFactors.length === 0}
-			<p class="text-xs text-muted-foreground">No authenticator app is set up.</p>
+			<p class="text-xs text-muted-foreground">{m.settings_no_authenticator_app_is_set_up()}</p>
 		{:else}
 			<ul class="divide-y divide-border">
 				{#each mfaFactors as factor (factor.id)}
@@ -57,7 +62,7 @@
 							disabled={deletingMfaFactorId === factor.id}
 							onclick={() => confirmDeleteMfaFactor(factor)}
 						>
-							{deletingMfaFactorId === factor.id ? 'Removing…' : 'Remove'}
+							{deletingMfaFactorId === factor.id ? m.settings_removing() : m.settings_remove()}
 						</Button>
 					</li>
 				{/each}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Command from '$lib/components/ui/command';
@@ -27,15 +28,15 @@
 </script>
 
 <div class="grid gap-2 text-xs">
-	<span class="font-medium">Households</span>
+	<span class="font-medium">{m.settings_households()}</span>
 	<RadioGroup.Root bind:value={mcpKeyHouseholdKind} class="gap-2">
 		<label class="flex items-center gap-2 py-1">
 			<RadioGroup.Item value="all" />
-			<span>All current and future households</span>
+			<span>{m.settings_all_current_and_future_households()}</span>
 		</label>
 		<label class="flex items-center gap-2 py-1">
 			<RadioGroup.Item value="households" />
-			<span>Selected households</span>
+			<span>{m.settings_selected_households()}</span>
 		</label>
 	</RadioGroup.Root>
 	{#if mcpKeyHouseholdKind === 'households'}
@@ -52,10 +53,13 @@
 			</Popover.Trigger>
 			<Popover.Content align="start" class="w-[22rem] max-w-[calc(100vw-2rem)] p-1">
 				<Command.Root shouldFilter={false}>
-					<Command.Input bind:value={mcpHouseholdQuery} placeholder="Search households…" />
+					<Command.Input
+						bind:value={mcpHouseholdQuery}
+						placeholder={m.settings_search_households()}
+					/>
 					<Command.List class="max-h-56 overflow-y-auto p-1">
 						{#if filteredMcpHouseholds.length === 0}
-							<Command.Empty>No households found.</Command.Empty>
+							<Command.Empty>{m.settings_no_households_found()}</Command.Empty>
 						{:else}
 							{#each filteredMcpHouseholds as household (household.id)}
 								{@const checked = mcpKeyHouseholdIds.includes(household.id)}

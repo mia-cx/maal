@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import * as Button from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import type { DraftIngredient } from '$lib/menu/recipe-editor-model';
@@ -21,7 +22,7 @@
 </script>
 
 <section class="grid gap-2">
-	<h3 class="text-xs font-medium text-foreground">Ingredients</h3>
+	<h3 class="text-xs font-medium text-foreground">{m.menu_ingredients()}</h3>
 	<div class="grid gap-2">
 		{#each ingredients as ingredient, index (ingredient.draftId)}
 			<div class="grid gap-2 sm:grid-cols-[4.5rem_5rem_minmax(0,1fr)_auto] sm:items-end">
@@ -39,7 +40,7 @@
 						value={ingredient.unit ?? ''}
 						oninput={(event) => updateIngredientUnit(ingredient.draftId, event.currentTarget.value)}
 						aria-label={`Ingredient ${index + 1} unit`}
-						placeholder="tbsp"
+						placeholder={m.menu_unit_placeholder_tablespoon()}
 					/>
 				</div>
 				<div>
@@ -47,18 +48,18 @@
 						value={ingredient.item}
 						oninput={(event) => updateIngredientItem(ingredient.draftId, event.currentTarget.value)}
 						aria-label={`Ingredient ${index + 1}`}
-						placeholder="olive oil"
+						placeholder={m.menu_olive_oil()}
 					/>
 				</div>
 				<Button.Root variant="ghost" size="sm" onclick={() => removeIngredient(ingredient.draftId)}>
-					Remove
+					{m.menu_remove()}
 				</Button.Root>
 			</div>
 		{/each}
 	</div>
 	<div>
 		<Button.Root variant="outline" size="sm" class="w-full" onclick={addIngredient}>
-			Add ingredient
+			{m.menu_add_ingredient()}
 		</Button.Root>
 	</div>
 </section>

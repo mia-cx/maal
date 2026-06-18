@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { cn } from '$lib/utils';
 	import type { SettingsCategory } from '$lib/settings/categories';
@@ -17,9 +18,9 @@
 
 <aside class="overflow-y-auto border-b border-border bg-muted/25 p-2 md:border-r md:border-b-0">
 	<Dialog.Header class="px-2 py-2">
-		<Dialog.Title>Settings</Dialog.Title>
+		<Dialog.Title>{m.settings_settings()}</Dialog.Title>
 	</Dialog.Header>
-	<nav aria-label="Settings categories" class="mt-1 grid gap-1">
+	<nav aria-label={m.settings_settings_categories()} class="mt-1 grid gap-1">
 		{#each categories as category (category.id)}
 			<button
 				type="button"
@@ -32,13 +33,13 @@
 						'bg-background text-foreground shadow-sm ring-1 ring-border'
 				)}
 				aria-current={activeCategory === category.id ? 'page' : undefined}
-				title={category.disabled ? 'Coming soon' : undefined}
+				title={category.disabled ? m.settings_coming_soon() : undefined}
 				onclick={() => onchoose(category)}
 			>
 				<category.icon class="size-3.5 shrink-0" />
-				<span class="truncate font-medium">{category.label}</span>
+				<span class="truncate font-medium">{category.label()}</span>
 				{#if category.disabled}
-					<span class="ml-auto text-[0.625rem] font-medium">Soon</span>
+					<span class="ml-auto text-[0.625rem] font-medium">{m.settings_soon()}</span>
 				{/if}
 			</button>
 		{/each}

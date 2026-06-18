@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { requireBillingAppContext } from '$lib/server/http/app-context';
@@ -290,18 +291,18 @@ const fetchRecipeFromUrl = async (url: string) => {
 		}));
 	} catch (cause) {
 		if (cause instanceof RecipeImportFetchError && cause.message === 'Invalid recipe URL.') {
-			error(400, { message: 'Enter a valid recipe URL.' });
+			error(400, { message: m.menu_enter_a_valid_recipe_url() });
 		}
 		if (cause instanceof RecipeImportFetchError && cause.message === 'Recipe URL is too long.') {
-			error(400, { message: 'Recipe URL is too long.' });
+			error(400, { message: m.menu_recipe_url_is_too_long() });
 		}
 		if (cause instanceof RecipeImportFetchError) {
 			error(502, { message: cause.message });
 		}
-		error(502, { message: 'Could not fetch that recipe page.' });
+		error(502, { message: m.menu_could_not_fetch_that_recipe_page() });
 	}
 	const imported = recipeFromJsonLd(html, finalUrl);
-	if (!imported) error(422, { message: 'No schema.org Recipe data found on that page.' });
+	if (!imported) error(422, { message: m.menu_no_schema_org_recipe_data_found_on_that_page() });
 
 	const recipe = imported.recipe;
 	const sourceAuthorName = namedReference(recipe.author, imported.nodes);
@@ -530,7 +531,7 @@ const saveRecipeSidecars = async (db: WritableDb, userRecipeId: string, recipe: 
 const recipeBody = (value: unknown): RecipeMenuItem | undefined => {
 	if (value === undefined) return;
 	const recipe = parseRecipeMenuItemPayload(value);
-	if (!recipe) error(400, { message: 'Recipe payload is invalid.' });
+	if (!recipe) error(400, { message: m.menu_recipe_payload_is_invalid() });
 	return recipe;
 };
 
@@ -726,9 +727,9 @@ const readBody = async (request: Request): Promise<CreateRecipeBody> => {
 	try {
 		body = await request.json();
 	} catch {
-		error(400, { message: 'Invalid request.' });
+		error(400, { message: m.household_invalid_request() });
 	}
-	if (!isRecord(body)) error(400, { message: 'Invalid request.' });
+	if (!isRecord(body)) error(400, { message: m.household_invalid_request() });
 	return {
 		title: stringValue(body.title),
 		url: stringValue(body.url),
@@ -741,15 +742,15 @@ const readBulkBody = async (request: Request): Promise<BulkRecipeBody> => {
 	try {
 		body = await request.json();
 	} catch {
-		error(400, { message: 'Invalid request.' });
+		error(400, { message: m.household_invalid_request() });
 	}
 	if (!isRecord(body) || !Array.isArray(body.recipeIds)) {
-		error(400, { message: 'Choose at least one recipe.' });
+		error(400, { message: m.menu_choose_at_least_one_recipe() });
 	}
 	const recipeIds = [
 		...new Set(body.recipeIds.filter((id): id is string => typeof id === 'string'))
 	];
-	if (!recipeIds.length) error(400, { message: 'Choose at least one recipe.' });
+	if (!recipeIds.length) error(400, { message: m.menu_choose_at_least_one_recipe() });
 	return { recipeIds, permanent: body.permanent === true };
 };
 
@@ -787,13 +788,13 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 
 	const body = await readBody(request);
 	if (body.url && body.url.length > maxUrlLength)
-		error(400, { message: 'Recipe URL is too long.' });
+		error(400, { message: m.menu_recipe_url_is_too_long() });
 	if (body.title && body.title.length > maxTitleLength)
-		error(400, { message: 'Recipe name is too long.' });
+		error(400, { message: m.menu_recipe_name_is_too_long() });
 	if (body.recipe?.title && body.recipe.title.length > maxTitleLength)
-		error(400, { message: 'Recipe name is too long.' });
+		error(400, { message: m.menu_recipe_name_is_too_long() });
 	if (!body.url && !body.title && !body.recipe) {
-		error(400, { message: 'Enter a recipe name or URL.' });
+		error(400, { message: m.menu_enter_a_recipe_name_or_url() });
 	}
 
 	const [unitPreferences, unitAliasMap, recipeIdentities] = await Promise.all([
@@ -894,7 +895,7 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		unitPreferences,
 		recipeId
 	);
-	if (!recipe) error(500, { message: 'Recipe was created but could not be loaded.' });
+	if (!recipe) error(500, { message: m.menu_recipe_was_created_but_could_not_be_loaded() });
 	return json({ recipe }, { status: 201 });
 };
 
@@ -952,7 +953,7 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 					)
 				);
 			const existingRecipeIds = existingRows.map((recipe) => recipe.id);
-			if (!existingRecipeIds.length) error(404, { message: 'Archived recipes not found.' });
+			if (!existingRecipeIds.length) error(404, { message: m.menu_archived_recipes_not_found() });
 
 			const mealLinks = await tx
 				.select({ householdMealId: householdMealUserRecipes.householdMealId })
@@ -1013,7 +1014,7 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 			)
 		);
 	const existingRecipeIds = existingRows.map((recipe) => recipe.id);
-	if (!existingRecipeIds.length) error(404, { message: 'Recipes not found.' });
+	if (!existingRecipeIds.length) error(404, { message: m.menu_recipes_not_found() });
 
 	const deletedAt = new Date().toISOString();
 	await db.transaction((tx) =>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import ScheduleDashboard from '$lib/components/dashboard/schedule-dashboard.svelte';
 	import type { HouseholdMember, Meal } from '$lib/plan/plan-types';
 	import { activeHouseholdId } from '$lib/stores/active-household';
@@ -36,7 +37,7 @@
 </script>
 
 <svelte:head>
-	<title>Meal Plan · Maal</title>
+	<title>{m.plan_meal_plan_maal()}</title>
 </svelte:head>
 
 <ScheduleDashboard

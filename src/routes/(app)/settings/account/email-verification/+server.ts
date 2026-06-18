@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import { error, isHttpError, json, type RequestHandler } from '@sveltejs/kit';
 import { readJsonObject } from '$lib/server/http/request';
 import { isVerificationCode, normalizeVerificationCode } from '$lib/settings/verification-code';
@@ -18,20 +19,21 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const emailFromBody = (body: Record<string, unknown>): string => {
 	const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
 	if (!emailPattern.test(email) || email.length > maxEmailLength) {
-		error(400, { message: 'Enter a valid email address.' });
+		error(400, { message: m.settings_enter_a_valid_email_address() });
 	}
 	return email;
 };
 
 const codeFromBody = (body: Record<string, unknown>): string => {
 	const code = normalizeVerificationCode(body.code);
-	if (!isVerificationCode(code)) error(400, { message: 'Enter the 6-digit verification code.' });
+	if (!isVerificationCode(code))
+		error(400, { message: m.settings_enter_the_6_digit_verification_code() });
 	return code;
 };
 
 export const POST: RequestHandler = async ({ locals, platform, request }) => {
 	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
+	if (!session) error(401, { message: m.app_sign_in_required() });
 
 	const email = emailFromBody(await readJsonObject(request));
 
@@ -41,13 +43,13 @@ export const POST: RequestHandler = async ({ locals, platform, request }) => {
 	} catch (cause) {
 		if (isHttpError(cause)) throw cause;
 		console.error('Failed to send WorkOS email change code', cause);
-		error(502, { message: 'Could not send verification email.' });
+		error(502, { message: m.settings_could_not_send_verification_email() });
 	}
 };
 
 export const PUT: RequestHandler = async ({ cookies, locals, platform, request, url }) => {
 	const session = locals.session;
-	if (!session) error(401, { message: 'Sign in required.' });
+	if (!session) error(401, { message: m.app_sign_in_required() });
 
 	const body = await readJsonObject(request);
 	const code = codeFromBody(body);
@@ -61,9 +63,9 @@ export const PUT: RequestHandler = async ({ cookies, locals, platform, request, 
 	} catch (cause) {
 		if (isHttpError(cause)) throw cause;
 		if (isInvalidEmailChangeCode(cause)) {
-			error(400, { message: 'Could not verify that code.' });
+			error(400, { message: m.settings_could_not_verify_that_code() });
 		}
 		console.error('Failed to confirm WorkOS email change', cause);
-		error(502, { message: 'Could not verify that code.' });
+		error(502, { message: m.settings_could_not_verify_that_code() });
 	}
 };

@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import { error, type Cookies } from '@sveltejs/kit';
 import {
 	canManageActiveHousehold,
@@ -20,18 +21,20 @@ export const loadBillingStatusView = async ({
 	url: URL;
 }) => {
 	const { householdId } = await resolveActiveHouseholdId({ platform, cookies, url, session });
-	if (!householdId) error(404, { message: 'No household found.' });
+	if (!householdId) error(404, { message: m.household_no_household_found() });
 
 	const config = getStripePublicConfig(platform);
 	let householdListDegraded = false;
-	const accessibleHouseholds = await listUserHouseholds(platform, session.user.id).catch((cause) => {
-		console.error('Failed to list households for billing status view', cause);
-		householdListDegraded = true;
-		return [];
-	});
+	const accessibleHouseholds = await listUserHouseholds(platform, session.user.id).catch(
+		(cause) => {
+			console.error('Failed to list households for billing status view', cause);
+			householdListDegraded = true;
+			return [];
+		}
+	);
 	const activeHouseholdName =
 		accessibleHouseholds.find((household) => household.id === householdId)?.name ??
-		'Current household';
+		m.billing_current_household();
 	const billing = platform?.env.DB
 		? await loadFreshBillingStatus(platform, householdId)
 		: {

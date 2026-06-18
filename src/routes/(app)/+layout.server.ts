@@ -1,3 +1,4 @@
+import * as m from '$lib/paraglide/messages';
 import { error } from '@sveltejs/kit';
 import type { LayoutServerLoad } from './$types';
 import {
@@ -8,6 +9,7 @@ import {
 import { toPublicSession } from '$lib/server/auth/session';
 import { hasHouseholdBillingGrant } from '$lib/server/domains/billing';
 import { loadFreshBillingStatus } from '$lib/server/domains/billing';
+import { loadHouseholdParaglideLocale } from '$lib/server/i18n/household-locale';
 
 export const load: LayoutServerLoad = async ({ cookies, locals, platform, url }) => {
 	const session = locals.session;
@@ -17,7 +19,7 @@ export const load: LayoutServerLoad = async ({ cookies, locals, platform, url })
 			userHouseholds = await listUserHouseholds(platform, session.user.id);
 		} catch (cause) {
 			console.error('Failed to load app households', cause);
-			error(503, { message: 'Could not load your households. Try again in a moment.' });
+			error(503, { message: m.billing_could_not_load_your_households_try_again_in_() });
 		}
 	}
 	const { householdId: activeHouseholdId } = session
@@ -29,6 +31,10 @@ export const load: LayoutServerLoad = async ({ cookies, locals, platform, url })
 				householdIds: userHouseholds.map((household) => household.id)
 			})
 		: { householdId: null };
+
+	const householdParaglideLocale = session
+		? await loadHouseholdParaglideLocale({ platform, householdId: activeHouseholdId })
+		: null;
 
 	let subscriptionLock = null;
 	if (session && activeHouseholdId && platform?.env.DB) {
@@ -52,6 +58,7 @@ export const load: LayoutServerLoad = async ({ cookies, locals, platform, url })
 		session: toPublicSession(session),
 		households: userHouseholds,
 		activeHouseholdId,
+		householdParaglideLocale,
 		subscriptionLock
 	};
 };
