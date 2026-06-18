@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as m from '$lib/paraglide/messages';
 	import { dateKey, formatDayHeading, isToday } from './schedule-date';
 	import { handleBlankScheduleTarget } from './schedule-interactions';
 	import ScheduledMealList from './scheduled-meal-list.svelte';
@@ -69,7 +70,12 @@
 			{formatDayHeading(day)}
 		</span>
 	</div>
-	<div role="button" tabindex="-1" aria-label={`Add meal on ${dayKey}`} class="space-y-1 px-1 py-1">
+	<div
+		role="button"
+		tabindex="-1"
+		aria-label={m.app_add_meal_on_date({ date: dayKey })}
+		class="space-y-1 px-1 py-1"
+	>
 		<ScheduledMealList
 			meals={previewMeals}
 			{previewIndex}

@@ -48,13 +48,13 @@
 	const showExistingRecipeOptions = $derived(showExistingRecipes ?? true);
 	const shouldFetchFuzzyRecipes = $derived(normalizedSearch.length > 3);
 	const recipeFetchQuery = $derived(shouldFetchFuzzyRecipes ? normalizedSearch : '');
-	const dialogTitle = 'Add meal';
+	const dialogTitle = m.app_add_meal();
 	const dialogDescription = $derived(
 		showExistingRecipeOptions
 			? date
-				? 'Choose a saved recipe, import one from a URL, or start a new recipe for this day.'
-				: 'Choose a saved recipe, import one from a URL, or start a new meal-pool recipe.'
-			: 'Import one from a URL or start a new recipe for your menu.'
+				? m.app_add_meal_for_day_description()
+				: m.app_add_meal_pool_description()
+			: m.app_add_menu_recipe_description()
 	);
 
 	const matches = $derived(

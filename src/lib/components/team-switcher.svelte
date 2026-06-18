@@ -20,7 +20,7 @@
 	let {
 		households = [],
 		activeHouseholdId = null,
-		label = 'Households'
+		label = m.settings_households()
 	}: { households?: Household[]; activeHouseholdId?: string | null; label?: string } = $props();
 	const sidebar = useSidebar();
 	let clientActiveHouseholdId = $state<string | null>(null);
@@ -34,8 +34,10 @@
 			households[0] ??
 			null
 	);
-	const householdName = $derived(activeHousehold?.name ?? 'No household');
-	const householdMeta = $derived(activeHousehold ? 'Household' : 'Create one from Meal Plan');
+	const householdName = $derived(activeHousehold?.name ?? m.app_no_household());
+	const householdMeta = $derived(
+		activeHousehold ? m.app_household_meta() : m.app_create_household_from_meal_plan()
+	);
 	const isKnownHouseholdId = (householdId: string | null): householdId is string =>
 		Boolean(householdId && households.some((household) => household.id === householdId));
 	const startHouseholdCreation = () => goto(resolve('/onboarding?new=1'));
@@ -56,7 +58,7 @@
 			clientActiveHouseholdId = previousHouseholdId;
 			setActiveHouseholdId(previousHouseholdId);
 			writeActiveHouseholdCookie(previousHouseholdId);
-			switchError = 'Could not switch households. Please try again.';
+			switchError = m.app_could_not_switch_households();
 		}
 	};
 

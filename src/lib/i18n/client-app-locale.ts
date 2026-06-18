@@ -7,8 +7,9 @@ let appLocale: Locale | null = null;
 let installed = false;
 
 export const setClientAppLocale = (locale: Locale | null): void => {
+	if (!browser) return;
 	appLocale = locale;
-	if (!browser || installed) return;
+	if (installed) return;
 	installed = true;
 	overwriteGetLocale(() => {
 		if (appLocale && authenticatedAppPathUsesHouseholdLocale(window.location.pathname)) {

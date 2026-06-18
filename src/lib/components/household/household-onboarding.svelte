@@ -43,7 +43,7 @@
 		try {
 			await goto(resolve(`/invite/${encodeURIComponent(code)}`));
 		} catch {
-			error = 'Could not open that invite. Please try again.';
+			error = m.household_could_not_open_invite();
 			busy = false;
 		}
 	};
@@ -63,14 +63,14 @@
 			});
 
 			if (!response.ok) {
-				error = await readError(response, 'Could not create household.');
+				error = await readError(response, m.household_could_not_create());
 				busy = false;
 				return;
 			}
 
 			const body: unknown = await response.json();
 			if (!body || typeof body !== 'object') {
-				throw new Error('Invalid onboarding response.');
+				throw new Error(m.household_invalid_onboarding_response());
 			}
 			const trialStarted = 'trialStarted' in body && body.trialStarted === true;
 			const household = 'household' in body ? body.household : null;
@@ -81,13 +81,13 @@
 				typeof household.id === 'string'
 					? household.id
 					: null;
-			if (!householdId) throw new Error('Created household response did not include an id.');
+			if (!householdId) throw new Error(m.household_created_response_missing_id());
 			setActiveHouseholdId(householdId);
 			await goto(resolve(trialStarted ? '/plan?trial=started' : '/subscribe'), {
 				invalidateAll: true
 			});
 		} catch {
-			error = 'Could not create household. Please try again.';
+			error = m.household_could_not_create_try_again();
 			busy = false;
 		}
 	};
@@ -120,10 +120,10 @@
 			</label>
 			<Button type="submit" disabled={busy || !householdName.trim()}>
 				{busy
-					? 'Creating…'
+					? m.household_creating()
 					: canStartTrial
-						? 'Create household and start trial'
-						: 'Create household'}
+						? m.household_create_and_start_trial()
+						: m.household_create()}
 			</Button>
 		</form>
 

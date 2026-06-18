@@ -16,13 +16,15 @@
 		writeActiveHouseholdCookie
 	} from '$lib/stores/active-household';
 	import { appShellUiState, updateAppShellUiState } from '$lib/stores/app-shell-ui-state';
-	import { onMount, type Snippet } from 'svelte';
+	import { onMount, untrack, type Snippet } from 'svelte';
 	import type { LayoutData } from './$types';
 
 	const minSidebarWidth = 208;
 	const maxSidebarWidth = 384;
 
 	let { children, data }: { children: Snippet; data: LayoutData } = $props();
+
+	setClientAppLocale(untrack(() => data.householdParaglideLocale));
 
 	const initialUiState = appShellUiState.get();
 	let sidebarOpen = $state(initialUiState.sidebarOpen);

@@ -30,13 +30,13 @@
 						<div class="min-w-0">
 							<p class="truncate text-xs font-medium">
 								{householdBilling.householdName}{householdBilling.isActiveHousehold
-									? ' · current'
+									? ` · ${m.billing_current()}`
 									: ''}
 							</p>
 							<p class="truncate text-xs text-muted-foreground">
 								{householdBilling.status
-									? `${householdBilling.status}${householdBilling.cancelAtPeriodEnd ? ' · cancels at period end' : ''}`
-									: 'No active plan'}
+									? `${householdBilling.status}${householdBilling.cancelAtPeriodEnd ? ` · ${m.billing_cancels_at_period_end()}` : ''}`
+									: m.billing_no_active_plan()}
 							</p>
 						</div>
 						{#if householdBilling.stripeCustomerId && householdBilling.canManageBilling}
@@ -46,7 +46,7 @@
 								disabled={billingPortalBusy}
 								onclick={() => openBillingPortal(householdBilling.householdId)}
 							>
-								{billingPortalBusy ? 'Opening…' : 'Manage subscriptions'}
+								{billingPortalBusy ? m.billing_opening() : m.billing_manage_subscriptions()}
 							</Button>
 						{/if}
 					</li>
