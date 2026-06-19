@@ -12,10 +12,13 @@ The original Fahrenheit reset appears fixed, but the household settings page sti
 - [ ] Existing tests still pass.
 
 ## TODOs
-- [ ] Add regression coverage that household save forms are progressively enhanced instead of native page posts.
-- [ ] Enhance the household settings save forms while preserving existing optimistic invite/member behavior.
+- [x] Add regression coverage that household save forms are progressively enhanced instead of native page posts.
+- [x] Enhance the household settings save forms while preserving existing optimistic invite/member behavior.
 - [ ] Run focused validation and final repo checks.
 
 ## Notes
 - 2026-06-19: Confirmed issue #51 is open. User reports Fahrenheit reset is no longer reproducible but any save button reloads the page, which is poor UX.
 - Svelte MCP server was unavailable in this runtime (`Server "svelte" not found`), so implementation follows existing SvelteKit `enhance` usage in the route.
+- 2026-06-19: Added `page-source.test.ts` regression coverage. Initial RED failed because `updateSettings` and `updateAppliances` forms lacked `use:enhance`.
+- 2026-06-19: Added `use:enhance` to non-redirecting household forms: household settings, appliances, alias/unit overrides, member role, invite role, and create invite. Existing delete/revoke invite forms kept their custom enhance handlers.
+- Validation: `pnpm vitest run 'src/routes/(app)/household/page-source.test.ts'` — pass.
