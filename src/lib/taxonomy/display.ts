@@ -36,6 +36,11 @@ export const displayIngredientAmount = (
 	return displayCanonicalIngredientAmount(quantity, baseUnitId, unitPreferences, foodName, foodId);
 };
 
+const defaultUnitForFood = (foodName: string): string | undefined => {
+	const normalized = foodName.toLowerCase().trim();
+	if (/\b(garlic|knoflook)\b/u.test(normalized)) return 'clove';
+};
+
 export const displayIngredient = (
 	ingredient: TaxonomyIngredient,
 	preferences: UnitPreferences | EffectiveTaxonomyPreferences = {}
@@ -43,7 +48,7 @@ export const displayIngredient = (
 	const fallbackItem = ingredient.sourceFoodLabel ?? ingredient.originalText;
 	const item = displayFoodName(ingredient.baseFoodId, fallbackItem, preferences);
 	const quantity = ingredient.baseQuantity ?? ingredient.sourceQuantity;
-	const unit = ingredient.baseUnitId ?? ingredient.sourceUnitLabel;
+	const unit = ingredient.baseUnitId ?? ingredient.sourceUnitLabel ?? defaultUnitForFood(item);
 	const amount = displayIngredientAmount(quantity, unit, preferences, item, ingredient.baseFoodId);
 	const text = [amount, item].filter(Boolean).join(' ');
 	const originalAmount =

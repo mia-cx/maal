@@ -392,8 +392,12 @@ export const formatQuantity = (quantity: number): string => {
 	const whole = Math.floor(rounded);
 	const fraction = rounded - whole;
 	if (fraction < 0.01) return String(whole);
-	let numerator = Math.round(fraction * 8);
 	let denominator = 8;
+	let numerator = Math.round(fraction * denominator);
+	if (numerator === 0) {
+		denominator = 16;
+		numerator = Math.max(1, Math.round(fraction * denominator));
+	}
 	const divisor = commonDivisor(numerator, denominator);
 	numerator /= divisor;
 	denominator /= divisor;

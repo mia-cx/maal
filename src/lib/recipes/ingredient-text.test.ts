@@ -3,7 +3,8 @@ import {
 	canonicalIngredientUnit,
 	convertInstructionTemperatures,
 	displayIngredientAmount,
-	parseIngredientLine
+	parseIngredientLine,
+	scaleIngredientText
 } from './ingredient-text';
 
 describe('ingredient text units', () => {
@@ -14,6 +15,10 @@ describe('ingredient text units', () => {
 
 	it('keeps unknown units as source text instead of converting', () => {
 		expect(displayIngredientAmount(2, 'knobs', { preferredMassUnit: 'lb' })).toBe('2 knobs');
+	});
+
+	it('formats tiny scaled fractions without dropping to zero', () => {
+		expect(scaleIngredientText('½ cayennepepper', 8, 1)).toBe('1/16 cayennepepper');
 	});
 
 	it('uses locale unit labels for canonical count units', () => {
