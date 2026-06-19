@@ -13,7 +13,7 @@ Build issue #47 on top of PR #53 by replacing fragile route-level in-memory cach
 - [ ] `pnpm check` passes.
 
 ## TODOs
-- [ ] Add Dexie dependency plus a typed, versioned client DB schema and pure tests for store/index contracts.
+- [x] Add Dexie dependency plus a typed, versioned client DB schema and pure tests for store/index contracts.
 - [ ] Replace in-memory route-data cache helpers with centralized Dexie read-through cache helpers and TTL/user/household isolation.
 - [ ] Wire `/plan`, `/menu`, and app layout to async durable cache hydration/clearing without recursive Svelte effects.
 - [ ] Run focused validation and final repo checks.
@@ -22,3 +22,5 @@ Build issue #47 on top of PR #53 by replacing fragile route-level in-memory cach
 - 2026-06-19: Issue #47 is open. User explicitly wants this branch on top of PR #53 and wants a full Dexie schema based on existing DB schemas, lazily populated and user-keyed for future account switching.
 - Svelte MCP server is unavailable in this runtime, so Svelte changes follow existing Svelte 5 project patterns and will be checked with `pnpm check`.
 - Existing docs recommend IDB aggregate stores: households, householdMembers, recipes, plannedMeals, mealCheckIns, foodProfile, billingEntitlements, syncOutbox, syncCursors.
+- 2026-06-19: Added `dexie` and a versioned client DB schema with user-keyed household aggregate stores, route caches, food profile, billing entitlement, sync cursor, and outbox stores.
+- Validation: `pnpm vitest run src/lib/client-db/schema.test.ts` — pass.
