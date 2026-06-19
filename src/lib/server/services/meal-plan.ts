@@ -257,12 +257,26 @@ export const createHouseholdMeal = async (input: {
 		status: 'planned'
 	});
 
-	if (recipe) {
-		await db.insert(householdMealUserRecipes).values({ householdMealId, userRecipeId: recipe.id });
-		await copyRecipeSidecarsToMeal(db, recipe.id, householdMealId);
-	} else {
-		await replaceMealIngredientsFromLines(db, householdMealId, meal.customMeal?.ingredients);
-		await replaceMealInstructionsFromLines(db, householdMealId, meal.customMeal?.instructions);
+	try {
+		if (recipe) {
+			await db
+				.insert(householdMealUserRecipes)
+				.values({ householdMealId, userRecipeId: recipe.id });
+			await copyRecipeSidecarsToMeal(db, recipe.id, householdMealId);
+		} else {
+			await replaceMealIngredientsFromLines(db, householdMealId, meal.customMeal?.ingredients);
+			await replaceMealInstructionsFromLines(db, householdMealId, meal.customMeal?.instructions);
+		}
+	} catch (cause) {
+		await db
+			.delete(householdMeals)
+			.where(
+				and(
+					eq(householdMeals.id, householdMealId),
+					eq(householdMeals.householdId, meal.householdId)
+				)
+			);
+		throw cause;
 	}
 
 	return getHouseholdMeal({

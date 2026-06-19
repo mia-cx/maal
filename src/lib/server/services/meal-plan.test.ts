@@ -48,6 +48,8 @@ const createDb = (existingMeal?: Record<string, unknown>) => ({
 describe('meal plan service', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		replaceMealIngredientsFromLines.mockResolvedValue(undefined);
+		replaceMealInstructionsFromLines.mockResolvedValue(undefined);
 	});
 	it('creates custom meals without entering the D1 transaction begin path', async () => {
 		const db = createDb();
@@ -81,6 +83,33 @@ describe('meal plan service', () => {
 		expect(replaceMealInstructionsFromLines).toHaveBeenCalledWith(db, expect.any(String), [
 			'Simmer'
 		]);
+	});
+
+	it('cleans up the parent meal when custom sidecar creation fails', async () => {
+		const deleteWhere = vi.fn().mockResolvedValue(undefined);
+		const db = {
+			...createDb(),
+			delete: vi.fn(() => ({ where: deleteWhere }))
+		};
+		countActiveHouseholdMembers.mockResolvedValue(2);
+		listHouseholdMembers.mockResolvedValue([{ userId: 'user_1' }]);
+		replaceMealIngredientsFromLines.mockRejectedValue(new Error('sidecar failed'));
+
+		await expect(
+			createHouseholdMeal({
+				platform: undefined,
+				db: db as never,
+				meal: {
+					householdId: 'household_1',
+					workosUserId: 'user_1',
+					customMeal: { title: 'Soup', ingredients: ['water'], instructions: ['Simmer'] }
+				}
+			})
+		).rejects.toThrow('sidecar failed');
+
+		expect(db.delete).toHaveBeenCalledOnce();
+		expect(deleteWhere).toHaveBeenCalledOnce();
+		expect(replaceMealInstructionsFromLines).not.toHaveBeenCalled();
 	});
 
 	it('updates meals without entering the D1 transaction begin path', async () => {
