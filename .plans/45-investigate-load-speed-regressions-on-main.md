@@ -11,7 +11,7 @@ Investigate current load speed on `main` for `/plan`, `/menu`, and settings/hous
 - [ ] `pnpm check` passes after any code changes.
 
 ## TODOs
-- [ ] Map existing route loaders, smoke fixtures, and test/deploy commands relevant to `/plan`, `/menu`, and household/settings.
+- [x] Map existing route loaders, smoke fixtures, and test/deploy commands relevant to `/plan`, `/menu`, and household/settings.
 - [ ] Build a reproducible production-style load timing harness and capture cold/warm baselines for target routes.
 - [ ] Inspect bundle/server/client evidence to isolate the largest regression source and decide whether to fix directly or file follow-ups.
 - [ ] Add or extend lightweight smoke/perf coverage for the regression source.
@@ -19,3 +19,5 @@ Investigate current load speed on `main` for `/plan`, `/menu`, and settings/hous
 
 ## Notes
 - Issue body calls out possible overlap with Svelte `effect_update_depth_exceeded`, but asks to track load speed separately.
+- Mapped loaders: `/plan` loads household profile, taxonomy preferences, members, and `loadMealPlanMeals`; `/menu` checks billing access then loads active and archived recipes with `loadMenuRecipes`; `/household` calls WorkOS organization/members plus household/taxonomy data; `/settings` routes are static shells.
+- Existing commands: `pnpm build`, `pnpm preview`, `pnpm check`, `pnpm test:e2e`. Playwright config builds and previews on port 4173.
