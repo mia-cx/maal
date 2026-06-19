@@ -1,5 +1,5 @@
-import type { Household } from '$lib/server/auth/household';
 import type { PublicAuthSession } from '$lib/server/auth/session';
+import type { ClientHousehold } from './schema';
 import { getClientDb } from './db';
 import { userScopedKey } from './schema';
 
@@ -8,7 +8,7 @@ export const writeAppContextCache = async ({
 	households
 }: {
 	session: PublicAuthSession | null;
-	households: Household[];
+	households: ClientHousehold[];
 }): Promise<void> => {
 	const db = getClientDb();
 	const user = session?.user;
@@ -34,42 +34,29 @@ export const writeAppContextCache = async ({
 	});
 };
 
-export const clearInactiveUserCache = async (activeUserId: string | null | undefined): Promise<void> => {
+export const clearInactiveUserCache = async (
+	activeUserId: string | null | undefined
+): Promise<void> => {
 	const db = getClientDb();
 	if (!db) return;
 	if (!activeUserId) {
 		await db.delete();
 		return;
 	}
-	await db.transaction(
-		'rw',
-		db.users,
-		db.households,
-		db.householdMembers,
-		db.planRoutes,
-		db.menuRoutes,
-		db.recipes,
-		db.plannedMeals,
-		db.mealCheckIns,
-		db.foodProfiles,
-		db.billingEntitlements,
-		db.syncCursors,
-		db.syncOutbox,
-		async () => {
-			await db.users.where('id').notEqual(activeUserId).delete();
-			await Promise.all([
-				db.households.where('userId').notEqual(activeUserId).delete(),
-				db.householdMembers.where('userId').notEqual(activeUserId).delete(),
-				db.planRoutes.where('userId').notEqual(activeUserId).delete(),
-				db.menuRoutes.where('userId').notEqual(activeUserId).delete(),
-				db.recipes.where('userId').notEqual(activeUserId).delete(),
-				db.plannedMeals.where('userId').notEqual(activeUserId).delete(),
-				db.mealCheckIns.where('userId').notEqual(activeUserId).delete(),
-				db.foodProfiles.where('userId').notEqual(activeUserId).delete(),
-				db.billingEntitlements.where('userId').notEqual(activeUserId).delete(),
-				db.syncCursors.where('userId').notEqual(activeUserId).delete(),
-				db.syncOutbox.where('userId').notEqual(activeUserId).delete()
-			]);
-		}
-	);
+	await db.transaction('rw', db.tables, async () => {
+		await db.users.where('id').notEqual(activeUserId).delete();
+		await Promise.all([
+			db.households.where('userId').notEqual(activeUserId).delete(),
+			db.householdMembers.where('userId').notEqual(activeUserId).delete(),
+			db.planRoutes.where('userId').notEqual(activeUserId).delete(),
+			db.menuRoutes.where('userId').notEqual(activeUserId).delete(),
+			db.recipes.where('userId').notEqual(activeUserId).delete(),
+			db.plannedMeals.where('userId').notEqual(activeUserId).delete(),
+			db.mealCheckIns.where('userId').notEqual(activeUserId).delete(),
+			db.foodProfiles.where('userId').notEqual(activeUserId).delete(),
+			db.billingEntitlements.where('userId').notEqual(activeUserId).delete(),
+			db.syncCursors.where('userId').notEqual(activeUserId).delete(),
+			db.syncOutbox.where('userId').notEqual(activeUserId).delete()
+		]);
+	});
 };

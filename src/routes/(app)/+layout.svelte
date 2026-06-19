@@ -5,6 +5,7 @@
 	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
 	import { setClientAppLocale } from '$lib/i18n/client-app-locale';
 	import { activeNavItemForPath } from '$lib/components/dashboard/active-nav';
+	import { clearInactiveUserCache, writeAppContextCache } from '$lib/client-db/app-cache';
 	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
 	import type { DashboardNavItem } from '$lib/components/dashboard/dashboard-nav';
 	import * as Popover from '$lib/components/ui/popover';
@@ -77,6 +78,9 @@
 	};
 
 	onMount(() => {
+		void writeAppContextCache({ session: data.session, households: data.households });
+		void clearInactiveUserCache(data.session?.user.id);
+
 		const storedHouseholdId = activeHouseholdId.get();
 		const storedHouseholdIsAccessible = data.households.some(
 			(household) => household.id === storedHouseholdId

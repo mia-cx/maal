@@ -1,5 +1,4 @@
-import type { Household } from '$lib/server/auth/household';
-import type { UnitPreferences } from '$lib/taxonomy/preferences';
+import type { UnitPreferences } from '$lib/recipes/ingredient-text';
 import type { HouseholdMember, Meal } from '$lib/components/dashboard/schedule-types';
 import type { RecipeMenuItem } from '$lib/components/menu';
 
@@ -10,6 +9,12 @@ export const routeCacheTtlMs = 1000 * 60 * 60 * 6;
 export type UserScopedKey = `${string}:${string}`;
 export type HouseholdScopedKey = `${string}:${string}:${string}`;
 
+export type ClientHousehold = {
+	id: string;
+	name: string;
+	role?: string | null;
+};
+
 export type ClientUser = {
 	id: string;
 	email: string | null;
@@ -19,7 +24,7 @@ export type ClientUser = {
 	updatedAt: number;
 };
 
-export type CachedHousehold = Household & {
+export type CachedHousehold = ClientHousehold & {
 	userId: string;
 	key: UserScopedKey;
 	cachedAt: number;
@@ -146,5 +151,6 @@ export const clientDbStores = {
 	foodProfiles: '&key, [userId+householdId], householdId, userId, expiresAt, cachedAt',
 	billingEntitlements: '&key, [userId+householdId], householdId, userId, expiresAt, cachedAt',
 	syncCursors: '&key, [userId+householdId], householdId, userId, collection, updatedAt',
-	syncOutbox: '++id, key, [userId+householdId], householdId, userId, entityType, entityId, nextAttemptAt'
+	syncOutbox:
+		'++id, key, [userId+householdId], householdId, userId, entityType, entityId, nextAttemptAt'
 } as const;

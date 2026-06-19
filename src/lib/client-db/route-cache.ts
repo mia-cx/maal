@@ -1,7 +1,12 @@
 import type { HouseholdMember, Meal } from '$lib/components/dashboard/schedule-types';
 import type { RecipeMenuItem } from '$lib/components/menu';
 import { getClientDb } from './db';
-import { householdScopedKey, routeCacheTtlMs, type CachedMenuRoute, type CachedPlanRoute } from './schema';
+import {
+	householdScopedKey,
+	routeCacheTtlMs,
+	type CachedMenuRoute,
+	type CachedPlanRoute
+} from './schema';
 
 export type PlanRouteCacheEntry = {
 	meals: Meal[];
@@ -128,8 +133,9 @@ export const clearUserRouteDataCache = async (userId: string | null | undefined)
 export const clearHouseholdRouteDataCache = async (scope: CacheScope): Promise<void> => {
 	const db = getClientDb();
 	if (!db || !scope.userId || !scope.householdId) return;
+	const householdIndex = [scope.userId, scope.householdId] as [string, string];
 	await db.transaction('rw', db.planRoutes, db.menuRoutes, async () => {
-		await db.planRoutes.where('[userId+householdId]').equals([scope.userId, scope.householdId]).delete();
-		await db.menuRoutes.where('[userId+householdId]').equals([scope.userId, scope.householdId]).delete();
+		await db.planRoutes.where('[userId+householdId]').equals(householdIndex).delete();
+		await db.menuRoutes.where('[userId+householdId]').equals(householdIndex).delete();
 	});
 };

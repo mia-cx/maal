@@ -14,8 +14,8 @@ Build issue #47 on top of PR #53 by replacing fragile route-level in-memory cach
 
 ## TODOs
 - [x] Add Dexie dependency plus a typed, versioned client DB schema and pure tests for store/index contracts.
-- [ ] Replace in-memory route-data cache helpers with centralized Dexie read-through cache helpers and TTL/user/household isolation.
-- [ ] Wire `/plan`, `/menu`, and app layout to async durable cache hydration/clearing without recursive Svelte effects.
+- [x] Replace in-memory route-data cache helpers with centralized Dexie read-through cache helpers and TTL/user/household isolation.
+- [x] Wire `/plan`, `/menu`, and app layout to async durable cache hydration/clearing without recursive Svelte effects.
 - [ ] Run focused validation and final repo checks.
 
 ## Notes
@@ -24,3 +24,6 @@ Build issue #47 on top of PR #53 by replacing fragile route-level in-memory cach
 - Existing docs recommend IDB aggregate stores: households, householdMembers, recipes, plannedMeals, mealCheckIns, foodProfile, billingEntitlements, syncOutbox, syncCursors.
 - 2026-06-19: Added `dexie` and a versioned client DB schema with user-keyed household aggregate stores, route caches, food profile, billing entitlement, sync cursor, and outbox stores.
 - Validation: `pnpm vitest run src/lib/client-db/schema.test.ts` — pass.
+- 2026-06-19: Replaced route data cache implementation with Dexie-backed async helpers. Route cache entries use `userId:householdId:route:*` keys and a six-hour TTL. Existing `$lib/stores/route-data-cache` now re-exports the centralized client DB helpers for compatibility.
+- 2026-06-19: `/plan` and `/menu` initialize from server data, asynchronously hydrate fresh durable cache on mount without clearing authoritative data when no cache exists, and hydrate/clear on active-household changes. App layout writes active user/household metadata and removes inactive user data, while no-session layout deletes the client DB.
+- Validation: `pnpm check` — pass.

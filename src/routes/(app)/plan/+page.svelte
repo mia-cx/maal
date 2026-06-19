@@ -4,13 +4,30 @@
 	import type { HouseholdMember, Meal } from '$lib/plan/plan-types';
 	import { activeHouseholdId } from '$lib/stores/active-household';
 	import { getCachedPlanRouteData, setCachedPlanRouteData } from '$lib/stores/route-data-cache';
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, untrack } from 'svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
-	let meals = $state<Meal[]>([]);
-	let householdMembers = $state<HouseholdMember[]>([]);
+	let meals = $state<Meal[]>(untrack(() => data.meals ?? []));
+	let householdMembers = $state<HouseholdMember[]>(untrack(() => data.householdMembers ?? []));
+	let cacheHydrationVersion = 0;
 	let unsubscribeActiveHousehold: (() => void) | null = null;
+
+	const cacheScope = (householdId: string | null | undefined = data.activeHouseholdId) => ({
+		userId: data.session?.user.id,
+		householdId
+	});
+
+	const hydrateCachedPlan = async (
+		householdId: string | null | undefined,
+		clearWhenMissing = false
+	) => {
+		const version = ++cacheHydrationVersion;
+		const cached = await getCachedPlanRouteData(cacheScope(householdId));
+		if (version !== cacheHydrationVersion || (!cached && !clearWhenMissing)) return;
+		meals = cached?.meals ?? [];
+		householdMembers = cached?.householdMembers ?? [];
+	};
 
 	$effect(() => {
 		const routeMeals = data.meals ?? [];
@@ -18,24 +35,21 @@
 
 		meals = routeMeals;
 		householdMembers = routeHouseholdMembers;
-		setCachedPlanRouteData(data.activeHouseholdId, {
+		void setCachedPlanRouteData(cacheScope(), {
 			meals: routeMeals,
 			householdMembers: routeHouseholdMembers
 		});
 	});
 
 	onMount(() => {
-		const cached = getCachedPlanRouteData(data.activeHouseholdId);
-		if (cached) {
-			meals = cached.meals;
-			householdMembers = cached.householdMembers;
-		}
+		void hydrateCachedPlan(data.activeHouseholdId);
 
 		unsubscribeActiveHousehold = activeHouseholdId.subscribe((householdId) => {
-			if (householdId && householdId !== data.activeHouseholdId) {
-				const cached = getCachedPlanRouteData(householdId);
-				meals = cached?.meals ?? [];
-				householdMembers = cached?.householdMembers ?? [];
+			if (householdId && householdId !== data.activeHouseholdId)
+				void hydrateCachedPlan(householdId, true);
+			if (!householdId) {
+				meals = [];
+				householdMembers = [];
 			}
 		});
 	});
