@@ -11,7 +11,10 @@ const formForAction = (action: string) => {
 };
 
 describe('household settings page forms', () => {
-	it.each(['updateSettings', 'updateAppliances'])('enhances %s saves to avoid page reloads', (action) => {
-		expect(formForAction(action)).toContain('use:enhance');
-	});
+	it.each(['updateSettings', 'updateAppliances'])(
+		'enhances %s saves to avoid page reloads',
+		(action) => {
+			expect(formForAction(action)).toContain('use:enhance');
+		}
+	);
 });

@@ -180,7 +180,8 @@
 		untrack(() => cloneIngredientOverrideRows(initialView.displayOverrideRows.ingredientOverrides))
 	);
 	const applyHouseholdView = (nextView: LocalPageData) => {
-		const { freshView: _freshView, ...resolvedView } = nextView;
+		const { freshView, ...resolvedView } = nextView;
+		void freshView;
 		view = resolvedView;
 		householdName = nextView.household.name;
 		defaultServings = String(nextView.profile.defaultServings);
