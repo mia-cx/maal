@@ -6,11 +6,11 @@ Investigate current load speed on `main` for `/plan`, `/menu`, and settings/hous
 
 ## Acceptance criteria
 
-- [ ] Establish a baseline with reproducible commands or browser steps.
-- [ ] Identify the biggest regression source(s) with evidence.
-- [ ] File follow-up implementation issues if the fix needs multiple slices, or fix directly if it is small and safe.
-- [ ] Add or extend lightweight smoke/perf checks where practical.
-- [ ] `pnpm check` passes after any code changes.
+- [x] Establish a baseline with reproducible commands or browser steps.
+- [x] Identify the biggest regression source(s) with evidence.
+- [x] File follow-up implementation issues if the fix needs multiple slices, or fix directly if it is small and safe.
+- [x] Add or extend lightweight smoke/perf checks where practical.
+- [x] `pnpm check` passes after any code changes.
 
 ## TODOs
 
@@ -18,7 +18,7 @@ Investigate current load speed on `main` for `/plan`, `/menu`, and settings/hous
 - [x] Build a reproducible production-style load timing harness and capture cold/warm baselines for target routes.
 - [x] Inspect bundle/server/client evidence to isolate the largest regression source and decide whether to fix directly or file follow-ups.
 - [x] Add or extend lightweight smoke/perf coverage for the regression source.
-- [ ] Run focused validation plus `pnpm check`, then prepare PR notes with evidence.
+- [x] Run focused validation plus `pnpm check`, then prepare PR notes with evidence.
 
 ## Notes
 
@@ -31,3 +31,4 @@ Investigate current load speed on `main` for `/plan`, `/menu`, and settings/hous
 - Baseline result on local Wrangler preview: `/plan` warm p50 119ms; `/menu` warm p50 113ms; `/household` warm p50 97ms; `/settings` redirects to `/plan?settings=account` with warm p50 156ms. Cold max outliers ~650–750ms appear dominated by first asset/service-worker work in local Wrangler rather than route server time.
 - Biggest server-side source found while measuring `/menu`: `loadMenuRecipes` collected every linked meal id for the visible recipes and then queried meals/check-ins with huge `IN (...)` lists. With the smoke fixture this exceeded D1/SQLite variable limits and 500ed; on real data it scales with meal history rather than page size. Fixed directly by joining through `household_meal_user_recipes` and `household_meals` instead of issuing unbounded ID-list queries.
 - Lightweight coverage added: `pnpm perf:load` exercises `/plan`, `/menu`, `/household`, and the settings entry redirect against a seeded smoke dataset; the command fails on non-200 responses or browser console/page errors.
+- Final validation: `MAAL_PERF_ITERATIONS=5 pnpm perf:load` passed against local Wrangler preview on 2026-06-19 with warm p50s `/plan` 122ms, `/menu` 114ms, `/household` 92ms, `/settings` 145ms. `pnpm check` passed with 0 errors and 0 warnings after clearing stale `.svelte-kit` build output from interrupted preview attempts.
