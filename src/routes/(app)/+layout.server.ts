@@ -38,18 +38,18 @@ export const load: LayoutServerLoad = async ({ cookies, locals, platform, url })
 
 	let subscriptionLock = null;
 	if (session && activeHouseholdId && platform?.env.DB) {
-		const billing = await loadFreshBillingStatus(platform, activeHouseholdId);
-		const hasAccess =
-			billing.isPaid ||
-			(await hasHouseholdBillingGrant({ platform, householdId: activeHouseholdId }).catch(
-				() => false
-			));
+		const hasGrant = await hasHouseholdBillingGrant({
+			platform,
+			householdId: activeHouseholdId
+		}).catch(() => false);
+		const billing = hasGrant ? null : await loadFreshBillingStatus(platform, activeHouseholdId);
+		const hasAccess = hasGrant || Boolean(billing?.isPaid);
 		const canManageSubscription = hasAccess
 			? false
 			: await canManageActiveHousehold(platform, session, activeHouseholdId);
 		subscriptionLock = {
 			locked: !hasAccess,
-			status: billing.status,
+			status: billing?.status ?? 'active',
 			canManageSubscription
 		};
 	}

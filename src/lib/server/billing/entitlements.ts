@@ -1,3 +1,4 @@
+import { SMOKE_HOUSEHOLD_ID, smokeAuthEnabled } from '$lib/server/auth/smoke';
 import { tryCreateAuthRuntime } from '$lib/server/auth/workos';
 import { loadFreshBillingStatus } from './subscriptions';
 
@@ -65,6 +66,8 @@ export const hasHouseholdBillingGrant = async (input: {
 	platform?: App.Platform;
 	householdId: string;
 }): Promise<boolean> => {
+	if (smokeAuthEnabled(input.platform) && input.householdId === SMOKE_HOUSEHOLD_ID) return true;
+
 	const cached = cachedGrant(input.householdId);
 	if (cached !== null) return cached;
 
