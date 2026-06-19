@@ -6,6 +6,7 @@ const loadMealPlanMeals = vi.fn();
 const replaceMealIngredientsFromLines = vi.fn();
 const replaceMealInstructionsFromLines = vi.fn();
 const loadHouseholdUnitPreferences = vi.fn();
+const d1Batch = vi.fn();
 
 vi.mock('$lib/server/auth/household', () => ({
 	countActiveHouseholdMembers,
@@ -21,11 +22,16 @@ vi.mock('$lib/server/services/meal-sidecar-writer', () => ({
 vi.mock('$lib/server/taxonomy/household-preferences', () => ({
 	loadHouseholdUnitPreferences
 }));
+vi.mock('$lib/server/db/d1-batch', () => ({
+	d1Batch,
+	requireD1Database: vi.fn(() => ({}))
+}));
 
 const { createHouseholdMeal, updateHouseholdMeal } = await import('./meal-plan');
 
 const createDb = (existingMeal?: Record<string, unknown>) => ({
 	insert: vi.fn(() => ({ values: vi.fn().mockResolvedValue(undefined) })),
+	delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })),
 	update: vi.fn(() => ({
 		set: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }))
 	})),
@@ -110,7 +116,7 @@ describe('meal plan service', () => {
 		).resolves.toMatchObject({ id: 'meal_1' });
 
 		expect(db.transaction).not.toHaveBeenCalled();
-		expect(db.update).toHaveBeenCalledOnce();
-		expect(replaceMealIngredientsFromLines).toHaveBeenCalledWith(db, 'meal_1', ['4 cups water']);
+		expect(d1Batch).toHaveBeenCalledOnce();
+		expect(replaceMealIngredientsFromLines).not.toHaveBeenCalled();
 	});
 });

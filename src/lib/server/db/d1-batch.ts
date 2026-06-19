@@ -5,7 +5,7 @@ type DrizzleSqlQuery = {
 type D1Value = string | number | boolean | null | ArrayBuffer | ArrayBufferView;
 
 export const requireD1Database = (platform: App.Platform | undefined): D1Database => {
-	if (!platform) throw new Error('D1 database binding is required.');
+	if (!platform?.env?.DB) throw new Error('D1 database binding is required.');
 	return platform.env.DB;
 };
 
