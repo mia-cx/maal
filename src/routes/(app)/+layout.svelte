@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages';
 	import { invalidateAll } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { navigating, page } from '$app/state';
 	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
 	import { setClientAppLocale } from '$lib/i18n/client-app-locale';
@@ -50,6 +51,8 @@
 			!isSubscribePage
 	);
 	const canManageSubscription = $derived(Boolean(data.subscriptionLock?.canManageSubscription));
+	const subscribeHref = resolve('/subscribe');
+	const exportDataHref = resolve('/export-data');
 	const navigatingWithinApp = $derived(
 		Boolean(
 			navigating.to?.url.pathname.startsWith('/plan') ||
@@ -193,7 +196,7 @@
 									<div class="mt-4 flex justify-center gap-2">
 										<a
 											class="inline-flex h-9 items-center justify-center rounded-md bg-[var(--brand-salmon)] px-4 text-sm font-medium text-white shadow-xs transition-colors hover:bg-[var(--brand-salmon)]/90 focus-visible:ring-2 focus-visible:ring-[var(--brand-salmon)]/30 focus-visible:outline-none"
-											href="/subscribe"
+											href={subscribeHref}
 										>
 											{m.app_subscribe()}
 										</a>
@@ -226,7 +229,7 @@
 									</p>
 									<a
 										class="mt-1 inline-block text-sm font-medium underline underline-offset-4"
-										href="/export-data">{m.app_export_your_data()}</a
+										href={exportDataHref}>{m.app_export_your_data()}</a
 									>
 								{/if}
 							</div>
