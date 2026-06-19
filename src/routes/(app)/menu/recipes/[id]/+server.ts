@@ -177,19 +177,38 @@ export const DELETE: RequestHandler = async ({ cookies, locals, params, platform
 
 	if (permanent) {
 		const mealLinks = await db
-			.select({ householdMealId: householdMealUserRecipes.householdMealId })
+			.select({
+				householdMealId: householdMealUserRecipes.householdMealId,
+				householdId: householdMeals.householdId
+			})
 			.from(householdMealUserRecipes)
 			.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
-			.where(
-				and(
-					eq(householdMealUserRecipes.userRecipeId, recipeId),
-					eq(householdMeals.householdId, householdId)
-				)
-			);
-		const householdMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
+			.where(eq(householdMealUserRecipes.userRecipeId, recipeId));
+		const otherHouseholdLinks = mealLinks.filter((link) => link.householdId !== householdId);
+		if (otherHouseholdLinks.length) {
+			error(409, { message: 'Recipe is still planned in another household.' });
+		}
+		const householdMealIds = [
+			...new Set(
+				mealLinks
+					.filter((link) => link.householdId === householdId)
+					.map((link) => link.householdMealId)
+			)
+		];
 
 		await d1Batch(requireD1Database(platform), [
-			db.delete(householdMealUserRecipes).where(eq(householdMealUserRecipes.userRecipeId, recipeId))
+			...(householdMealIds.length
+				? [
+						db
+							.delete(householdMealUserRecipes)
+							.where(
+								and(
+									eq(householdMealUserRecipes.userRecipeId, recipeId),
+									inArray(householdMealUserRecipes.householdMealId, householdMealIds)
+								)
+							)
+					]
+				: [])
 		]);
 
 		let mealIdsWithoutLinks: string[] = [];

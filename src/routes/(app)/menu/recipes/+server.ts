@@ -964,21 +964,38 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 		if (!existingRecipeIds.length) error(404, { message: m.menu_archived_recipes_not_found() });
 
 		const mealLinks = await db
-			.select({ householdMealId: householdMealUserRecipes.householdMealId })
+			.select({
+				householdMealId: householdMealUserRecipes.householdMealId,
+				householdId: householdMeals.householdId
+			})
 			.from(householdMealUserRecipes)
 			.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
-			.where(
-				and(
-					inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds),
-					eq(householdMeals.householdId, householdId)
-				)
-			);
-		const householdMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
+			.where(inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds));
+		const otherHouseholdLinks = mealLinks.filter((link) => link.householdId !== householdId);
+		if (otherHouseholdLinks.length) {
+			error(409, { message: 'One or more recipes are still planned in another household.' });
+		}
+		const householdMealIds = [
+			...new Set(
+				mealLinks
+					.filter((link) => link.householdId === householdId)
+					.map((link) => link.householdMealId)
+			)
+		];
 
 		await d1Batch(requireD1Database(platform), [
-			db
-				.delete(householdMealUserRecipes)
-				.where(inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds))
+			...(householdMealIds.length
+				? [
+						db
+							.delete(householdMealUserRecipes)
+							.where(
+								and(
+									inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds),
+									inArray(householdMealUserRecipes.householdMealId, householdMealIds)
+								)
+							)
+					]
+				: [])
 		]);
 
 		let mealIdsWithoutLinks: string[] = [];

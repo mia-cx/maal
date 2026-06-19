@@ -38,7 +38,7 @@ export const displayIngredientAmount = (
 
 const defaultUnitForFood = (foodName: string): string | undefined => {
 	const normalized = foodName.toLowerCase().trim();
-	if (/\b(garlic|knoflook)\b/u.test(normalized)) return 'clove';
+	if (normalized === 'garlic' || normalized === 'knoflook') return 'clove';
 };
 
 export const displayIngredient = (

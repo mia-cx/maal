@@ -68,7 +68,11 @@ describe('taxonomy display helpers', () => {
 		).toBe('2 el gerookte-paprikapoeder');
 	});
 
-	it('infers localized garlic clove units when source units are unavailable', () => {
+	it('infers localized garlic clove units only for whole garlic when source units are unavailable', () => {
+		const preferences = {
+			unitLabelOverrides: { clove: 'teen' },
+			unitPluralLabelOverrides: { clove: 'tenen' }
+		};
 		expect(
 			displayIngredient(
 				{
@@ -80,12 +84,23 @@ describe('taxonomy display helpers', () => {
 					sourceFoodLabel: 'knoflook',
 					originalText: '1 knoflook'
 				},
-				{
-					unitLabelOverrides: { clove: 'teen' },
-					unitPluralLabelOverrides: { clove: 'tenen' }
-				}
+				preferences
 			).text
 		).toBe('1 teen knoflook');
+		expect(
+			displayIngredient(
+				{
+					baseQuantity: null,
+					baseUnitId: null,
+					sourceQuantity: 1,
+					sourceUnitLabel: null,
+					baseFoodId: null,
+					sourceFoodLabel: 'garlic powder',
+					originalText: '1 garlic powder'
+				},
+				preferences
+			).text
+		).toBe('1 garlic powder');
 	});
 
 	it('localizes source unit labels when source quantities are available', () => {
