@@ -402,7 +402,7 @@ export const loadMenuRecipes = async (
 	const eventsByInstructionId = groupInstructionEvents(instructionEvents.map((row) => row.event));
 	const appliancesByRecipeId = groupByRecipeId(appliances);
 	const mealsById = new Map(householdMealRows.map((meal) => [meal.id, meal]));
-	const checkInsByMealId = groupByMealId(checkInRows.map((row) => row.checkIn));
+	const checkInsByMealId = groupByMealId(uniqueById(checkInRows.map((row) => row.checkIn)));
 	const mealsByRecipeId = new Map<string, HouseholdMealRow[]>();
 	const checkInsByRecipeId = new Map<string, (typeof mealCheckIns.$inferSelect)[]>();
 	for (const link of visibleMealLinks) {
@@ -517,6 +517,12 @@ const groupInstructionEvents = <T extends InstructionEventRow>(rows: T[]): Map<s
 		else grouped.set(instructionId, [row]);
 	}
 	return grouped;
+};
+
+const uniqueById = <T extends { id: string }>(rows: T[]): T[] => {
+	const unique = new Map<string, T>();
+	for (const row of rows) unique.set(row.id, row);
+	return [...unique.values()];
 };
 
 const groupByMealId = <T extends { householdMealId: string | null }>(

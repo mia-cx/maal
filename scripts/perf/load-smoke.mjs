@@ -7,7 +7,11 @@ const routes = (process.env.MAAL_PERF_ROUTES ?? '/plan,/menu,/household,/setting
 	.map((route) => route.trim())
 	.filter(Boolean);
 const outputJson = process.env.MAAL_PERF_JSON === '1';
-const iterations = Number.parseInt(process.env.MAAL_PERF_ITERATIONS ?? '3', 10);
+const iterationInput = process.env.MAAL_PERF_ITERATIONS ?? '3';
+const iterations = Number.parseInt(iterationInput, 10);
+if (!/^\d+$/.test(iterationInput) || iterations < 1) {
+	throw new Error('MAAL_PERF_ITERATIONS must be a positive integer');
+}
 const smokeHeaders = { 'x-maal-smoke-auth': '1' };
 
 const percentile = (values, ratio) => {
@@ -105,6 +109,10 @@ const report = {
 	)
 };
 
+const failures = results.filter(
+	(result) => result.status !== 200 || result.consoleErrors.length > 0
+);
+
 if (outputJson) {
 	console.log(JSON.stringify(report, null, 2));
 } else {
@@ -114,9 +122,6 @@ if (outputJson) {
 			`${label}: min=${summary.minMs}ms p50=${summary.p50Ms}ms p95=${summary.p95Ms}ms max=${summary.maxMs}ms`
 		);
 	}
-	const failures = results.filter(
-		(result) => result.status !== 200 || result.consoleErrors.length > 0
-	);
 	if (failures.length) {
 		console.log('\nFailures:');
 		for (const failure of failures) {
@@ -124,6 +129,7 @@ if (outputJson) {
 				`${failure.mode} ${failure.route} #${failure.iteration}: status=${failure.status} final=${failure.finalUrl} consoleErrors=${failure.consoleErrors.length}`
 			);
 		}
-		process.exitCode = 1;
 	}
 }
+
+if (failures.length) process.exitCode = 1;
