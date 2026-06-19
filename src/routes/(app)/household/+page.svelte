@@ -180,7 +180,8 @@
 		untrack(() => cloneIngredientOverrideRows(initialView.displayOverrideRows.ingredientOverrides))
 	);
 	const applyHouseholdView = (nextView: LocalPageData) => {
-		const { freshView: _freshView, ...resolvedView } = nextView;
+		const { freshView, ...resolvedView } = nextView;
+		void freshView;
 		view = resolvedView;
 		householdName = nextView.household.name;
 		defaultServings = String(nextView.profile.defaultServings);
@@ -403,7 +404,7 @@
 				class="grid gap-3 border-t border-border pt-4"
 				aria-label={m.household_basic_settings()}
 			>
-				<form method="post" action="?/updateSettings" class="grid gap-4">
+				<form method="post" action="?/updateSettings" use:enhance class="grid gap-4">
 					<fieldset class="grid gap-3">
 						<legend class="sr-only">{m.app_household()}</legend>
 						<label class="grid min-w-0 gap-1 text-xs font-medium">
@@ -505,7 +506,7 @@
 
 			<section class="grid gap-3 border-t border-border pt-4">
 				<h2 class="text-sm font-medium">{m.household_appliances()}</h2>
-				<form method="post" action="?/updateAppliances" class="grid gap-3">
+				<form method="post" action="?/updateAppliances" use:enhance class="grid gap-3">
 					{#each changedAppliances as appliance (appliance.appliance)}
 						<input
 							type="hidden"
@@ -552,7 +553,7 @@
 				<h2 id="aliases-overrides-title" class="text-sm font-medium">
 					{m.household_aliases_overrides()}
 				</h2>
-				<form method="post" action="?/updateSettings" class="grid gap-5">
+				<form method="post" action="?/updateSettings" use:enhance class="grid gap-5">
 					<input type="hidden" name="overrideLocale" value={locale} />
 					<fieldset class="grid gap-3">
 						<legend class="text-xs font-semibold text-muted-foreground"
@@ -753,7 +754,7 @@
 							</div>
 							<div class="flex items-center justify-end gap-2">
 								{#if canManageHousehold && !member.directoryManaged && member.userId !== currentView.currentUserId}
-									<form method="post" action="?/updateMemberRole" class="contents">
+									<form method="post" action="?/updateMemberRole" use:enhance class="contents">
 										<input type="hidden" name="membershipId" value={member.id} />
 										<input type="hidden" name="userId" value={member.userId} />
 										<select
@@ -835,7 +836,7 @@
 								</div>
 								<div class="flex items-center justify-end gap-2">
 									{#if canManageHousehold && invite.usable}
-										<form method="post" action="?/updateInviteRole" class="contents">
+										<form method="post" action="?/updateInviteRole" use:enhance class="contents">
 											<input type="hidden" name="inviteId" value={invite.id} />
 											<select
 												name="role"
@@ -949,7 +950,7 @@
 			</Dialog.Description>
 		</Dialog.Header>
 
-		<form method="post" action="?/createInvite" class="grid gap-4">
+		<form method="post" action="?/createInvite" use:enhance class="grid gap-4">
 			<input type="hidden" name="role" value={inviteRole} />
 			<input type="hidden" name="expiresInDays" value={inviteExpiresInDays} />
 			<label class="grid gap-1 text-xs font-medium">
