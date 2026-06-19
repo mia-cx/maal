@@ -630,15 +630,8 @@ export const loadMealPlanMeals = async (
 	return scheduledMeals;
 };
 
-export const replaceRecipeIngredients = async (
-	db: WritableDb,
-	recipeId: string,
-	ingredients: RecipeIngredientItem[]
-) => {
-	await db.delete(userRecipeIngredients).where(eq(userRecipeIngredients.userRecipeId, recipeId));
-	if (!ingredients.length) return;
-
-	const rows = ingredients.map((ingredient, index) => {
+export const recipeIngredientRows = (recipeId: string, ingredients: RecipeIngredientItem[]) =>
+	ingredients.map((ingredient, index) => {
 		const amountText = ingredientAmountText(ingredient);
 		const parsedAmount = parseIngredientAmount(amountText);
 		return {
@@ -653,6 +646,16 @@ export const replaceRecipeIngredients = async (
 			confidence: 1
 		};
 	});
+
+export const replaceRecipeIngredients = async (
+	db: WritableDb,
+	recipeId: string,
+	ingredients: RecipeIngredientItem[]
+) => {
+	await db.delete(userRecipeIngredients).where(eq(userRecipeIngredients.userRecipeId, recipeId));
+	if (!ingredients.length) return;
+
+	const rows = recipeIngredientRows(recipeId, ingredients);
 	for (let index = 0; index < rows.length; index += maxIngredientRowsPerInsert) {
 		await db
 			.insert(userRecipeIngredients)
@@ -666,6 +669,15 @@ export const updateRecipeIngredients = async (
 	ingredients: RecipeIngredientItem[]
 ) => replaceRecipeIngredients(db, recipeId, ingredients);
 
+export const recipeInstructionRows = (recipeId: string, instructions: RecipeInstructionItem[]) =>
+	instructions.map((instruction, index) => ({
+		id: crypto.randomUUID(),
+		userRecipeId: recipeId,
+		stepIndex: index,
+		text: cleanImportedText(instruction.text),
+		confidence: 1
+	}));
+
 export const replaceRecipeInstructions = async (
 	db: WritableDb,
 	recipeId: string,
@@ -674,12 +686,7 @@ export const replaceRecipeInstructions = async (
 	await db.delete(userRecipeInstructions).where(eq(userRecipeInstructions.userRecipeId, recipeId));
 	if (!instructions.length) return;
 
-	const rows = instructions.map((instruction, index) => ({
-		userRecipeId: recipeId,
-		stepIndex: index,
-		text: cleanImportedText(instruction.text),
-		confidence: 1
-	}));
+	const rows = recipeInstructionRows(recipeId, instructions);
 	for (let index = 0; index < rows.length; index += maxInstructionRowsPerInsert) {
 		await db
 			.insert(userRecipeInstructions)

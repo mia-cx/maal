@@ -3,15 +3,23 @@ import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { requireBillingAppContext } from '$lib/server/http/app-context';
 import { d1Batch, requireD1Database } from '$lib/server/db/d1-batch';
-import { householdMeals, householdMealUserRecipes, userRecipes } from '$lib/server/db/schema';
+import {
+	householdMeals,
+	householdMealUserRecipes,
+	userRecipeIngredients,
+	userRecipeInstructionEvents,
+	userRecipeInstructions,
+	userRecipes
+} from '$lib/server/db/schema';
 import {
 	loadMenuRecipes,
-	replaceRecipeIngredients,
-	replaceRecipeInstructions
+	recipeIngredientRows,
+	recipeInstructionRows
 } from '$lib/server/db/recipe-mappers';
 import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import { parseRecipeMenuItemPayload } from '$lib/menu/recipe-payload';
 import { loadHouseholdUnitPreferences } from '$lib/server/taxonomy/household-preferences';
+import { parseInstructionEvents } from '$lib/server/taxonomy/instruction-events';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
@@ -56,35 +64,54 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 		.get();
 	if (!existing) error(404, { message: m.plan_recipe_not_found() });
 
-	await db
-		.update(userRecipes)
-		.set({
-			title: recipe.title,
-			description: recipe.description ?? null,
-			imageUrl: recipe.image ?? null,
-			prepTimeMinutes: recipe.prepTimeMinutes ?? null,
-			cookTimeMinutes: recipe.cookTimeMinutes ?? null,
-			totalTimeMinutes: recipe.totalTimeMinutes ?? null,
-			yield: recipe.yield ?? null,
-			sourceUrl: recipe.sourceUrl ?? null,
-			sourceSiteName: recipe.sourceSiteName ?? null,
-			sourceAuthorName: recipe.sourceAuthorName ?? null,
-			sourcePublisherName: recipe.sourcePublisherName ?? null,
-			sourceIsBasedOnUrl: recipe.sourceIsBasedOnUrl ?? null,
-			sourceClaimedMinutes: recipe.cookTimeMinutes ?? null,
-			userNotes: recipe.userNotes ?? null,
-			updatedAt: new Date().toISOString()
-		})
-		.where(
-			and(
-				eq(userRecipes.id, recipeId),
-				eq(userRecipes.workosUserId, session.user.id),
-				isNull(userRecipes.deletedAt)
+	const ingredientRows = recipeIngredientRows(recipeId, recipe.ingredients ?? []);
+	const instructionRows = recipeInstructionRows(recipeId, recipe.instructions ?? []);
+	const instructionEventRows = (
+		await Promise.all(
+			instructionRows.map(async (instruction) =>
+				(await parseInstructionEvents(db, instruction.text)).map((event) => ({
+					userRecipeInstructionId: instruction.id,
+					...event
+				}))
 			)
-		);
+		)
+	).flat();
 
-	await replaceRecipeIngredients(db, recipeId, recipe.ingredients ?? []);
-	await replaceRecipeInstructions(db, recipeId, recipe.instructions ?? []);
+	await d1Batch(requireD1Database(platform), [
+		db
+			.update(userRecipes)
+			.set({
+				title: recipe.title,
+				description: recipe.description ?? null,
+				imageUrl: recipe.image ?? null,
+				prepTimeMinutes: recipe.prepTimeMinutes ?? null,
+				cookTimeMinutes: recipe.cookTimeMinutes ?? null,
+				totalTimeMinutes: recipe.totalTimeMinutes ?? null,
+				yield: recipe.yield ?? null,
+				sourceUrl: recipe.sourceUrl ?? null,
+				sourceSiteName: recipe.sourceSiteName ?? null,
+				sourceAuthorName: recipe.sourceAuthorName ?? null,
+				sourcePublisherName: recipe.sourcePublisherName ?? null,
+				sourceIsBasedOnUrl: recipe.sourceIsBasedOnUrl ?? null,
+				sourceClaimedMinutes: recipe.cookTimeMinutes ?? null,
+				userNotes: recipe.userNotes ?? null,
+				updatedAt: new Date().toISOString()
+			})
+			.where(
+				and(
+					eq(userRecipes.id, recipeId),
+					eq(userRecipes.workosUserId, session.user.id),
+					isNull(userRecipes.deletedAt)
+				)
+			),
+		db.delete(userRecipeIngredients).where(eq(userRecipeIngredients.userRecipeId, recipeId)),
+		...(ingredientRows.length ? [db.insert(userRecipeIngredients).values(ingredientRows)] : []),
+		db.delete(userRecipeInstructions).where(eq(userRecipeInstructions.userRecipeId, recipeId)),
+		...(instructionRows.length ? [db.insert(userRecipeInstructions).values(instructionRows)] : []),
+		...(instructionEventRows.length
+			? [db.insert(userRecipeInstructionEvents).values(instructionEventRows)]
+			: [])
+	]);
 
 	const unitPreferences = await loadHouseholdUnitPreferences(db, {
 		workosUserId: session.user.id,
