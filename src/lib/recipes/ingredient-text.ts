@@ -16,6 +16,8 @@ export type UnitPreferences = {
 	preferredTemperatureUnitLabel?: string;
 	unitConversions?: Record<string, UnitConversion>;
 	unitAliases?: Record<string, string>;
+	unitLabelOverrides?: Record<string, string>;
+	unitPluralLabelOverrides?: Record<string, string>;
 	ingredientUnitOverrides?: Record<string, string>;
 	ingredientUnitLabelOverrides?: Record<string, string>;
 	ingredientUnitPluralLabelOverrides?: Record<string, string>;
@@ -318,14 +320,17 @@ const preferredUnitFor = (
 		ingredientName,
 		ingredientId
 	);
+	const unitLabelOverride = preferences.unitLabelOverrides?.[unit];
+	const unitPluralLabelOverride = preferences.unitPluralLabelOverrides?.[unit];
 	if (kind === 'mass') {
 		const target = override === 'oz' ? 'oz' : canonicalIngredientUnit(override);
 		const preferred =
 			target && massUnits.has(target) ? target : (preferences.preferredMassUnit ?? 'g');
 		return {
 			unit: preferred,
-			label: labelOverride ?? preferences.preferredMassUnitLabel,
-			pluralLabel: pluralLabelOverride ?? preferences.preferredMassUnitPluralLabel
+			label: labelOverride ?? preferences.preferredMassUnitLabel ?? unitLabelOverride,
+			pluralLabel:
+				pluralLabelOverride ?? preferences.preferredMassUnitPluralLabel ?? unitPluralLabelOverride
 		};
 	}
 	if (kind === 'volume') {
@@ -334,11 +339,16 @@ const preferredUnitFor = (
 			target && volumeUnits.has(target) ? target : (preferences.preferredVolumeUnit ?? 'ml');
 		return {
 			unit: preferred,
-			label: labelOverride ?? preferences.preferredVolumeUnitLabel,
-			pluralLabel: pluralLabelOverride ?? preferences.preferredVolumeUnitPluralLabel
+			label: labelOverride ?? preferences.preferredVolumeUnitLabel ?? unitLabelOverride,
+			pluralLabel:
+				pluralLabelOverride ?? preferences.preferredVolumeUnitPluralLabel ?? unitPluralLabelOverride
 		};
 	}
-	return { unit };
+	return {
+		unit,
+		label: labelOverride ?? unitLabelOverride,
+		pluralLabel: pluralLabelOverride ?? unitPluralLabelOverride
+	};
 };
 
 export const canonicalIngredientUnit = (value: string | undefined): string | undefined => {
@@ -382,8 +392,12 @@ export const formatQuantity = (quantity: number): string => {
 	const whole = Math.floor(rounded);
 	const fraction = rounded - whole;
 	if (fraction < 0.01) return String(whole);
-	let numerator = Math.round(fraction * 8);
 	let denominator = 8;
+	let numerator = Math.round(fraction * denominator);
+	if (numerator === 0) {
+		denominator = 16;
+		numerator = Math.max(1, Math.round(fraction * denominator));
+	}
 	const divisor = commonDivisor(numerator, denominator);
 	numerator /= divisor;
 	denominator /= divisor;
@@ -475,7 +489,13 @@ export const displayIngredientAmount = (
 		const label = target.label ?? (target.unit === 'fl oz' ? 'fl oz' : target.unit);
 		return `${formatQuantity(targetQuantity)} ${displayUnitLabel(targetQuantity, label, target.pluralLabel)}`;
 	}
-	return [formatQuantity(quantity), canonicalUnit].filter(Boolean).join(' ');
+	const label = target.label ?? canonicalUnit;
+	return [
+		formatQuantity(quantity),
+		label ? displayUnitLabel(quantity, label, target.pluralLabel) : ''
+	]
+		.filter(Boolean)
+		.join(' ');
 };
 
 const normalizedInstructionUnitAlias = (value: string): string =>

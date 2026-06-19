@@ -2,16 +2,29 @@ import { and, eq } from 'drizzle-orm';
 import type { Meal } from '$lib/plan/plan-types';
 import { countActiveHouseholdMembers, listHouseholdMembers } from '$lib/server/auth/household';
 import { getDb } from '$lib/server/db';
-import { householdMeals, householdMealUserRecipes, userRecipes } from '$lib/server/db/schema';
+import { d1Batch, requireD1Database } from '$lib/server/db/d1-batch';
+import {
+	householdMealIngredients,
+	householdMealInstructionEvents,
+	householdMealInstructions,
+	householdMeals,
+	householdMealUserRecipes,
+	userRecipes
+} from '$lib/server/db/schema';
 import { loadMealPlanMeals } from '$lib/server/db/recipe-mappers';
 import { DomainError } from '$lib/server/domain-errors';
 import { copyRecipeSidecarsToMeal } from '$lib/server/services/meal-sidecars';
+import {
+	mealIngredientLineToSidecar,
+	mealInstructionLineToSidecar
+} from '$lib/server/services/meal-line-sidecars';
 import { loadHouseholdUnitPreferences } from '$lib/server/taxonomy/household-preferences';
 import { normalizeServingsPlanned } from '$lib/server/services/planned-servings';
 import {
 	replaceMealIngredientsFromLines,
 	replaceMealInstructionsFromLines
 } from './meal-sidecar-writer';
+import { parseInstructionEvents } from '$lib/server/taxonomy/instruction-events';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -113,6 +126,70 @@ const mealUpdatePayload = (
 	return update;
 };
 
+const mealInstructionEventRows = async (
+	db: Db,
+	householdMealId: string,
+	instructions: string[]
+) => {
+	const rows = [];
+	for (const [stepIndex, text] of instructions.entries()) {
+		const householdMealInstructionId = crypto.randomUUID();
+		rows.push({
+			instruction: {
+				id: householdMealInstructionId,
+				...mealInstructionLineToSidecar(householdMealId, text, stepIndex)
+			},
+			events: (await parseInstructionEvents(db, text)).map((event) => ({
+				householdMealInstructionId,
+				...event
+			}))
+		});
+	}
+	return rows;
+};
+
+const updateMealWithSidecars = async (input: {
+	platform: App.Platform | undefined;
+	db: Db;
+	mealId: string;
+	mealPatch: HouseholdMealPatch;
+	ingredients?: string[];
+	instructions?: string[];
+}) => {
+	const { db, mealId } = input;
+	const instructionRows = input.instructions
+		? await mealInstructionEventRows(db, mealId, input.instructions)
+		: [];
+	await d1Batch(requireD1Database(input.platform), [
+		db.update(householdMeals).set(input.mealPatch).where(eq(householdMeals.id, mealId)),
+		...(input.ingredients
+			? [
+					db
+						.delete(householdMealIngredients)
+						.where(eq(householdMealIngredients.householdMealId, mealId)),
+					...input.ingredients.map((line, index) =>
+						db
+							.insert(householdMealIngredients)
+							.values(mealIngredientLineToSidecar(mealId, line, index))
+					)
+				]
+			: []),
+		...(input.instructions
+			? [
+					db
+						.delete(householdMealInstructions)
+						.where(eq(householdMealInstructions.householdMealId, mealId)),
+					...instructionRows.map(({ instruction }) =>
+						db.insert(householdMealInstructions).values(instruction)
+					),
+					...instructionRows.flatMap(({ events }) =>
+						events.map((event) => db.insert(householdMealInstructionEvents).values(event))
+					)
+				]
+			: [])
+	]);
+};
+
 export const defaultMealServings = async (
 	platform: App.Platform | undefined,
 	householdId: string
@@ -157,37 +234,50 @@ export const createHouseholdMeal = async (input: {
 	if (meal.userRecipeId && !recipe) throw new DomainError('recipe_not_found', 'Recipe not found.');
 
 	const householdMealId = crypto.randomUUID();
-	await db.transaction(async (tx) => {
-		await tx.insert(householdMeals).values({
-			id: householdMealId,
-			householdId: meal.householdId,
-			title: recipe?.title ?? meal.customMeal?.title?.trim() ?? 'New meal',
-			description: recipe?.description ?? meal.customMeal?.description ?? null,
-			imageUrl: recipe?.imageUrl ?? meal.customMeal?.imageUrl ?? null,
-			prepTimeMinutes: recipe?.prepTimeMinutes ?? meal.customMeal?.prepTimeMinutes ?? null,
-			cookTimeMinutes: recipe?.cookTimeMinutes ?? meal.customMeal?.cookTimeMinutes ?? null,
-			yield: recipe?.yield ?? meal.customMeal?.yield ?? servingsDefault,
-			plannedYield: normalizeServingsPlanned(
-				{ servingsPlanned: meal.servingsPlanned },
-				servingsDefault
-			),
-			plannedCookWorkosUserId,
-			date: meal.date ?? null,
-			time: meal.time ?? null,
-			sortOrder: meal.sortOrder ?? null,
-			status: 'planned'
-		});
+	// Cloudflare D1 rejects Drizzle's interactive transaction `begin` path in local/dev
+	// and worker runtimes. Keep meal creation D1-compatible by issuing ordered writes
+	// directly: parent meal first, then link/sidecar rows that depend on it.
+	await db.insert(householdMeals).values({
+		id: householdMealId,
+		householdId: meal.householdId,
+		title: recipe?.title ?? meal.customMeal?.title?.trim() ?? 'New meal',
+		description: recipe?.description ?? meal.customMeal?.description ?? null,
+		imageUrl: recipe?.imageUrl ?? meal.customMeal?.imageUrl ?? null,
+		prepTimeMinutes: recipe?.prepTimeMinutes ?? meal.customMeal?.prepTimeMinutes ?? null,
+		cookTimeMinutes: recipe?.cookTimeMinutes ?? meal.customMeal?.cookTimeMinutes ?? null,
+		yield: recipe?.yield ?? meal.customMeal?.yield ?? servingsDefault,
+		plannedYield: normalizeServingsPlanned(
+			{ servingsPlanned: meal.servingsPlanned },
+			servingsDefault
+		),
+		plannedCookWorkosUserId,
+		date: meal.date ?? null,
+		time: meal.time ?? null,
+		sortOrder: meal.sortOrder ?? null,
+		status: 'planned'
+	});
 
+	try {
 		if (recipe) {
-			await tx
+			await db
 				.insert(householdMealUserRecipes)
 				.values({ householdMealId, userRecipeId: recipe.id });
-			await copyRecipeSidecarsToMeal(tx, recipe.id, householdMealId);
+			await copyRecipeSidecarsToMeal(db, recipe.id, householdMealId);
 		} else {
-			await replaceMealIngredientsFromLines(tx, householdMealId, meal.customMeal?.ingredients);
-			await replaceMealInstructionsFromLines(tx, householdMealId, meal.customMeal?.instructions);
+			await replaceMealIngredientsFromLines(db, householdMealId, meal.customMeal?.ingredients);
+			await replaceMealInstructionsFromLines(db, householdMealId, meal.customMeal?.instructions);
 		}
-	});
+	} catch (cause) {
+		await db
+			.delete(householdMeals)
+			.where(
+				and(
+					eq(householdMeals.id, householdMealId),
+					eq(householdMeals.householdId, meal.householdId)
+				)
+			);
+		throw cause;
+	}
 
 	return getHouseholdMeal({
 		db,
@@ -239,17 +329,13 @@ export const updateHouseholdMeal = async (input: {
 			: meal.patch.plannedCookUserId;
 	await validateCook(input.platform, meal.householdId, plannedCookWorkosUserId);
 	const updatedAt = new Date().toISOString();
-	await db.transaction(async (tx) => {
-		await tx
-			.update(householdMeals)
-			.set(mealUpdatePayload(meal.patch, existingMeal, plannedCookWorkosUserId, updatedAt))
-			.where(eq(householdMeals.id, existingMeal.id));
-		if (meal.patch.ingredients !== undefined) {
-			await replaceMealIngredientsFromLines(tx, existingMeal.id, meal.patch.ingredients);
-		}
-		if (meal.patch.instructions !== undefined) {
-			await replaceMealInstructionsFromLines(tx, existingMeal.id, meal.patch.instructions);
-		}
+	await updateMealWithSidecars({
+		platform: input.platform,
+		db,
+		mealId: existingMeal.id,
+		mealPatch: mealUpdatePayload(meal.patch, existingMeal, plannedCookWorkosUserId, updatedAt),
+		ingredients: meal.patch.ingredients,
+		instructions: meal.patch.instructions
 	});
 	return getHouseholdMeal({
 		db,

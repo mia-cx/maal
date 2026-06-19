@@ -2,18 +2,37 @@ import * as m from '$lib/paraglide/messages';
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { requireBillingAppContext } from '$lib/server/http/app-context';
-import { householdMeals, householdMealUserRecipes, userRecipes } from '$lib/server/db/schema';
+import { d1Batch, requireD1Database } from '$lib/server/db/d1-batch';
+import {
+	householdMeals,
+	householdMealUserRecipes,
+	userRecipeIngredients,
+	userRecipeInstructionEvents,
+	userRecipeInstructions,
+	userRecipes
+} from '$lib/server/db/schema';
 import {
 	loadMenuRecipes,
-	replaceRecipeIngredients,
-	replaceRecipeInstructions
+	maxIngredientRowsPerInsert,
+	maxInstructionRowsPerInsert,
+	recipeIngredientRows,
+	recipeInstructionRows
 } from '$lib/server/db/recipe-mappers';
 import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import { parseRecipeMenuItemPayload } from '$lib/menu/recipe-payload';
 import { loadHouseholdUnitPreferences } from '$lib/server/taxonomy/household-preferences';
+import { parseInstructionEvents } from '$lib/server/taxonomy/instruction-events';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
+
+const chunks = <T>(rows: T[], size: number): T[][] => {
+	const result: T[][] = [];
+	for (let index = 0; index < rows.length; index += size) {
+		result.push(rows.slice(index, index + size));
+	}
+	return result;
+};
 
 const readRecipe = async (request: Request): Promise<RecipeMenuItem> => {
 	let body: unknown;
@@ -55,8 +74,21 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 		.get();
 	if (!existing) error(404, { message: m.plan_recipe_not_found() });
 
-	await db.transaction(async (tx) => {
-		await tx
+	const ingredientRows = recipeIngredientRows(recipeId, recipe.ingredients ?? []);
+	const instructionRows = recipeInstructionRows(recipeId, recipe.instructions ?? []);
+	const instructionEventRows = (
+		await Promise.all(
+			instructionRows.map(async (instruction) =>
+				(await parseInstructionEvents(db, instruction.text)).map((event) => ({
+					userRecipeInstructionId: instruction.id,
+					...event
+				}))
+			)
+		)
+	).flat();
+
+	await d1Batch(requireD1Database(platform), [
+		db
 			.update(userRecipes)
 			.set({
 				title: recipe.title,
@@ -81,11 +113,19 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 					eq(userRecipes.workosUserId, session.user.id),
 					isNull(userRecipes.deletedAt)
 				)
-			);
-
-		await replaceRecipeIngredients(tx, recipeId, recipe.ingredients ?? []);
-		await replaceRecipeInstructions(tx, recipeId, recipe.instructions ?? []);
-	});
+			),
+		db.delete(userRecipeIngredients).where(eq(userRecipeIngredients.userRecipeId, recipeId)),
+		...chunks(ingredientRows, maxIngredientRowsPerInsert).map((rows) =>
+			db.insert(userRecipeIngredients).values(rows)
+		),
+		db.delete(userRecipeInstructions).where(eq(userRecipeInstructions.userRecipeId, recipeId)),
+		...chunks(instructionRows, maxInstructionRowsPerInsert).map((rows) =>
+			db.insert(userRecipeInstructions).values(rows)
+		),
+		...chunks(instructionEventRows, maxInstructionRowsPerInsert).map((rows) =>
+			db.insert(userRecipeInstructionEvents).values(rows)
+		)
+	]);
 
 	const unitPreferences = await loadHouseholdUnitPreferences(db, {
 		workosUserId: session.user.id,
@@ -123,8 +163,8 @@ export const PATCH: RequestHandler = async ({ cookies, locals, params, platform,
 	if (!existing) error(404, { message: m.menu_archived_recipe_not_found() });
 
 	const updatedAt = new Date().toISOString();
-	await db.transaction((tx) =>
-		tx
+	await d1Batch(requireD1Database(platform), [
+		db
 			.update(userRecipes)
 			.set({ deletedAt: null, updatedAt })
 			.where(
@@ -134,7 +174,7 @@ export const PATCH: RequestHandler = async ({ cookies, locals, params, platform,
 					isNotNull(userRecipes.deletedAt)
 				)
 			)
-	);
+	]);
 
 	const unitPreferences = await loadHouseholdUnitPreferences(db, {
 		workosUserId: session.user.id,
@@ -177,37 +217,56 @@ export const DELETE: RequestHandler = async ({ cookies, locals, params, platform
 		error(404, { message: permanent ? 'Archived recipe not found.' : 'Recipe not found.' });
 
 	if (permanent) {
-		const deletedMealCount = await db.transaction(async (tx) => {
-			const mealLinks = await tx
+		const mealLinks = await db
+			.select({
+				householdMealId: householdMealUserRecipes.householdMealId,
+				householdId: householdMeals.householdId
+			})
+			.from(householdMealUserRecipes)
+			.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
+			.where(eq(householdMealUserRecipes.userRecipeId, recipeId));
+		const otherHouseholdLinks = mealLinks.filter((link) => link.householdId !== householdId);
+		if (otherHouseholdLinks.length) {
+			error(409, { message: 'Recipe is still planned in another household.' });
+		}
+		const householdMealIds = [
+			...new Set(
+				mealLinks
+					.filter((link) => link.householdId === householdId)
+					.map((link) => link.householdMealId)
+			)
+		];
+
+		await d1Batch(requireD1Database(platform), [
+			...(householdMealIds.length
+				? [
+						db
+							.delete(householdMealUserRecipes)
+							.where(
+								and(
+									eq(householdMealUserRecipes.userRecipeId, recipeId),
+									inArray(householdMealUserRecipes.householdMealId, householdMealIds)
+								)
+							)
+					]
+				: [])
+		]);
+
+		let mealIdsWithoutLinks: string[] = [];
+		if (householdMealIds.length) {
+			const remainingLinks = await db
 				.select({ householdMealId: householdMealUserRecipes.householdMealId })
 				.from(householdMealUserRecipes)
-				.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
-				.where(
-					and(
-						eq(householdMealUserRecipes.userRecipeId, recipeId),
-						eq(householdMeals.householdId, householdId)
-					)
-				);
-			const householdMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
-
-			await tx
-				.delete(householdMealUserRecipes)
-				.where(eq(householdMealUserRecipes.userRecipeId, recipeId));
-
-			let mealIdsWithoutLinks: string[] = [];
-			if (householdMealIds.length) {
-				const remainingLinks = await tx
-					.select({ householdMealId: householdMealUserRecipes.householdMealId })
-					.from(householdMealUserRecipes)
-					.where(inArray(householdMealUserRecipes.householdMealId, householdMealIds));
-				const linkedMealIds = new Set(remainingLinks.map((link) => link.householdMealId));
-				mealIdsWithoutLinks = householdMealIds.filter((mealId) => !linkedMealIds.has(mealId));
-				if (mealIdsWithoutLinks.length) {
-					await tx.delete(householdMeals).where(inArray(householdMeals.id, mealIdsWithoutLinks));
-				}
+				.where(inArray(householdMealUserRecipes.householdMealId, householdMealIds));
+			const linkedMealIds = new Set(remainingLinks.map((link) => link.householdMealId));
+			mealIdsWithoutLinks = householdMealIds.filter((mealId) => !linkedMealIds.has(mealId));
+			if (mealIdsWithoutLinks.length) {
+				await db.delete(householdMeals).where(inArray(householdMeals.id, mealIdsWithoutLinks));
 			}
+		}
 
-			await tx
+		await d1Batch(requireD1Database(platform), [
+			db
 				.delete(userRecipes)
 				.where(
 					and(
@@ -215,15 +274,14 @@ export const DELETE: RequestHandler = async ({ cookies, locals, params, platform
 						eq(userRecipes.workosUserId, session.user.id),
 						isNotNull(userRecipes.deletedAt)
 					)
-				);
-			return mealIdsWithoutLinks.length;
-		});
-		return json({ deleted: true, permanent: true, deletedMealCount });
+				)
+		]);
+		return json({ deleted: true, permanent: true, deletedMealCount: mealIdsWithoutLinks.length });
 	}
 
 	const deletedAt = new Date().toISOString();
-	await db.transaction((tx) =>
-		tx
+	await d1Batch(requireD1Database(platform), [
+		db
 			.update(userRecipes)
 			.set({ deletedAt, updatedAt: deletedAt })
 			.where(
@@ -233,7 +291,7 @@ export const DELETE: RequestHandler = async ({ cookies, locals, params, platform
 					isNull(userRecipes.deletedAt)
 				)
 			)
-	);
+	]);
 
 	return json({ deleted: true, deletedAt });
 };

@@ -192,21 +192,7 @@ export const upsertUnitDisplayOverride = async ({
 }) => {
 	const alias = stringField(preferredUnitAlias);
 	if (!alias) return;
-	const rootDb = getDb(database);
-	if (!inputDb) {
-		await rootDb.transaction((tx) =>
-			upsertUnitDisplayOverride({
-				database,
-				db: tx,
-				householdId,
-				locale,
-				baseUnitId,
-				preferredUnitAlias: alias
-			})
-		);
-		return;
-	}
-	const db = inputDb;
+	const db = inputDb ?? getDb(database);
 	const globalAlias = await unitByAlias(db, alias, locale, baseUnitId);
 	if (globalAlias) {
 		await db
@@ -306,20 +292,7 @@ export const upsertFoodDisplayOverride = async ({
 	const preferredFoodAlias = stringField(row.preferredFoodAlias) ?? '';
 	const preferredMeasureUnit = stringField(row.preferredMeasureUnit) ?? '';
 	if (!baseFood) return;
-	const rootDb = getDb(database);
-	if (!inputDb) {
-		await rootDb.transaction((tx) =>
-			upsertFoodDisplayOverride({
-				database,
-				db: tx,
-				householdId,
-				locale,
-				row: { baseFood, preferredFoodAlias, preferredMeasureUnit }
-			})
-		);
-		return;
-	}
-	const db = inputDb;
+	const db = inputDb ?? getDb(database);
 	const unitRows = preferredMeasureUnit
 		? await db.select().from(units).where(eq(units.id, preferredMeasureUnit)).limit(1)
 		: [];

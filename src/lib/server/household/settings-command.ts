@@ -21,9 +21,6 @@ export type HouseholdSettingsUpdateResult =
 	| { ok: false; status: number; message: string };
 
 type HouseholdSettingsDb = ReturnType<typeof getDb>;
-type HouseholdSettingsTransaction = Parameters<
-	Parameters<HouseholdSettingsDb['transaction']>[0]
->[0];
 
 const isStringRecord = (value: unknown): value is Record<string, string> =>
 	Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -54,7 +51,8 @@ export const updateHouseholdSettingsFromForm = async ({
 	if (!parsedProfileUpdate.ok)
 		return { ok: false, status: 400, message: parsedProfileUpdate.message };
 	const profileUpdate = parsedProfileUpdate.update;
-	const dbUpdates: Array<(tx: HouseholdSettingsTransaction) => Promise<unknown>> = [];
+	const db = getDb(database);
+	const dbUpdates: Array<(db: HouseholdSettingsDb) => Promise<unknown>> = [];
 	const workosUpdates: Array<() => Promise<unknown>> = [];
 
 	if (form.has('name')) {
@@ -206,11 +204,7 @@ export const updateHouseholdSettingsFromForm = async ({
 
 	if (dbUpdates.length === 0 && workosUpdates.length === 0)
 		return { ok: true, message: 'No changes.' };
-	if (dbUpdates.length > 0) {
-		await getDb(database).transaction(async (tx) => {
-			for (const update of dbUpdates) await update(tx);
-		});
-	}
+	for (const update of dbUpdates) await update(db);
 	for (const update of workosUpdates) await update();
 	return { ok: true, message: 'Household saved.' };
 };

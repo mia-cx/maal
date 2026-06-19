@@ -3,6 +3,7 @@ import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { requireBillingAppContext } from '$lib/server/http/app-context';
 import { getDb } from '$lib/server/db';
+import { d1Batch, requireD1Database } from '$lib/server/db/d1-batch';
 import {
 	householdMeals,
 	householdMealUserRecipes,
@@ -845,8 +846,11 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 	const recipeInstructions = body.recipe?.instructions ?? instructionsFromRecipe(recipeJson);
 	const recipeId = crypto.randomUUID();
 
-	await db.transaction(async (tx) => {
-		await tx.insert(userRecipes).values({
+	// Cloudflare D1 rejects Drizzle's interactive transaction `begin` path in local/dev
+	// and worker runtimes. Keep this create path D1-compatible by issuing the same writes
+	// directly; the recipe row is inserted first so dependent sidecars keep FK order.
+	try {
+		await db.insert(userRecipes).values({
 			id: recipeId,
 			workosUserId: session.user.id,
 			savedFromHouseholdId: householdId,
@@ -880,13 +884,18 @@ export const POST: RequestHandler = async ({ cookies, locals, platform, request,
 		});
 
 		await replaceRecipeIngredients(
-			tx,
+			db,
 			recipeId,
 			body.recipe?.ingredients ?? ingredientsFromRecipe(recipeJson, unitAliasMap)
 		);
-		await replaceRecipeInstructions(tx, recipeId, recipeInstructions);
-		await saveRecipeSidecars(tx, recipeId, recipeJson);
-	});
+		await replaceRecipeInstructions(db, recipeId, recipeInstructions);
+		await saveRecipeSidecars(db, recipeId, recipeJson);
+	} catch (cause) {
+		await db
+			.delete(userRecipes)
+			.where(and(eq(userRecipes.id, recipeId), eq(userRecipes.workosUserId, session.user.id)));
+		throw cause;
+	}
 
 	const recipe = await loadSingleMenuRecipe(
 		db,
@@ -909,8 +918,8 @@ export const PATCH: RequestHandler = async ({ cookies, locals, platform, request
 
 	const { recipeIds } = await readBulkBody(request);
 	const updatedAt = new Date().toISOString();
-	await db.transaction((tx) =>
-		tx
+	await d1Batch(requireD1Database(platform), [
+		db
 			.update(userRecipes)
 			.set({ deletedAt: null, updatedAt })
 			.where(
@@ -920,7 +929,7 @@ export const PATCH: RequestHandler = async ({ cookies, locals, platform, request
 					isNotNull(userRecipes.deletedAt)
 				)
 			)
-	);
+	]);
 
 	const unitPreferences = await loadRecipeUnitPreferences(db, session.user.id, householdId);
 	const recipes = await loadMenuRecipes(db, session.user.id, householdId, {
@@ -941,50 +950,69 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 	const { recipeIds, permanent } = await readBulkBody(request);
 
 	if (permanent) {
-		const { deletedMealCount, existingRecipeIds } = await db.transaction(async (tx) => {
-			const existingRows = await tx
-				.select({ id: userRecipes.id })
-				.from(userRecipes)
-				.where(
-					and(
-						eq(userRecipes.workosUserId, session.user.id),
-						inArray(userRecipes.id, recipeIds),
-						isNotNull(userRecipes.deletedAt)
-					)
-				);
-			const existingRecipeIds = existingRows.map((recipe) => recipe.id);
-			if (!existingRecipeIds.length) error(404, { message: m.menu_archived_recipes_not_found() });
+		const existingRows = await db
+			.select({ id: userRecipes.id })
+			.from(userRecipes)
+			.where(
+				and(
+					eq(userRecipes.workosUserId, session.user.id),
+					inArray(userRecipes.id, recipeIds),
+					isNotNull(userRecipes.deletedAt)
+				)
+			);
+		const existingRecipeIds = existingRows.map((recipe) => recipe.id);
+		if (!existingRecipeIds.length) error(404, { message: m.menu_archived_recipes_not_found() });
 
-			const mealLinks = await tx
+		const mealLinks = await db
+			.select({
+				householdMealId: householdMealUserRecipes.householdMealId,
+				householdId: householdMeals.householdId
+			})
+			.from(householdMealUserRecipes)
+			.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
+			.where(inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds));
+		const otherHouseholdLinks = mealLinks.filter((link) => link.householdId !== householdId);
+		if (otherHouseholdLinks.length) {
+			error(409, { message: 'One or more recipes are still planned in another household.' });
+		}
+		const householdMealIds = [
+			...new Set(
+				mealLinks
+					.filter((link) => link.householdId === householdId)
+					.map((link) => link.householdMealId)
+			)
+		];
+
+		await d1Batch(requireD1Database(platform), [
+			...(householdMealIds.length
+				? [
+						db
+							.delete(householdMealUserRecipes)
+							.where(
+								and(
+									inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds),
+									inArray(householdMealUserRecipes.householdMealId, householdMealIds)
+								)
+							)
+					]
+				: [])
+		]);
+
+		let mealIdsWithoutLinks: string[] = [];
+		if (householdMealIds.length) {
+			const remainingLinks = await db
 				.select({ householdMealId: householdMealUserRecipes.householdMealId })
 				.from(householdMealUserRecipes)
-				.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
-				.where(
-					and(
-						inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds),
-						eq(householdMeals.householdId, householdId)
-					)
-				);
-			const householdMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
-
-			await tx
-				.delete(householdMealUserRecipes)
-				.where(inArray(householdMealUserRecipes.userRecipeId, existingRecipeIds));
-
-			let mealIdsWithoutLinks: string[] = [];
-			if (householdMealIds.length) {
-				const remainingLinks = await tx
-					.select({ householdMealId: householdMealUserRecipes.householdMealId })
-					.from(householdMealUserRecipes)
-					.where(inArray(householdMealUserRecipes.householdMealId, householdMealIds));
-				const linkedMealIds = new Set(remainingLinks.map((link) => link.householdMealId));
-				mealIdsWithoutLinks = householdMealIds.filter((mealId) => !linkedMealIds.has(mealId));
-				if (mealIdsWithoutLinks.length) {
-					await tx.delete(householdMeals).where(inArray(householdMeals.id, mealIdsWithoutLinks));
-				}
+				.where(inArray(householdMealUserRecipes.householdMealId, householdMealIds));
+			const linkedMealIds = new Set(remainingLinks.map((link) => link.householdMealId));
+			mealIdsWithoutLinks = householdMealIds.filter((mealId) => !linkedMealIds.has(mealId));
+			if (mealIdsWithoutLinks.length) {
+				await db.delete(householdMeals).where(inArray(householdMeals.id, mealIdsWithoutLinks));
 			}
+		}
 
-			await tx
+		await d1Batch(requireD1Database(platform), [
+			db
 				.delete(userRecipes)
 				.where(
 					and(
@@ -992,14 +1020,13 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 						inArray(userRecipes.id, existingRecipeIds),
 						isNotNull(userRecipes.deletedAt)
 					)
-				);
-			return { deletedMealCount: mealIdsWithoutLinks.length, existingRecipeIds };
-		});
+				)
+		]);
 		return json({
 			deleted: true,
 			permanent: true,
 			recipeIds: existingRecipeIds,
-			deletedMealCount
+			deletedMealCount: mealIdsWithoutLinks.length
 		});
 	}
 
@@ -1017,8 +1044,8 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 	if (!existingRecipeIds.length) error(404, { message: m.menu_recipes_not_found() });
 
 	const deletedAt = new Date().toISOString();
-	await db.transaction((tx) =>
-		tx
+	await d1Batch(requireD1Database(platform), [
+		db
 			.update(userRecipes)
 			.set({ deletedAt, updatedAt: deletedAt })
 			.where(
@@ -1028,7 +1055,7 @@ export const DELETE: RequestHandler = async ({ cookies, locals, platform, reques
 					isNull(userRecipes.deletedAt)
 				)
 			)
-	);
+	]);
 
 	return json({ deleted: true, recipeIds: existingRecipeIds, deletedAt });
 };

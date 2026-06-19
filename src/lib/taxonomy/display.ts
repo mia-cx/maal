@@ -7,6 +7,8 @@ import type { EffectiveTaxonomyPreferences } from './preferences';
 export type TaxonomyIngredient = {
 	baseQuantity?: number | null;
 	baseUnitId?: string | null;
+	sourceQuantity?: number | null;
+	sourceUnitLabel?: string | null;
 	baseFoodId?: string | null;
 	sourceFoodLabel?: string | null;
 	originalText: string;
@@ -34,23 +36,29 @@ export const displayIngredientAmount = (
 	return displayCanonicalIngredientAmount(quantity, baseUnitId, unitPreferences, foodName, foodId);
 };
 
+const defaultUnitForFood = (foodName: string): string | undefined => {
+	const normalized = foodName.toLowerCase().trim();
+	if (normalized === 'garlic' || normalized === 'knoflook') return 'clove';
+};
+
 export const displayIngredient = (
 	ingredient: TaxonomyIngredient,
 	preferences: UnitPreferences | EffectiveTaxonomyPreferences = {}
 ): { amount: string; item: string; text: string } => {
 	const fallbackItem = ingredient.sourceFoodLabel ?? ingredient.originalText;
 	const item = displayFoodName(ingredient.baseFoodId, fallbackItem, preferences);
-	const amount = displayIngredientAmount(
-		ingredient.baseQuantity,
-		ingredient.baseUnitId,
-		preferences,
-		item,
-		ingredient.baseFoodId
-	);
+	const quantity = ingredient.baseQuantity ?? ingredient.sourceQuantity;
+	const unit = ingredient.baseUnitId ?? ingredient.sourceUnitLabel ?? defaultUnitForFood(item);
+	const amount = displayIngredientAmount(quantity, unit, preferences, item, ingredient.baseFoodId);
+	const text = [amount, item].filter(Boolean).join(' ');
+	const originalAmount =
+		!amount && item && ingredient.originalText.endsWith(item)
+			? ingredient.originalText.slice(0, -item.length).trim()
+			: '';
 	return {
 		amount,
 		item,
-		text: [amount, item].filter(Boolean).join(' ') || ingredient.originalText
+		text: originalAmount ? ingredient.originalText : text || ingredient.originalText
 	};
 };
 
