@@ -64,8 +64,8 @@ const displayInstructionText = (
 };
 
 const fallbackTitle = 'Untitled recipe';
-const maxIngredientRowsPerInsert = 8;
-const maxInstructionRowsPerInsert = 16;
+export const maxIngredientRowsPerInsert = 8;
+export const maxInstructionRowsPerInsert = 16;
 
 const duration = (minutes?: number): string | undefined =>
 	minutes === undefined ? undefined : `PT${Math.max(0, Math.round(minutes))}M`;

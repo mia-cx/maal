@@ -13,6 +13,8 @@ import {
 } from '$lib/server/db/schema';
 import {
 	loadMenuRecipes,
+	maxIngredientRowsPerInsert,
+	maxInstructionRowsPerInsert,
 	recipeIngredientRows,
 	recipeInstructionRows
 } from '$lib/server/db/recipe-mappers';
@@ -23,6 +25,14 @@ import { parseInstructionEvents } from '$lib/server/taxonomy/instruction-events'
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null;
+
+const chunks = <T>(rows: T[], size: number): T[][] => {
+	const result: T[][] = [];
+	for (let index = 0; index < rows.length; index += size) {
+		result.push(rows.slice(index, index + size));
+	}
+	return result;
+};
 
 const readRecipe = async (request: Request): Promise<RecipeMenuItem> => {
 	let body: unknown;
@@ -105,12 +115,16 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 				)
 			),
 		db.delete(userRecipeIngredients).where(eq(userRecipeIngredients.userRecipeId, recipeId)),
-		...(ingredientRows.length ? [db.insert(userRecipeIngredients).values(ingredientRows)] : []),
+		...chunks(ingredientRows, maxIngredientRowsPerInsert).map((rows) =>
+			db.insert(userRecipeIngredients).values(rows)
+		),
 		db.delete(userRecipeInstructions).where(eq(userRecipeInstructions.userRecipeId, recipeId)),
-		...(instructionRows.length ? [db.insert(userRecipeInstructions).values(instructionRows)] : []),
-		...(instructionEventRows.length
-			? [db.insert(userRecipeInstructionEvents).values(instructionEventRows)]
-			: [])
+		...chunks(instructionRows, maxInstructionRowsPerInsert).map((rows) =>
+			db.insert(userRecipeInstructions).values(rows)
+		),
+		...chunks(instructionEventRows, maxInstructionRowsPerInsert).map((rows) =>
+			db.insert(userRecipeInstructionEvents).values(rows)
+		)
 	]);
 
 	const unitPreferences = await loadHouseholdUnitPreferences(db, {
