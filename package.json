@@ -16,6 +16,7 @@
 		"test:coverage": "vitest run --coverage",
 		"test": "npm run test:unit -- --run && npm run test:e2e",
 		"test:e2e": "playwright install && playwright test",
+		"perf:load": "node scripts/perf/load-smoke.mjs",
 		"duplicates:scan": "node scripts/find-semantic-duplicates.mjs",
 		"boundaries:check": "node scripts/check-boundaries.mjs",
 		"architecture:check": "pnpm boundaries:check && pnpm duplicates:scan",

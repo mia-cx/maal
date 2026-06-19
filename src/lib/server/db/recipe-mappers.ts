@@ -345,51 +345,56 @@ export const loadMenuRecipes = async (
 
 	if (!recipes.length) return [];
 	const recipeIds = recipes.map((recipe) => recipe.id);
-	const [ingredients, instructions, instructionEvents, appliances, mealLinks] = await Promise.all([
-		db
-			.select()
-			.from(userRecipeIngredients)
-			.where(inArray(userRecipeIngredients.userRecipeId, recipeIds)),
-		db
-			.select()
-			.from(userRecipeInstructions)
-			.where(inArray(userRecipeInstructions.userRecipeId, recipeIds)),
-		db
-			.select({ event: userRecipeInstructionEvents })
-			.from(userRecipeInstructionEvents)
-			.innerJoin(
-				userRecipeInstructions,
-				eq(userRecipeInstructions.id, userRecipeInstructionEvents.userRecipeInstructionId)
-			)
-			.where(inArray(userRecipeInstructions.userRecipeId, recipeIds)),
-		db
-			.select()
-			.from(userRecipeApplianceRequirements)
-			.where(inArray(userRecipeApplianceRequirements.userRecipeId, recipeIds)),
-		db
-			.select()
-			.from(householdMealUserRecipes)
-			.where(inArray(householdMealUserRecipes.userRecipeId, recipeIds))
-	]);
-	const linkedMealIds = [...new Set(mealLinks.map((link) => link.householdMealId))];
-	const householdMealRows = linkedMealIds.length
-		? await db
+	const [ingredients, instructions, instructionEvents, appliances, linkedMealRows] =
+		await Promise.all([
+			db
 				.select()
-				.from(householdMeals)
+				.from(userRecipeIngredients)
+				.where(inArray(userRecipeIngredients.userRecipeId, recipeIds)),
+			db
+				.select()
+				.from(userRecipeInstructions)
+				.where(inArray(userRecipeInstructions.userRecipeId, recipeIds)),
+			db
+				.select({ event: userRecipeInstructionEvents })
+				.from(userRecipeInstructionEvents)
+				.innerJoin(
+					userRecipeInstructions,
+					eq(userRecipeInstructions.id, userRecipeInstructionEvents.userRecipeInstructionId)
+				)
+				.where(inArray(userRecipeInstructions.userRecipeId, recipeIds)),
+			db
+				.select()
+				.from(userRecipeApplianceRequirements)
+				.where(inArray(userRecipeApplianceRequirements.userRecipeId, recipeIds)),
+			db
+				.select({ meal: householdMeals, link: householdMealUserRecipes })
+				.from(householdMealUserRecipes)
+				.innerJoin(householdMeals, eq(householdMeals.id, householdMealUserRecipes.householdMealId))
 				.where(
 					and(
-						inArray(householdMeals.id, linkedMealIds),
+						inArray(householdMealUserRecipes.userRecipeId, recipeIds),
 						householdId ? eq(householdMeals.householdId, householdId) : undefined
 					)
 				)
-		: [];
-	const visibleMealIds = new Set(householdMealRows.map((meal) => meal.id));
-	const visibleMealLinks = mealLinks.filter((link) => visibleMealIds.has(link.householdMealId));
-	const checkIns = visibleMealIds.size
+		]);
+	const householdMealRows = linkedMealRows.map((row) => row.meal);
+	const visibleMealLinks = linkedMealRows.map((row) => row.link);
+	const checkInRows = linkedMealRows.length
 		? await db
-				.select()
+				.select({ checkIn: mealCheckIns })
 				.from(mealCheckIns)
-				.where(inArray(mealCheckIns.householdMealId, [...visibleMealIds]))
+				.innerJoin(
+					householdMealUserRecipes,
+					eq(householdMealUserRecipes.householdMealId, mealCheckIns.householdMealId)
+				)
+				.innerJoin(householdMeals, eq(householdMeals.id, mealCheckIns.householdMealId))
+				.where(
+					and(
+						inArray(householdMealUserRecipes.userRecipeId, recipeIds),
+						householdId ? eq(householdMeals.householdId, householdId) : undefined
+					)
+				)
 		: [];
 
 	const ingredientsByRecipeId = groupByRecipeId(ingredients);
@@ -397,7 +402,7 @@ export const loadMenuRecipes = async (
 	const eventsByInstructionId = groupInstructionEvents(instructionEvents.map((row) => row.event));
 	const appliancesByRecipeId = groupByRecipeId(appliances);
 	const mealsById = new Map(householdMealRows.map((meal) => [meal.id, meal]));
-	const checkInsByMealId = groupByMealId(checkIns);
+	const checkInsByMealId = groupByMealId(uniqueById(checkInRows.map((row) => row.checkIn)));
 	const mealsByRecipeId = new Map<string, HouseholdMealRow[]>();
 	const checkInsByRecipeId = new Map<string, (typeof mealCheckIns.$inferSelect)[]>();
 	for (const link of visibleMealLinks) {
@@ -512,6 +517,12 @@ const groupInstructionEvents = <T extends InstructionEventRow>(rows: T[]): Map<s
 		else grouped.set(instructionId, [row]);
 	}
 	return grouped;
+};
+
+const uniqueById = <T extends { id: string }>(rows: T[]): T[] => {
+	const unique = new Map<string, T>();
+	for (const row of rows) unique.set(row.id, row);
+	return [...unique.values()];
 };
 
 const groupByMealId = <T extends { householdMealId: string | null }>(
