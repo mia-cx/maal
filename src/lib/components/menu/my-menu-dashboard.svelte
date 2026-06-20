@@ -10,7 +10,6 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import { searchRecipesInDexie } from '$lib/client-db/repositories';
-	import { syncImportedRecipeDraftFromRemote } from '$lib/client-db/menu-sync';
 	import {
 		archivedMenuRecipesStore,
 		createMenuRecipe,
@@ -211,7 +210,7 @@
 	};
 
 	const loadRecipeDraftFromUrl = (url: string): Promise<RecipeMenuItem> =>
-		syncImportedRecipeDraftFromRemote(url);
+		Promise.resolve({ ...createDraftRecipe(() => crypto.randomUUID(), url), sourceUrl: url });
 
 	const saveRecipeFromSheet = async (recipe: RecipeMenuItem) => {
 		if (!recipe.id.startsWith('draft-recipe-')) {

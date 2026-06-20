@@ -29,52 +29,53 @@ export const syncMealsFromRemote = async (
 	await writeMealsToDexie(meals, scope);
 };
 
-export const queueRemoteSync = async ({
+export const enqueueRemoteSync = async ({
 	entity,
 	operation,
 	entityId,
 	payload,
-	remote,
 	scope
 }: {
 	entity: SyncEntity;
 	operation: SyncOperation;
 	entityId: string;
 	payload: unknown;
-	remote: RemoteSyncTask;
+	scope?: ClientCacheScope | null;
+}): Promise<void> => {
+	const activeScope = scopeOrActive(scope);
+	const { getClientDb } = await import('./db');
+	const { householdScopedKey } = await import('./schema');
+	const db = getClientDb();
+	if (!db || !activeScope) return;
+	const now = Date.now();
+	await db.syncOutbox.add({
+		key: householdScopedKey(
+			activeScope.userId,
+			activeScope.householdId,
+			`${entity}:${entityId}:${now}`
+		),
+		userId: activeScope.userId,
+		householdId: activeScope.householdId,
+		operation,
+		entityType: entity,
+		entityId,
+		payload,
+		createdAt: now,
+		attempts: 0,
+		nextAttemptAt: now
+	});
+};
+
+export const queueRemoteSync = async (input: {
+	entity: SyncEntity;
+	operation: SyncOperation;
+	entityId: string;
+	payload: unknown;
+	remote?: RemoteSyncTask;
 	scope?: ClientCacheScope | null;
 }): Promise<unknown> => {
-	const activeScope = scopeOrActive(scope);
-	try {
-		return await remote();
-	} catch (error) {
-		// The outbox is intentionally best-effort for this slice: the UI writes to Dexie first,
-		// then records failed remote work for the future replay worker instead of pretending the
-		// D1 write succeeded.
-		const { getClientDb } = await import('./db');
-		const { householdScopedKey } = await import('./schema');
-		const db = getClientDb();
-		if (db && activeScope) {
-			const now = Date.now();
-			await db.syncOutbox.add({
-				key: householdScopedKey(
-					activeScope.userId,
-					activeScope.householdId,
-					`${entity}:${entityId}:${now}`
-				),
-				userId: activeScope.userId,
-				householdId: activeScope.householdId,
-				operation,
-				entityType: entity,
-				entityId,
-				payload,
-				createdAt: now,
-				attempts: 0,
-				nextAttemptAt: now + 30_000
-			});
-		}
-		throw error;
-	}
+	await enqueueRemoteSync(input);
+	return undefined;
 };
 
 export const removeRecipeLocally = async (

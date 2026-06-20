@@ -4,12 +4,7 @@ import {
 	readMealsFromDexie,
 	writeMealsToDexie
 } from '$lib/client-db/repositories';
-import {
-	isScheduleSyncErrorWithStatus,
-	syncCreatedMealToRemote,
-	syncDeletedMealToRemote,
-	syncUpdatedMealToRemote
-} from '$lib/client-db/schedule-sync';
+import { enqueueRemoteSync } from '$lib/client-db/sync';
 import { dateFromKey } from '$lib/components/dashboard/schedule-date';
 import { moveMealToDropTarget } from '$lib/components/dashboard/schedule-dnd';
 import { isMealInPool } from '$lib/components/dashboard/schedule-ordering';
@@ -167,7 +162,12 @@ const emitScheduleMealChange = (change: ScheduleMealChange) => {
 
 const persistDeletedScheduleMeal = (mealId: string, onFailure?: (error: unknown) => void) => {
 	if (!browser) return;
-	syncDeletedMealToRemote(mealId)
+	enqueueRemoteSync({
+		entity: 'plannedMeal',
+		operation: 'delete',
+		entityId: mealId,
+		payload: { mealId }
+	})
 		.then(() => {
 			deletedMealIds.delete(mealId);
 		})
@@ -189,7 +189,12 @@ const persistExistingScheduleMeal = (
 	onSuccess?: () => void
 ) => {
 	if (!browser) return;
-	syncUpdatedMealToRemote(meal)
+	enqueueRemoteSync({
+		entity: 'plannedMeal',
+		operation: 'update',
+		entityId: meal.id,
+		payload: { meal }
+	})
 		.then(() => {
 			onSuccess?.();
 		})
@@ -212,12 +217,6 @@ const persistScheduleMealChange = (change: ScheduleMealChange) => {
 			if (pendingPersistVersions.get(change.meal.id) !== persistVersion) return;
 			pendingPersistVersions.delete(change.meal.id);
 			optimisticMealSnapshots.delete(change.meal.id);
-			if (isScheduleSyncErrorWithStatus(error, 404)) {
-				deletedMealIds.add(change.meal.id);
-				removeMeal(change.meal.id);
-				void deleteMealFromDexie(change.meal.id);
-				return;
-			}
 			if (change.previousMeal) replaceMeal(change.previousMeal, change.meal.id);
 		},
 		() => {
@@ -316,43 +315,17 @@ const emitChangedScheduleMealChanges = (
 	}
 };
 
-const mergePendingCreateResponse = (createdMeal: Meal, currentMeal?: Meal): Meal => {
-	if (!currentMeal) return createdMeal;
-	return {
-		...createdMeal,
-		date: currentMeal.date,
-		time: currentMeal.time,
-		day: currentMeal.day,
-		sortOrder: currentMeal.sortOrder,
-		status: currentMeal.status,
-		servingsPlanned: currentMeal.servingsPlanned,
-		plannedCookWorkosUserId: currentMeal.plannedCookWorkosUserId,
-		id: createdMeal.id
-	};
-};
-
 const persistNewScheduleMeal = (meal: Meal, previousMealId = meal.id) => {
 	if (!browser) return;
 	pendingCreateMealIds.add(previousMealId);
-	syncCreatedMealToRemote(meal)
-		.then((createdMeal) => {
-			if (deletedMealIds.has(previousMealId)) {
-				pendingCreateMealIds.delete(previousMealId);
-				deletedMealIds.add(createdMeal.id);
-				persistDeletedScheduleMeal(createdMeal.id);
-				return;
-			}
-			const currentMeal = scheduleMealStore
-				.get()
-				.find((candidate) => candidate.id === previousMealId);
-			const reconciledMeal = mergePendingCreateResponse(createdMeal, currentMeal);
+	enqueueRemoteSync({
+		entity: 'plannedMeal',
+		operation: 'create',
+		entityId: previousMealId,
+		payload: { meal }
+	})
+		.then(() => {
 			pendingCreateMealIds.delete(previousMealId);
-			replaceMeal(reconciledMeal, previousMealId);
-			void deleteMealFromDexie(previousMealId);
-			void writePersistedMealsToDexie([reconciledMeal]);
-			if (currentMeal && scheduleFieldsChanged(currentMeal, meal)) {
-				persistExistingScheduleMeal(reconciledMeal);
-			}
 		})
 		.catch((error: unknown) => {
 			pendingCreateMealIds.delete(previousMealId);
@@ -435,7 +408,6 @@ export const deleteScheduleMeal = (meal: Meal) => {
 	}
 	persistDeletedScheduleMeal(meal.id, (error: unknown) => {
 		console.error('Failed to delete schedule meal', error);
-		if (isScheduleSyncErrorWithStatus(error, 404)) return;
 		deletedMealIds.delete(meal.id);
 		scheduleMealStore.set(cloneMeals(previousMeals));
 	});

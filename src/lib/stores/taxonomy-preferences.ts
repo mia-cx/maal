@@ -1,5 +1,4 @@
 import { atom, computed } from 'nanostores';
-import { syncTaxonomyPreferencesFromRemote } from '$lib/client-db/taxonomy-sync';
 import {
 	emptyTaxonomyPreferences,
 	type EffectiveTaxonomyPreferences
@@ -20,8 +19,4 @@ export const hydrateTaxonomyPreferences = (
 	taxonomyPreferencesStore.set(preferences ?? emptyTaxonomyPreferences());
 };
 
-export const refreshTaxonomyPreferences = async () => {
-	const preferences = await syncTaxonomyPreferencesFromRemote();
-	hydrateTaxonomyPreferences(preferences);
-	return preferences;
-};
+export const refreshTaxonomyPreferences = async () => taxonomyPreferencesStore.get();

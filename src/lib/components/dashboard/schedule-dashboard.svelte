@@ -39,11 +39,6 @@
 	import { addDays, addMonths, dateFromKey, dateKey, startOfDay } from './schedule-date';
 	import { dropTargetFromPointer } from './schedule-dnd';
 	import { isMealInPool, sortMealPool } from './schedule-ordering';
-	import { syncMealCheckInToRemote } from '$lib/client-db/check-in-sync';
-	import {
-		isScheduleSyncErrorWithStatus,
-		syncMealRangeFromRemote
-	} from '$lib/client-db/schedule-sync';
 	import { cardDirectionByKey, focusMealCard } from './schedule-keyboard';
 	import { hasLoadedMealRange, missingMealRanges, type MealRange } from './schedule-ranges';
 	import type { UnitPreferences } from '$lib/recipes/ingredient-text';
@@ -139,16 +134,9 @@
 		if (loadingMealRangeKey === key) return;
 		loadingMealRangeKey = key;
 		try {
-			await syncMealRangeFromRemote(range);
 			mealRangeError = null;
 			await hydrateScheduleMealsFromDexie();
 			loadedMealRanges = [...loadedMealRanges, { start: range.start, end: range.end }];
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Failed to load meal range.';
-			mealRangeError = message;
-			if (!isScheduleSyncErrorWithStatus(error, 402)) {
-				console.error('Failed to load meal range', error);
-			}
 		} finally {
 			if (loadingMealRangeKey === key) loadingMealRangeKey = '';
 		}
@@ -298,7 +286,19 @@
 	};
 
 	const saveMealCheckIn = async (payload: MealCheckInPayload) => {
-		updateScheduleMealSchedule(await syncMealCheckInToRemote(payload), 'external');
+		updateScheduleMealSchedule(
+			{
+				...payload.meal,
+				status: payload.cooked ? 'cooked' : 'skipped',
+				latestVerdict: payload.verdict,
+				latestCheckIn: {
+					verdict: payload.verdict,
+					cookTime: payload.cookTime,
+					reason: payload.reason?.trim() || undefined
+				}
+			},
+			'external'
+		);
 	};
 
 	const createMeal = (date?: string) => {

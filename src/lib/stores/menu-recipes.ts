@@ -6,13 +6,7 @@ import {
 	writeRecipesToDexie
 } from '$lib/client-db/repositories';
 import type { RecipeMenuItem } from '$lib/menu/menu-types';
-import {
-	syncArchivedRecipesToRemote,
-	syncCreatedRecipeToRemote,
-	syncPermanentlyDeletedRecipesToRemote,
-	syncRestoredRecipesToRemote,
-	syncUpdatedRecipeToRemote
-} from '$lib/client-db/menu-sync';
+import { enqueueRemoteSync } from '$lib/client-db/sync';
 import { atom, computed } from 'nanostores';
 
 const cloneRecipe = (recipe: RecipeMenuItem): RecipeMenuItem => ({
@@ -112,7 +106,14 @@ export const createMenuRecipe = async (input: {
 	recipe?: RecipeMenuItem;
 }) => {
 	if (!browser) throw new Error('Recipe creation requires a browser session.');
-	const recipe = await syncCreatedRecipeToRemote(input);
+	const recipe = input.recipe;
+	if (!recipe) throw new Error('Recipe creation requires a recipe draft.');
+	await enqueueRemoteSync({
+		entity: 'recipe',
+		operation: 'create',
+		entityId: recipe.id,
+		payload: input
+	});
 	const recipes = menuRecipesStore.get();
 	menuRecipesStore.set([
 		...recipes.filter((candidate) => candidate.id !== recipe.id),
@@ -128,10 +129,14 @@ export const updateMenuRecipe = async (recipe: RecipeMenuItem) => {
 	if (!browser) return recipe;
 
 	try {
-		const persistedRecipe = await syncUpdatedRecipeToRemote(recipe);
-		replaceRecipe(persistedRecipe);
-		void writeRecipesToDexie([persistedRecipe]);
-		return persistedRecipe;
+		await writeRecipesToDexie([recipe]);
+		await enqueueRemoteSync({
+			entity: 'recipe',
+			operation: 'update',
+			entityId: recipe.id,
+			payload: recipe
+		});
+		return recipe;
 	} catch (error) {
 		if (previousRecipe) replaceRecipe(previousRecipe);
 		throw error;
@@ -151,11 +156,15 @@ export const deleteMenuRecipes = async (recipes: RecipeMenuItem[]) => {
 	if (!browser) return;
 
 	try {
-		const body = await syncArchivedRecipesToRemote(recipeIds);
-		archiveRecipes(recipes, body.deletedAt);
-		void writeRecipesToDexie(
-			recipes.map((recipe) => ({ ...recipe, archivedAt: body.deletedAt ?? recipe.archivedAt }))
-		);
+		const deletedAt = new Date().toISOString();
+		archiveRecipes(recipes, deletedAt);
+		void writeRecipesToDexie(recipes.map((recipe) => ({ ...recipe, archivedAt: deletedAt })));
+		await enqueueRemoteSync({
+			entity: 'recipe',
+			operation: 'archive',
+			entityId: recipeIds.join(','),
+			payload: { recipeIds }
+		});
 	} catch (error) {
 		menuRecipesStore.set(previousRecipes);
 		archivedMenuRecipesStore.set(previousArchivedRecipes);
@@ -176,16 +185,19 @@ export const restoreMenuRecipes = async (recipes: RecipeMenuItem[]) => {
 	if (!browser) return [];
 
 	try {
-		const remoteRecipes = await syncRestoredRecipesToRemote(recipeIds);
-		const restoredRecipes = remoteRecipes.length
-			? remoteRecipes
-			: recipes.map((recipe) => ({ ...recipe, archivedAt: undefined }));
+		const restoredRecipes = recipes.map((recipe) => ({ ...recipe, archivedAt: undefined }));
 		const restoredIds = new Set(restoredRecipes.map((recipe) => recipe.id));
 		menuRecipesStore.set([
 			...restoredRecipes.map(cloneRecipe),
 			...menuRecipesStore.get().filter((candidate) => !restoredIds.has(candidate.id))
 		]);
 		void writeRecipesToDexie(restoredRecipes);
+		await enqueueRemoteSync({
+			entity: 'recipe',
+			operation: 'restore',
+			entityId: recipeIds.join(','),
+			payload: { recipeIds }
+		});
 		return restoredRecipes;
 	} catch (error) {
 		menuRecipesStore.set(previousRecipes);
@@ -208,7 +220,13 @@ export const permanentlyDeleteMenuRecipes = async (recipes: RecipeMenuItem[]) =>
 	if (!browser) return { deletedMealCount: 0 };
 
 	try {
-		return await syncPermanentlyDeletedRecipesToRemote(recipeIds);
+		await enqueueRemoteSync({
+			entity: 'recipe',
+			operation: 'delete',
+			entityId: recipeIds.join(','),
+			payload: { recipeIds, permanent: true }
+		});
+		return { deletedMealCount: 0 };
 	} catch (error) {
 		archivedMenuRecipesStore.set(previousArchivedRecipes);
 		throw error;

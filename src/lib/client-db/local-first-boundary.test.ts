@@ -13,7 +13,11 @@ const allowedFetchFiles = new Set([
 const forbiddenRemoteImports = [
 	'$lib/menu/menu-client',
 	'./schedule-meal-client',
-	'./schedule-check-ins'
+	'./schedule-check-ins',
+	'$lib/client-db/menu-sync',
+	'$lib/client-db/schedule-sync',
+	'$lib/client-db/check-in-sync',
+	'$lib/client-db/taxonomy-sync'
 ];
 
 const walk = (dir: string): string[] =>
