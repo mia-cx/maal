@@ -19,6 +19,7 @@
 		hydrateMenuRecipesFromDexie,
 		menuRecipesStore
 	} from '$lib/stores/menu-recipes';
+	import { importRecipeDraftFromUrl } from '$lib/client-db/recipe-import';
 	import { searchRecipesInDexie } from '$lib/client-db/repositories';
 	import { createDraftRecipe } from '$lib/menu/recipe-draft';
 	import {
@@ -352,7 +353,8 @@
 		addMealBusy = true;
 		addMealError = null;
 		try {
-			previewAddedRecipe(await createMenuRecipe({ url }));
+			const importedRecipe = await importRecipeDraftFromUrl(url);
+			previewAddedRecipe(await createMenuRecipe({ recipe: importedRecipe }));
 		} catch (error) {
 			addMealError = readAddMealError(error);
 		} finally {

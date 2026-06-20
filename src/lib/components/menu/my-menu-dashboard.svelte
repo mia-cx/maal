@@ -9,6 +9,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import SearchIcon from '@lucide/svelte/icons/search';
+	import { importRecipeDraftFromUrl } from '$lib/client-db/recipe-import';
 	import { searchRecipesInDexie } from '$lib/client-db/repositories';
 	import {
 		archivedMenuRecipesStore,
@@ -210,7 +211,7 @@
 	};
 
 	const loadRecipeDraftFromUrl = (url: string): Promise<RecipeMenuItem> =>
-		Promise.resolve({ ...createDraftRecipe(() => crypto.randomUUID(), url), sourceUrl: url });
+		importRecipeDraftFromUrl(url);
 
 	const saveRecipeFromSheet = async (recipe: RecipeMenuItem) => {
 		if (!recipe.id.startsWith('draft-recipe-')) {
