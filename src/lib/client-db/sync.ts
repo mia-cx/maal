@@ -60,24 +60,27 @@ export const enqueueRemoteSync = async ({
 	const db = getClientDb();
 	if (!db || !activeScope) return;
 	const now = Date.now();
-	logClientDbDebug('dexie->d1', 'enqueue outbox', {
+	const outboxKey = householdScopedKey(
+		activeScope.userId,
+		activeScope.householdId,
+		`${entity}:${entityId}:${operation}`
+	);
+	const existing = await db.syncOutbox.where('key').equals(outboxKey).first();
+	logClientDbDebug('dexie-outbox', existing ? 'coalesce outbox' : 'enqueue outbox', {
 		scope: activeScope,
 		payload: { operation, entityType: entity, entityId }
 	});
-	await db.syncOutbox.add({
-		key: householdScopedKey(
-			activeScope.userId,
-			activeScope.householdId,
-			`${entity}:${entityId}:${now}`
-		),
+	await db.syncOutbox.put({
+		...(existing?.id ? { id: existing.id } : {}),
+		key: outboxKey,
 		userId: activeScope.userId,
 		householdId: activeScope.householdId,
 		operation,
 		entityType: entity,
 		entityId,
 		payload,
-		createdAt: now,
-		attempts: 0,
+		createdAt: existing?.createdAt ?? now,
+		attempts: existing?.attempts ?? 0,
 		nextAttemptAt: now
 	});
 };

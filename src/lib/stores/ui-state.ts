@@ -4,6 +4,8 @@ import type { ScheduleMode } from '$lib/components/dashboard/schedule-types';
 import { persistentAtom } from '@nanostores/persistent';
 
 const storageKey = 'maal:ui-state:v1';
+const uiStatePersistDelayMs = 500;
+const scrollPersistMinOffsetDelta = 24;
 const defaultSidebarWidth = 256;
 const minSidebarWidth = 208;
 const maxSidebarWidth = 384;
@@ -100,6 +102,38 @@ const normalizeUiState = (value: unknown): UiState => {
 	};
 };
 
+const dailyScrollsMatch = (
+	left: DailyScrollState | null,
+	right: DailyScrollState | null
+): boolean => {
+	if (!left || !right) return left === right;
+	return (
+		left.date === right.date && Math.abs(left.offset - right.offset) < scrollPersistMinOffsetDelta
+	);
+};
+
+const uiStatesMatch = (left: UiState, right: UiState): boolean =>
+	left.activeNav === right.activeNav &&
+	left.sidebarOpen === right.sidebarOpen &&
+	left.sidebarWidth === right.sidebarWidth &&
+	left.scheduleMode === right.scheduleMode &&
+	left.scheduleAnchorDate === right.scheduleAnchorDate &&
+	dailyScrollsMatch(left.dailyScroll, right.dailyScroll);
+
+let pendingPersistState: UiState | null = null;
+let persistUiStateTimer: ReturnType<typeof setTimeout> | null = null;
+
+const scheduleUiStatePersist = (state: UiState) => {
+	pendingPersistState = state;
+	if (persistUiStateTimer) clearTimeout(persistUiStateTimer);
+	persistUiStateTimer = setTimeout(() => {
+		const stateToPersist = pendingPersistState;
+		pendingPersistState = null;
+		persistUiStateTimer = null;
+		if (stateToPersist) void writeUiStateToDexie('app', stateToPersist);
+	}, uiStatePersistDelayMs);
+};
+
 export const uiState = persistentAtom<UiState>(storageKey, defaultUiState(), {
 	decode: (encoded) => {
 		try {
@@ -120,9 +154,11 @@ export const hydrateUiStateFromDexie = async () => {
 };
 
 export const updateUiState = (patch: Partial<UiState>) => {
-	const nextState = normalizeUiState({ ...uiState.get(), ...patch });
+	const currentState = uiState.get();
+	const nextState = normalizeUiState({ ...currentState, ...patch });
+	if (uiStatesMatch(currentState, nextState)) return;
 	uiState.set(nextState);
-	void writeUiStateToDexie('app', nextState);
+	scheduleUiStatePersist(nextState);
 };
 
 export const setDailyScroll = (dailyScroll: DailyScrollState) => {
