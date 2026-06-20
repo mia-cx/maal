@@ -2,6 +2,7 @@ import { browser } from '$app/environment';
 import {
 	createScheduleMealRemote,
 	deleteScheduleMealRemote,
+	ScheduleMealClientError,
 	updateScheduleMealRemote
 } from '$lib/components/dashboard/schedule-meal-client';
 import type { Meal } from '$lib/components/dashboard/schedule-types';
@@ -44,6 +45,24 @@ const payloadRecord = (entry: SyncOutboxEntry): Record<string, unknown> =>
 		? (entry.payload as Record<string, unknown>)
 		: {};
 
+const rewritePendingMealRecipeIds = async (localRecipeId: string, remoteRecipeId: string) => {
+	if (localRecipeId === remoteRecipeId) return;
+	const db = getClientDb();
+	if (!db) return;
+	const entries = await db.syncOutbox.where('entityType').equals('plannedMeal').toArray();
+	await Promise.all(
+		entries.map(async (entry) => {
+			if (!entry.id) return;
+			const payload = payloadRecord(entry) as MealPayload;
+			if (payload.meal?.userRecipeId !== localRecipeId) return;
+			await db.syncOutbox.update(entry.id, {
+				payload: { ...payload, meal: { ...payload.meal, userRecipeId: remoteRecipeId } },
+				nextAttemptAt: Date.now()
+			});
+		})
+	);
+};
+
 const syncMealEntry = async (entry: SyncOutboxEntry) => {
 	const payload = payloadRecord(entry) as MealPayload;
 	if (entry.operation === 'delete') {
@@ -57,7 +76,15 @@ const syncMealEntry = async (entry: SyncOutboxEntry) => {
 		return;
 	}
 	if (entry.operation === 'update') {
-		await updateScheduleMealRemote(payload.meal);
+		try {
+			await updateScheduleMealRemote(payload.meal);
+		} catch (error) {
+			if (error instanceof ScheduleMealClientError && error.status === 404) {
+				await createScheduleMealRemote(payload.meal);
+				return;
+			}
+			throw error;
+		}
 		return;
 	}
 	throw new Error(`Unsupported planned meal operation: ${entry.operation}`);
@@ -68,6 +95,7 @@ const syncRecipeEntry = async (entry: SyncOutboxEntry) => {
 	if (entry.operation === 'create') {
 		const recipe = await createMenuRecipeRemote(payload);
 		await writeRecipesToDexie([recipe], entry);
+		await rewritePendingMealRecipeIds(entry.entityId, recipe.id);
 		return;
 	}
 	if (entry.operation === 'update') {

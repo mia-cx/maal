@@ -326,7 +326,8 @@ const persistNewScheduleMeal = (meal: Meal, previousMealId = meal.id) => {
 		payload: { meal }
 	})
 		.then(() => {
-			pendingCreateMealIds.delete(previousMealId);
+			// Keep this local id marked as pending until a future remote reconciliation replaces it
+			// with the canonical D1 id. Enqueue success only means the outbox row was stored.
 		})
 		.catch((error: unknown) => {
 			pendingCreateMealIds.delete(previousMealId);
