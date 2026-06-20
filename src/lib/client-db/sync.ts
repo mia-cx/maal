@@ -15,6 +15,7 @@ export type SyncOperation = 'create' | 'update' | 'delete' | 'archive' | 'restor
 type RemoteSyncTask = () => Promise<unknown>;
 
 const scopeOrActive = (scope?: ClientCacheScope | null) => scope ?? getClientCacheScope();
+const toPlain = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 export const syncRecipesFromRemote = async (
 	recipes: readonly RecipeMenuItem[],
@@ -78,7 +79,7 @@ export const enqueueRemoteSync = async ({
 		operation,
 		entityType: entity,
 		entityId,
-		payload,
+		payload: toPlain(payload),
 		createdAt: existing?.createdAt ?? now,
 		attempts: existing?.attempts ?? 0,
 		nextAttemptAt: now
