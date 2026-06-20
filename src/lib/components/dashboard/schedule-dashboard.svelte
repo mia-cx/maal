@@ -426,6 +426,7 @@
 	});
 
 	$effect(() => {
+		if (!initialMeals.length) return;
 		const signature = initialMeals.map((meal) => meal.id).join('|');
 		if (signature === hydratedMealsSignature) return;
 		hydratedMealsSignature = signature;
@@ -434,6 +435,7 @@
 	});
 
 	$effect(() => {
+		if (!initialRecipes.length) return;
 		const signature = initialRecipes.map((recipe) => recipe.id).join('|');
 		if (signature === hydratedRecipesSignature) return;
 		hydratedRecipesSignature = signature;

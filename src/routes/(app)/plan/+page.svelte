@@ -39,6 +39,7 @@
 		const routeMeals = data.meals ?? [];
 		const routeHouseholdMembers = data.householdMembers ?? [];
 
+		if (!routeMeals.length && !routeHouseholdMembers.length) return;
 		meals = routeMeals;
 		householdMembers = routeHouseholdMembers;
 		void setCachedPlanRouteData(cacheScope(), {

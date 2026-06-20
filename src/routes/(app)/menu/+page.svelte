@@ -47,6 +47,7 @@
 		const routeArchivedRecipes = data.archivedRecipes ?? [];
 		const routeNextRecipeOffset = data.nextRecipeOffset ?? null;
 
+		if (!routeRecipes.length && !routeArchivedRecipes.length) return;
 		recipes = routeRecipes;
 		archivedRecipes = routeArchivedRecipes;
 		nextRecipeOffset = routeNextRecipeOffset;

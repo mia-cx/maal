@@ -97,6 +97,7 @@
 	);
 
 	$effect(() => {
+		if (!initialRecipes.length && !initialArchivedRecipes.length) return;
 		const signature = JSON.stringify({
 			recipes: initialRecipes,
 			archivedRecipes: initialArchivedRecipes,

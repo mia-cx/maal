@@ -36,6 +36,7 @@
 	let resizingSidebar = $state(false);
 	let exportDataPopoverOpen = $state(false);
 	let householdStateHydrated = $state(false);
+	let uiStateHydrated = $state(false);
 
 	const features = $derived(featurePreviews(data.session));
 	const sidebarUser = $derived({
@@ -93,6 +94,7 @@
 		void hydrateUiStateFromDexie().then((cachedUiState) => {
 			sidebarOpen = cachedUiState.sidebarOpen;
 			sidebarWidth = cachedUiState.sidebarWidth;
+			uiStateHydrated = true;
 		});
 
 		const storedHouseholdId = activeHouseholdId.get();
@@ -120,6 +122,7 @@
 	});
 
 	$effect(() => {
+		if (!uiStateHydrated) return;
 		updateAppShellUiState({ activeNav, sidebarOpen, sidebarWidth });
 	});
 
