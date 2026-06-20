@@ -1,4 +1,9 @@
 import { browser } from '$app/environment';
+import {
+	deleteRecipesFromDexie,
+	readRecipesFromDexie,
+	writeRecipesToDexie
+} from '$lib/client-db/repositories';
 import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import {
 	archiveMenuRecipesRemote,
@@ -44,24 +49,6 @@ const replaceRecipe = (recipe: RecipeMenuItem) => {
 	);
 };
 
-const removeRecipe = (recipeId: string) => {
-	menuRecipesStore.set(menuRecipesStore.get().filter((recipe) => recipe.id !== recipeId));
-	if (selectedMenuRecipeIdStore.get() === recipeId) selectedMenuRecipeIdStore.set(null);
-};
-
-const removeArchivedRecipe = (recipeId: string) => {
-	archivedMenuRecipesStore.set(
-		archivedMenuRecipesStore.get().filter((recipe) => recipe.id !== recipeId)
-	);
-};
-
-const archiveRecipe = (recipe: RecipeMenuItem, archivedAt?: string) => {
-	archivedMenuRecipesStore.set([
-		{ ...cloneRecipe(recipe), archivedAt: archivedAt ?? recipe.archivedAt },
-		...archivedMenuRecipesStore.get().filter((candidate) => candidate.id !== recipe.id)
-	]);
-};
-
 const removeRecipes = (recipeIds: string[]) => {
 	const idSet = new Set(recipeIds);
 	menuRecipesStore.set(menuRecipesStore.get().filter((recipe) => !idSet.has(recipe.id)));
@@ -94,6 +81,14 @@ export const hydrateMenuRecipes = (
 ) => {
 	menuRecipesStore.set(cloneRecipes(recipes));
 	if (archivedRecipes) archivedMenuRecipesStore.set(cloneRecipes(archivedRecipes));
+	void writeRecipesToDexie(archivedRecipes ? [...recipes, ...archivedRecipes] : recipes);
+};
+
+export const hydrateMenuRecipesFromDexie = async () => {
+	const cached = await readRecipesFromDexie();
+	if (!cached.recipes.length && !cached.archivedRecipes.length) return cached;
+	hydrateMenuRecipes(cached.recipes, cached.archivedRecipes);
+	return cached;
 };
 
 export const appendMenuRecipes = (recipes: RecipeMenuItem[]) => {
@@ -103,6 +98,7 @@ export const appendMenuRecipes = (recipes: RecipeMenuItem[]) => {
 		...existingRecipes.filter((recipe) => !incomingRecipeIds.has(recipe.id)),
 		...cloneRecipes(recipes)
 	]);
+	void writeRecipesToDexie(recipes);
 };
 
 export const selectMenuRecipe = (recipeId: string | null) => {
@@ -121,6 +117,7 @@ export const createMenuRecipe = async (input: {
 		...recipes.filter((candidate) => candidate.id !== recipe.id),
 		cloneRecipe(recipe)
 	]);
+	void writeRecipesToDexie([recipe]);
 	return recipe;
 };
 
@@ -132,6 +129,7 @@ export const updateMenuRecipe = async (recipe: RecipeMenuItem) => {
 	try {
 		const persistedRecipe = await updateMenuRecipeRemote(recipe);
 		replaceRecipe(persistedRecipe);
+		void writeRecipesToDexie([persistedRecipe]);
 		return persistedRecipe;
 	} catch (error) {
 		if (previousRecipe) replaceRecipe(previousRecipe);
@@ -154,6 +152,9 @@ export const deleteMenuRecipes = async (recipes: RecipeMenuItem[]) => {
 	try {
 		const body = await archiveMenuRecipesRemote(recipeIds);
 		archiveRecipes(recipes, body.deletedAt);
+		void writeRecipesToDexie(
+			recipes.map((recipe) => ({ ...recipe, archivedAt: body.deletedAt ?? recipe.archivedAt }))
+		);
 	} catch (error) {
 		menuRecipesStore.set(previousRecipes);
 		archivedMenuRecipesStore.set(previousArchivedRecipes);
@@ -183,6 +184,7 @@ export const restoreMenuRecipes = async (recipes: RecipeMenuItem[]) => {
 			...restoredRecipes.map(cloneRecipe),
 			...menuRecipesStore.get().filter((candidate) => !restoredIds.has(candidate.id))
 		]);
+		void writeRecipesToDexie(restoredRecipes);
 		return restoredRecipes;
 	} catch (error) {
 		menuRecipesStore.set(previousRecipes);
@@ -200,6 +202,7 @@ export const permanentlyDeleteMenuRecipes = async (recipes: RecipeMenuItem[]) =>
 	const previousArchivedRecipes = archivedMenuRecipesStore.get();
 	const recipeIds = recipes.map((recipe) => recipe.id);
 	removeArchivedRecipes(recipeIds);
+	void deleteRecipesFromDexie(recipeIds);
 	if (!browser) return { deletedMealCount: 0 };
 
 	try {

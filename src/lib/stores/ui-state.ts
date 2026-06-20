@@ -1,3 +1,4 @@
+import { readUiStateFromDexie, writeUiStateToDexie } from '$lib/client-db/repositories';
 import type { DashboardNavItem } from '$lib/components/dashboard/dashboard-nav';
 import type { ScheduleMode } from '$lib/components/dashboard/schedule-types';
 import { persistentAtom } from '@nanostores/persistent';
@@ -110,8 +111,18 @@ export const uiState = persistentAtom<UiState>(storageKey, defaultUiState(), {
 	encode: (state) => JSON.stringify(normalizeUiState(state))
 });
 
+export const hydrateUiStateFromDexie = async () => {
+	const cached = await readUiStateFromDexie('app');
+	if (!cached) return uiState.get();
+	const nextState = normalizeUiState({ ...uiState.get(), ...cached });
+	uiState.set(nextState);
+	return nextState;
+};
+
 export const updateUiState = (patch: Partial<UiState>) => {
-	uiState.set({ ...uiState.get(), ...patch });
+	const nextState = normalizeUiState({ ...uiState.get(), ...patch });
+	uiState.set(nextState);
+	void writeUiStateToDexie('app', nextState);
 };
 
 export const setDailyScroll = (dailyScroll: DailyScrollState) => {

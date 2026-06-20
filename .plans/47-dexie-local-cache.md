@@ -19,6 +19,7 @@ Build issue #47 on top of PR #53 by replacing fragile route-level in-memory cach
 - [x] Add Dexie dependency plus a typed, versioned client DB schema and pure tests for store/index contracts.
 - [x] Replace in-memory route-data cache helpers with centralized Dexie read-through cache helpers and TTL/user/household isolation.
 - [x] Wire `/plan`, `/menu`, and app layout to async durable cache hydration/clearing without recursive Svelte effects.
+- [x] Refactor UI stores, picker reads, and remote fetch adapters so Dexie is the first-read local source and D1 sync is a separate layer.
 - [x] Run focused validation and final repo checks.
 
 ## Notes
@@ -36,3 +37,9 @@ Build issue #47 on top of PR #53 by replacing fragile route-level in-memory cach
 - Validation: `pnpm eslint src/lib/client-db src/lib/stores/route-data-cache.ts 'src/routes/(app)/plan/+page.svelte' 'src/routes/(app)/menu/+page.svelte' 'src/routes/(app)/+layout.svelte'` — pass.
 - Validation: `pnpm test:unit -- --run` — pass, 72 files / 265 tests.
 - Validation: `pnpm check` — pass after final layout lint fix.
+- 2026-06-19: User clarified this should be a full local-first refactor, not route-cache-only. Added active client cache scope, Dexie repositories, and a D1 sync adapter boundary. Menu recipes, schedule meals, route cache, UI state, picker reads, and menu fetch responses now write/read via Dexie first; remote API calls feed Dexie via sync helpers instead of being direct UI sources.
+- 2026-06-19: Addressed review blockers: removed client import from `$lib/server/auth/session`; plan/menu cache hydration now validates requested household IDs against server-authoritative `data.households` before reading IndexedDB.
+- Validation: `pnpm check` — pass.
+- Validation: `pnpm boundaries:check` — pass.
+- Validation: `pnpm vitest run src/lib/client-db/schema.test.ts` — pass.
+- Validation: focused `pnpm eslint` on changed client-db/menu/stores/route files — pass.

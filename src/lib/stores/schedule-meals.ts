@@ -1,4 +1,9 @@
 import { browser } from '$app/environment';
+import {
+	deleteMealFromDexie,
+	readMealsFromDexie,
+	writeMealsToDexie
+} from '$lib/client-db/repositories';
 import { dateFromKey } from '$lib/components/dashboard/schedule-date';
 import { moveMealToDropTarget } from '$lib/components/dashboard/schedule-dnd';
 import { isMealInPool } from '$lib/components/dashboard/schedule-ordering';
@@ -230,6 +235,13 @@ const setScheduleMeals = (
 
 export const hydrateScheduleMeals = (meals: Meal[]) => {
 	setScheduleMeals(cloneMeals(meals), 'hydrate');
+	void writeMealsToDexie(meals);
+};
+
+export const hydrateScheduleMealsFromDexie = async () => {
+	const meals = await readMealsFromDexie();
+	if (meals.length) setScheduleMeals(meals, 'hydrate');
+	return meals;
 };
 
 export const mergeHydratedScheduleMeals = (meals: Meal[], startDate: string, endDate: string) => {
@@ -260,7 +272,9 @@ export const mergeHydratedScheduleMeals = (meals: Meal[], startDate: string, end
 		return meal.date < startDate || meal.date > endDate;
 	});
 	const incomingToMerge = incomingMeals.filter((meal) => !optimisticIdsToKeep.has(meal.id));
-	setScheduleMeals([...outsideRangeOrPending, ...incomingToMerge], 'hydrate');
+	const mergedMeals = [...outsideRangeOrPending, ...incomingToMerge];
+	setScheduleMeals(mergedMeals, 'hydrate');
+	void writeMealsToDexie(mergedMeals);
 };
 
 export const selectScheduleMeal = (mealId: string | null) => {
@@ -349,6 +363,7 @@ export const addScheduleMealFromRecipe = (
 	);
 	scheduleMealStore.set([...scheduleMealStore.get(), cloneMeal(meal)]);
 	selectedMealIdStore.set(meal.id);
+	void writeMealsToDexie([meal]);
 	persistNewScheduleMeal(meal);
 	return meal;
 };
@@ -368,6 +383,7 @@ export const addScheduleMeal = (date?: string, defaultServings = 1) => {
 	};
 	scheduleMealStore.set([...scheduleMealStore.get(), cloneMeal(meal)]);
 	selectedMealIdStore.set(meal.id);
+	void writeMealsToDexie([meal]);
 
 	persistNewScheduleMeal(meal);
 
@@ -383,6 +399,7 @@ export const updateScheduleMeal = (meal: Meal, source: ScheduleMealChangeSource 
 			currentMeal.id === meal.id ? { ...currentMeal, ...meal, day } : currentMeal
 		);
 	setScheduleMeals(meals, source, meal.id, previousMeal);
+	void writeMealsToDexie(meals);
 };
 
 export const updateScheduleMealSchedule = (
@@ -396,6 +413,7 @@ export const deleteScheduleMeal = (meal: Meal) => {
 	const previousMeals = scheduleMealStore.get();
 	deletedMealIds.add(meal.id);
 	removeMeal(meal.id);
+	void deleteMealFromDexie(meal.id);
 	if (!browser || pendingCreateMealIds.has(meal.id)) return;
 	if (isRecipePoolTemplate(meal)) {
 		deletedMealIds.delete(meal.id);

@@ -1,4 +1,6 @@
 import { resolve } from '$app/paths';
+import { searchRecipesInDexie } from '$lib/client-db/repositories';
+import { syncRecipesFromRemote } from '$lib/client-db/sync';
 import { MENU_RECIPE_PAGE_SIZE } from '$lib/menu/pagination';
 import type { RecipeMenuItem } from '$lib/menu/menu-types';
 
@@ -22,28 +24,40 @@ export const fetchMenuRecipesPage = async (
 	const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
 	const response = await fetch(`${resolve('/menu/recipes')}?${params}`);
 	if (!response.ok) throw new Error('Could not load more recipes.');
-	return (await response.json()) as { recipes: RecipeMenuItem[]; nextRecipeOffset: number | null };
+	const body = (await response.json()) as {
+		recipes: RecipeMenuItem[];
+		nextRecipeOffset: number | null;
+	};
+	void syncRecipesFromRemote(body.recipes);
+	return body;
 };
 
 export const searchMenuRecipes = async (
 	query: string,
 	options: { signal?: AbortSignal; limit?: number; picker?: 'meal' } = {}
 ): Promise<RecipeMenuItem[]> => {
-	const params = new URLSearchParams({ q: query, limit: String(options.limit ?? 60) });
+	const limit = options.limit ?? 60;
+	const cached = await searchRecipesInDexie(query, limit);
+	if (cached.length) return cached;
+	const params = new URLSearchParams({ q: query, limit: String(limit) });
 	if (options.picker) params.set('picker', options.picker);
 	const response = await fetch(`${resolve('/menu/recipes')}?${params}`, { signal: options.signal });
 	if (!response.ok)
 		throw new Error(await readMenuResponseError(response, 'Could not search recipes.'));
 	const body = (await response.json()) as { recipes: RecipeMenuItem[] };
+	void syncRecipesFromRemote(body.recipes);
 	return body.recipes;
 };
 
 export const fetchRecipePickerRecipes = async (limit = 60): Promise<RecipeMenuItem[]> => {
+	const cached = await searchRecipesInDexie('', limit);
+	if (cached.length) return cached;
 	const params = new URLSearchParams({ picker: 'meal', limit: String(limit) });
 	const response = await fetch(`${resolve('/menu/recipes')}?${params}`);
 	if (!response.ok)
 		throw new Error(await readMenuResponseError(response, 'Could not load recipes.'));
 	const body = (await response.json()) as { recipes: RecipeMenuItem[] };
+	void syncRecipesFromRemote(body.recipes);
 	return body.recipes;
 };
 
@@ -53,6 +67,7 @@ export const importRecipeDraftFromUrl = async (url: string): Promise<RecipeMenuI
 	if (!response.ok)
 		throw new Error(await readMenuResponseError(response, 'Could not import recipe.'));
 	const body = (await response.json()) as { recipe: RecipeMenuItem };
+	void syncRecipesFromRemote([body.recipe]);
 	return body.recipe;
 };
 
@@ -69,6 +84,7 @@ export const createMenuRecipeRemote = async (input: {
 	if (!response.ok)
 		throw new Error(await readMenuResponseError(response, 'Could not create recipe.'));
 	const body = (await response.json()) as { recipe: RecipeMenuItem };
+	void syncRecipesFromRemote([body.recipe]);
 	return body.recipe;
 };
 
@@ -80,6 +96,7 @@ export const updateMenuRecipeRemote = async (recipe: RecipeMenuItem): Promise<Re
 	});
 	if (!response.ok) throw new Error(await response.text());
 	const body = (await response.json()) as { recipe: RecipeMenuItem };
+	void syncRecipesFromRemote([body.recipe]);
 	return body.recipe;
 };
 
@@ -105,6 +122,7 @@ export const restoreMenuRecipesRemote = async (recipeIds: string[]): Promise<Rec
 	if (!response.ok)
 		throw new Error(await readMenuResponseError(response, 'Could not restore recipes.'));
 	const body = (await response.json()) as { recipes?: RecipeMenuItem[] };
+	void syncRecipesFromRemote(body.recipes ?? []);
 	return body.recipes ?? [];
 };
 

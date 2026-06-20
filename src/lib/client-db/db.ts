@@ -13,6 +13,7 @@ import {
 	type CachedPlanRoute,
 	type CachedPlannedMeal,
 	type CachedRecipe,
+	type CachedUiState,
 	type ClientUser,
 	type SyncCursor,
 	type SyncOutboxEntry
@@ -29,6 +30,7 @@ export class MaalClientDb extends Dexie {
 	mealCheckIns!: EntityTable<CachedMealCheckIn, 'key'>;
 	foodProfiles!: EntityTable<CachedFoodProfile, 'key'>;
 	billingEntitlements!: EntityTable<CachedBillingEntitlement, 'key'>;
+	uiStates!: EntityTable<CachedUiState, 'key'>;
 	syncCursors!: EntityTable<SyncCursor, 'key'>;
 	syncOutbox!: EntityTable<SyncOutboxEntry, 'id'>;
 

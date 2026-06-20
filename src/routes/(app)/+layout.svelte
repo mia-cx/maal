@@ -7,6 +7,7 @@
 	import { setClientAppLocale } from '$lib/i18n/client-app-locale';
 	import { activeNavItemForPath } from '$lib/components/dashboard/active-nav';
 	import { clearInactiveUserCache, writeAppContextCache } from '$lib/client-db/app-cache';
+	import { setClientCacheScope } from '$lib/client-db/context';
 	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
 	import type { DashboardNavItem } from '$lib/components/dashboard/dashboard-nav';
 	import * as Popover from '$lib/components/ui/popover';
@@ -18,6 +19,7 @@
 		writeActiveHouseholdCookie
 	} from '$lib/stores/active-household';
 	import { appShellUiState, updateAppShellUiState } from '$lib/stores/app-shell-ui-state';
+	import { hydrateUiStateFromDexie } from '$lib/stores/ui-state';
 	import { onMount, untrack, type Snippet } from 'svelte';
 	import type { LayoutData } from './$types';
 
@@ -81,8 +83,17 @@
 	};
 
 	onMount(() => {
+		setClientCacheScope(
+			data.session?.user.id && data.activeHouseholdId
+				? { userId: data.session.user.id, householdId: data.activeHouseholdId }
+				: null
+		);
 		void writeAppContextCache({ session: data.session, households: data.households });
 		void clearInactiveUserCache(data.session?.user.id);
+		void hydrateUiStateFromDexie().then((cachedUiState) => {
+			sidebarOpen = cachedUiState.sidebarOpen;
+			sidebarWidth = cachedUiState.sidebarWidth;
+		});
 
 		const storedHouseholdId = activeHouseholdId.get();
 		const storedHouseholdIsAccessible = data.households.some(
@@ -113,6 +124,11 @@
 	});
 
 	$effect(() => {
+		setClientCacheScope(
+			data.session?.user.id && data.activeHouseholdId
+				? { userId: data.session.user.id, householdId: data.activeHouseholdId }
+				: null
+		);
 		if (householdStateHydrated) setActiveHouseholdId(data.activeHouseholdId);
 	});
 </script>

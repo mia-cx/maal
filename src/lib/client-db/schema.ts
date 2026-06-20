@@ -1,4 +1,5 @@
 import type { UnitPreferences } from '$lib/recipes/ingredient-text';
+import type { UiState } from '$lib/stores/ui-state';
 import type { HouseholdMember, Meal } from '$lib/components/dashboard/schedule-types';
 import type { RecipeMenuItem } from '$lib/components/menu';
 
@@ -115,6 +116,15 @@ export type SyncCursor = {
 	updatedAt: number;
 };
 
+export type CachedUiState = {
+	key: HouseholdScopedKey;
+	userId: string;
+	householdId: string;
+	name: string;
+	state: Partial<UiState>;
+	updatedAt: number;
+};
+
 export type SyncOutboxEntry = {
 	id?: number;
 	key: HouseholdScopedKey;
@@ -150,6 +160,7 @@ export const clientDbStores = {
 	mealCheckIns: '&key, [userId+householdId], householdId, userId, mealId, cachedAt',
 	foodProfiles: '&key, [userId+householdId], householdId, userId, expiresAt, cachedAt',
 	billingEntitlements: '&key, [userId+householdId], householdId, userId, expiresAt, cachedAt',
+	uiStates: '&key, [userId+householdId], householdId, userId, name, updatedAt',
 	syncCursors: '&key, [userId+householdId], householdId, userId, collection, updatedAt',
 	syncOutbox:
 		'++id, key, [userId+householdId], householdId, userId, entityType, entityId, nextAttemptAt'

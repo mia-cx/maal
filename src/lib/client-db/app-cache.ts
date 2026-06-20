@@ -1,13 +1,22 @@
-import type { PublicAuthSession } from '$lib/server/auth/session';
 import type { ClientHousehold } from './schema';
 import { getClientDb } from './db';
 import { userScopedKey } from './schema';
+
+type ClientSession = {
+	user: {
+		id: string;
+		email: string;
+		name: string | null;
+		profilePictureUrl: string | null;
+		emailVerified: boolean;
+	};
+};
 
 export const writeAppContextCache = async ({
 	session,
 	households
 }: {
-	session: PublicAuthSession | null;
+	session: ClientSession | null;
 	households: ClientHousehold[];
 }): Promise<void> => {
 	const db = getClientDb();
@@ -55,6 +64,7 @@ export const clearInactiveUserCache = async (
 			db.mealCheckIns.where('userId').notEqual(activeUserId).delete(),
 			db.foodProfiles.where('userId').notEqual(activeUserId).delete(),
 			db.billingEntitlements.where('userId').notEqual(activeUserId).delete(),
+			db.uiStates.where('userId').notEqual(activeUserId).delete(),
 			db.syncCursors.where('userId').notEqual(activeUserId).delete(),
 			db.syncOutbox.where('userId').notEqual(activeUserId).delete()
 		]);

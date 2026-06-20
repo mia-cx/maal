@@ -21,6 +21,7 @@ describe('client Dexie schema', () => {
 			'mealCheckIns',
 			'foodProfiles',
 			'billingEntitlements',
+			'uiStates',
 			'syncCursors',
 			'syncOutbox'
 		]);

@@ -1,6 +1,7 @@
 import type { HouseholdMember, Meal } from '$lib/components/dashboard/schedule-types';
 import type { RecipeMenuItem } from '$lib/components/menu';
 import { getClientDb } from './db';
+import { writeRecipesToDexie } from './repositories';
 import {
 	householdScopedKey,
 	routeCacheTtlMs,
@@ -22,7 +23,7 @@ export type MenuRouteCacheEntry = {
 type CacheScope = {
 	userId: string | null | undefined;
 	householdId: string | null | undefined;
-};
+} | null;
 
 const planCacheId = 'route:plan';
 const menuCacheId = 'route:menu';
@@ -54,9 +55,9 @@ const cloneMenuEntry = (entry: MenuRouteCacheEntry): MenuRouteCacheEntry => ({
 	nextRecipeOffset: entry.nextRecipeOffset
 });
 
-const cacheKey = ({ userId, householdId }: CacheScope, id: string) => {
-	if (!userId || !householdId) return null;
-	return householdScopedKey(userId, householdId, id);
+const cacheKey = (scope: CacheScope, id: string) => {
+	if (!scope?.userId || !scope.householdId) return null;
+	return householdScopedKey(scope.userId, scope.householdId, id);
 };
 
 const isFresh = (entry: { expiresAt: number }, now = Date.now()) => entry.expiresAt > now;
@@ -78,7 +79,7 @@ export const setCachedPlanRouteData = async (
 ): Promise<void> => {
 	const db = getClientDb();
 	const key = cacheKey(scope, planCacheId);
-	if (!db || !key || !scope.userId || !scope.householdId) return;
+	if (!db || !key || !scope?.userId || !scope.householdId) return;
 	const now = Date.now();
 	const cloned = clonePlanEntry(entry);
 	await db.planRoutes.put({
@@ -108,9 +109,13 @@ export const setCachedMenuRouteData = async (
 ): Promise<void> => {
 	const db = getClientDb();
 	const key = cacheKey(scope, menuCacheId);
-	if (!db || !key || !scope.userId || !scope.householdId) return;
+	if (!db || !key || !scope?.userId || !scope.householdId) return;
 	const now = Date.now();
 	const cloned = cloneMenuEntry(entry);
+	await writeRecipesToDexie([...cloned.recipes, ...cloned.archivedRecipes], {
+		userId: scope.userId,
+		householdId: scope.householdId
+	});
 	await db.menuRoutes.put({
 		key,
 		userId: scope.userId,
@@ -132,7 +137,7 @@ export const clearUserRouteDataCache = async (userId: string | null | undefined)
 
 export const clearHouseholdRouteDataCache = async (scope: CacheScope): Promise<void> => {
 	const db = getClientDb();
-	if (!db || !scope.userId || !scope.householdId) return;
+	if (!db || !scope?.userId || !scope.householdId) return;
 	const householdIndex = [scope.userId, scope.householdId] as [string, string];
 	await db.transaction('rw', db.planRoutes, db.menuRoutes, async () => {
 		await db.planRoutes.where('[userId+householdId]').equals(householdIndex).delete();

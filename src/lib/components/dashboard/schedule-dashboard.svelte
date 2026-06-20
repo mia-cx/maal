@@ -6,6 +6,7 @@
 		addScheduleMealFromRecipe,
 		deleteScheduleMeal,
 		hydrateScheduleMeals,
+		hydrateScheduleMealsFromDexie,
 		mergeHydratedScheduleMeals,
 		moveScheduleMealToDropTarget,
 		scheduleMealStore,
@@ -13,7 +14,12 @@
 		selectedMealStore,
 		updateScheduleMealSchedule
 	} from '$lib/stores/schedule-meals';
-	import { createMenuRecipe, hydrateMenuRecipes, menuRecipesStore } from '$lib/stores/menu-recipes';
+	import {
+		createMenuRecipe,
+		hydrateMenuRecipes,
+		hydrateMenuRecipesFromDexie,
+		menuRecipesStore
+	} from '$lib/stores/menu-recipes';
 	import { fetchRecipePickerRecipes } from '$lib/menu/menu-client';
 	import { createDraftRecipe } from '$lib/menu/recipe-draft';
 	import {
@@ -170,6 +176,11 @@
 
 	const loadPickerRecipes = async () => {
 		if (pickerRecipesLoaded || pickerRecipesLoading || $menuRecipesStore.length > 0) return;
+		const cached = await hydrateMenuRecipesFromDexie();
+		if (cached.recipes.length) {
+			pickerRecipesLoaded = true;
+			return;
+		}
 		pickerRecipesLoading = true;
 		try {
 			hydrateMenuRecipes(await fetchRecipePickerRecipes());
@@ -408,6 +419,11 @@
 		secondaryScrollPointerId = null;
 		secondaryScrollElement = null;
 	};
+
+	$effect(() => {
+		void hydrateScheduleMealsFromDexie();
+		void hydrateMenuRecipesFromDexie();
+	});
 
 	$effect(() => {
 		const signature = initialMeals.map((meal) => meal.id).join('|');

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { householdIsAccessible } from '$lib/client-db/context';
+	import { readRecipesFromDexie } from '$lib/client-db/repositories';
 	import { MyMenuDashboard, type RecipeMenuItem } from '$lib/components/menu';
 	import { activeHouseholdId, writeActiveHouseholdCookie } from '$lib/stores/active-household';
 	import {
@@ -16,20 +18,26 @@
 	let cacheHydrationVersion = 0;
 	let unsubscribeActiveHousehold: (() => void) | null = null;
 
-	const cacheScope = (householdId: string | null | undefined = data.activeHouseholdId) => ({
-		userId: data.session?.user.id,
-		householdId
-	});
+	const cacheScope = (householdId: string | null | undefined = data.activeHouseholdId) =>
+		data.session?.user.id && householdId ? { userId: data.session.user.id, householdId } : null;
+	const canReadHouseholdCache = (householdId: string | null | undefined) =>
+		householdIsAccessible(data.households, householdId);
 
 	const hydrateCachedMenu = async (
 		householdId: string | null | undefined,
 		clearWhenMissing = false
 	) => {
+		if (!canReadHouseholdCache(householdId)) return;
 		const version = ++cacheHydrationVersion;
 		const cached = await getCachedMenuRouteData(cacheScope(householdId));
-		if (version !== cacheHydrationVersion || (!cached && !clearWhenMissing)) return;
-		recipes = cached?.recipes ?? [];
-		archivedRecipes = cached?.archivedRecipes ?? [];
+		const recipeCache = cached ? null : await readRecipesFromDexie(cacheScope(householdId));
+		if (
+			version !== cacheHydrationVersion ||
+			(!cached && !recipeCache?.recipes.length && !clearWhenMissing)
+		)
+			return;
+		recipes = cached?.recipes ?? recipeCache?.recipes ?? [];
+		archivedRecipes = cached?.archivedRecipes ?? recipeCache?.archivedRecipes ?? [];
 		nextRecipeOffset = cached?.nextRecipeOffset ?? null;
 	};
 

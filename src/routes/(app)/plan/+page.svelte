@@ -2,6 +2,8 @@
 	import * as m from '$lib/paraglide/messages';
 	import ScheduleDashboard from '$lib/components/dashboard/schedule-dashboard.svelte';
 	import type { HouseholdMember, Meal } from '$lib/plan/plan-types';
+	import { householdIsAccessible } from '$lib/client-db/context';
+	import { readMealsFromDexie } from '$lib/client-db/repositories';
 	import { activeHouseholdId } from '$lib/stores/active-household';
 	import { getCachedPlanRouteData, setCachedPlanRouteData } from '$lib/stores/route-data-cache';
 	import { onDestroy, onMount, untrack } from 'svelte';
@@ -13,19 +15,20 @@
 	let cacheHydrationVersion = 0;
 	let unsubscribeActiveHousehold: (() => void) | null = null;
 
-	const cacheScope = (householdId: string | null | undefined = data.activeHouseholdId) => ({
-		userId: data.session?.user.id,
-		householdId
-	});
+	const cacheScope = (householdId: string | null | undefined = data.activeHouseholdId) =>
+		data.session?.user.id && householdId ? { userId: data.session.user.id, householdId } : null;
+	const canReadHouseholdCache = (householdId: string | null | undefined) =>
+		householdIsAccessible(data.households, householdId);
 
 	const hydrateCachedPlan = async (
 		householdId: string | null | undefined,
 		clearWhenMissing = false
 	) => {
+		if (!canReadHouseholdCache(householdId)) return;
 		const version = ++cacheHydrationVersion;
 		const cached = await getCachedPlanRouteData(cacheScope(householdId));
 		if (version !== cacheHydrationVersion || (!cached && !clearWhenMissing)) return;
-		meals = cached?.meals ?? [];
+		meals = cached?.meals ?? (await readMealsFromDexie(cacheScope(householdId)));
 		householdMembers = cached?.householdMembers ?? [];
 	};
 
