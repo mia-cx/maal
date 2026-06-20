@@ -41,7 +41,10 @@ const backoffMs = (attempts: number) =>
 	Math.min(maxBackoffMs, retryIntervalMs * 2 ** Math.max(0, attempts - 1));
 
 const localMealIdPrefix = 'local-meal-';
+const localRecipeIdPrefixes = ['draft-recipe-', 'local-recipe-'];
 const isLocalMealId = (mealId: string): boolean => mealId.startsWith(localMealIdPrefix);
+const isLocalRecipeId = (recipeId: string): boolean =>
+	localRecipeIdPrefixes.some((prefix) => recipeId.startsWith(prefix));
 
 const outboxPriority = (entry: SyncOutboxEntry): number => {
 	if (entry.entityType === 'recipe' && entry.operation === 'create') return 0;
@@ -75,8 +78,12 @@ const rewritePendingMealRecipeIds = async (localRecipeId: string, remoteRecipeId
 };
 
 const createMealTrustingDexie = async (meal: Meal): Promise<Meal> => {
+	const mealToCreate =
+		meal.userRecipeId && isLocalRecipeId(meal.userRecipeId)
+			? { ...meal, userRecipeId: undefined }
+			: meal;
 	try {
-		return await createScheduleMealRemote(meal);
+		return await createScheduleMealRemote(mealToCreate);
 	} catch (error) {
 		if (
 			error instanceof ScheduleMealClientError &&
@@ -199,13 +206,13 @@ export const flushClientDbOutbox = async () => {
 	if (!db) return;
 	flushing = true;
 	try {
-		const dueAt = Date.now();
-		const entries = (await db.syncOutbox.where('nextAttemptAt').belowOrEqual(dueAt).toArray()).sort(
-			(left, right) =>
-				outboxPriority(left) - outboxPriority(right) || left.createdAt - right.createdAt
-		);
-		for (const entry of entries) {
-			if (!entry.id) continue;
+		while (true) {
+			const dueAt = Date.now();
+			const entry = (await db.syncOutbox.where('nextAttemptAt').belowOrEqual(dueAt).toArray()).sort(
+				(left, right) =>
+					outboxPriority(left) - outboxPriority(right) || left.createdAt - right.createdAt
+			)[0];
+			if (!entry?.id) return;
 			try {
 				await syncOutboxEntry(entry);
 				await db.syncOutbox.delete(entry.id);
