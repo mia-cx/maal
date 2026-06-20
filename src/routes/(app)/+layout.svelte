@@ -170,7 +170,8 @@
 			{#if sidebarOpen}
 				<button
 					aria-label={m.app_resize_sidebar()}
-					class="fixed top-0 bottom-0 z-[55] w-3 cursor-col-resize bg-transparent after:absolute after:top-0 after:bottom-0 after:left-1/2 after:w-px after:-translate-x-1/2 hover:after:bg-border"
+					class="fixed top-0 bottom-0 z-[55] w-3 cursor-col-resize bg-transparent after:absolute after:top-0 after:bottom-0 after:left-1/2 after:w-px after:-translate-x-1/2"
+					class:after:bg-border={resizingSidebar}
 					style:left="{sidebarWidth - 6}px"
 					onpointerdown={startSidebarResize}
 				></button>
