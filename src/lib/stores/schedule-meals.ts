@@ -5,6 +5,7 @@ import {
 	writeMealsToDexie
 } from '$lib/client-db/repositories';
 import {
+	isScheduleSyncErrorWithStatus,
 	syncCreatedMealToRemote,
 	syncDeletedMealToRemote,
 	syncUpdatedMealToRemote
@@ -211,6 +212,12 @@ const persistScheduleMealChange = (change: ScheduleMealChange) => {
 			if (pendingPersistVersions.get(change.meal.id) !== persistVersion) return;
 			pendingPersistVersions.delete(change.meal.id);
 			optimisticMealSnapshots.delete(change.meal.id);
+			if (isScheduleSyncErrorWithStatus(error, 404)) {
+				deletedMealIds.add(change.meal.id);
+				removeMeal(change.meal.id);
+				void deleteMealFromDexie(change.meal.id);
+				return;
+			}
 			if (change.previousMeal) replaceMeal(change.previousMeal, change.meal.id);
 		},
 		() => {
@@ -428,6 +435,7 @@ export const deleteScheduleMeal = (meal: Meal) => {
 	}
 	persistDeletedScheduleMeal(meal.id, (error: unknown) => {
 		console.error('Failed to delete schedule meal', error);
+		if (isScheduleSyncErrorWithStatus(error, 404)) return;
 		deletedMealIds.delete(meal.id);
 		scheduleMealStore.set(cloneMeals(previousMeals));
 	});
