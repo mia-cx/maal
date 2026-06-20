@@ -16,7 +16,7 @@ import {
 import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import { getClientDb } from './db';
 import { logClientDbDebug } from './debug';
-import { writeMealsToDexie, writeRecipesToDexie } from './repositories';
+import { deleteMealFromDexie, writeMealsToDexie, writeRecipesToDexie } from './repositories';
 import type { SyncOutboxEntry } from './schema';
 
 const flushDebounceMs = 1_500;
@@ -130,7 +130,12 @@ const rewritePendingMealIds = async (localMealId: string, remoteMeal: Meal) => {
 const syncMealEntry = async (entry: SyncOutboxEntry) => {
 	const payload = mealPayloadFromEntry(entry);
 	if (entry.operation === 'delete') {
-		await deleteScheduleMealRemote(payload.mealId ?? entry.entityId);
+		try {
+			await deleteScheduleMealRemote(payload.mealId ?? entry.entityId);
+		} catch (error) {
+			if (error instanceof ScheduleMealClientError && error.status === 404) return;
+			throw error;
+		}
 		return;
 	}
 	if (!payload.meal) throw new Error(`Missing meal payload for ${entry.operation} outbox entry.`);
@@ -152,6 +157,10 @@ const syncMealEntry = async (entry: SyncOutboxEntry) => {
 				const meal = await createMealTrustingDexie(payload.meal);
 				await writeMealsToDexie([meal], entry);
 				await rewritePendingMealIds(payload.meal.id, meal);
+				return;
+			}
+			if (error instanceof ScheduleMealClientError && error.status === 404) {
+				await deleteMealFromDexie(payload.meal.id, entry);
 				return;
 			}
 			throw error;
