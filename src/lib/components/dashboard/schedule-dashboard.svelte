@@ -41,7 +41,8 @@
 	import { dropTargetFromPointer } from './schedule-dnd';
 	import { isMealInPool, sortMealPool } from './schedule-ordering';
 	import { submitMealCheckIn } from './schedule-check-ins';
-	import { fetchScheduleMealRange, ScheduleMealClientError } from './schedule-meal-client';
+	import { syncMealRangeFromRemote } from '$lib/client-db/schedule-sync';
+	import { ScheduleMealClientError } from './schedule-meal-client';
 	import { cardDirectionByKey, focusMealCard } from './schedule-keyboard';
 	import { hasLoadedMealRange, missingMealRanges, type MealRange } from './schedule-ranges';
 	import type { UnitPreferences } from '$lib/recipes/ingredient-text';
@@ -137,7 +138,7 @@
 		if (loadingMealRangeKey === key) return;
 		loadingMealRangeKey = key;
 		try {
-			const meals = await fetchScheduleMealRange(range);
+			const meals = await syncMealRangeFromRemote(range);
 			mealRangeError = null;
 			mergeHydratedScheduleMeals(meals, range.start, range.end);
 			loadedMealRanges = [...loadedMealRanges, { start: range.start, end: range.end }];

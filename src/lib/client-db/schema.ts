@@ -64,6 +64,7 @@ export type CachedRecipe = RecipeMenuItem & {
 	householdId: string;
 	key: HouseholdScopedKey;
 	cachedAt: number;
+	locallyDeletedAt?: number;
 };
 
 export type CachedPlannedMeal = Meal & {
@@ -71,6 +72,7 @@ export type CachedPlannedMeal = Meal & {
 	householdId: string;
 	key: HouseholdScopedKey;
 	cachedAt: number;
+	locallyDeletedAt?: number;
 };
 
 export type CachedMealCheckIn = {

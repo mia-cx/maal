@@ -1,17 +1,18 @@
 import { browser } from '$app/environment';
 import {
+	deleteMealsForRecipeFromDexie,
 	deleteRecipesFromDexie,
 	readRecipesFromDexie,
 	writeRecipesToDexie
 } from '$lib/client-db/repositories';
 import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import {
-	archiveMenuRecipesRemote,
-	createMenuRecipeRemote,
-	permanentlyDeleteMenuRecipesRemote,
-	restoreMenuRecipesRemote,
-	updateMenuRecipeRemote
-} from '$lib/menu/menu-client';
+	syncArchivedRecipesToRemote,
+	syncCreatedRecipeToRemote,
+	syncPermanentlyDeletedRecipesToRemote,
+	syncRestoredRecipesToRemote,
+	syncUpdatedRecipeToRemote
+} from '$lib/client-db/menu-sync';
 import { atom, computed } from 'nanostores';
 
 const cloneRecipe = (recipe: RecipeMenuItem): RecipeMenuItem => ({
@@ -111,7 +112,7 @@ export const createMenuRecipe = async (input: {
 	recipe?: RecipeMenuItem;
 }) => {
 	if (!browser) throw new Error('Recipe creation requires a browser session.');
-	const recipe = await createMenuRecipeRemote(input);
+	const recipe = await syncCreatedRecipeToRemote(input);
 	const recipes = menuRecipesStore.get();
 	menuRecipesStore.set([
 		...recipes.filter((candidate) => candidate.id !== recipe.id),
@@ -127,7 +128,7 @@ export const updateMenuRecipe = async (recipe: RecipeMenuItem) => {
 	if (!browser) return recipe;
 
 	try {
-		const persistedRecipe = await updateMenuRecipeRemote(recipe);
+		const persistedRecipe = await syncUpdatedRecipeToRemote(recipe);
 		replaceRecipe(persistedRecipe);
 		void writeRecipesToDexie([persistedRecipe]);
 		return persistedRecipe;
@@ -150,7 +151,7 @@ export const deleteMenuRecipes = async (recipes: RecipeMenuItem[]) => {
 	if (!browser) return;
 
 	try {
-		const body = await archiveMenuRecipesRemote(recipeIds);
+		const body = await syncArchivedRecipesToRemote(recipeIds);
 		archiveRecipes(recipes, body.deletedAt);
 		void writeRecipesToDexie(
 			recipes.map((recipe) => ({ ...recipe, archivedAt: body.deletedAt ?? recipe.archivedAt }))
@@ -175,7 +176,7 @@ export const restoreMenuRecipes = async (recipes: RecipeMenuItem[]) => {
 	if (!browser) return [];
 
 	try {
-		const remoteRecipes = await restoreMenuRecipesRemote(recipeIds);
+		const remoteRecipes = await syncRestoredRecipesToRemote(recipeIds);
 		const restoredRecipes = remoteRecipes.length
 			? remoteRecipes
 			: recipes.map((recipe) => ({ ...recipe, archivedAt: undefined }));
@@ -203,10 +204,11 @@ export const permanentlyDeleteMenuRecipes = async (recipes: RecipeMenuItem[]) =>
 	const recipeIds = recipes.map((recipe) => recipe.id);
 	removeArchivedRecipes(recipeIds);
 	void deleteRecipesFromDexie(recipeIds);
+	void deleteMealsForRecipeFromDexie(recipeIds);
 	if (!browser) return { deletedMealCount: 0 };
 
 	try {
-		return await permanentlyDeleteMenuRecipesRemote(recipeIds);
+		return await syncPermanentlyDeletedRecipesToRemote(recipeIds);
 	} catch (error) {
 		archivedMenuRecipesStore.set(previousArchivedRecipes);
 		throw error;

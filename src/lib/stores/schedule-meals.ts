@@ -4,15 +4,15 @@ import {
 	readMealsFromDexie,
 	writeMealsToDexie
 } from '$lib/client-db/repositories';
+import {
+	syncCreatedMealToRemote,
+	syncDeletedMealToRemote,
+	syncUpdatedMealToRemote
+} from '$lib/client-db/schedule-sync';
 import { dateFromKey } from '$lib/components/dashboard/schedule-date';
 import { moveMealToDropTarget } from '$lib/components/dashboard/schedule-dnd';
 import { isMealInPool } from '$lib/components/dashboard/schedule-ordering';
 import type { Meal, MealDropTarget } from '$lib/components/dashboard/schedule-types';
-import {
-	createScheduleMealRemote,
-	deleteScheduleMealRemote,
-	updateScheduleMealRemote
-} from '$lib/components/dashboard/schedule-meal-client';
 import type { RecipeMenuItem } from '$lib/components/menu';
 import { convertInstructionTemperatures, type UnitPreferences } from '$lib/recipes/ingredient-text';
 import { atom, computed } from 'nanostores';
@@ -166,7 +166,7 @@ const emitScheduleMealChange = (change: ScheduleMealChange) => {
 
 const persistDeletedScheduleMeal = (mealId: string, onFailure?: (error: unknown) => void) => {
 	if (!browser) return;
-	deleteScheduleMealRemote(mealId)
+	syncDeletedMealToRemote(mealId)
 		.then(() => {
 			deletedMealIds.delete(mealId);
 		})
@@ -188,7 +188,7 @@ const persistExistingScheduleMeal = (
 	onSuccess?: () => void
 ) => {
 	if (!browser) return;
-	updateScheduleMealRemote(meal)
+	syncUpdatedMealToRemote(meal)
 		.then(() => {
 			onSuccess?.();
 		})
@@ -327,7 +327,7 @@ const mergePendingCreateResponse = (createdMeal: Meal, currentMeal?: Meal): Meal
 const persistNewScheduleMeal = (meal: Meal, previousMealId = meal.id) => {
 	if (!browser) return;
 	pendingCreateMealIds.add(previousMealId);
-	createScheduleMealRemote(meal)
+	syncCreatedMealToRemote(meal)
 		.then((createdMeal) => {
 			if (deletedMealIds.has(previousMealId)) {
 				pendingCreateMealIds.delete(previousMealId);
