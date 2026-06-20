@@ -1,4 +1,5 @@
 import type { ClientHousehold } from './schema';
+import { logClientDbDebug } from './debug';
 import { getClientDb } from './db';
 import { userScopedKey } from './schema';
 
@@ -23,6 +24,11 @@ export const writeAppContextCache = async ({
 	const user = session?.user;
 	if (!db || !user) return;
 	const now = Date.now();
+	logClientDbDebug('ui->dexie', 'write app context cache', {
+		count: households.length,
+		ids: households.map((household) => household.id),
+		extra: { userId: user.id }
+	});
 	await db.transaction('rw', db.users, db.households, async () => {
 		await db.users.put({
 			id: user.id,
@@ -49,9 +55,11 @@ export const clearInactiveUserCache = async (
 	const db = getClientDb();
 	if (!db) return;
 	if (!activeUserId) {
+		logClientDbDebug('ui->dexie', 'clear entire client db');
 		await db.delete();
 		return;
 	}
+	logClientDbDebug('ui->dexie', 'clear inactive user cache', { extra: { activeUserId } });
 	await db.transaction('rw', db.tables, async () => {
 		await db.users.where('id').notEqual(activeUserId).delete();
 		await Promise.all([

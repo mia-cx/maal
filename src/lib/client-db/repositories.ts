@@ -3,6 +3,7 @@ import type { RecipeMenuItem } from '$lib/components/menu';
 import type { UiState } from '$lib/stores/ui-state';
 import { getClientDb } from './db';
 import { getClientCacheScope, type ClientCacheScope } from './context';
+import { logClientDbDebug } from './debug';
 import { householdScopedKey, type CachedPlannedMeal, type CachedRecipe } from './schema';
 
 const localMealIdPrefix = 'local-meal-';
@@ -28,6 +29,11 @@ export const readRecipesFromDexie = async (
 		.equals([activeScope.userId, activeScope.householdId])
 		.toArray();
 	const activeRows = rows.filter((recipe) => !recipe.locallyDeletedAt);
+	logClientDbDebug('dexie->ui', 'read recipes', {
+		scope: activeScope,
+		count: activeRows.length,
+		extra: { archivedCount: activeRows.filter((recipe) => recipe.archivedAt).length }
+	});
 	return {
 		recipes: activeRows.filter((recipe) => !recipe.archivedAt).map(cloneRecipe),
 		archivedRecipes: activeRows.filter((recipe) => recipe.archivedAt).map(cloneRecipe)
@@ -50,6 +56,11 @@ export const writeRecipesToDexie = async (
 	);
 	const recipesToWrite = recipes.filter((recipe) => !locallyDeletedRecipeIds.has(recipe.id));
 	if (!recipesToWrite.length) return;
+	logClientDbDebug('ui->dexie', 'write recipes', {
+		scope: activeScope,
+		count: recipesToWrite.length,
+		ids: recipesToWrite.map((recipe) => recipe.id)
+	});
 	const cachedAt = now();
 	await db.recipes.bulkPut(
 		recipesToWrite.map(
@@ -77,6 +88,11 @@ export const deleteRecipesFromDexie = async (
 		householdScopedKey(activeScope.userId, activeScope.householdId, recipeId)
 	);
 	const existingRows = await db.recipes.bulkGet(keys);
+	logClientDbDebug('ui->dexie', 'tombstone recipes', {
+		scope: activeScope,
+		count: recipeIds.length,
+		ids: recipeIds
+	});
 	await db.recipes.bulkPut(
 		recipeIds.map(
 			(recipeId, index) =>
@@ -136,7 +152,13 @@ export const readMealsFromDexie = async (scope?: ClientCacheScope | null): Promi
 		.toArray();
 	const staleLocalRows = rows.filter((meal) => !isPersistedMeal(meal));
 	await db.plannedMeals.bulkDelete(staleLocalRows.map((meal) => meal.key));
-	return rows.filter((meal) => isPersistedMeal(meal) && !meal.locallyDeletedAt).map(cloneMeal);
+	const activeRows = rows.filter((meal) => isPersistedMeal(meal) && !meal.locallyDeletedAt);
+	logClientDbDebug('dexie->ui', 'read meals', {
+		scope: activeScope,
+		count: activeRows.length,
+		extra: { purgedLocalCount: staleLocalRows.length }
+	});
+	return activeRows.map(cloneMeal);
 };
 
 export const writeMealsToDexie = async (
@@ -156,6 +178,12 @@ export const writeMealsToDexie = async (
 	);
 	const mealsToWrite = persistedMeals.filter((meal) => !locallyDeletedMealIds.has(meal.id));
 	if (!mealsToWrite.length) return;
+	logClientDbDebug('ui->dexie', 'write meals', {
+		scope: activeScope,
+		count: mealsToWrite.length,
+		ids: mealsToWrite.map((meal) => meal.id),
+		extra: { dates: mealsToWrite.map((meal) => meal.date ?? null) }
+	});
 	const cachedAt = now();
 	await db.plannedMeals.bulkPut(
 		mealsToWrite.map(
@@ -184,6 +212,7 @@ const putDeletedMealTombstone = async ({
 	if (!db) return;
 	const key = householdScopedKey(scope.userId, scope.householdId, mealId);
 	const existingRow = await db.plannedMeals.get(key);
+	logClientDbDebug('ui->dexie', 'tombstone meal', { scope, ids: [mealId] });
 	await db.plannedMeals.put({
 		...(existingRow ?? { id: mealId, title: '' }),
 		key,
@@ -236,6 +265,7 @@ export const readUiStateFromDexie = async (
 	const entry = await db.uiStates.get(
 		householdScopedKey(activeScope.userId, activeScope.householdId, key)
 	);
+	logClientDbDebug('dexie->ui', 'read ui state', { scope: activeScope, ids: [key] });
 	return entry?.state ?? null;
 };
 
@@ -247,6 +277,7 @@ export const writeUiStateToDexie = async (
 	const db = getClientDb();
 	const activeScope = scopeOrActive(scope);
 	if (!db || !activeScope) return;
+	logClientDbDebug('ui->dexie', 'write ui state', { scope: activeScope, ids: [key] });
 	await db.uiStates.put({
 		key: householdScopedKey(activeScope.userId, activeScope.householdId, key),
 		userId: activeScope.userId,

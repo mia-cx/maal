@@ -6,6 +6,7 @@ import {
 	ScheduleMealClientError,
 	updateScheduleMealRemote
 } from '$lib/components/dashboard/schedule-meal-client';
+import { logClientDbDebug } from './debug';
 import { deleteMealFromDexie, writeMealsToDexie } from './repositories';
 import { queueRemoteSync } from './sync';
 
@@ -13,7 +14,13 @@ export const isScheduleSyncErrorWithStatus = (error: unknown, status: number): b
 	error instanceof ScheduleMealClientError && error.status === status;
 
 export const syncMealRangeFromRemote = async (range: { start: string; end: string }) => {
+	logClientDbDebug('dexie->d1', 'fetch meal range', { extra: range });
 	const meals = await fetchScheduleMealRange(range);
+	logClientDbDebug('d1->dexie', 'fetched meal range', {
+		count: meals.length,
+		ids: meals.map((meal) => meal.id),
+		extra: range
+	});
 	await writeMealsToDexie(meals);
 	return meals;
 };

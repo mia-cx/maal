@@ -1,5 +1,6 @@
 import type { HouseholdMember, Meal } from '$lib/components/dashboard/schedule-types';
 import type { RecipeMenuItem } from '$lib/components/menu';
+import { logClientDbDebug } from './debug';
 import { getClientDb } from './db';
 import { writeRecipesToDexie } from './repositories';
 import {
@@ -70,6 +71,13 @@ export const getCachedPlanRouteData = async (
 	if (!db || !key) return null;
 	const entry = await db.planRoutes.get(key);
 	if (!entry || !isFresh(entry)) return null;
+	logClientDbDebug('dexie->ui', 'read plan route cache', {
+		scope:
+			scope?.userId && scope.householdId
+				? { userId: scope.userId, householdId: scope.householdId }
+				: null,
+		count: entry.meals.length
+	});
 	return clonePlanEntry(entry);
 };
 
@@ -82,6 +90,10 @@ export const setCachedPlanRouteData = async (
 	if (!db || !key || !scope?.userId || !scope.householdId) return;
 	const now = Date.now();
 	const cloned = clonePlanEntry(entry);
+	logClientDbDebug('ui->dexie', 'write plan route cache', {
+		scope: { userId: scope.userId, householdId: scope.householdId },
+		count: cloned.meals.length
+	});
 	await db.planRoutes.put({
 		key,
 		userId: scope.userId,
@@ -100,6 +112,14 @@ export const getCachedMenuRouteData = async (
 	if (!db || !key) return null;
 	const entry = await db.menuRoutes.get(key);
 	if (!entry || !isFresh(entry)) return null;
+	logClientDbDebug('dexie->ui', 'read menu route cache', {
+		scope:
+			scope?.userId && scope.householdId
+				? { userId: scope.userId, householdId: scope.householdId }
+				: null,
+		count: entry.recipes.length,
+		extra: { archivedCount: entry.archivedRecipes.length, nextRecipeOffset: entry.nextRecipeOffset }
+	});
 	return cloneMenuEntry(entry);
 };
 
@@ -112,6 +132,14 @@ export const setCachedMenuRouteData = async (
 	if (!db || !key || !scope?.userId || !scope.householdId) return;
 	const now = Date.now();
 	const cloned = cloneMenuEntry(entry);
+	logClientDbDebug('ui->dexie', 'write menu route cache', {
+		scope: { userId: scope.userId, householdId: scope.householdId },
+		count: cloned.recipes.length,
+		extra: {
+			archivedCount: cloned.archivedRecipes.length,
+			nextRecipeOffset: cloned.nextRecipeOffset
+		}
+	});
 	await writeRecipesToDexie([...cloned.recipes, ...cloned.archivedRecipes], {
 		userId: scope.userId,
 		householdId: scope.householdId

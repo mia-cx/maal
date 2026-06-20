@@ -9,11 +9,18 @@ import {
 	searchMenuRecipesRemote,
 	updateMenuRecipeRemote
 } from '$lib/menu/menu-client';
+import { logClientDbDebug } from './debug';
 import { deleteRecipesFromDexie, writeRecipesToDexie } from './repositories';
 import { queueRemoteSync } from './sync';
 
 export const syncRecipePageFromRemote = async (offset: number) => {
+	logClientDbDebug('dexie->d1', 'fetch recipe page', { extra: { offset } });
 	const body = await fetchMenuRecipesPageRemote(offset);
+	logClientDbDebug('d1->dexie', 'fetched recipe page', {
+		count: body.recipes.length,
+		ids: body.recipes.map((recipe) => recipe.id),
+		extra: { offset, nextRecipeOffset: body.nextRecipeOffset }
+	});
 	await writeRecipesToDexie(body.recipes);
 	return body;
 };
@@ -22,13 +29,21 @@ export const syncRecipeSearchFromRemote = async (
 	query: string,
 	options: { signal?: AbortSignal } = {}
 ): Promise<RecipeMenuItem[]> => {
+	logClientDbDebug('dexie->d1', 'search recipes remote', { extra: { query } });
 	const recipes = await searchMenuRecipesRemote(query, options);
+	logClientDbDebug('d1->dexie', 'searched recipes remote', {
+		count: recipes.length,
+		ids: recipes.map((recipe) => recipe.id),
+		extra: { query }
+	});
 	await writeRecipesToDexie(recipes);
 	return recipes;
 };
 
 export const syncImportedRecipeDraftFromRemote = async (url: string): Promise<RecipeMenuItem> => {
+	logClientDbDebug('dexie->d1', 'import recipe draft', { extra: { url } });
 	const recipe = await importRecipeDraftFromUrlRemote(url);
+	logClientDbDebug('d1->dexie', 'imported recipe draft', { ids: [recipe.id], payload: recipe });
 	await writeRecipesToDexie([recipe]);
 	return recipe;
 };

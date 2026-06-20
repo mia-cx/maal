@@ -1,6 +1,7 @@
 import type { Meal } from '$lib/components/dashboard/schedule-types';
 import type { RecipeMenuItem } from '$lib/components/menu';
 import { getClientCacheScope, type ClientCacheScope } from './context';
+import { logClientDbDebug } from './debug';
 import {
 	deleteMealFromDexie,
 	deleteRecipesFromDexie,
@@ -19,6 +20,11 @@ export const syncRecipesFromRemote = async (
 	recipes: readonly RecipeMenuItem[],
 	scope?: ClientCacheScope | null
 ): Promise<void> => {
+	logClientDbDebug('d1->dexie', 'sync recipes from remote', {
+		scope: scopeOrActive(scope),
+		count: recipes.length,
+		ids: recipes.map((recipe) => recipe.id)
+	});
 	await writeRecipesToDexie(recipes, scope);
 };
 
@@ -26,6 +32,12 @@ export const syncMealsFromRemote = async (
 	meals: readonly Meal[],
 	scope?: ClientCacheScope | null
 ): Promise<void> => {
+	logClientDbDebug('d1->dexie', 'sync meals from remote', {
+		scope: scopeOrActive(scope),
+		count: meals.length,
+		ids: meals.map((meal) => meal.id),
+		extra: { dates: meals.map((meal) => meal.date ?? null) }
+	});
 	await writeMealsToDexie(meals, scope);
 };
 
@@ -48,6 +60,10 @@ export const enqueueRemoteSync = async ({
 	const db = getClientDb();
 	if (!db || !activeScope) return;
 	const now = Date.now();
+	logClientDbDebug('dexie->d1', 'enqueue outbox', {
+		scope: activeScope,
+		payload: { operation, entityType: entity, entityId }
+	});
 	await db.syncOutbox.add({
 		key: householdScopedKey(
 			activeScope.userId,
