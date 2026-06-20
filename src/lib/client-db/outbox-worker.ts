@@ -22,6 +22,7 @@ import type { SyncOutboxEntry } from './schema';
 const flushDebounceMs = 1_500;
 const retryIntervalMs = 30_000;
 const maxBackoffMs = 5 * 60_000;
+const maxMissingMealUpdateAttempts = 3;
 
 let started = false;
 let flushing = false;
@@ -160,6 +161,7 @@ const syncMealEntry = async (entry: SyncOutboxEntry) => {
 				return;
 			}
 			if (error instanceof ScheduleMealClientError && error.status === 404) {
+				if (entry.attempts < maxMissingMealUpdateAttempts) throw error;
 				await deleteMealFromDexie(payload.meal.id, entry);
 				return;
 			}
