@@ -16,7 +16,12 @@ import {
 import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import { getClientDb } from './db';
 import { logClientDbDebug } from './debug';
-import { deleteMealFromDexie, writeMealsToDexie, writeRecipesToDexie } from './repositories';
+import {
+	deleteMealFromDexie,
+	deleteRecipesFromDexie,
+	writeMealsToDexie,
+	writeRecipesToDexie
+} from './repositories';
 import type { SyncOutboxEntry } from './schema';
 
 const flushDebounceMs = 1_500;
@@ -182,6 +187,7 @@ const syncRecipeEntry = async (entry: SyncOutboxEntry) => {
 	if (entry.operation === 'create') {
 		const recipe = await createMenuRecipeRemote(payload);
 		await writeRecipesToDexie([recipe], entry);
+		if (entry.entityId !== recipe.id) await deleteRecipesFromDexie([entry.entityId], entry);
 		await rewritePendingMealRecipeIds(entry.entityId, recipe.id);
 		return;
 	}
