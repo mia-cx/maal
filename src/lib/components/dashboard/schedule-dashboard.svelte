@@ -201,6 +201,9 @@
 		return true;
 	};
 
+	const scheduleShortcutsEnabled = () =>
+		!previewOpen && !recipeEditorOpen && !addMealOpen && !checkInOpen;
+
 	const handleScheduleShortcut = (event: KeyboardEvent) => {
 		const activeMealCard =
 			event.target instanceof Element
@@ -481,6 +484,7 @@
 				combo: scheduleShortcutCombos,
 				preventDefault: false,
 				ignoreRepeat: false,
+				when: scheduleShortcutsEnabled,
 				handler: handleScheduleShortcut
 			}
 		]
