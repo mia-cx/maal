@@ -40,6 +40,17 @@ type RecipePayload = {
 const backoffMs = (attempts: number) =>
 	Math.min(maxBackoffMs, retryIntervalMs * 2 ** Math.max(0, attempts - 1));
 
+const localMealIdPrefix = 'local-meal-';
+const isLocalMealId = (mealId: string): boolean => mealId.startsWith(localMealIdPrefix);
+
+const outboxPriority = (entry: SyncOutboxEntry): number => {
+	if (entry.entityType === 'recipe' && entry.operation === 'create') return 0;
+	if (entry.entityType === 'plannedMeal' && entry.operation === 'create') return 1;
+	if (entry.entityType === 'plannedMeal' && entry.operation === 'update') return 2;
+	if (entry.operation === 'delete') return 4;
+	return 3;
+};
+
 const payloadRecord = (entry: SyncOutboxEntry): Record<string, unknown> =>
 	entry.payload && typeof entry.payload === 'object'
 		? (entry.payload as Record<string, unknown>)
@@ -63,6 +74,44 @@ const rewritePendingMealRecipeIds = async (localRecipeId: string, remoteRecipeId
 	);
 };
 
+const createMealTrustingDexie = async (meal: Meal): Promise<Meal> => {
+	try {
+		return await createScheduleMealRemote(meal);
+	} catch (error) {
+		if (
+			error instanceof ScheduleMealClientError &&
+			error.status === 404 &&
+			meal.userRecipeId &&
+			error.body.includes('Recipe not found')
+		) {
+			return await createScheduleMealRemote({ ...meal, userRecipeId: undefined });
+		}
+		throw error;
+	}
+};
+
+const rewritePendingMealIds = async (localMealId: string, remoteMeal: Meal) => {
+	if (localMealId === remoteMeal.id) return;
+	const db = getClientDb();
+	if (!db) return;
+	const entries = await db.syncOutbox.where('entityType').equals('plannedMeal').toArray();
+	await Promise.all(
+		entries.map(async (entry) => {
+			if (!entry.id || entry.entityId !== localMealId) return;
+			const payload = payloadRecord(entry) as MealPayload;
+			await db.syncOutbox.update(entry.id, {
+				entityId: remoteMeal.id,
+				payload: {
+					...payload,
+					mealId: payload.mealId === localMealId ? remoteMeal.id : payload.mealId,
+					meal: payload.meal ? { ...payload.meal, id: remoteMeal.id } : payload.meal
+				},
+				nextAttemptAt: Date.now()
+			});
+		})
+	);
+};
+
 const syncMealEntry = async (entry: SyncOutboxEntry) => {
 	const payload = payloadRecord(entry) as MealPayload;
 	if (entry.operation === 'delete') {
@@ -71,16 +120,23 @@ const syncMealEntry = async (entry: SyncOutboxEntry) => {
 	}
 	if (!payload.meal) throw new Error(`Missing meal payload for ${entry.operation} outbox entry.`);
 	if (entry.operation === 'create') {
-		const meal = await createScheduleMealRemote(payload.meal);
+		const meal = await createMealTrustingDexie(payload.meal);
 		await writeMealsToDexie([meal], entry);
+		await rewritePendingMealIds(entry.entityId, meal);
 		return;
 	}
 	if (entry.operation === 'update') {
 		try {
 			await updateScheduleMealRemote(payload.meal);
 		} catch (error) {
-			if (error instanceof ScheduleMealClientError && error.status === 404) {
-				await createScheduleMealRemote(payload.meal);
+			if (
+				error instanceof ScheduleMealClientError &&
+				error.status === 404 &&
+				isLocalMealId(payload.meal.id)
+			) {
+				const meal = await createMealTrustingDexie(payload.meal);
+				await writeMealsToDexie([meal], entry);
+				await rewritePendingMealIds(payload.meal.id, meal);
 				return;
 			}
 			throw error;
@@ -144,10 +200,10 @@ export const flushClientDbOutbox = async () => {
 	flushing = true;
 	try {
 		const dueAt = Date.now();
-		const entries = await db.syncOutbox
-			.where('nextAttemptAt')
-			.belowOrEqual(dueAt)
-			.sortBy('createdAt');
+		const entries = (await db.syncOutbox.where('nextAttemptAt').belowOrEqual(dueAt).toArray()).sort(
+			(left, right) =>
+				outboxPriority(left) - outboxPriority(right) || left.createdAt - right.createdAt
+		);
 		for (const entry of entries) {
 			if (!entry.id) continue;
 			try {
