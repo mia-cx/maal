@@ -47,6 +47,11 @@ const isLocalMealId = (mealId: string): boolean => mealId.startsWith(localMealId
 const isLocalRecipeId = (recipeId: string): boolean =>
 	localRecipeIdPrefixes.some((prefix) => recipeId.startsWith(prefix));
 
+const isNotFoundError = (error: unknown): boolean =>
+	error instanceof ScheduleMealClientError
+		? error.status === 404
+		: error instanceof Error && /not found/i.test(error.message);
+
 const outboxPriority = (entry: SyncOutboxEntry): number => {
 	if (entry.entityType === 'recipe' && entry.operation === 'create') return 0;
 	if (entry.entityType === 'plannedMeal' && entry.operation === 'create') return 1;
@@ -188,16 +193,31 @@ const syncRecipeEntry = async (entry: SyncOutboxEntry) => {
 	}
 	const recipeIds = payload.recipeIds ?? entry.entityId.split(',').filter(Boolean);
 	if (entry.operation === 'archive') {
-		await archiveMenuRecipesRemote(recipeIds);
+		try {
+			await archiveMenuRecipesRemote(recipeIds);
+		} catch (error) {
+			if (isNotFoundError(error)) return;
+			throw error;
+		}
 		return;
 	}
 	if (entry.operation === 'restore') {
-		const recipes = await restoreMenuRecipesRemote(recipeIds);
-		await writeRecipesToDexie(recipes, entry);
+		try {
+			const recipes = await restoreMenuRecipesRemote(recipeIds);
+			await writeRecipesToDexie(recipes, entry);
+		} catch (error) {
+			if (isNotFoundError(error)) return;
+			throw error;
+		}
 		return;
 	}
 	if (entry.operation === 'delete') {
-		await permanentlyDeleteMenuRecipesRemote(recipeIds);
+		try {
+			await permanentlyDeleteMenuRecipesRemote(recipeIds);
+		} catch (error) {
+			if (isNotFoundError(error)) return;
+			throw error;
+		}
 		return;
 	}
 	throw new Error(`Unsupported recipe operation: ${entry.operation}`);
