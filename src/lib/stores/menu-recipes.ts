@@ -1,12 +1,12 @@
 import { browser } from '$app/environment';
-import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import {
-	archiveMenuRecipesRemote,
-	createMenuRecipeRemote,
-	permanentlyDeleteMenuRecipesRemote,
-	restoreMenuRecipesRemote,
-	updateMenuRecipeRemote
-} from '$lib/menu/menu-client';
+	deleteMealsForRecipeFromDexie,
+	deleteRecipesFromDexie,
+	readRecipesFromDexie,
+	writeRecipesToDexie
+} from '$lib/client-db/repositories';
+import type { RecipeMenuItem } from '$lib/menu/menu-types';
+import { enqueueRemoteSync } from '$lib/client-db/sync';
 import { atom, computed } from 'nanostores';
 
 const cloneRecipe = (recipe: RecipeMenuItem): RecipeMenuItem => ({
@@ -44,24 +44,6 @@ const replaceRecipe = (recipe: RecipeMenuItem) => {
 	);
 };
 
-const removeRecipe = (recipeId: string) => {
-	menuRecipesStore.set(menuRecipesStore.get().filter((recipe) => recipe.id !== recipeId));
-	if (selectedMenuRecipeIdStore.get() === recipeId) selectedMenuRecipeIdStore.set(null);
-};
-
-const removeArchivedRecipe = (recipeId: string) => {
-	archivedMenuRecipesStore.set(
-		archivedMenuRecipesStore.get().filter((recipe) => recipe.id !== recipeId)
-	);
-};
-
-const archiveRecipe = (recipe: RecipeMenuItem, archivedAt?: string) => {
-	archivedMenuRecipesStore.set([
-		{ ...cloneRecipe(recipe), archivedAt: archivedAt ?? recipe.archivedAt },
-		...archivedMenuRecipesStore.get().filter((candidate) => candidate.id !== recipe.id)
-	]);
-};
-
 const removeRecipes = (recipeIds: string[]) => {
 	const idSet = new Set(recipeIds);
 	menuRecipesStore.set(menuRecipesStore.get().filter((recipe) => !idSet.has(recipe.id)));
@@ -94,6 +76,14 @@ export const hydrateMenuRecipes = (
 ) => {
 	menuRecipesStore.set(cloneRecipes(recipes));
 	if (archivedRecipes) archivedMenuRecipesStore.set(cloneRecipes(archivedRecipes));
+	void writeRecipesToDexie(archivedRecipes ? [...recipes, ...archivedRecipes] : recipes);
+};
+
+export const hydrateMenuRecipesFromDexie = async () => {
+	const cached = await readRecipesFromDexie();
+	if (!cached.recipes.length && !cached.archivedRecipes.length) return cached;
+	hydrateMenuRecipes(cached.recipes, cached.archivedRecipes);
+	return cached;
 };
 
 export const appendMenuRecipes = (recipes: RecipeMenuItem[]) => {
@@ -103,6 +93,7 @@ export const appendMenuRecipes = (recipes: RecipeMenuItem[]) => {
 		...existingRecipes.filter((recipe) => !incomingRecipeIds.has(recipe.id)),
 		...cloneRecipes(recipes)
 	]);
+	void writeRecipesToDexie(recipes);
 };
 
 export const selectMenuRecipe = (recipeId: string | null) => {
@@ -115,12 +106,20 @@ export const createMenuRecipe = async (input: {
 	recipe?: RecipeMenuItem;
 }) => {
 	if (!browser) throw new Error('Recipe creation requires a browser session.');
-	const recipe = await createMenuRecipeRemote(input);
+	const recipe = input.recipe;
+	if (!recipe) throw new Error('Recipe creation requires a recipe draft.');
+	await enqueueRemoteSync({
+		entity: 'recipe',
+		operation: 'create',
+		entityId: recipe.id,
+		payload: input
+	});
 	const recipes = menuRecipesStore.get();
 	menuRecipesStore.set([
 		...recipes.filter((candidate) => candidate.id !== recipe.id),
 		cloneRecipe(recipe)
 	]);
+	void writeRecipesToDexie([recipe]);
 	return recipe;
 };
 
@@ -130,9 +129,14 @@ export const updateMenuRecipe = async (recipe: RecipeMenuItem) => {
 	if (!browser) return recipe;
 
 	try {
-		const persistedRecipe = await updateMenuRecipeRemote(recipe);
-		replaceRecipe(persistedRecipe);
-		return persistedRecipe;
+		await writeRecipesToDexie([recipe]);
+		await enqueueRemoteSync({
+			entity: 'recipe',
+			operation: 'update',
+			entityId: recipe.id,
+			payload: recipe
+		});
+		return recipe;
 	} catch (error) {
 		if (previousRecipe) replaceRecipe(previousRecipe);
 		throw error;
@@ -152,8 +156,15 @@ export const deleteMenuRecipes = async (recipes: RecipeMenuItem[]) => {
 	if (!browser) return;
 
 	try {
-		const body = await archiveMenuRecipesRemote(recipeIds);
-		archiveRecipes(recipes, body.deletedAt);
+		const deletedAt = new Date().toISOString();
+		archiveRecipes(recipes, deletedAt);
+		await writeRecipesToDexie(recipes.map((recipe) => ({ ...recipe, archivedAt: deletedAt })));
+		await enqueueRemoteSync({
+			entity: 'recipe',
+			operation: 'archive',
+			entityId: recipeIds.join(','),
+			payload: { recipeIds }
+		});
 	} catch (error) {
 		menuRecipesStore.set(previousRecipes);
 		archivedMenuRecipesStore.set(previousArchivedRecipes);
@@ -174,15 +185,19 @@ export const restoreMenuRecipes = async (recipes: RecipeMenuItem[]) => {
 	if (!browser) return [];
 
 	try {
-		const remoteRecipes = await restoreMenuRecipesRemote(recipeIds);
-		const restoredRecipes = remoteRecipes.length
-			? remoteRecipes
-			: recipes.map((recipe) => ({ ...recipe, archivedAt: undefined }));
+		const restoredRecipes = recipes.map((recipe) => ({ ...recipe, archivedAt: undefined }));
 		const restoredIds = new Set(restoredRecipes.map((recipe) => recipe.id));
 		menuRecipesStore.set([
 			...restoredRecipes.map(cloneRecipe),
 			...menuRecipesStore.get().filter((candidate) => !restoredIds.has(candidate.id))
 		]);
+		void writeRecipesToDexie(restoredRecipes);
+		await enqueueRemoteSync({
+			entity: 'recipe',
+			operation: 'restore',
+			entityId: recipeIds.join(','),
+			payload: { recipeIds }
+		});
 		return restoredRecipes;
 	} catch (error) {
 		menuRecipesStore.set(previousRecipes);
@@ -200,10 +215,18 @@ export const permanentlyDeleteMenuRecipes = async (recipes: RecipeMenuItem[]) =>
 	const previousArchivedRecipes = archivedMenuRecipesStore.get();
 	const recipeIds = recipes.map((recipe) => recipe.id);
 	removeArchivedRecipes(recipeIds);
+	void deleteRecipesFromDexie(recipeIds);
+	void deleteMealsForRecipeFromDexie(recipeIds);
 	if (!browser) return { deletedMealCount: 0 };
 
 	try {
-		return await permanentlyDeleteMenuRecipesRemote(recipeIds);
+		await enqueueRemoteSync({
+			entity: 'recipe',
+			operation: 'delete',
+			entityId: recipeIds.join(','),
+			payload: { recipeIds, permanent: true }
+		});
+		return { deletedMealCount: 0 };
 	} catch (error) {
 		archivedMenuRecipesStore.set(previousArchivedRecipes);
 		throw error;

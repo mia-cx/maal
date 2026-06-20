@@ -1,10 +1,14 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages';
 	import { invalidateAll } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { navigating, page } from '$app/state';
 	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
 	import { setClientAppLocale } from '$lib/i18n/client-app-locale';
 	import { activeNavItemForPath } from '$lib/components/dashboard/active-nav';
+	import { clearInactiveUserCache, writeAppContextCache } from '$lib/client-db/app-cache';
+	import { setClientCacheScope } from '$lib/client-db/context';
+	import { startClientDbOutboxWorker } from '$lib/client-db/outbox-worker';
 	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
 	import type { DashboardNavItem } from '$lib/components/dashboard/dashboard-nav';
 	import * as Popover from '$lib/components/ui/popover';
@@ -16,6 +20,7 @@
 		writeActiveHouseholdCookie
 	} from '$lib/stores/active-household';
 	import { appShellUiState, updateAppShellUiState } from '$lib/stores/app-shell-ui-state';
+	import { hydrateUiStateFromDexie } from '$lib/stores/ui-state';
 	import { onMount, untrack, type Snippet } from 'svelte';
 	import type { LayoutData } from './$types';
 
@@ -32,6 +37,7 @@
 	let resizingSidebar = $state(false);
 	let exportDataPopoverOpen = $state(false);
 	let householdStateHydrated = $state(false);
+	let uiStateHydrated = $state(false);
 
 	const features = $derived(featurePreviews(data.session));
 	const sidebarUser = $derived({
@@ -49,6 +55,8 @@
 			!isSubscribePage
 	);
 	const canManageSubscription = $derived(Boolean(data.subscriptionLock?.canManageSubscription));
+	const subscribeHref = resolve('/subscribe');
+	const exportDataHref = resolve('/export-data');
 	const navigatingWithinApp = $derived(
 		Boolean(
 			navigating.to?.url.pathname.startsWith('/plan') ||
@@ -57,7 +65,10 @@
 		)
 	);
 
+	const desktopSidebarVisible = () => window.matchMedia('(min-width: 768px)').matches;
+
 	const startSidebarResize = (event: PointerEvent) => {
+		if (!desktopSidebarVisible()) return;
 		resizingSidebar = true;
 		event.preventDefault();
 	};
@@ -77,6 +88,20 @@
 	};
 
 	onMount(() => {
+		setClientCacheScope(
+			data.session?.user.id && data.activeHouseholdId
+				? { userId: data.session.user.id, householdId: data.activeHouseholdId }
+				: null
+		);
+		void writeAppContextCache({ session: data.session, households: data.households });
+		void clearInactiveUserCache(data.session?.user.id);
+		startClientDbOutboxWorker();
+		void hydrateUiStateFromDexie().then((cachedUiState) => {
+			sidebarOpen = cachedUiState.sidebarOpen;
+			sidebarWidth = cachedUiState.sidebarWidth;
+			uiStateHydrated = true;
+		});
+
 		const storedHouseholdId = activeHouseholdId.get();
 		const storedHouseholdIsAccessible = data.households.some(
 			(household) => household.id === storedHouseholdId
@@ -102,10 +127,16 @@
 	});
 
 	$effect(() => {
+		if (!uiStateHydrated) return;
 		updateAppShellUiState({ activeNav, sidebarOpen, sidebarWidth });
 	});
 
 	$effect(() => {
+		setClientCacheScope(
+			data.session?.user.id && data.activeHouseholdId
+				? { userId: data.session.user.id, householdId: data.activeHouseholdId }
+				: null
+		);
 		if (householdStateHydrated) setActiveHouseholdId(data.activeHouseholdId);
 	});
 </script>
@@ -142,7 +173,8 @@
 			{#if sidebarOpen}
 				<button
 					aria-label={m.app_resize_sidebar()}
-					class="fixed top-0 bottom-0 z-[55] w-3 cursor-col-resize bg-transparent after:absolute after:top-0 after:bottom-0 after:left-1/2 after:w-px after:-translate-x-1/2 hover:after:bg-border"
+					class="fixed top-0 bottom-0 z-[55] hidden w-3 cursor-col-resize bg-transparent after:absolute after:top-0 after:bottom-0 after:left-1/2 after:w-px after:-translate-x-1/2 md:block"
+					class:after:bg-border={resizingSidebar}
 					style:left="{sidebarWidth - 6}px"
 					onpointerdown={startSidebarResize}
 				></button>
@@ -189,7 +221,7 @@
 									<div class="mt-4 flex justify-center gap-2">
 										<a
 											class="inline-flex h-9 items-center justify-center rounded-md bg-[var(--brand-salmon)] px-4 text-sm font-medium text-white shadow-xs transition-colors hover:bg-[var(--brand-salmon)]/90 focus-visible:ring-2 focus-visible:ring-[var(--brand-salmon)]/30 focus-visible:outline-none"
-											href="/subscribe"
+											href={subscribeHref}
 										>
 											{m.app_subscribe()}
 										</a>
@@ -222,7 +254,7 @@
 									</p>
 									<a
 										class="mt-1 inline-block text-sm font-medium underline underline-offset-4"
-										href="/export-data">{m.app_export_your_data()}</a
+										href={exportDataHref}>{m.app_export_your_data()}</a
 									>
 								{/if}
 							</div>

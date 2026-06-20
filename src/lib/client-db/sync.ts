@@ -1,0 +1,115 @@
+import type { Meal } from '$lib/components/dashboard/schedule-types';
+import type { RecipeMenuItem } from '$lib/components/menu';
+import { getClientCacheScope, type ClientCacheScope } from './context';
+import { logClientDbDebug } from './debug';
+import {
+	deleteMealFromDexie,
+	deleteRecipesFromDexie,
+	writeMealsToDexie,
+	writeRecipesToDexie
+} from './repositories';
+
+export type SyncEntity = 'recipe' | 'plannedMeal';
+export type SyncOperation = 'create' | 'update' | 'delete' | 'archive' | 'restore';
+
+type RemoteSyncTask = () => Promise<unknown>;
+
+const scopeOrActive = (scope?: ClientCacheScope | null) => scope ?? getClientCacheScope();
+const toPlain = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+export const syncRecipesFromRemote = async (
+	recipes: readonly RecipeMenuItem[],
+	scope?: ClientCacheScope | null
+): Promise<void> => {
+	logClientDbDebug('d1->dexie', 'sync recipes from remote', {
+		scope: scopeOrActive(scope),
+		count: recipes.length,
+		ids: recipes.map((recipe) => recipe.id)
+	});
+	await writeRecipesToDexie(recipes, scope);
+};
+
+export const syncMealsFromRemote = async (
+	meals: readonly Meal[],
+	scope?: ClientCacheScope | null
+): Promise<void> => {
+	logClientDbDebug('d1->dexie', 'sync meals from remote', {
+		scope: scopeOrActive(scope),
+		count: meals.length,
+		ids: meals.map((meal) => meal.id),
+		extra: { dates: meals.map((meal) => meal.date ?? null) }
+	});
+	await writeMealsToDexie(meals, scope);
+};
+
+export const enqueueRemoteSync = async ({
+	entity,
+	operation,
+	entityId,
+	payload,
+	scope
+}: {
+	entity: SyncEntity;
+	operation: SyncOperation;
+	entityId: string;
+	payload: unknown;
+	scope?: ClientCacheScope | null;
+}): Promise<void> => {
+	const activeScope = scopeOrActive(scope);
+	const { getClientDb } = await import('./db');
+	const { householdScopedKey } = await import('./schema');
+	const db = getClientDb();
+	if (!db || !activeScope) return;
+	const now = Date.now();
+	const outboxKey = householdScopedKey(
+		activeScope.userId,
+		activeScope.householdId,
+		`${entity}:${entityId}:${operation}`
+	);
+	const existing = await db.syncOutbox.where('key').equals(outboxKey).first();
+	logClientDbDebug('dexie-outbox', existing ? 'coalesce outbox' : 'enqueue outbox', {
+		scope: activeScope,
+		payload: { operation, entityType: entity, entityId }
+	});
+	await db.syncOutbox.put({
+		...(existing?.id ? { id: existing.id } : {}),
+		key: outboxKey,
+		userId: activeScope.userId,
+		householdId: activeScope.householdId,
+		operation,
+		entityType: entity,
+		entityId,
+		payload: toPlain(payload),
+		createdAt: existing?.createdAt ?? now,
+		attempts: existing?.attempts ?? 0,
+		nextAttemptAt: now
+	});
+	const { scheduleClientDbOutboxFlush } = await import('./outbox-worker');
+	scheduleClientDbOutboxFlush();
+};
+
+export const queueRemoteSync = async (input: {
+	entity: SyncEntity;
+	operation: SyncOperation;
+	entityId: string;
+	payload: unknown;
+	remote?: RemoteSyncTask;
+	scope?: ClientCacheScope | null;
+}): Promise<unknown> => {
+	await enqueueRemoteSync(input);
+	return undefined;
+};
+
+export const removeRecipeLocally = async (
+	recipeIds: readonly string[],
+	scope?: ClientCacheScope | null
+): Promise<void> => {
+	await deleteRecipesFromDexie(recipeIds, scope);
+};
+
+export const removeMealLocally = async (
+	mealId: string,
+	scope?: ClientCacheScope | null
+): Promise<void> => {
+	await deleteMealFromDexie(mealId, scope);
+};

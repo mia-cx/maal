@@ -6,15 +6,21 @@
 		addScheduleMealFromRecipe,
 		deleteScheduleMeal,
 		hydrateScheduleMeals,
-		mergeHydratedScheduleMeals,
+		hydrateScheduleMealsFromDexie,
 		moveScheduleMealToDropTarget,
 		scheduleMealStore,
 		selectScheduleMeal,
 		selectedMealStore,
 		updateScheduleMealSchedule
 	} from '$lib/stores/schedule-meals';
-	import { createMenuRecipe, hydrateMenuRecipes, menuRecipesStore } from '$lib/stores/menu-recipes';
-	import { fetchRecipePickerRecipes } from '$lib/menu/menu-client';
+	import {
+		createMenuRecipe,
+		hydrateMenuRecipes,
+		hydrateMenuRecipesFromDexie,
+		menuRecipesStore
+	} from '$lib/stores/menu-recipes';
+	import { importRecipeDraftFromUrl } from '$lib/client-db/recipe-import';
+	import { searchRecipesInDexie } from '$lib/client-db/repositories';
 	import { createDraftRecipe } from '$lib/menu/recipe-draft';
 	import {
 		clearScheduleDailyScroll,
@@ -34,8 +40,6 @@
 	import { addDays, addMonths, dateFromKey, dateKey, startOfDay } from './schedule-date';
 	import { dropTargetFromPointer } from './schedule-dnd';
 	import { isMealInPool, sortMealPool } from './schedule-ordering';
-	import { submitMealCheckIn } from './schedule-check-ins';
-	import { fetchScheduleMealRange, ScheduleMealClientError } from './schedule-meal-client';
 	import { cardDirectionByKey, focusMealCard } from './schedule-keyboard';
 	import { hasLoadedMealRange, missingMealRanges, type MealRange } from './schedule-ranges';
 	import type { UnitPreferences } from '$lib/recipes/ingredient-text';
@@ -131,16 +135,9 @@
 		if (loadingMealRangeKey === key) return;
 		loadingMealRangeKey = key;
 		try {
-			const meals = await fetchScheduleMealRange(range);
 			mealRangeError = null;
-			mergeHydratedScheduleMeals(meals, range.start, range.end);
+			await hydrateScheduleMealsFromDexie();
 			loadedMealRanges = [...loadedMealRanges, { start: range.start, end: range.end }];
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Failed to load meal range.';
-			mealRangeError = message;
-			if (!(error instanceof ScheduleMealClientError) || error.status !== 402) {
-				console.error('Failed to load meal range', error);
-			}
 		} finally {
 			if (loadingMealRangeKey === key) loadingMealRangeKey = '';
 		}
@@ -170,9 +167,14 @@
 
 	const loadPickerRecipes = async () => {
 		if (pickerRecipesLoaded || pickerRecipesLoading || $menuRecipesStore.length > 0) return;
+		const cached = await hydrateMenuRecipesFromDexie();
+		if (cached.recipes.length) {
+			pickerRecipesLoaded = true;
+			return;
+		}
 		pickerRecipesLoading = true;
 		try {
-			hydrateMenuRecipes(await fetchRecipePickerRecipes());
+			hydrateMenuRecipes(await searchRecipesInDexie('', 60));
 			pickerRecipesLoaded = true;
 		} catch (error) {
 			addMealError = error instanceof Error ? error.message : 'Could not load recipes.';
@@ -199,6 +201,9 @@
 		anchorDate = startOfDay(addDays(anchorDate, rowDelta * 7));
 		return true;
 	};
+
+	const scheduleShortcutsEnabled = () =>
+		!previewOpen && !recipeEditorOpen && !addMealOpen && !checkInOpen;
 
 	const handleScheduleShortcut = (event: KeyboardEvent) => {
 		const activeMealCard =
@@ -285,7 +290,19 @@
 	};
 
 	const saveMealCheckIn = async (payload: MealCheckInPayload) => {
-		updateScheduleMealSchedule(await submitMealCheckIn(payload), 'external');
+		updateScheduleMealSchedule(
+			{
+				...payload.meal,
+				status: payload.cooked ? 'cooked' : 'skipped',
+				latestVerdict: payload.verdict,
+				latestCheckIn: {
+					verdict: payload.verdict,
+					cookTime: payload.cookTime,
+					reason: payload.reason?.trim() || undefined
+				}
+			},
+			'external'
+		);
 	};
 
 	const createMeal = (date?: string) => {
@@ -336,7 +353,8 @@
 		addMealBusy = true;
 		addMealError = null;
 		try {
-			previewAddedRecipe(await createMenuRecipe({ url }));
+			const importedRecipe = await importRecipeDraftFromUrl(url);
+			previewAddedRecipe(await createMenuRecipe({ recipe: importedRecipe }));
 		} catch (error) {
 			addMealError = readAddMealError(error);
 		} finally {
@@ -410,6 +428,12 @@
 	};
 
 	$effect(() => {
+		void hydrateScheduleMealsFromDexie();
+		void hydrateMenuRecipesFromDexie();
+	});
+
+	$effect(() => {
+		if (!initialMeals.length) return;
 		const signature = initialMeals.map((meal) => meal.id).join('|');
 		if (signature === hydratedMealsSignature) return;
 		hydratedMealsSignature = signature;
@@ -418,6 +442,7 @@
 	});
 
 	$effect(() => {
+		if (!initialRecipes.length) return;
 		const signature = initialRecipes.map((recipe) => recipe.id).join('|');
 		if (signature === hydratedRecipesSignature) return;
 		hydratedRecipesSignature = signature;
@@ -461,6 +486,7 @@
 				combo: scheduleShortcutCombos,
 				preventDefault: false,
 				ignoreRepeat: false,
+				when: scheduleShortcutsEnabled,
 				handler: handleScheduleShortcut
 			}
 		]
