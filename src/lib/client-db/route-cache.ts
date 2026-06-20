@@ -2,7 +2,6 @@ import type { HouseholdMember, Meal } from '$lib/components/dashboard/schedule-t
 import type { RecipeMenuItem } from '$lib/components/menu';
 import { logClientDbDebug } from './debug';
 import { getClientDb } from './db';
-import { writeRecipesToDexie } from './repositories';
 import {
 	householdScopedKey,
 	routeCacheTtlMs,
@@ -139,10 +138,6 @@ export const setCachedMenuRouteData = async (
 			archivedCount: cloned.archivedRecipes.length,
 			nextRecipeOffset: cloned.nextRecipeOffset
 		}
-	});
-	await writeRecipesToDexie([...cloned.recipes, ...cloned.archivedRecipes], {
-		userId: scope.userId,
-		householdId: scope.householdId
 	});
 	await db.menuRoutes.put({
 		key,

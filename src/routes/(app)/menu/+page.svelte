@@ -30,15 +30,17 @@
 		if (!canReadHouseholdCache(householdId)) return;
 		const version = ++cacheHydrationVersion;
 		const scope = cacheScope(householdId);
-		const cached = await getCachedMenuRouteData(scope);
-		const recipeCache = cached ? null : await readRecipesFromDexie(scope);
+		const [cached, recipeCache] = await Promise.all([
+			getCachedMenuRouteData(scope),
+			readRecipesFromDexie(scope)
+		]);
 		const hasRecipeCache = Boolean(
-			recipeCache?.recipes.length || recipeCache?.archivedRecipes.length
+			recipeCache.recipes.length || recipeCache.archivedRecipes.length
 		);
 		if (version !== cacheHydrationVersion || (!cached && !hasRecipeCache && !clearWhenMissing))
 			return;
-		recipes = cached?.recipes ?? recipeCache?.recipes ?? [];
-		archivedRecipes = cached?.archivedRecipes ?? recipeCache?.archivedRecipes ?? [];
+		recipes = recipeCache.recipes;
+		archivedRecipes = recipeCache.archivedRecipes;
 		nextRecipeOffset = cached?.nextRecipeOffset ?? null;
 	};
 

@@ -158,7 +158,7 @@ export const deleteMenuRecipes = async (recipes: RecipeMenuItem[]) => {
 	try {
 		const deletedAt = new Date().toISOString();
 		archiveRecipes(recipes, deletedAt);
-		void writeRecipesToDexie(recipes.map((recipe) => ({ ...recipe, archivedAt: deletedAt })));
+		await writeRecipesToDexie(recipes.map((recipe) => ({ ...recipe, archivedAt: deletedAt })));
 		await enqueueRemoteSync({
 			entity: 'recipe',
 			operation: 'archive',
