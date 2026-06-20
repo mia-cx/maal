@@ -207,6 +207,7 @@ const persistScheduleMealChange = (change: ScheduleMealChange) => {
 	if (!browser || change.source === 'hydrate' || change.source === 'external') return;
 	if (pendingCreateMealIds.has(change.meal.id)) return;
 
+	void writePersistedMealsToDexie([change.meal]);
 	const persistVersion = ++nextPersistVersion;
 	pendingPersistVersions.set(change.meal.id, persistVersion);
 	optimisticMealSnapshots.set(change.meal.id, cloneMeal(change.meal));
