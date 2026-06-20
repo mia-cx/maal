@@ -3,10 +3,14 @@ import {
 	createScheduleMealRemote,
 	deleteScheduleMealRemote,
 	fetchScheduleMealRange,
+	ScheduleMealClientError,
 	updateScheduleMealRemote
 } from '$lib/components/dashboard/schedule-meal-client';
 import { deleteMealFromDexie, writeMealsToDexie } from './repositories';
 import { queueRemoteSync } from './sync';
+
+export const isScheduleSyncErrorWithStatus = (error: unknown, status: number): boolean =>
+	error instanceof ScheduleMealClientError && error.status === status;
 
 export const syncMealRangeFromRemote = async (range: { start: string; end: string }) => {
 	const meals = await fetchScheduleMealRange(range);

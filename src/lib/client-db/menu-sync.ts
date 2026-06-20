@@ -2,12 +2,36 @@ import type { RecipeMenuItem } from '$lib/menu/menu-types';
 import {
 	archiveMenuRecipesRemote,
 	createMenuRecipeRemote,
+	fetchMenuRecipesPageRemote,
+	importRecipeDraftFromUrlRemote,
 	permanentlyDeleteMenuRecipesRemote,
 	restoreMenuRecipesRemote,
+	searchMenuRecipesRemote,
 	updateMenuRecipeRemote
 } from '$lib/menu/menu-client';
 import { deleteRecipesFromDexie, writeRecipesToDexie } from './repositories';
 import { queueRemoteSync } from './sync';
+
+export const syncRecipePageFromRemote = async (offset: number) => {
+	const body = await fetchMenuRecipesPageRemote(offset);
+	await writeRecipesToDexie(body.recipes);
+	return body;
+};
+
+export const syncRecipeSearchFromRemote = async (
+	query: string,
+	options: { signal?: AbortSignal } = {}
+): Promise<RecipeMenuItem[]> => {
+	const recipes = await searchMenuRecipesRemote(query, options);
+	await writeRecipesToDexie(recipes);
+	return recipes;
+};
+
+export const syncImportedRecipeDraftFromRemote = async (url: string): Promise<RecipeMenuItem> => {
+	const recipe = await importRecipeDraftFromUrlRemote(url);
+	await writeRecipesToDexie([recipe]);
+	return recipe;
+};
 
 export const syncCreatedRecipeToRemote = async (input: {
 	title?: string;

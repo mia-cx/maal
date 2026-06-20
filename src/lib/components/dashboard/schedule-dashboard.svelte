@@ -7,7 +7,6 @@
 		deleteScheduleMeal,
 		hydrateScheduleMeals,
 		hydrateScheduleMealsFromDexie,
-		mergeHydratedScheduleMeals,
 		moveScheduleMealToDropTarget,
 		scheduleMealStore,
 		selectScheduleMeal,
@@ -20,7 +19,7 @@
 		hydrateMenuRecipesFromDexie,
 		menuRecipesStore
 	} from '$lib/stores/menu-recipes';
-	import { fetchRecipePickerRecipes } from '$lib/menu/menu-client';
+	import { searchRecipesInDexie } from '$lib/client-db/repositories';
 	import { createDraftRecipe } from '$lib/menu/recipe-draft';
 	import {
 		clearScheduleDailyScroll,
@@ -40,9 +39,11 @@
 	import { addDays, addMonths, dateFromKey, dateKey, startOfDay } from './schedule-date';
 	import { dropTargetFromPointer } from './schedule-dnd';
 	import { isMealInPool, sortMealPool } from './schedule-ordering';
-	import { submitMealCheckIn } from './schedule-check-ins';
-	import { syncMealRangeFromRemote } from '$lib/client-db/schedule-sync';
-	import { ScheduleMealClientError } from './schedule-meal-client';
+	import { syncMealCheckInToRemote } from '$lib/client-db/check-in-sync';
+	import {
+		isScheduleSyncErrorWithStatus,
+		syncMealRangeFromRemote
+	} from '$lib/client-db/schedule-sync';
 	import { cardDirectionByKey, focusMealCard } from './schedule-keyboard';
 	import { hasLoadedMealRange, missingMealRanges, type MealRange } from './schedule-ranges';
 	import type { UnitPreferences } from '$lib/recipes/ingredient-text';
@@ -138,14 +139,14 @@
 		if (loadingMealRangeKey === key) return;
 		loadingMealRangeKey = key;
 		try {
-			const meals = await syncMealRangeFromRemote(range);
+			await syncMealRangeFromRemote(range);
 			mealRangeError = null;
-			mergeHydratedScheduleMeals(meals, range.start, range.end);
+			await hydrateScheduleMealsFromDexie();
 			loadedMealRanges = [...loadedMealRanges, { start: range.start, end: range.end }];
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Failed to load meal range.';
 			mealRangeError = message;
-			if (!(error instanceof ScheduleMealClientError) || error.status !== 402) {
+			if (!isScheduleSyncErrorWithStatus(error, 402)) {
 				console.error('Failed to load meal range', error);
 			}
 		} finally {
@@ -184,7 +185,7 @@
 		}
 		pickerRecipesLoading = true;
 		try {
-			hydrateMenuRecipes(await fetchRecipePickerRecipes());
+			hydrateMenuRecipes(await searchRecipesInDexie('', 60));
 			pickerRecipesLoaded = true;
 		} catch (error) {
 			addMealError = error instanceof Error ? error.message : 'Could not load recipes.';
@@ -297,7 +298,7 @@
 	};
 
 	const saveMealCheckIn = async (payload: MealCheckInPayload) => {
-		updateScheduleMealSchedule(await submitMealCheckIn(payload), 'external');
+		updateScheduleMealSchedule(await syncMealCheckInToRemote(payload), 'external');
 	};
 
 	const createMeal = (date?: string) => {
