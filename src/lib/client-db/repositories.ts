@@ -5,9 +5,11 @@ import { getClientDb } from './db';
 import { getClientCacheScope, type ClientCacheScope } from './context';
 import { householdScopedKey, type CachedPlannedMeal, type CachedRecipe } from './schema';
 
+const localMealIdPrefix = 'local-meal-';
 const now = () => Date.now();
 
 const scopeOrActive = (scope?: ClientCacheScope | null) => scope ?? getClientCacheScope();
+const isPersistedMeal = (meal: Meal): boolean => !meal.id.startsWith(localMealIdPrefix);
 
 const toPlain = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
@@ -100,7 +102,9 @@ export const readMealsFromDexie = async (scope?: ClientCacheScope | null): Promi
 		.where('[userId+householdId]')
 		.equals([activeScope.userId, activeScope.householdId])
 		.toArray();
-	return rows.map(cloneMeal);
+	const staleLocalRows = rows.filter((meal) => !isPersistedMeal(meal));
+	await db.plannedMeals.bulkDelete(staleLocalRows.map((meal) => meal.key));
+	return rows.filter(isPersistedMeal).map(cloneMeal);
 };
 
 export const writeMealsToDexie = async (
@@ -109,10 +113,11 @@ export const writeMealsToDexie = async (
 ): Promise<void> => {
 	const db = getClientDb();
 	const activeScope = scopeOrActive(scope);
-	if (!db || !activeScope || !meals.length) return;
+	const persistedMeals = meals.filter(isPersistedMeal);
+	if (!db || !activeScope || !persistedMeals.length) return;
 	const cachedAt = now();
 	await db.plannedMeals.bulkPut(
-		meals.map(
+		persistedMeals.map(
 			(meal) =>
 				({
 					...cloneMeal(meal),
