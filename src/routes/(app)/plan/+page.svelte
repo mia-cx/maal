@@ -26,9 +26,12 @@
 	) => {
 		if (!canReadHouseholdCache(householdId)) return;
 		const version = ++cacheHydrationVersion;
-		const cached = await getCachedPlanRouteData(cacheScope(householdId));
-		if (version !== cacheHydrationVersion || (!cached && !clearWhenMissing)) return;
-		meals = cached?.meals ?? (await readMealsFromDexie(cacheScope(householdId)));
+		const scope = cacheScope(householdId);
+		const cached = await getCachedPlanRouteData(scope);
+		const dexieMeals = cached ? [] : await readMealsFromDexie(scope);
+		if (version !== cacheHydrationVersion || (!cached && !dexieMeals.length && !clearWhenMissing))
+			return;
+		meals = cached?.meals ?? dexieMeals;
 		householdMembers = cached?.householdMembers ?? [];
 	};
 

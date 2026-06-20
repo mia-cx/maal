@@ -9,20 +9,11 @@ const now = () => Date.now();
 
 const scopeOrActive = (scope?: ClientCacheScope | null) => scope ?? getClientCacheScope();
 
-const cloneRecipe = (recipe: RecipeMenuItem): RecipeMenuItem => ({
-	...recipe,
-	ingredients: recipe.ingredients?.map((ingredient) => ({ ...ingredient })),
-	instructions: recipe.instructions?.map((instruction) => ({ ...instruction })),
-	reviewSummary: recipe.reviewSummary
-		? { ...recipe.reviewSummary, notes: [...recipe.reviewSummary.notes] }
-		: recipe.reviewSummary
-});
+const toPlain = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
-const cloneMeal = (meal: Meal): Meal => ({
-	...meal,
-	ingredients: meal.ingredients ? [...meal.ingredients] : undefined,
-	instructions: meal.instructions ? [...meal.instructions] : undefined
-});
+const cloneRecipe = (recipe: RecipeMenuItem): RecipeMenuItem => toPlain(recipe);
+
+const cloneMeal = (meal: Meal): Meal => toPlain(meal);
 
 export const readRecipesFromDexie = async (
 	scope?: ClientCacheScope | null
