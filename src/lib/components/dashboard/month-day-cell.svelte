@@ -1,13 +1,13 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages';
 	import { cn } from '$lib/utils.js';
-	import { onMount, tick } from 'svelte';
 	import { dateKey, isSameMonth, isToday } from './schedule-date';
 	import { handleBlankScheduleTarget } from './schedule-interactions';
 	import ScheduledMealList from './scheduled-meal-list.svelte';
 	import type {
 		Meal,
 		MealAddHandler,
+		MealCheckInHandler,
 		MealDropTarget,
 		MealPickHandler,
 		MealSelectHandler
@@ -24,6 +24,7 @@
 		onaddmeal,
 		onpick,
 		onselect,
+		oncheckin,
 		onselectdate
 	}: {
 		day: Date;
@@ -36,14 +37,13 @@
 		onaddmeal?: MealAddHandler;
 		onpick?: MealPickHandler;
 		onselect?: MealSelectHandler;
+		oncheckin?: MealCheckInHandler;
 		onselectdate?: (date: Date) => void;
 	} = $props();
 
-	let sectionElement: HTMLElement;
-	let contentElement: HTMLDivElement;
-	let visibleMealCount = $state(0);
-	let measureVersion = 0;
-	let lastMeasurementKey = '';
+	const compactMealRowHeight = 28;
+	const overflowRowHeight = 20;
+	let contentHeight = $state(0);
 
 	const dayKey = $derived(dateKey(day));
 	const isInMonth = $derived(isSameMonth(day, anchorDate));
@@ -53,6 +53,9 @@
 	const previewSourceMeals = $derived(
 		previewIndex >= 0 ? meals.filter((meal) => meal.id !== draggingMealId) : meals
 	);
+	const visibleMealCount = $derived(
+		Math.max(0, Math.floor((contentHeight - overflowRowHeight) / compactMealRowHeight))
+	);
 	const monthVisibleMeals = $derived(previewSourceMeals.slice(0, visibleMealCount));
 	const overflowCount = $derived(Math.max(0, previewSourceMeals.length - visibleMealCount));
 	const overflowLabel = $derived(
@@ -60,50 +63,12 @@
 	);
 	const outlineDropCell = $derived(previewIndex >= 0 && overflowCount > 0);
 	const visiblePreviewIndex = $derived(outlineDropCell ? -1 : previewIndex);
-	const measurementKey = $derived(
-		[
-			dayKey,
-			previewIndex,
-			draggingMealId ?? '',
-			previewSourceMeals.map((meal) => meal.id).join(',')
-		].join('|')
-	);
-
 	const addMealOnBlankTarget = (event: MouseEvent) =>
 		handleBlankScheduleTarget(event, dayKey, onaddmeal);
-
-	const fitVisibleMeals = async () => {
-		const version = ++measureVersion;
-		visibleMealCount = previewSourceMeals.length;
-		await tick();
-
-		while (
-			version === measureVersion &&
-			contentElement &&
-			contentElement.scrollHeight > contentElement.clientHeight + 1 &&
-			visibleMealCount > 0
-		) {
-			visibleMealCount -= 1;
-			await tick();
-		}
-	};
-
-	onMount(() => {
-		const resizeObserver = new ResizeObserver(() => void fitVisibleMeals());
-		if (sectionElement) resizeObserver.observe(sectionElement);
-		return () => resizeObserver.disconnect();
-	});
-
-	$effect(() => {
-		if (measurementKey === lastMeasurementKey) return;
-		lastMeasurementKey = measurementKey;
-		void fitVisibleMeals();
-	});
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <section
-	bind:this={sectionElement}
 	data-meal-drop-kind="date"
 	data-meal-drop-date={dayKey}
 	class={cn(
@@ -127,7 +92,7 @@
 	</button>
 
 	<div
-		bind:this={contentElement}
+		bind:clientHeight={contentHeight}
 		role="button"
 		tabindex="-1"
 		aria-label={m.app_add_meal_on_date({ date: dayKey })}
@@ -145,6 +110,7 @@
 			showEmpty={false}
 			{onpick}
 			{onselect}
+			{oncheckin}
 		/>
 		{#if overflowCount > 0}
 			<button
