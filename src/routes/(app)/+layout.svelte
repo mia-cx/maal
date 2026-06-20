@@ -8,6 +8,7 @@
 	import { activeNavItemForPath } from '$lib/components/dashboard/active-nav';
 	import { clearInactiveUserCache, writeAppContextCache } from '$lib/client-db/app-cache';
 	import { setClientCacheScope } from '$lib/client-db/context';
+	import { startClientDbOutboxWorker } from '$lib/client-db/outbox-worker';
 	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
 	import type { DashboardNavItem } from '$lib/components/dashboard/dashboard-nav';
 	import * as Popover from '$lib/components/ui/popover';
@@ -91,6 +92,7 @@
 		);
 		void writeAppContextCache({ session: data.session, households: data.households });
 		void clearInactiveUserCache(data.session?.user.id);
+		startClientDbOutboxWorker();
 		void hydrateUiStateFromDexie().then((cachedUiState) => {
 			sidebarOpen = cachedUiState.sidebarOpen;
 			sidebarWidth = cachedUiState.sidebarWidth;

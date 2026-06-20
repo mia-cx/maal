@@ -83,6 +83,8 @@ export const enqueueRemoteSync = async ({
 		attempts: existing?.attempts ?? 0,
 		nextAttemptAt: now
 	});
+	const { scheduleClientDbOutboxFlush } = await import('./outbox-worker');
+	scheduleClientDbOutboxFlush();
 };
 
 export const queueRemoteSync = async (input: {
