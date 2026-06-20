@@ -59,6 +59,14 @@ const payloadRecord = (entry: SyncOutboxEntry): Record<string, unknown> =>
 		? (entry.payload as Record<string, unknown>)
 		: {};
 
+const isMealPayload = (payload: Record<string, unknown>): payload is Meal =>
+	typeof payload.id === 'string' && typeof payload.title === 'string';
+
+const mealPayloadFromEntry = (entry: SyncOutboxEntry): MealPayload => {
+	const payload = payloadRecord(entry);
+	return isMealPayload(payload) ? { meal: payload } : (payload as MealPayload);
+};
+
 const rewritePendingMealRecipeIds = async (localRecipeId: string, remoteRecipeId: string) => {
 	if (localRecipeId === remoteRecipeId) return;
 	const db = getClientDb();
@@ -67,7 +75,7 @@ const rewritePendingMealRecipeIds = async (localRecipeId: string, remoteRecipeId
 	await Promise.all(
 		entries.map(async (entry) => {
 			if (!entry.id) return;
-			const payload = payloadRecord(entry) as MealPayload;
+			const payload = mealPayloadFromEntry(entry);
 			if (payload.meal?.userRecipeId !== localRecipeId) return;
 			await db.syncOutbox.update(entry.id, {
 				payload: { ...payload, meal: { ...payload.meal, userRecipeId: remoteRecipeId } },
@@ -105,7 +113,7 @@ const rewritePendingMealIds = async (localMealId: string, remoteMeal: Meal) => {
 	await Promise.all(
 		entries.map(async (entry) => {
 			if (!entry.id || entry.entityId !== localMealId) return;
-			const payload = payloadRecord(entry) as MealPayload;
+			const payload = mealPayloadFromEntry(entry);
 			await db.syncOutbox.update(entry.id, {
 				entityId: remoteMeal.id,
 				payload: {
@@ -120,7 +128,7 @@ const rewritePendingMealIds = async (localMealId: string, remoteMeal: Meal) => {
 };
 
 const syncMealEntry = async (entry: SyncOutboxEntry) => {
-	const payload = payloadRecord(entry) as MealPayload;
+	const payload = mealPayloadFromEntry(entry);
 	if (entry.operation === 'delete') {
 		await deleteScheduleMealRemote(payload.mealId ?? entry.entityId);
 		return;
