@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { commitHouseholdCookie } from '$lib/server/auth/household';
 import { getDb } from '$lib/server/db';
 import { households } from '$lib/server/db/schema';
+import { defaultUnitPreferencesForLocale } from '$lib/taxonomy/preferences';
 import type { PageServerLoad } from './$types';
 
 const dateKey = (date: Date): string => date.toISOString().slice(0, 10);
@@ -20,7 +21,7 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 	if (!session) redirect(303, '/auth/login');
 	if (!platform?.env.DB) return { meals: [], recipes: [], defaultMealServings: 1 };
 
-	const { activeHouseholdId: householdId } = await parent();
+	const { activeHouseholdId: householdId, householdParaglideLocale } = await parent();
 	if (!householdId) redirect(303, '/onboarding');
 	commitHouseholdCookie(cookies, householdId, url);
 
@@ -42,7 +43,7 @@ export const load: PageServerLoad = async ({ cookies, locals, parent, platform, 
 		defaultMealServings: householdProfile?.defaultPlannedYield ?? 1,
 		weekStartsOn: weekStartsOnName(householdProfile?.weekStartsOn),
 		householdMembers: [],
-		unitPreferences: {},
+		unitPreferences: defaultUnitPreferencesForLocale(householdParaglideLocale ?? undefined),
 		initialMealRange: { start: initialStartDate, end: initialEndDate },
 		meals: []
 	};
