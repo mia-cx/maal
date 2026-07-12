@@ -3,7 +3,12 @@ import type { ClientCacheScope } from './context';
 
 const debugFlagKey = 'maal:debug:client-db';
 
-export type ClientDbDebugFlow = 'ui->dexie' | 'dexie->ui' | 'dexie->d1' | 'd1->dexie';
+export type ClientDbDebugFlow =
+	| 'ui->dexie'
+	| 'dexie->ui'
+	| 'dexie-outbox'
+	| 'dexie->d1'
+	| 'd1->dexie';
 
 const isEnabled = (): boolean => {
 	if (!browser) return false;
