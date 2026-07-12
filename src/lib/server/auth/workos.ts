@@ -14,6 +14,8 @@ interface AuthEnv {
 	WORKOS_COOKIE_PASSWORD?: string;
 }
 
+const MIN_WORKOS_COOKIE_PASSWORD_LENGTH = 32;
+
 const runtimeCache = new WeakMap<App.Platform['env'], AuthRuntime>();
 let localRuntime: AuthRuntime | undefined;
 let localRuntimeKey: string | undefined;
@@ -29,8 +31,10 @@ const readAuthEnv = (platformEnv?: App.Platform['env']): Required<AuthEnv> => {
 	if (!apiKey) throw new Error('WORKOS_API_KEY is not set');
 	if (!clientId) throw new Error('WORKOS_CLIENT_ID is not set');
 	if (!cookiePassword) throw new Error('WORKOS_COOKIE_PASSWORD is not set');
-	if (cookiePassword.length < 32) {
-		throw new Error('WORKOS_COOKIE_PASSWORD must be at least 32 characters');
+	if (cookiePassword.length < MIN_WORKOS_COOKIE_PASSWORD_LENGTH) {
+		throw new Error(
+			`WORKOS_COOKIE_PASSWORD must be at least ${MIN_WORKOS_COOKIE_PASSWORD_LENGTH} characters`
+		);
 	}
 
 	return {
@@ -61,7 +65,11 @@ export const createAuthRuntime = (platform?: App.Platform): AuthRuntime => {
 	}
 
 	const authEnv = readAuthEnv();
-	const cacheKey = `${authEnv.WORKOS_API_KEY}:${authEnv.WORKOS_CLIENT_ID}:${authEnv.WORKOS_COOKIE_PASSWORD}`;
+	const cacheKey = JSON.stringify([
+		authEnv.WORKOS_API_KEY,
+		authEnv.WORKOS_CLIENT_ID,
+		authEnv.WORKOS_COOKIE_PASSWORD
+	]);
 	if (localRuntime && localRuntimeKey === cacheKey) return localRuntime;
 
 	localRuntime = createRuntime(authEnv);

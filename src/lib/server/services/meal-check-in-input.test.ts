@@ -16,7 +16,7 @@ describe('readMealCheckInInput', () => {
 					mealId: ' meal_1 ',
 					verdict: 'repeat',
 					cooked: true,
-					cookTime: '24.4',
+					cookTime: '24',
 					reason: ' Great '
 				}),
 				'household_1',
@@ -33,14 +33,31 @@ describe('readMealCheckInInput', () => {
 		});
 	});
 
-	it('defaults cooked to true and ignores invalid cook time', async () => {
+	it('defaults cooked to true and rejects coercive values', async () => {
 		await expect(
 			readMealCheckInInput(
-				jsonRequest({ mealId: 'meal_1', verdict: 'neutral', cookTime: -1 }),
+				jsonRequest({ mealId: 'meal_1', verdict: 'neutral' }),
 				'household_1',
 				'user_1'
 			)
 		).resolves.toMatchObject({ cooked: true, cookTime: null });
+		await expect(
+			readMealCheckInInput(
+				jsonRequest({ mealId: 'meal_1', verdict: 'neutral', cooked: 'true' }),
+				'household_1',
+				'user_1'
+			)
+		).rejects.toMatchObject({ status: 400, body: { message: 'Cooked must be true or false.' } });
+		await expect(
+			readMealCheckInInput(
+				jsonRequest({ mealId: 'meal_1', verdict: 'neutral', cookTime: '1.9' }),
+				'household_1',
+				'user_1'
+			)
+		).rejects.toMatchObject({
+			status: 400,
+			body: { message: 'Cook time must be a positive whole number.' }
+		});
 	});
 
 	it('rejects missing meal id and invalid verdict', async () => {

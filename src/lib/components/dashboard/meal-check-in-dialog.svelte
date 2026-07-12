@@ -4,7 +4,8 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { cn } from '$lib/utils';
-	import { mealFeedbackVerdictLabels, type MealFeedbackVerdict } from './meal-labels';
+	import { mealFeedbackVerdictLabels } from './meal-labels';
+	import type { MealFeedbackVerdict } from '$lib/domain/meal-feedback';
 	import type { Meal } from './schedule-types';
 
 	export type MealCheckInPayload = {

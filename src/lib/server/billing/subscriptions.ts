@@ -3,6 +3,7 @@ import type Stripe from 'stripe';
 import { getDb } from '$lib/server/db';
 import { billingSubscriptions } from '$lib/server/db/schema';
 import { createStripeClient, currentPeriodEndIso, subscriptionPriceId } from './stripe';
+import { billingStatusFromStripe, paidBillingStatuses } from './status';
 
 export type BillingStatus = {
 	householdId: string;
@@ -15,8 +16,6 @@ export type BillingStatus = {
 	cancelAtPeriodEnd: boolean;
 	isPaid: boolean;
 };
-
-const paidStatuses = new Set(['active', 'trialing']);
 
 export const loadBillingStatus = async (
 	database: D1Database,
@@ -37,7 +36,7 @@ export const loadBillingStatus = async (
 		status: subscription?.status ?? null,
 		currentPeriodEnd: subscription?.currentPeriodEnd ?? null,
 		cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
-		isPaid: paidStatuses.has(subscription?.status ?? '')
+		isPaid: paidBillingStatuses.has(billingStatusFromStripe(subscription?.status))
 	};
 };
 
@@ -91,7 +90,7 @@ export const upsertSubscription = async (input: {
 			subscriberUserId,
 			stripeSubscriptionId: input.subscription?.id ?? null,
 			stripePriceId: input.subscription ? subscriptionPriceId(input.subscription) : null,
-			status: input.subscription?.status ?? input.status ?? 'unknown',
+			status: billingStatusFromStripe(input.subscription?.status ?? input.status),
 			currentPeriodEnd: input.subscription ? currentPeriodEndIso(input.subscription) : null,
 			cancelAtPeriodEnd: input.subscription?.cancel_at_period_end ?? false,
 			updatedAt: now
@@ -103,7 +102,7 @@ export const upsertSubscription = async (input: {
 				subscriberUserId,
 				stripeSubscriptionId: input.subscription?.id ?? null,
 				stripePriceId: input.subscription ? subscriptionPriceId(input.subscription) : null,
-				status: input.subscription?.status ?? input.status ?? 'unknown',
+				status: billingStatusFromStripe(input.subscription?.status ?? input.status),
 				currentPeriodEnd: input.subscription ? currentPeriodEndIso(input.subscription) : null,
 				cancelAtPeriodEnd: input.subscription?.cancel_at_period_end ?? false,
 				updatedAt: now

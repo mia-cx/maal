@@ -2,6 +2,8 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import type { UnitPreferences } from '$lib/recipes/ingredient-text';
 import type { EffectiveTaxonomyPreferences } from '$lib/taxonomy/preferences';
+import { bestAliasLookup, bestAliasRowsById, byLocalePreference, localeRank } from './aliases';
+import { localeFallbacks } from '$lib/domain/household/settings-parsing';
 import {
 	foodAliases,
 	foodHouseholdAliases,
@@ -26,8 +28,6 @@ type UnitDisplayOverride =
 type FoodDisplayOverride =
 	| (typeof userFoodDisplayOverrides.$inferSelect & { scopeRank: 0 })
 	| (typeof householdFoodDisplayOverrides.$inferSelect & { scopeRank: 1 });
-
-const defaultLocale = 'en-US';
 
 const unitIdToIngredientUnit: Record<string, string> = {
 	grams: 'g',
@@ -55,23 +55,6 @@ const unitIdToIngredientUnit: Record<string, string> = {
 	slices: 'slice',
 	cans: 'can',
 	bunches: 'bunch'
-};
-
-const normalizedInstructionUnitAlias = (value: string): string =>
-	value
-		.trim()
-		.toLowerCase()
-		.replace(/[°º]\s*/gu, '')
-		.replace(/\s+/gu, ' ')
-		.replace(/[.,]+$/g, '');
-
-const localeFallbacksFor = (locale: string): string[] => {
-	try {
-		const parsed = new Intl.Locale(locale);
-		return [...new Set([parsed.toString(), parsed.language, defaultLocale])];
-	} catch {
-		return [defaultLocale];
-	}
 };
 
 const bestByKey = <T extends { locale: string; scopeRank: number }, K>(
@@ -136,8 +119,8 @@ export const loadEffectiveTaxonomyPreferences = async (
 	db: Db,
 	params: { workosUserId: string; householdId: string; locale: string }
 ): Promise<EffectiveTaxonomyPreferences> => {
-	const localeFallbacks = localeFallbacksFor(params.locale);
-	const localeRank = new Map(localeFallbacks.map((locale, index) => [locale, index]));
+	const fallbackLocales = localeFallbacks(params.locale);
+	const ranks = localeRank(params.locale);
 	const [
 		userUnitRows,
 		householdUnitRows,
@@ -157,7 +140,7 @@ export const loadEffectiveTaxonomyPreferences = async (
 			.where(
 				and(
 					eq(userUnitDisplayOverrides.workosUserId, params.workosUserId),
-					inArray(userUnitDisplayOverrides.locale, localeFallbacks)
+					inArray(userUnitDisplayOverrides.locale, fallbackLocales)
 				)
 			),
 		db
@@ -166,7 +149,7 @@ export const loadEffectiveTaxonomyPreferences = async (
 			.where(
 				and(
 					eq(householdUnitDisplayOverrides.householdId, params.householdId),
-					inArray(householdUnitDisplayOverrides.locale, localeFallbacks)
+					inArray(householdUnitDisplayOverrides.locale, fallbackLocales)
 				)
 			),
 		db
@@ -175,7 +158,7 @@ export const loadEffectiveTaxonomyPreferences = async (
 			.where(
 				and(
 					eq(userFoodDisplayOverrides.workosUserId, params.workosUserId),
-					inArray(userFoodDisplayOverrides.locale, localeFallbacks)
+					inArray(userFoodDisplayOverrides.locale, fallbackLocales)
 				)
 			),
 		db
@@ -184,27 +167,53 @@ export const loadEffectiveTaxonomyPreferences = async (
 			.where(
 				and(
 					eq(householdFoodDisplayOverrides.householdId, params.householdId),
-					inArray(householdFoodDisplayOverrides.locale, localeFallbacks)
+					inArray(householdFoodDisplayOverrides.locale, fallbackLocales)
 				)
 			),
 		db
 			.select()
 			.from(unitAliases)
-			.where(and(inArray(unitAliases.locale, localeFallbacks), isNull(unitAliases.sourceDomain))),
+			.where(and(inArray(unitAliases.locale, fallbackLocales), isNull(unitAliases.sourceDomain))),
 		db
 			.select()
 			.from(unitHouseholdAliases)
-			.where(eq(unitHouseholdAliases.householdId, params.householdId)),
-		db.select().from(unitUserAliases).where(eq(unitUserAliases.workosUserId, params.workosUserId)),
+			.where(
+				and(
+					eq(unitHouseholdAliases.householdId, params.householdId),
+					inArray(unitHouseholdAliases.locale, fallbackLocales)
+				)
+			),
+		db
+			.select()
+			.from(unitUserAliases)
+			.where(
+				and(
+					eq(unitUserAliases.workosUserId, params.workosUserId),
+					inArray(unitUserAliases.locale, fallbackLocales)
+				)
+			),
 		db
 			.select()
 			.from(foodAliases)
-			.where(and(inArray(foodAliases.locale, localeFallbacks), isNull(foodAliases.sourceDomain))),
+			.where(and(inArray(foodAliases.locale, fallbackLocales), isNull(foodAliases.sourceDomain))),
 		db
 			.select()
 			.from(foodHouseholdAliases)
-			.where(eq(foodHouseholdAliases.householdId, params.householdId)),
-		db.select().from(foodUserAliases).where(eq(foodUserAliases.workosUserId, params.workosUserId)),
+			.where(
+				and(
+					eq(foodHouseholdAliases.householdId, params.householdId),
+					inArray(foodHouseholdAliases.locale, fallbackLocales)
+				)
+			),
+		db
+			.select()
+			.from(foodUserAliases)
+			.where(
+				and(
+					eq(foodUserAliases.workosUserId, params.workosUserId),
+					inArray(foodUserAliases.locale, fallbackLocales)
+				)
+			),
 		db.select().from(units)
 	]);
 
@@ -213,14 +222,36 @@ export const loadEffectiveTaxonomyPreferences = async (
 		pluralAlias: alias.pluralAlias ?? undefined
 	});
 	const aliases = {
-		unitGlobal: new Map(globalUnitAliases.map((alias) => [alias.id, unitAliasLabel(alias)])),
-		unitHousehold: new Map(
-			householdScopedUnitAliases.map((alias) => [alias.id, unitAliasLabel(alias)])
+		unitGlobal: new Map(
+			[...bestAliasRowsById(globalUnitAliases, ranks)].map(([id, alias]) => [
+				id,
+				unitAliasLabel(alias)
+			])
 		),
-		unitUser: new Map(userScopedUnitAliases.map((alias) => [alias.id, unitAliasLabel(alias)])),
-		foodGlobal: new Map(globalFoodAliases.map((alias) => [alias.id, alias.alias])),
-		foodHousehold: new Map(householdScopedFoodAliases.map((alias) => [alias.id, alias.alias])),
-		foodUser: new Map(userScopedFoodAliases.map((alias) => [alias.id, alias.alias]))
+		unitHousehold: new Map(
+			[...bestAliasRowsById(householdScopedUnitAliases, ranks)].map(([id, alias]) => [
+				id,
+				unitAliasLabel(alias)
+			])
+		),
+		unitUser: new Map(
+			[...bestAliasRowsById(userScopedUnitAliases, ranks)].map(([id, alias]) => [
+				id,
+				unitAliasLabel(alias)
+			])
+		),
+		foodGlobal: new Map(
+			[...bestAliasRowsById(globalFoodAliases, ranks)].map(([id, alias]) => [id, alias.alias])
+		),
+		foodHousehold: new Map(
+			[...bestAliasRowsById(householdScopedFoodAliases, ranks)].map(([id, alias]) => [
+				id,
+				alias.alias
+			])
+		),
+		foodUser: new Map(
+			[...bestAliasRowsById(userScopedFoodAliases, ranks)].map(([id, alias]) => [id, alias.alias])
+		)
 	};
 	const unitById = new Map(unitRows.map((unit) => [unit.id, unit]));
 	const unitOverrides = bestByKey<UnitDisplayOverride, string>(
@@ -229,7 +260,7 @@ export const loadEffectiveTaxonomyPreferences = async (
 			...householdUnitRows.map((row) => ({ ...row, scopeRank: 1 as const }))
 		],
 		(row) => row.baseUnitId,
-		localeRank
+		ranks
 	);
 	const foodOverrides = bestByKey<FoodDisplayOverride, string>(
 		[
@@ -237,7 +268,7 @@ export const loadEffectiveTaxonomyPreferences = async (
 			...householdFoodRows.map((row) => ({ ...row, scopeRank: 1 as const }))
 		],
 		(row) => row.foodId,
-		localeRank
+		ranks
 	);
 
 	const unitPreferences: UnitPreferences = {
@@ -252,11 +283,15 @@ export const loadEffectiveTaxonomyPreferences = async (
 			])
 		),
 		unitAliases: Object.fromEntries(
-			[...globalUnitAliases, ...householdScopedUnitAliases, ...userScopedUnitAliases].flatMap(
-				(alias) => [
-					[alias.alias, alias.unitId],
-					[normalizedInstructionUnitAlias(alias.alias), alias.unitId]
-				]
+			bestAliasLookup(
+				[
+					...globalUnitAliases.map((alias) => ({ ...alias, scopeRank: 2 })),
+					...householdScopedUnitAliases.map((alias) => ({ ...alias, scopeRank: 1 })),
+					...userScopedUnitAliases.map((alias) => ({ ...alias, scopeRank: 0 }))
+				],
+				ranks,
+				(alias) => alias.unitId,
+				(left, right) => left.scopeRank - right.scopeRank || byLocalePreference(ranks)(left, right)
 			)
 		),
 		ingredientUnitOverrides: {},
@@ -326,5 +361,11 @@ export const loadEffectiveTaxonomyPreferences = async (
 		};
 	}
 
-	return { locale: params.locale, localeFallbacks, unitPreferences, unitDisplay, foodDisplay };
+	return {
+		locale: params.locale,
+		localeFallbacks: fallbackLocales,
+		unitPreferences,
+		unitDisplay,
+		foodDisplay
+	};
 };

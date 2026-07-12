@@ -1,6 +1,6 @@
 import { error, json, type RequestHandler } from '@sveltejs/kit';
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
-import { requireAppContext } from '$lib/server/http/app-context';
+import { requireBillingAppContext } from '$lib/server/http/app-context';
 import {
 	householdMeals,
 	householdMealUserRecipes,
@@ -30,7 +30,7 @@ const readRecipe = async (request: Request): Promise<RecipeMenuItem> => {
 };
 
 export const PUT: RequestHandler = async ({ cookies, locals, params, platform, request, url }) => {
-	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
 	const recipeId = params.id;
 	if (!recipeId) error(400, { message: 'Recipe is required.' });
 
@@ -104,7 +104,7 @@ export const PUT: RequestHandler = async ({ cookies, locals, params, platform, r
 };
 
 export const PATCH: RequestHandler = async ({ cookies, locals, params, platform, url }) => {
-	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
+	const { db, householdId, session } = await requireBillingAppContext({ cookies, locals, platform, url });
 	const recipeId = params.id;
 	if (!recipeId) error(400, { message: 'Recipe is required.' });
 
@@ -160,7 +160,7 @@ export const PATCH: RequestHandler = async ({ cookies, locals, params, platform,
 };
 
 export const DELETE: RequestHandler = async ({ cookies, locals, params, platform, url }) => {
-	const { db, householdId, session } = await requireAppContext({ cookies, locals, platform, url });
+	const { db, session } = await requireBillingAppContext({ cookies, locals, platform, url });
 	const recipeId = params.id;
 	if (!recipeId) error(400, { message: 'Recipe is required.' });
 

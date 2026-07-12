@@ -32,4 +32,19 @@ describe('defaultPlanRange', () => {
 			endDate: '2026-03-04'
 		});
 	});
+
+	it('rejects invalid or reversed explicit date ranges', () => {
+		expect(() => defaultPlanRange({ startDate: 'not-a-date' })).toThrow(
+			expect.objectContaining({ code: 'invalid_input' })
+		);
+		expect(() => defaultPlanRange({ startDate: '2026-13-01' })).toThrow(
+			expect.objectContaining({ code: 'invalid_input' })
+		);
+		expect(() => defaultPlanRange({ endDate: 'not-a-date' })).toThrow(
+			expect.objectContaining({ code: 'invalid_input' })
+		);
+		expect(() => defaultPlanRange({ startDate: '2026-03-02', endDate: '2026-03-01' })).toThrow(
+			expect.objectContaining({ code: 'invalid_input' })
+		);
+	});
 });

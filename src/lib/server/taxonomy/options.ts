@@ -29,6 +29,12 @@ export const emptyTaxonomyOptions = (): TaxonomyOptions => ({
 
 const labelFromId = (id: string): string => id.replaceAll('_', ' ');
 
+const PRESET_BASE_UNITS = {
+	weightPresetOptions: 'grams',
+	volumePresetOptions: 'milliliters',
+	temperaturePresetOptions: 'celsius'
+} as const;
+
 export const loadTaxonomyOptions = async (
 	database: D1Database,
 	locale: string
@@ -50,11 +56,15 @@ export const loadTaxonomyOptions = async (
 		left.alias.localeCompare(right.alias);
 	const aliasesByUnit = new Map<string, typeof unitAliasRows>();
 	for (const alias of unitAliasRows) {
-		aliasesByUnit.set(alias.unitId, [...(aliasesByUnit.get(alias.unitId) ?? []), alias]);
+		const bucket = aliasesByUnit.get(alias.unitId) ?? [];
+		bucket.push(alias);
+		aliasesByUnit.set(alias.unitId, bucket);
 	}
 	const aliasesByFood = new Map<string, typeof foodAliasRows>();
 	for (const alias of foodAliasRows) {
-		aliasesByFood.set(alias.foodId, [...(aliasesByFood.get(alias.foodId) ?? []), alias]);
+		const bucket = aliasesByFood.get(alias.foodId) ?? [];
+		bucket.push(alias);
+		aliasesByFood.set(alias.foodId, bucket);
 	}
 	const unitLabel = (unitId: string) =>
 		[...(aliasesByUnit.get(unitId) ?? [])].sort(aliasSort)[0]?.alias ?? labelFromId(unitId);
@@ -74,16 +84,17 @@ export const loadTaxonomyOptions = async (
 		keywords: [alias.unitId, alias.baseUnitId, alias.locale]
 	});
 
+	const presetOptions = Object.fromEntries(
+		Object.entries(PRESET_BASE_UNITS).map(([key, baseUnitId]) => [
+			key,
+			uniqueByValue(
+				unitAliasRows.filter((alias) => alias.baseUnitId === baseUnitId).map(unitAliasOption)
+			)
+		])
+	) as Pick<TaxonomyOptions, keyof typeof PRESET_BASE_UNITS>;
+
 	return {
-		weightPresetOptions: uniqueByValue(
-			unitAliasRows.filter((alias) => alias.baseUnitId === 'grams').map(unitAliasOption)
-		),
-		volumePresetOptions: uniqueByValue(
-			unitAliasRows.filter((alias) => alias.baseUnitId === 'milliliters').map(unitAliasOption)
-		),
-		temperaturePresetOptions: uniqueByValue(
-			unitAliasRows.filter((alias) => alias.baseUnitId === 'celsius').map(unitAliasOption)
-		),
+		...presetOptions,
 		baseUnitOptions: unitRows
 			.filter((unit) => unit.id === unit.baseUnitId)
 			.map(unitOption)

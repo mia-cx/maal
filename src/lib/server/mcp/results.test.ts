@@ -16,6 +16,30 @@ describe('MCP results', () => {
 		});
 	});
 
+	it('returns a safe error result when structured content cannot be serialized', () => {
+		const circular: Record<string, unknown> = {};
+		circular.self = circular;
+
+		expect(toolResult(circular)).toEqual({
+			content: [
+				{
+					type: 'text',
+					text: JSON.stringify(
+						{ code: 'serialization_failed', message: 'Tool result could not be serialized.' },
+						null,
+						2
+					)
+				}
+			],
+			structuredContent: {
+				code: 'serialization_failed',
+				message: 'Tool result could not be serialized.',
+				suggestion: undefined
+			},
+			isError: true
+		});
+	});
+
 	it('formats tool errors with optional suggestions', () => {
 		expect(toolError('missing_scope', 'Missing scope', 'Reconnect the key')).toEqual({
 			code: 'missing_scope',

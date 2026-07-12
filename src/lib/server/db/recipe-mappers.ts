@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNotNull, isNull, lte, or } from 'drizzle-orm';
+import { asc, and, eq, gte, inArray, isNotNull, isNull, lte, or } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import type * as schema from '$lib/server/db/schema';
 import {
@@ -14,7 +14,7 @@ import {
 	userRecipeInstructions,
 	userRecipes
 } from '$lib/server/db/schema';
-import type { MealFeedbackVerdict } from '$lib/components/dashboard/meal-labels';
+import type { MealFeedbackVerdict } from '$lib/domain/meal-feedback';
 import type { Meal } from '$lib/components/dashboard/schedule-types';
 import type {
 	RecipeIngredientItem,
@@ -34,6 +34,8 @@ import { cleanImportedText } from '$lib/server/services/html-text';
 import { insertUserRecipeInstructionEvents } from '$lib/server/taxonomy/instruction-events';
 
 type Db = DrizzleD1Database<typeof schema>;
+export type Transaction = Parameters<Parameters<Db['transaction']>[0]>[0];
+export type WritableDb = Db | Transaction;
 type UserRecipeRow = typeof userRecipes.$inferSelect;
 type UserRecipeIngredientRow = typeof userRecipeIngredients.$inferSelect;
 type UserRecipeInstructionRow = typeof userRecipeInstructions.$inferSelect;
@@ -50,8 +52,7 @@ type RecipeJson = Record<string, unknown>;
 const displayInstructionText = (
 	text: string,
 	unitPreferences?: UnitPreferences,
-	events: InstructionTemperatureEvent[] = [],
-	context: Record<string, unknown> = {}
+	events: InstructionTemperatureEvent[] = []
 ): string => {
 	const cleaned = cleanImportedText(text);
 	const eventRendered = convertInstructionTemperatureEvents(cleaned, events, unitPreferences);
@@ -189,7 +190,9 @@ const latestUserMealCheckIn = (
 const groupByRecipeId = <T extends { userRecipeId: string }>(rows: T[]): Map<string, T[]> => {
 	const grouped = new Map<string, T[]>();
 	for (const row of rows) {
-		grouped.set(row.userRecipeId, [...(grouped.get(row.userRecipeId) ?? []), row]);
+		const bucket = grouped.get(row.userRecipeId);
+		if (bucket) bucket.push(row);
+		else grouped.set(row.userRecipeId, [row]);
 	}
 	return grouped;
 };
@@ -293,8 +296,7 @@ export const menuItemFromRecipe = (params: {
 				text: displayInstructionText(
 					instruction.text,
 					unitPreferences,
-					params.instructionEvents?.get(instruction.id),
-					{ surface: 'menu-recipe', recipeId: recipe.id, instructionId: instruction.id }
+					params.instructionEvents?.get(instruction.id)
 				)
 			})),
 		ingredientCount: ingredients.length,
@@ -446,13 +448,7 @@ export const mealFromMenuRecipe = (
 	ingredients: recipe.ingredients?.map((ingredient) =>
 		cleanImportedText(fullIngredientText(ingredient))
 	),
-	instructions: recipe.instructions?.map((instruction) =>
-		displayInstructionText(instruction.text, undefined, [], {
-			surface: 'meal-from-menu-recipe',
-			recipeId: recipe.id,
-			position: instruction.position
-		})
-	),
+	instructions: recipe.instructions?.map((instruction) => displayInstructionText(instruction.text)),
 	...overrides
 });
 
@@ -496,8 +492,7 @@ export const mealFromHouseholdMeal = (
 				displayInstructionText(
 					instruction.text,
 					unitPreferences,
-					instructionEvents.get(instruction.id),
-					{ surface: 'household-meal', mealId: meal.id, instructionId: instruction.id }
+					instructionEvents.get(instruction.id)
 				)
 			),
 		latestVerdict,
@@ -512,7 +507,9 @@ const groupInstructionEvents = <T extends InstructionEventRow>(rows: T[]): Map<s
 			'userRecipeInstructionId' in row
 				? row.userRecipeInstructionId
 				: row.householdMealInstructionId;
-		grouped.set(instructionId, [...(grouped.get(instructionId) ?? []), row]);
+		const bucket = grouped.get(instructionId);
+		if (bucket) bucket.push(row);
+		else grouped.set(instructionId, [row]);
 	}
 	return grouped;
 };
@@ -523,7 +520,9 @@ const groupByMealId = <T extends { householdMealId: string | null }>(
 	const grouped = new Map<string, T[]>();
 	for (const row of rows) {
 		if (!row.householdMealId) continue;
-		grouped.set(row.householdMealId, [...(grouped.get(row.householdMealId) ?? []), row]);
+		const bucket = grouped.get(row.householdMealId);
+		if (bucket) bucket.push(row);
+		else grouped.set(row.householdMealId, [row]);
 	}
 	return grouped;
 };
@@ -533,12 +532,11 @@ export const loadMealPlanMeals = async (
 	params: {
 		workosUserId: string;
 		householdId: string;
-		defaultMealServings?: number;
 		startDate?: string;
 		endDate?: string;
-		menuRecipes?: RecipeMenuItem[];
 		unitPreferences?: UnitPreferences;
 		includeMealPool?: boolean;
+		mealId?: string;
 	}
 ) => {
 	const includeMealPool = params.includeMealPool ?? true;
@@ -559,7 +557,20 @@ export const loadMealPlanMeals = async (
 	const householdMealRows = await db
 		.select()
 		.from(householdMeals)
-		.where(and(eq(householdMeals.householdId, params.householdId), dateRangeFilter));
+		.where(
+			and(
+				eq(householdMeals.householdId, params.householdId),
+				params.mealId !== undefined ? eq(householdMeals.id, params.mealId) : undefined,
+				dateRangeFilter
+			)
+		)
+		.orderBy(
+			asc(householdMeals.date),
+			asc(householdMeals.time),
+			asc(householdMeals.sortOrder),
+			asc(householdMeals.createdAt),
+			asc(householdMeals.id)
+		);
 	const householdMealIds = householdMealRows.map((meal) => meal.id);
 	const [mealIngredientRows, mealInstructionRows, mealInstructionEventRows, mealLinks, checkIns] =
 		householdMealIds.length
@@ -619,8 +630,8 @@ export const loadMealPlanMeals = async (
 	return scheduledMeals;
 };
 
-export const updateRecipeIngredients = async (
-	db: Db,
+export const replaceRecipeIngredients = async (
+	db: WritableDb,
 	recipeId: string,
 	ingredients: RecipeIngredientItem[]
 ) => {
@@ -649,15 +660,20 @@ export const updateRecipeIngredients = async (
 	}
 };
 
-export const updateRecipeInstructions = async (
+export const updateRecipeIngredients = async (
 	db: Db,
+	recipeId: string,
+	ingredients: RecipeIngredientItem[]
+) => db.transaction((tx) => replaceRecipeIngredients(tx, recipeId, ingredients));
+
+export const replaceRecipeInstructions = async (
+	db: WritableDb,
 	recipeId: string,
 	instructions: RecipeInstructionItem[]
 ) => {
 	await db.delete(userRecipeInstructions).where(eq(userRecipeInstructions.userRecipeId, recipeId));
-	if (!instructions.length) {
-		return;
-	}
+	if (!instructions.length) return;
+
 	const rows = instructions.map((instruction, index) => ({
 		userRecipeId: recipeId,
 		stepIndex: index,
@@ -675,3 +691,9 @@ export const updateRecipeInstructions = async (
 		.where(eq(userRecipeInstructions.userRecipeId, recipeId));
 	await insertUserRecipeInstructionEvents(db, insertedInstructions);
 };
+
+export const updateRecipeInstructions = async (
+	db: Db,
+	recipeId: string,
+	instructions: RecipeInstructionItem[]
+) => db.transaction((tx) => replaceRecipeInstructions(tx, recipeId, instructions));

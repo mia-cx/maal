@@ -8,10 +8,10 @@ import {
 	updateHouseholdMeal,
 	upsertMealCheckIn
 } from '$lib/server/domains/planning';
-import { isRecord, text } from './scalars';
+import { isRecord, requireNonEmptyText, text } from './scalars';
 import { toolError } from './results';
 import { defaultPlanRange } from './plan-range';
-import { resolveHouseholdId, resolveScopedHouseholdId } from './context';
+import { resolveHouseholdId } from './context';
 import { optionalHouseholdInput, recordInput } from './schemas';
 import { createMealResolvingRecipe, mealPatchFromArgs } from './meal-input';
 import { createBatchHouseholdMeals } from './batch-meal-handler';
@@ -111,7 +111,7 @@ export const planningTools: ToolDefinition[] = [
 					db: context.db,
 					workosUserId: context.key.userId,
 					householdId,
-					mealId: text(args.mealId) ?? ''
+					mealId: requireNonEmptyText(args.mealId, 'mealId')
 				})
 			};
 		}
@@ -136,7 +136,7 @@ export const planningTools: ToolDefinition[] = [
 					meal: {
 						householdId,
 						workosUserId: context.key.userId,
-						mealId: text(args.mealId) ?? '',
+						mealId: requireNonEmptyText(args.mealId, 'mealId'),
 						patch: mealPatchFromArgs(args.patch)
 					}
 				})
@@ -155,7 +155,7 @@ export const planningTools: ToolDefinition[] = [
 				deleted: await deleteHouseholdMeal({
 					db: context.db,
 					householdId,
-					mealId: text(args.mealId) ?? ''
+					mealId: requireNonEmptyText(args.mealId, 'mealId')
 				})
 			};
 		}
@@ -174,12 +174,12 @@ export const planningTools: ToolDefinition[] = [
 		}),
 		annotations: { readOnlyHint: false },
 		handler: async (context, args) => {
-			const householdId = await resolveScopedHouseholdId(context, args, 'check_ins:write');
+			const householdId = await resolveHouseholdId(context, args, 'check_ins:write', 'meals:write');
 			return await upsertMealCheckIn({
 				db: context.db,
 				workosUserId: context.key.userId,
 				householdId,
-				mealId: text(args.mealId) ?? '',
+				mealId: requireNonEmptyText(args.mealId, 'mealId'),
 				verdict:
 					args.verdict === 'repeat' || args.verdict === 'neutral' || args.verdict === 'avoid'
 						? args.verdict

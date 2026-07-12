@@ -179,11 +179,13 @@ export const actions: Actions = {
 	updateMemberRole: async (event) => {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
+		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
 
 		try {
 			return memberCommandResponse(
 				await updateMemberRoleFromForm({
 					platform: event.platform,
+					database: event.platform.env.DB,
 					householdId: managedHousehold.householdId,
 					session: managedHousehold.session,
 					form: await event.request.formData()
@@ -219,12 +221,13 @@ export const actions: Actions = {
 		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
 
 		try {
-			const changedCount = await updateHouseholdAppliancesFromForm({
+			const result = await updateHouseholdAppliancesFromForm({
 				database: event.platform.env.DB,
 				householdId: managedHousehold.householdId,
 				form: await event.request.formData()
 			});
-			return { message: changedCount > 0 ? 'Appliances saved.' : 'No changes.' };
+			if (!result.ok) return fail(result.status, { message: result.message });
+			return { message: result.changedCount > 0 ? 'Appliances saved.' : 'No changes.' };
 		} catch (cause) {
 			console.error('Failed to update household appliances', cause);
 			return fail(502, { message: 'Could not update appliances.' });
@@ -237,14 +240,17 @@ export const actions: Actions = {
 			return fail(400, { message: 'Smoke household cannot be left.' });
 		}
 
+		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
+
 		try {
 			const result = await leaveHouseholdMembership({
 				platform: event.platform,
+				database: event.platform.env.DB,
 				householdId,
 				session
 			});
 			if (!result.ok) return fail(result.status, { message: result.message });
-			if (result.clearHousehold) clearHouseholdCookie(event.cookies);
+			if (result.clearHousehold) clearHouseholdCookie(event.cookies, event.url);
 		} catch (cause) {
 			console.error('Failed to leave household', cause);
 			return fail(502, { message: 'Could not leave household.' });
@@ -256,10 +262,13 @@ export const actions: Actions = {
 		const managedHousehold = await requireManageHousehold(event);
 		if ('status' in managedHousehold) return managedHousehold;
 
+		if (!event.platform?.env.DB) return fail(500, { message: 'Database is not available.' });
+
 		try {
 			return memberCommandResponse(
 				await removeMemberFromForm({
 					platform: event.platform,
+					database: event.platform.env.DB,
 					householdId: managedHousehold.householdId,
 					session: managedHousehold.session,
 					form: await event.request.formData()
@@ -285,7 +294,7 @@ export const actions: Actions = {
 				platform: event.platform,
 				householdId
 			});
-			clearHouseholdCookie(event.cookies);
+			clearHouseholdCookie(event.cookies, event.url);
 		} catch (cause) {
 			console.error('Failed to delete household', cause);
 			return fail(502, { message: 'Could not delete household.' });
