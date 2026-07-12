@@ -13,12 +13,7 @@ export {
 	hasHouseholdAccess,
 	hasHouseholdBillingGrant
 } from '$lib/server/billing/entitlements';
-export {
-	findHouseholdIdForStripeSubscription,
-	loadBillingStatus,
-	loadFreshBillingStatus,
-	upsertSubscription
-} from '$lib/server/billing/subscriptions';
+export { loadFreshBillingStatus } from '$lib/server/billing/subscriptions';
 export { loadTrialAvailability, startHouseholdTrial } from '$lib/server/billing/trials';
 export {
 	createStripeClient,

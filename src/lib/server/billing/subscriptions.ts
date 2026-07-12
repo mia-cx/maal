@@ -1,4 +1,4 @@
-import { and, eq, or } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { getDb } from '$lib/server/db';
 import { billingSubscriptions } from '$lib/server/db/schema';
@@ -170,17 +170,6 @@ export const findStripeSubscriptionRecordBySubscriptionId = async (input: {
 	return rows[0] ?? null;
 };
 
-export const findHouseholdIdForStripeSubscriptionId = async (input: {
-	database: D1Database;
-	subscriptionId: string;
-}): Promise<string | null> =>
-	(
-		await findStripeSubscriptionRecordBySubscriptionId({
-			database: input.database,
-			subscriptionId: input.subscriptionId
-		})
-	)?.householdId ?? null;
-
 export const findStripeCustomerSubscription = async (input: {
 	database: D1Database;
 	customerId: string;
@@ -194,25 +183,4 @@ export const findStripeCustomerSubscription = async (input: {
 		.where(eq(billingSubscriptions.stripeCustomerId, input.customerId))
 		.limit(1);
 	return rows[0] ?? null;
-};
-
-export const findHouseholdIdForStripeSubscription = async (input: {
-	database: D1Database;
-	customerId?: string | null;
-	subscriptionId?: string | null;
-}): Promise<string | null> => {
-	if (!input.customerId && !input.subscriptionId) return null;
-	const rows = await getDb(input.database)
-		.select({ householdId: billingSubscriptions.householdId })
-		.from(billingSubscriptions)
-		.where(
-			or(
-				...(input.customerId ? [eq(billingSubscriptions.stripeCustomerId, input.customerId)] : []),
-				...(input.subscriptionId
-					? [eq(billingSubscriptions.stripeSubscriptionId, input.subscriptionId)]
-					: [])
-			)
-		)
-		.limit(1);
-	return rows[0]?.householdId ?? null;
 };
