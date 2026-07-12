@@ -11,10 +11,38 @@ export type EffectiveTaxonomyPreferences = {
 	>;
 };
 
+const fahrenheitLocales = new Set(['en-US']);
+
+const canonicalLocale = (locale: string): string => {
+	try {
+		return Intl.getCanonicalLocales(locale)[0] ?? 'en-US';
+	} catch {
+		return 'en-US';
+	}
+};
+
+export const defaultUnitPreferencesForLocale = (locale = 'en-US'): UnitPreferences => {
+	const normalizedLocale = canonicalLocale(locale);
+	if (fahrenheitLocales.has(normalizedLocale)) {
+		return {
+			preferredMassUnit: 'g',
+			preferredVolumeUnit: 'ml',
+			preferredTemperatureUnit: 'fahrenheit',
+			preferredTemperatureUnitLabel: '°F'
+		};
+	}
+	return {
+		preferredMassUnit: 'g',
+		preferredVolumeUnit: 'ml',
+		preferredTemperatureUnit: 'celsius',
+		preferredTemperatureUnitLabel: '°C'
+	};
+};
+
 export const emptyTaxonomyPreferences = (locale = 'en-US'): EffectiveTaxonomyPreferences => ({
 	locale,
 	localeFallbacks: [locale],
-	unitPreferences: {},
+	unitPreferences: defaultUnitPreferencesForLocale(locale),
 	unitDisplay: {},
 	foodDisplay: {}
 });

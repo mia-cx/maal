@@ -9,13 +9,9 @@
 	import { Input } from '$lib/components/ui/input';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import SearchIcon from '@lucide/svelte/icons/search';
+	import { importRecipeDraftFromUrl } from '$lib/client-db/recipe-import';
+	import { searchRecipesInDexie } from '$lib/client-db/repositories';
 	import {
-		fetchMenuRecipesPage,
-		importRecipeDraftFromUrl,
-		searchMenuRecipes
-	} from '$lib/menu/menu-client';
-	import {
-		appendMenuRecipes,
 		archivedMenuRecipesStore,
 		createMenuRecipe,
 		deleteMenuRecipe,
@@ -71,9 +67,9 @@
 	const archivedRecipes = $derived($archivedMenuRecipesStore);
 	const selectedRecipe = $derived(draftRecipe ?? $selectedMenuRecipeStore);
 	const normalizedRecipeSearchQuery = $derived(recipeSearchQuery.trim());
-	const serverSearchActive = $derived(normalizedRecipeSearchQuery.length >= 3);
+	const dexieSearchActive = $derived(normalizedRecipeSearchQuery.length >= 3);
 	const displayedRecipes = $derived(
-		serverSearchActive ? (searchRecipes ?? []) : rankRecipesByRelevance(recipes, recipeSearchQuery)
+		dexieSearchActive ? (searchRecipes ?? []) : rankRecipesByRelevance(recipes, recipeSearchQuery)
 	);
 	const selectedRecipes = $derived(
 		displayedRecipes.filter((recipe) => selectedRecipeIds.includes(recipe.id))
@@ -97,6 +93,7 @@
 	);
 
 	$effect(() => {
+		if (!initialRecipes.length && !initialArchivedRecipes.length) return;
 		const signature = JSON.stringify({
 			recipes: initialRecipes,
 			archivedRecipes: initialArchivedRecipes,
@@ -109,18 +106,7 @@
 	});
 
 	const loadMoreRecipes = async () => {
-		if (nextRecipeOffset === null || recipesLoading) return;
-		recipesLoading = true;
-		recipesLoadError = null;
-		try {
-			const body = await fetchMenuRecipesPage(nextRecipeOffset);
-			appendMenuRecipes(body.recipes);
-			nextRecipeOffset = body.nextRecipeOffset;
-		} catch {
-			recipesLoadError = m.menu_could_not_load_more_recipes();
-		} finally {
-			recipesLoading = false;
-		}
+		nextRecipeOffset = null;
 	};
 
 	const idsMatch = (left: string[], right: string[]): boolean =>
@@ -176,7 +162,9 @@
 		const controller = new AbortController();
 		const timeout = setTimeout(async () => {
 			try {
-				searchRecipes = await searchMenuRecipes(query, { signal: controller.signal });
+				const recipes = await searchRecipesInDexie(query);
+				if (controller.signal.aborted) return;
+				searchRecipes = recipes;
 			} catch (error) {
 				if (controller.signal.aborted) return;
 				searchLoadError = readAddRecipeError(error);
@@ -192,7 +180,7 @@
 	});
 
 	$effect(() => {
-		if (!loadMoreElement || nextRecipeOffset === null || serverSearchActive) return;
+		if (!loadMoreElement || nextRecipeOffset === null || dexieSearchActive) return;
 		const observer = new IntersectionObserver(
 			(entries) => {
 				if (entries.some((entry) => entry.isIntersecting)) void loadMoreRecipes();
@@ -415,7 +403,7 @@
 				/>
 			{/each}
 		</div>
-		{#if serverSearchActive && searchLoading}
+		{#if dexieSearchActive && searchLoading}
 			<p class="py-4 text-center text-xs text-muted-foreground">{m.menu_searching_recipes()}</p>
 		{:else if searchLoadError}
 			<p class="py-4 text-center text-xs text-destructive">{searchLoadError}</p>
@@ -425,9 +413,9 @@
 			</p>
 		{/if}
 		<div bind:this={loadMoreElement} class="flex min-h-10 items-center justify-center py-4">
-			{#if !serverSearchActive && recipesLoading}
+			{#if !dexieSearchActive && recipesLoading}
 				<p class="text-xs text-muted-foreground">{m.menu_loading_recipes()}</p>
-			{:else if !serverSearchActive && recipesLoadError}
+			{:else if !dexieSearchActive && recipesLoadError}
 				<button
 					type="button"
 					class="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"

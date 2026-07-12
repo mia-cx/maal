@@ -4,7 +4,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
 	import type { RecipeMenuItem } from '$lib/components/menu';
-	import { searchMenuRecipes } from '$lib/menu/menu-client';
+	import { searchRecipesInDexie } from '$lib/client-db/repositories';
 
 	type PickerOption =
 		| { id: string; type: 'existing'; recipe: RecipeMenuItem }
@@ -149,30 +149,31 @@
 		const query = recipeFetchQuery;
 		if (fetchedRecipeQuery === query) return;
 
-		const controller = new AbortController();
+		let cancelled = false;
 		const timeout = setTimeout(
 			() => {
 				fetchRecipesBusy = true;
 				fetchRecipesError = null;
-				searchMenuRecipes(query, { limit: 10, picker: 'meal', signal: controller.signal })
+				searchRecipesInDexie(query, 10)
 					.then((recipes) => {
+						if (cancelled) return;
 						fetchedRecipes = recipes;
 						fetchedRecipeQuery = query;
 					})
 					.catch((error: unknown) => {
-						if (error instanceof DOMException && error.name === 'AbortError') return;
+						if (cancelled) return;
 						fetchRecipesError = error instanceof Error ? error.message : 'Could not load recipes.';
 					})
 					.finally(() => {
-						if (!controller.signal.aborted) fetchRecipesBusy = false;
+						if (!cancelled) fetchRecipesBusy = false;
 					});
 			},
 			shouldFetchFuzzyRecipes ? 250 : 0
 		);
 
 		return () => {
+			cancelled = true;
 			clearTimeout(timeout);
-			controller.abort();
 		};
 	});
 

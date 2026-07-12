@@ -1,18 +1,16 @@
 import { eq } from 'drizzle-orm';
 import type { UnitPreferences } from '$lib/recipes/ingredient-text';
-import type { EffectiveTaxonomyPreferences } from '$lib/taxonomy/preferences';
+import {
+	defaultUnitPreferencesForLocale,
+	type EffectiveTaxonomyPreferences
+} from '$lib/taxonomy/preferences';
 import { getDb } from '$lib/server/db';
 import { households } from '$lib/server/db/schema';
 import { loadEffectiveTaxonomyPreferences } from '$lib/server/taxonomy/effective-preferences';
 
 export type TaxonomyPreferenceDb = ReturnType<typeof getDb>;
 
-export const defaultUnitPreferences: UnitPreferences = {
-	preferredMassUnit: 'g',
-	preferredVolumeUnit: 'ml',
-	preferredTemperatureUnit: 'celsius',
-	preferredTemperatureUnitLabel: '°C'
-};
+export const defaultUnitPreferences: UnitPreferences = defaultUnitPreferencesForLocale('en-US');
 
 export const loadHouseholdTaxonomyPreferences = async (
 	db: TaxonomyPreferenceDb,

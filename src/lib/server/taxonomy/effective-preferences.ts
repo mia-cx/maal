@@ -1,7 +1,10 @@
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import type { UnitPreferences } from '$lib/recipes/ingredient-text';
-import type { EffectiveTaxonomyPreferences } from '$lib/taxonomy/preferences';
+import {
+	defaultUnitPreferencesForLocale,
+	type EffectiveTaxonomyPreferences
+} from '$lib/taxonomy/preferences';
 import { bestAliasLookup, bestAliasRowsById, byLocalePreference, localeRank } from './aliases';
 import { localeFallbacks } from '$lib/domain/household/settings-parsing';
 import {
@@ -286,6 +289,7 @@ export const loadEffectiveTaxonomyPreferences = async (
 	);
 
 	const unitPreferences: UnitPreferences = {
+		...defaultUnitPreferencesForLocale(params.locale),
 		unitConversions: Object.fromEntries(
 			unitRows.map((unit) => [
 				unit.id,
@@ -352,9 +356,10 @@ export const loadEffectiveTaxonomyPreferences = async (
 		};
 	}
 
-	if (!unitPreferences.preferredTemperatureUnit) {
-		unitPreferences.preferredTemperatureUnit = 'celsius';
-		unitPreferences.preferredTemperatureUnitLabel = '°C';
+	if (!unitPreferences.preferredTemperatureUnitLabel && unitPreferences.preferredTemperatureUnit) {
+		unitPreferences.preferredTemperatureUnitLabel =
+			unitPreferences.unitLabelOverrides?.[unitPreferences.preferredTemperatureUnit] ??
+			unitPreferences.preferredTemperatureUnit;
 	}
 
 	const foodDisplay: EffectiveTaxonomyPreferences['foodDisplay'] = {};

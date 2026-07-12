@@ -19,10 +19,4 @@ export const hydrateTaxonomyPreferences = (
 	taxonomyPreferencesStore.set(preferences ?? emptyTaxonomyPreferences());
 };
 
-export const refreshTaxonomyPreferences = async () => {
-	const response = await fetch('/api/taxonomy/preferences');
-	if (!response.ok) throw new Error(await response.text());
-	const preferences = (await response.json()) as EffectiveTaxonomyPreferences;
-	hydrateTaxonomyPreferences(preferences);
-	return preferences;
-};
+export const refreshTaxonomyPreferences = async () => taxonomyPreferencesStore.get();

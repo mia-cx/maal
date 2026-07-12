@@ -1,13 +1,13 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages';
 	import { cn } from '$lib/utils.js';
-	import { onMount, tick } from 'svelte';
 	import { dateKey, isSameMonth, isToday } from './schedule-date';
 	import { handleBlankScheduleTarget } from './schedule-interactions';
 	import ScheduledMealList from './scheduled-meal-list.svelte';
 	import type {
 		Meal,
 		MealAddHandler,
+		MealCheckInHandler,
 		MealDropTarget,
 		MealPickHandler,
 		MealSelectHandler
@@ -24,6 +24,7 @@
 		onaddmeal,
 		onpick,
 		onselect,
+		oncheckin,
 		onselectdate
 	}: {
 		day: Date;
@@ -36,14 +37,12 @@
 		onaddmeal?: MealAddHandler;
 		onpick?: MealPickHandler;
 		onselect?: MealSelectHandler;
+		oncheckin?: MealCheckInHandler;
 		onselectdate?: (date: Date) => void;
 	} = $props();
 
-	let sectionElement: HTMLElement;
-	let contentElement: HTMLDivElement;
-	let visibleMealCount = $state(0);
-	let measureVersion = 0;
-	let lastMeasurementKey = '';
+	const maxMonthVisibleMeals = 6;
+	const visibleMealCounts = Array.from({ length: maxMonthVisibleMeals + 1 }, (_, count) => count);
 
 	const dayKey = $derived(dateKey(day));
 	const isInMonth = $derived(isSameMonth(day, anchorDate));
@@ -53,57 +52,15 @@
 	const previewSourceMeals = $derived(
 		previewIndex >= 0 ? meals.filter((meal) => meal.id !== draggingMealId) : meals
 	);
-	const monthVisibleMeals = $derived(previewSourceMeals.slice(0, visibleMealCount));
-	const overflowCount = $derived(Math.max(0, previewSourceMeals.length - visibleMealCount));
-	const overflowLabel = $derived(
-		visibleMealCount === 0 ? `${overflowCount} meals` : `+${overflowCount} more`
-	);
-	const outlineDropCell = $derived(previewIndex >= 0 && overflowCount > 0);
-	const visiblePreviewIndex = $derived(outlineDropCell ? -1 : previewIndex);
-	const measurementKey = $derived(
-		[
-			dayKey,
-			previewIndex,
-			draggingMealId ?? '',
-			previewSourceMeals.map((meal) => meal.id).join(',')
-		].join('|')
-	);
-
+	const monthVisibleMeals = $derived(previewSourceMeals.slice(0, maxMonthVisibleMeals));
+	const hasOverflow = $derived(previewSourceMeals.length > 1);
+	const outlineDropCell = $derived(previewIndex >= 0 && hasOverflow);
 	const addMealOnBlankTarget = (event: MouseEvent) =>
 		handleBlankScheduleTarget(event, dayKey, onaddmeal);
-
-	const fitVisibleMeals = async () => {
-		const version = ++measureVersion;
-		visibleMealCount = previewSourceMeals.length;
-		await tick();
-
-		while (
-			version === measureVersion &&
-			contentElement &&
-			contentElement.scrollHeight > contentElement.clientHeight + 1 &&
-			visibleMealCount > 0
-		) {
-			visibleMealCount -= 1;
-			await tick();
-		}
-	};
-
-	onMount(() => {
-		const resizeObserver = new ResizeObserver(() => void fitVisibleMeals());
-		if (sectionElement) resizeObserver.observe(sectionElement);
-		return () => resizeObserver.disconnect();
-	});
-
-	$effect(() => {
-		if (measurementKey === lastMeasurementKey) return;
-		lastMeasurementKey = measurementKey;
-		void fitVisibleMeals();
-	});
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <section
-	bind:this={sectionElement}
 	data-meal-drop-kind="date"
 	data-meal-drop-date={dayKey}
 	class={cn(
@@ -127,33 +84,138 @@
 	</button>
 
 	<div
-		bind:this={contentElement}
 		role="button"
 		tabindex="-1"
 		aria-label={m.app_add_meal_on_date({ date: dayKey })}
 		class="min-h-0 flex-1 space-y-1 overflow-hidden"
 	>
-		<ScheduledMealList
-			meals={monthVisibleMeals}
-			previewIndex={visiblePreviewIndex}
-			{draggingMealId}
-			{draggedMeal}
-			date={dayKey}
-			{onaddmeal}
-			compact
-			density="title"
-			showEmpty={false}
-			{onpick}
-			{onselect}
-		/>
-		{#if overflowCount > 0}
-			<button
-				type="button"
-				class="h-5 w-full truncate pl-2.5 text-left text-xs leading-none font-medium text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
-				onclick={() => onselectdate?.(day)}
-			>
-				{overflowLabel}
-			</button>
-		{/if}
+		<div class="month-meal-list">
+			<ScheduledMealList
+				meals={monthVisibleMeals}
+				{previewIndex}
+				{draggingMealId}
+				{draggedMeal}
+				date={dayKey}
+				{onaddmeal}
+				compact
+				density="title"
+				showEmpty={false}
+				{onpick}
+				{onselect}
+				{oncheckin}
+			/>
+		</div>
+		{#each visibleMealCounts as visibleCount (visibleCount)}
+			{@const overflowCount = Math.max(0, previewSourceMeals.length - visibleCount)}
+			{#if overflowCount > 0}
+				<button
+					type="button"
+					class="month-overflow-label h-5 w-full truncate pl-2.5 text-left text-xs leading-none font-medium text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
+					data-visible-count={visibleCount}
+					onclick={() => onselectdate?.(day)}
+				>
+					{visibleCount === 0 ? `${overflowCount} meals` : `+${overflowCount} more`}
+				</button>
+			{/if}
+		{/each}
 	</div>
 </section>
+
+<style>
+	section {
+		container: month-day-cell / size;
+	}
+
+	.month-meal-list :global(> :nth-child(n + 2)),
+	.month-overflow-label {
+		display: none;
+	}
+
+	.month-overflow-label[data-visible-count='1'] {
+		display: block;
+	}
+
+	@container month-day-cell (height < 72px) {
+		.month-meal-list :global(> :nth-child(n + 1)) {
+			display: none;
+		}
+
+		.month-overflow-label[data-visible-count='1'] {
+			display: none;
+		}
+
+		.month-overflow-label[data-visible-count='0'] {
+			display: block;
+		}
+	}
+
+	@container month-day-cell (height >= 112px) {
+		.month-meal-list :global(> :nth-child(-n + 2)) {
+			display: block;
+		}
+
+		.month-overflow-label[data-visible-count='1'] {
+			display: none;
+		}
+
+		.month-overflow-label[data-visible-count='2'] {
+			display: block;
+		}
+	}
+
+	@container month-day-cell (height >= 144px) {
+		.month-meal-list :global(> :nth-child(-n + 3)) {
+			display: block;
+		}
+
+		.month-overflow-label[data-visible-count='2'] {
+			display: none;
+		}
+
+		.month-overflow-label[data-visible-count='3'] {
+			display: block;
+		}
+	}
+
+	@container month-day-cell (height >= 176px) {
+		.month-meal-list :global(> :nth-child(-n + 4)) {
+			display: block;
+		}
+
+		.month-overflow-label[data-visible-count='3'] {
+			display: none;
+		}
+
+		.month-overflow-label[data-visible-count='4'] {
+			display: block;
+		}
+	}
+
+	@container month-day-cell (height >= 208px) {
+		.month-meal-list :global(> :nth-child(-n + 5)) {
+			display: block;
+		}
+
+		.month-overflow-label[data-visible-count='4'] {
+			display: none;
+		}
+
+		.month-overflow-label[data-visible-count='5'] {
+			display: block;
+		}
+	}
+
+	@container month-day-cell (height >= 240px) {
+		.month-meal-list :global(> :nth-child(-n + 6)) {
+			display: block;
+		}
+
+		.month-overflow-label[data-visible-count='5'] {
+			display: none;
+		}
+
+		.month-overflow-label[data-visible-count='6'] {
+			display: block;
+		}
+	}
+</style>

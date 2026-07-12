@@ -15,21 +15,25 @@ export const readMenuResponseError = async (
 	return fallback;
 };
 
-export const fetchMenuRecipesPage = async (
+export const fetchMenuRecipesPageRemote = async (
 	offset: number,
 	limit = MENU_RECIPE_PAGE_SIZE
 ): Promise<{ recipes: RecipeMenuItem[]; nextRecipeOffset: number | null }> => {
 	const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
 	const response = await fetch(`${resolve('/menu/recipes')}?${params}`);
 	if (!response.ok) throw new Error('Could not load more recipes.');
-	return (await response.json()) as { recipes: RecipeMenuItem[]; nextRecipeOffset: number | null };
+	return (await response.json()) as {
+		recipes: RecipeMenuItem[];
+		nextRecipeOffset: number | null;
+	};
 };
 
-export const searchMenuRecipes = async (
+export const searchMenuRecipesRemote = async (
 	query: string,
 	options: { signal?: AbortSignal; limit?: number; picker?: 'meal' } = {}
 ): Promise<RecipeMenuItem[]> => {
-	const params = new URLSearchParams({ q: query, limit: String(options.limit ?? 60) });
+	const limit = options.limit ?? 60;
+	const params = new URLSearchParams({ q: query, limit: String(limit) });
 	if (options.picker) params.set('picker', options.picker);
 	const response = await fetch(`${resolve('/menu/recipes')}?${params}`, { signal: options.signal });
 	if (!response.ok)
@@ -38,7 +42,7 @@ export const searchMenuRecipes = async (
 	return body.recipes;
 };
 
-export const fetchRecipePickerRecipes = async (limit = 60): Promise<RecipeMenuItem[]> => {
+export const fetchRecipePickerRecipesRemote = async (limit = 60): Promise<RecipeMenuItem[]> => {
 	const params = new URLSearchParams({ picker: 'meal', limit: String(limit) });
 	const response = await fetch(`${resolve('/menu/recipes')}?${params}`);
 	if (!response.ok)
@@ -47,7 +51,7 @@ export const fetchRecipePickerRecipes = async (limit = 60): Promise<RecipeMenuIt
 	return body.recipes;
 };
 
-export const importRecipeDraftFromUrl = async (url: string): Promise<RecipeMenuItem> => {
+export const importRecipeDraftFromUrlRemote = async (url: string): Promise<RecipeMenuItem> => {
 	const params = new URLSearchParams({ importUrl: url });
 	const response = await fetch(`${resolve('/menu/recipes')}?${params}`);
 	if (!response.ok)

@@ -1,13 +1,14 @@
 import { browser } from '$app/environment';
+import {
+	deleteMealFromDexie,
+	readMealsFromDexie,
+	writeMealsToDexie
+} from '$lib/client-db/repositories';
+import { enqueueRemoteSync } from '$lib/client-db/sync';
 import { dateFromKey } from '$lib/components/dashboard/schedule-date';
 import { moveMealToDropTarget } from '$lib/components/dashboard/schedule-dnd';
 import { isMealInPool } from '$lib/components/dashboard/schedule-ordering';
 import type { Meal, MealDropTarget } from '$lib/components/dashboard/schedule-types';
-import {
-	createScheduleMealRemote,
-	deleteScheduleMealRemote,
-	updateScheduleMealRemote
-} from '$lib/components/dashboard/schedule-meal-client';
 import type { RecipeMenuItem } from '$lib/components/menu';
 import { convertInstructionTemperatures, type UnitPreferences } from '$lib/recipes/ingredient-text';
 import { atom, computed } from 'nanostores';
@@ -82,8 +83,12 @@ const mealFromRecipe = (
 const weekdayName = (date: Date): string =>
 	new Intl.DateTimeFormat('en', { weekday: 'long' }).format(date);
 
+const localMealIdPrefix = 'local-meal-';
 const newLocalMealId = (): string =>
-	`local-meal-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`;
+	`${localMealIdPrefix}${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`;
+const isLocalMealId = (mealId: string): boolean => mealId.startsWith(localMealIdPrefix);
+const writePersistedMealsToDexie = (meals: Meal[]) =>
+	writeMealsToDexie(meals.filter((meal) => !isLocalMealId(meal.id)));
 
 const changeHooks = new Set<ScheduleMealChangeHook>();
 const pendingCreateMealIds = new Set<string>();
@@ -157,7 +162,12 @@ const emitScheduleMealChange = (change: ScheduleMealChange) => {
 
 const persistDeletedScheduleMeal = (mealId: string, onFailure?: (error: unknown) => void) => {
 	if (!browser) return;
-	deleteScheduleMealRemote(mealId)
+	enqueueRemoteSync({
+		entity: 'plannedMeal',
+		operation: 'delete',
+		entityId: mealId,
+		payload: { mealId }
+	})
 		.then(() => {
 			deletedMealIds.delete(mealId);
 		})
@@ -179,7 +189,12 @@ const persistExistingScheduleMeal = (
 	onSuccess?: () => void
 ) => {
 	if (!browser) return;
-	updateScheduleMealRemote(meal)
+	enqueueRemoteSync({
+		entity: 'plannedMeal',
+		operation: 'update',
+		entityId: meal.id,
+		payload: { meal }
+	})
 		.then(() => {
 			onSuccess?.();
 		})
@@ -192,6 +207,7 @@ const persistScheduleMealChange = (change: ScheduleMealChange) => {
 	if (!browser || change.source === 'hydrate' || change.source === 'external') return;
 	if (pendingCreateMealIds.has(change.meal.id)) return;
 
+	void writePersistedMealsToDexie([change.meal]);
 	const persistVersion = ++nextPersistVersion;
 	pendingPersistVersions.set(change.meal.id, persistVersion);
 	optimisticMealSnapshots.set(change.meal.id, cloneMeal(change.meal));
@@ -230,6 +246,16 @@ const setScheduleMeals = (
 
 export const hydrateScheduleMeals = (meals: Meal[]) => {
 	setScheduleMeals(cloneMeals(meals), 'hydrate');
+	void writePersistedMealsToDexie(meals);
+};
+
+export const hydrateScheduleMealsFromDexie = async () => {
+	const meals = await readMealsFromDexie();
+	const persistedMeals = meals.filter((meal) => !isLocalMealId(meal.id));
+	const staleLocalMealIds = meals.filter((meal) => isLocalMealId(meal.id)).map((meal) => meal.id);
+	for (const mealId of staleLocalMealIds) void deleteMealFromDexie(mealId);
+	if (persistedMeals.length) setScheduleMeals(persistedMeals, 'hydrate');
+	return persistedMeals;
 };
 
 export const mergeHydratedScheduleMeals = (meals: Meal[], startDate: string, endDate: string) => {
@@ -260,7 +286,9 @@ export const mergeHydratedScheduleMeals = (meals: Meal[], startDate: string, end
 		return meal.date < startDate || meal.date > endDate;
 	});
 	const incomingToMerge = incomingMeals.filter((meal) => !optimisticIdsToKeep.has(meal.id));
-	setScheduleMeals([...outsideRangeOrPending, ...incomingToMerge], 'hydrate');
+	const mergedMeals = [...outsideRangeOrPending, ...incomingToMerge];
+	setScheduleMeals(mergedMeals, 'hydrate');
+	void writePersistedMealsToDexie(mergedMeals);
 };
 
 export const selectScheduleMeal = (mealId: string | null) => {
@@ -288,41 +316,18 @@ const emitChangedScheduleMealChanges = (
 	}
 };
 
-const mergePendingCreateResponse = (createdMeal: Meal, currentMeal?: Meal): Meal => {
-	if (!currentMeal) return createdMeal;
-	return {
-		...createdMeal,
-		date: currentMeal.date,
-		time: currentMeal.time,
-		day: currentMeal.day,
-		sortOrder: currentMeal.sortOrder,
-		status: currentMeal.status,
-		servingsPlanned: currentMeal.servingsPlanned,
-		plannedCookWorkosUserId: currentMeal.plannedCookWorkosUserId,
-		id: createdMeal.id
-	};
-};
-
 const persistNewScheduleMeal = (meal: Meal, previousMealId = meal.id) => {
 	if (!browser) return;
 	pendingCreateMealIds.add(previousMealId);
-	createScheduleMealRemote(meal)
-		.then((createdMeal) => {
-			if (deletedMealIds.has(previousMealId)) {
-				pendingCreateMealIds.delete(previousMealId);
-				deletedMealIds.add(createdMeal.id);
-				persistDeletedScheduleMeal(createdMeal.id);
-				return;
-			}
-			const currentMeal = scheduleMealStore
-				.get()
-				.find((candidate) => candidate.id === previousMealId);
-			const reconciledMeal = mergePendingCreateResponse(createdMeal, currentMeal);
-			pendingCreateMealIds.delete(previousMealId);
-			replaceMeal(reconciledMeal, previousMealId);
-			if (currentMeal && scheduleFieldsChanged(currentMeal, meal)) {
-				persistExistingScheduleMeal(reconciledMeal);
-			}
+	enqueueRemoteSync({
+		entity: 'plannedMeal',
+		operation: 'create',
+		entityId: previousMealId,
+		payload: { meal }
+	})
+		.then(() => {
+			// Keep this local id marked as pending until a future remote reconciliation replaces it
+			// with the canonical D1 id. Enqueue success only means the outbox row was stored.
 		})
 		.catch((error: unknown) => {
 			pendingCreateMealIds.delete(previousMealId);
@@ -383,6 +388,7 @@ export const updateScheduleMeal = (meal: Meal, source: ScheduleMealChangeSource 
 			currentMeal.id === meal.id ? { ...currentMeal, ...meal, day } : currentMeal
 		);
 	setScheduleMeals(meals, source, meal.id, previousMeal);
+	void writePersistedMealsToDexie(meals);
 };
 
 export const updateScheduleMealSchedule = (
@@ -396,6 +402,7 @@ export const deleteScheduleMeal = (meal: Meal) => {
 	const previousMeals = scheduleMealStore.get();
 	deletedMealIds.add(meal.id);
 	removeMeal(meal.id);
+	void deleteMealFromDexie(meal.id);
 	if (!browser || pendingCreateMealIds.has(meal.id)) return;
 	if (isRecipePoolTemplate(meal)) {
 		deletedMealIds.delete(meal.id);

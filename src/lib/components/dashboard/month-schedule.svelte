@@ -130,18 +130,21 @@
 
 	const displayDateForWeek = (weekStart: Date): Date => startOfDay(addDays(weekStart, 3));
 
-	const dayName = (date: Date): string =>
-		new Intl.DateTimeFormat('en', { weekday: 'long' }).format(date);
 	const fastScrollMonthFormatter = new Intl.DateTimeFormat('en', {
 		month: 'long',
 		year: 'numeric'
 	});
-	const mealsForDate = (date: Date): Meal[] => {
-		const key = dateKey(date);
-		return sortScheduledMeals(
-			plannedMeals.filter((meal) => meal.date === key || (!meal.date && meal.day === dayName(date)))
-		);
-	};
+	const mealsByDate = $derived.by(() => {
+		const byDate: Record<string, Meal[]> = {};
+		for (const meal of plannedMeals) {
+			if (!meal.date) continue;
+			byDate[meal.date] ??= [];
+			byDate[meal.date].push(meal);
+		}
+		for (const key of Object.keys(byDate)) byDate[key] = sortScheduledMeals(byDate[key]);
+		return byDate;
+	});
+	const mealsForDate = (date: Date): Meal[] => mealsByDate[dateKey(date)] ?? [];
 
 	const ensureDateLoaded = (date: Date) => {
 		const weekKey = dateKey(startOfWeek(date, weekStartsOn));
@@ -729,6 +732,7 @@
 								{onaddmeal}
 								{onpick}
 								{onselect}
+								{oncheckin}
 								{onselectdate}
 							/>
 						{/each}
