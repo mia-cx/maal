@@ -55,7 +55,6 @@
 	let loadingMoreDays = false;
 	let lastStartTime = $state(0);
 	let lastDayNavigationSignal = $state(0);
-	let scrollPersistFrame: number | undefined;
 	let restoringScroll = false;
 	let ignoreScrollPersistenceUntil = 0;
 
@@ -107,13 +106,17 @@
 		return { date, offset: Math.max(0, anchorTop - current.getBoundingClientRect().top) };
 	};
 
+	const scrollPersistDelayMs = 800;
+	let scrollPersistTimeout: ReturnType<typeof setTimeout> | undefined;
+
 	const persistScrollPosition = () => {
-		if (!browser || scrollPersistFrame !== undefined) return;
-		scrollPersistFrame = requestAnimationFrame(() => {
-			scrollPersistFrame = undefined;
+		if (!browser) return;
+		if (scrollPersistTimeout) clearTimeout(scrollPersistTimeout);
+		scrollPersistTimeout = setTimeout(() => {
+			scrollPersistTimeout = undefined;
 			const scrollState = currentDailyScroll();
 			if (scrollState) onscrollstatechange?.(scrollState);
-		});
+		}, scrollPersistDelayMs);
 	};
 
 	const currentVisibleAnchor = (): { date: string; offset: number } | undefined => {
@@ -192,7 +195,7 @@
 
 		return () => {
 			resizeObserver.disconnect();
-			if (scrollPersistFrame !== undefined) cancelAnimationFrame(scrollPersistFrame);
+			if (scrollPersistTimeout) clearTimeout(scrollPersistTimeout);
 		};
 	});
 
