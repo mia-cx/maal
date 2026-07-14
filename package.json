@@ -16,7 +16,7 @@
 		"dev": "vite dev",
 		"build": "pnpm gen && pnpm i18n:compile && vite build",
 		"preview": "wrangler dev .svelte-kit/cloudflare/_worker.js --port 4173",
-		"prepare": "pnpm gen && pnpm i18n:compile && svelte-kit sync || echo ''",
+		"prepare": "pnpm gen && pnpm i18n:compile && svelte-kit sync",
 		"check": "pnpm gen && pnpm i18n:compile && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"lint": "prettier --check . && eslint .",
