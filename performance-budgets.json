@@ -1,0 +1,10 @@
+{
+	"initialSpaEntryGzipBytes": 256000,
+	"initialShellRenderMs": 1000,
+	"interactionResponseMs": 100,
+	"maxInteractionTaskMs": 50,
+	"maxCumulativeLayoutShift": 0.1,
+	"maxPushMutations": 100,
+	"maxPushBytes": 524288,
+	"menuRecipeFixtureSize": 10000
+}
