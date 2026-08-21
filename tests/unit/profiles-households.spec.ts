@@ -8,7 +8,6 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
 	addOrUpdateLocalProfile,
 	detachHouseholdSnapshot,
-	finalizeProfileSignOut,
 	forkDetachedHouseholdSnapshot,
 	listHouseholdsForProfile,
 	openMaalDatabase,
@@ -24,6 +23,7 @@ import {
 	createHouseholdInvite,
 	updateHouseholdMemberRole
 } from '$lib/client/household-administration.js';
+import { signOutLocalProfile } from '$lib/client/profile-sessions.js';
 import {
 	HouseholdSchema,
 	MembershipSchema,
@@ -201,7 +201,11 @@ describe('device-local profile lifecycle', () => {
 			conflictClocks: {}
 		});
 
-		await finalizeProfileSignOut(database, alice.profileId);
+		const revoke = vi.fn(async () => new Response(null, { status: 204 }));
+		await signOutLocalProfile(database, alice.profileId, revoke as typeof fetch);
+		expect(revoke).toHaveBeenCalledWith(`/api/auth-slots/${'a'.repeat(32)}/`, {
+			method: 'DELETE'
+		});
 		await expect(database.recipes.get(recipeId)).resolves.toBeDefined();
 		await expect(database.profiles.get(alice.profileId)).resolves.toMatchObject({
 			authState: 'signedOut'
