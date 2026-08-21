@@ -28,6 +28,20 @@ export default defineConfig({
 			strategy: ['url']
 		})
 	],
+	optimizeDeps: {
+		include: [
+			'@lucide/svelte/icons/chevron-down',
+			'@lucide/svelte/icons/chevron-up',
+			'@lucide/svelte/icons/grip-vertical',
+			'@lucide/svelte/icons/message-square-text',
+			'@lucide/svelte/icons/minus',
+			'@lucide/svelte/icons/plus',
+			'@lucide/svelte/icons/repeat',
+			'@lucide/svelte/icons/star',
+			'@lucide/svelte/icons/timer',
+			'@solar-icons/svelte/Outline'
+		]
+	},
 	test: {
 		expect: { requireAssertions: true },
 		coverage: {
