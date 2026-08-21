@@ -93,7 +93,8 @@ const jsonText = (value: unknown): string => JSON.stringify(value);
 const withoutConflictClocks = <A extends { conflictClocks: unknown }>(
 	record: A
 ): Omit<A, 'conflictClocks'> => {
-	const { conflictClocks: _conflictClocks, ...portable } = record;
+	const { conflictClocks, ...portable } = record;
+	void conflictClocks;
 	return portable;
 };
 

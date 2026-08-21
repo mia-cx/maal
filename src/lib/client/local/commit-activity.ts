@@ -9,6 +9,7 @@ type Listener = (snapshot: CommitActivitySnapshot) => void;
 
 const listeners = new Set<Listener>();
 const blockers = new Map<string, Set<string>>();
+const GLOBAL_DATABASE_KEY = '*';
 let inFlight = 0;
 
 const snapshot = (): CommitActivitySnapshot => ({
@@ -43,11 +44,20 @@ export const pauseLocalCommits = (databaseName: string, reason: string): void =>
 	publish();
 };
 
+export const pauseAllLocalCommits = (reason: string): void => {
+	reasonsFor(GLOBAL_DATABASE_KEY).add(reason);
+	publish();
+};
+
 export const resumeLocalCommits = (databaseName: string, reason: string): void => {
 	const reasons = blockers.get(databaseName);
 	reasons?.delete(reason);
 	if (reasons?.size === 0) blockers.delete(databaseName);
 	publish();
+};
+
+export const resumeAllLocalCommits = (reason: string): void => {
+	resumeLocalCommits(GLOBAL_DATABASE_KEY, reason);
 };
 
 export const waitForLocalCommitsToDrain = async (): Promise<void> => {
@@ -66,7 +76,7 @@ export const runTrackedLocalCommit = async <A>(
 	operation: string,
 	commit: () => Promise<A>
 ): Promise<A> => {
-	if (reasonsFor(databaseName).size > 0) {
+	if (reasonsFor(databaseName).size > 0 || reasonsFor(GLOBAL_DATABASE_KEY).size > 0) {
 		throw new LocalPersistenceError({
 			operation,
 			message: 'Local changes are paused while this tab prepares a safe reload.'

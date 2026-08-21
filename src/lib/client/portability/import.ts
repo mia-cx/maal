@@ -52,7 +52,6 @@ const archiveError = (
 const asRecord = (value: object): Record<string, unknown> => value as Record<string, unknown>;
 const copyRecord = (value: object): Record<string, unknown> => structuredClone(asRecord(value));
 const text = (value: unknown): string => (typeof value === 'string' ? value : '');
-const nullableText = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 const rowId = (store: PortableImportStore, row: Record<string, unknown>): string =>
 	store === 'households'
 		? text(row.householdId)

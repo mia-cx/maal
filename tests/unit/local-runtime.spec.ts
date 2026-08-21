@@ -20,11 +20,13 @@ import {
 	markRecoveryRequired,
 	openMaalDatabase,
 	openRecoveryDatabase,
+	pauseAllLocalCommits,
 	pauseLocalCommits,
 	readRecoveryState,
 	releaseSyncLease,
 	resetCommitActivityForTests,
 	resumeLocalCommits,
+	resumeAllLocalCommits,
 	resetRecoveredDatabase
 } from '$lib/client/local/index.js';
 import {
@@ -261,6 +263,29 @@ describe('local command boundary', () => {
 		).rejects.toMatchObject({ _tag: 'LocalPersistenceError' });
 
 		resumeLocalCommits(database.name, 'pwa-update');
+	});
+
+	test('pauses commands in every database while tabs coordinate a service-worker update', async () => {
+		const database = await openDatabase();
+		pauseAllLocalCommits('pwa-update');
+
+		await expect(
+			executeLocalCommand(database, {
+				authSlotId: uuidv7(),
+				scopeKind: 'user',
+				scopeId: 'user_alice',
+				entityKind: 'recipe',
+				aggregateId: uuidv7(),
+				conflictGroup: 'header',
+				operation: 'upsert',
+				originDeviceId: uuidv7(),
+				payload: { title: 'Blocked everywhere' },
+				payloadSchema: Schema.Struct({ title: Schema.String }),
+				writes: []
+			})
+		).rejects.toMatchObject({ _tag: 'LocalPersistenceError' });
+
+		resumeAllLocalCommits('pwa-update');
 	});
 
 	test('updates the aggregate, conflict clock, and outbox in one transaction', async () => {
