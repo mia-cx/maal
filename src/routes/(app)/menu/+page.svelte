@@ -14,6 +14,7 @@
 		updateRecipeFromEditor,
 		type RecipeCommandContext
 	} from '$lib/client/recipes/index.js';
+	import { detachDeletedRecipeFromMeals } from '$lib/client/meals/index.js';
 	import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.js';
 	import { DomainIdSchema } from '$lib/domain/contracts/primitives.js';
 	import { MyMenuDashboard, type RecipeMenuItem } from '$lib/components/menu/index.js';
@@ -68,7 +69,24 @@
 
 	const deleteLocalRecipe = async (recipe: RecipeMenuItem) => {
 		if (!database) throw new Error('Local recipe storage is still opening.');
-		await deleteRecipe(database, await commandContext(), recipe.id);
+		const context = await commandContext();
+		await deleteRecipe(database, context, recipe.id);
+		const memberships = await database.memberships
+			.where('workosUserId')
+			.equals(context.ownerUserId)
+			.filter(({ status }) => status !== 'revoked')
+			.toArray();
+		for (const membership of memberships) {
+			await detachDeletedRecipeFromMeals(
+				database,
+				{
+					...context,
+					householdId: membership.householdId,
+					reporterUserId: context.ownerUserId
+				},
+				recipe.id
+			);
+		}
 	};
 
 	const restoreLocalRecipe = async (recipe: RecipeMenuItem) => {
@@ -79,7 +97,25 @@
 	const permanentlyDeleteLocalRecipes = async (selected: RecipeMenuItem[]) => {
 		if (!database) throw new Error('Local recipe storage is still opening.');
 		const context = await commandContext();
-		for (const recipe of selected) await permanentlyDeleteRecipe(database, context, recipe.id);
+		const memberships = await database.memberships
+			.where('workosUserId')
+			.equals(context.ownerUserId)
+			.filter(({ status }) => status !== 'revoked')
+			.toArray();
+		for (const recipe of selected) {
+			for (const membership of memberships) {
+				await detachDeletedRecipeFromMeals(
+					database,
+					{
+						...context,
+						householdId: membership.householdId,
+						reporterUserId: context.ownerUserId
+					},
+					recipe.id
+				);
+			}
+			await permanentlyDeleteRecipe(database, context, recipe.id);
+		}
 	};
 
 	onMount(() => {
