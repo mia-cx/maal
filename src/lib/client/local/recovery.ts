@@ -64,7 +64,13 @@ export const exportDecodableRecoveryData = async (
 		LocalStoreName,
 		Schema.Schema.AnyNoContext
 	][]) {
-		const rawRecords = await database.table(name).toArray();
+		let rawRecords: unknown[];
+		try {
+			rawRecords = await database.table(name).toArray();
+		} catch {
+			// Recovery mode may be opening an older schema that never had this table.
+			continue;
+		}
 		const decoded: unknown[] = [];
 		let skippedCount = 0;
 		for (const rawRecord of rawRecords) {

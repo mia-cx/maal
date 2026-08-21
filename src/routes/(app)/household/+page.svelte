@@ -85,6 +85,13 @@
 	</Sidebar.Provider>
 {:else}
 	<div class="grid min-h-svh place-items-center bg-background px-6 text-center text-foreground">
-		<p class="text-sm text-muted-foreground">{error ?? 'Opening local Maal data…'}</p>
+		<div class="grid gap-2 text-sm text-muted-foreground">
+			<p>{error ?? 'Opening local Maal data…'}</p>
+			{#if error}
+				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+				<a class="text-primary underline underline-offset-4" href="/recovery">Open local recovery</a
+				>
+			{/if}
+		</div>
 	</div>
 {/if}

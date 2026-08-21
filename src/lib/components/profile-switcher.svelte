@@ -5,6 +5,7 @@
 	import KeyRoundIcon from '@lucide/svelte/icons/key-round';
 	import LockKeyholeIcon from '@lucide/svelte/icons/lock-keyhole';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
+	import PackageOpenIcon from '@lucide/svelte/icons/package-open';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
@@ -23,6 +24,7 @@
 	} from '$lib/client/profile-sessions.js';
 	import type { AuthSlotRecord } from '$lib/client/local/records.js';
 	import type { Profile } from '$lib/domain/household/contracts.js';
+	import PortableDataDialog from '$lib/components/portable-data-dialog.svelte';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
@@ -50,6 +52,8 @@
 	let unlockOpen = $state(false);
 	let manageOpen = $state(false);
 	let removeOpen = $state(false);
+	let portableOpen = $state(false);
+	let portableProfileId = $state<string | null>(null);
 	let pin = $state('');
 	let newPin = $state('');
 	let message = $state('');
@@ -179,7 +183,22 @@
 			pending = false;
 		}
 	};
+
+	const openPortableData = async (profileId: string) => {
+		if (onexport) {
+			await onexport(profileId);
+			return;
+		}
+		portableProfileId = profileId;
+		portableOpen = true;
+	};
 </script>
+
+<PortableDataDialog
+	{database}
+	profileId={portableProfileId ?? activeProfileId}
+	bind:open={portableOpen}
+/>
 
 <Dialog.Root bind:open={unlockOpen}>
 	<Dialog.Content class="sm:max-w-sm">
@@ -262,7 +281,7 @@
 		<div class="flex flex-wrap gap-2">
 			<Button
 				variant="outline"
-				onclick={() => removeProfile && void onexport?.(removeProfile.profile.profileId)}
+				onclick={() => removeProfile && void openPortableData(removeProfile.profile.profileId)}
 			>
 				Export data first
 			</Button>
@@ -345,6 +364,9 @@
 					</DropdownMenu.Item>
 					{#if view.profile.profileId === activeProfileId}
 						<DropdownMenu.Group>
+							<DropdownMenu.Item onclick={() => void openPortableData(view.profile.profileId)}>
+								<PackageOpenIcon /> Import or export data
+							</DropdownMenu.Item>
 							<DropdownMenu.Item
 								onclick={() => {
 									manageProfile = view;

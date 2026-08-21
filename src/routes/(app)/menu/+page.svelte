@@ -166,7 +166,11 @@
 </script>
 
 {#if loadError}
-	<p role="alert" class="p-4 text-sm text-destructive">{loadError}</p>
+	<div role="alert" class="grid gap-1 p-4 text-sm text-destructive">
+		<p>{loadError}</p>
+		<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+		<a class="underline underline-offset-4" href="/recovery">Open local recovery</a>
+	</div>
 {/if}
 
 <MyMenuDashboard
