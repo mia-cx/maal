@@ -1,5 +1,8 @@
 # Normalized D1 ERD
 
+> Conceptual scaffold only. The canonical tables, fields, and invariants are specified in
+> [`local-first-rewrite-spec.md`](local-first-rewrite-spec.md).
+
 The D1 model is normalized for authorization, synchronization, and reporting. Recipe and meal sidecars belong
 to their parent aggregate; Dexie collapses each family into one complete aggregate record.
 

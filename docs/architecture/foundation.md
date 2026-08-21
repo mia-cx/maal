@@ -48,7 +48,8 @@ and never during Svelte rendering. Drizzle rows and versioned Dexie aggregates r
 Commands atomically update the local aggregate and append an outbox mutation; components never perform
 network work as part of a domain edit.
 
-See `effect-schema-conventions.md`, `schema-catalogue.md`, and `erd.md` for the committed contracts.
+See `local-first-rewrite-spec.md` for the canonical architecture and field-complete schema, with
+`effect-schema-conventions.md` supplying contract style.
 
 ## Resource isolation
 
@@ -56,8 +57,8 @@ The rewrite uses `maal-v1-*` names and never reuses prototype bindings. Local de
 `maal-v1-local`. Staging and production each use a distinct Worker and D1 database; an environment's D1 UUID
 is recorded in `wrangler.jsonc` only after provisioning.
 
-The profile registry is `maal-v1-profiles`. Per-profile databases use
-`maal-v1:<environment>:<workosUserId>`. Service-worker cache names use a distinct `maal-v1` namespace.
+The one shared device database is `maal-v1:<environment>`. Profiles, domain records, outbox entries, and sync
+scopes retain explicit user/household ownership. Service-worker cache names use a distinct `maal-v1` namespace.
 
 ## Release baseline
 

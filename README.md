@@ -1,11 +1,15 @@
 # Maal Greenfield Local-First Rewrite
 
+> The implementation-driving architecture and schema are now in
+> [`docs/architecture/local-first-rewrite-spec.md`](docs/architecture/local-first-rewrite-spec.md). This older
+> scaffold plan is retained for provenance; the canonical specification wins wherever they differ.
+
 ## Summary
 
 Rebuild Maal on an empty orphan branch as a client-side, offline-first SvelteKit PWA:
 
 - Dexie is the only data source observed by the UI.
-- Each previously authenticated WorkOS user gets an isolated local database.
+- One shared device database supports several previously authenticated WorkOS users with logical ownership.
 - The app continues working offline indefinitely.
 - D1 provides optional paid backup, multi-device sync, household collaboration, and MCP.
 - D1 remains normalized through Drizzle; Dexie stores complete domain aggregates.
@@ -20,8 +24,7 @@ Rebuild Maal on an empty orphan branch as a client-side, offline-first SvelteKit
 - A user must authenticate with WorkOS once to create a local profile.
 - WorkOS user IDs and organization IDs remain application primary keys.
 - Domain records, devices, and mutations use client-generated UUIDv7 IDs.
-- A small device-level profile registry lists previously authenticated profiles.
-- Every profile opens a separate Dexie database named by deployment and WorkOS user ID.
+- The shared Dexie database contains safe profile and auth-slot projections beside logically scoped data.
 - Multiple profiles may coexist on one browser, Netflix-style.
 - An optional per-profile PIN prevents casual access or editing.
 - The PIN is only an application gate; IndexedDB is not encrypted.
@@ -94,8 +97,7 @@ The new deployment uses distinct resources:
 
 - New staging and production D1 databases
 - New cache names and service-worker version namespace
-- `maal-v1-profiles` for the profile registry
-- `maal-v1:<environment>:<workosUserId>` for user databases
+- `maal-v1:<environment>` for the shared device database
 
 No current D1 migration or prototype IndexedDB migration is provided.
 

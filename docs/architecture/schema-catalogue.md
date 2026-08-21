@@ -1,5 +1,10 @@
 # Schema catalogue
 
+> Historical scaffold catalogue. The field-complete
+> [`local-first-rewrite-spec.md`](local-first-rewrite-spec.md) supersedes this file, including its shared-device
+> Dexie model, exact prototype taxonomy tables, focused check-in shape, and backfill timestamp exception. Do
+> not implement directly from this catalogue.
+
 Effect Schema is authoritative for shared contracts. D1 remains normalized through Drizzle; Dexie stores
 versioned complete aggregates. This catalogue fixes names, ownership, and invariants before table migrations
 arrive in the vertical slices.
