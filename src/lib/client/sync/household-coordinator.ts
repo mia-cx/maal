@@ -703,7 +703,10 @@ export const createHouseholdSyncCoordinator = (
 			if (pushedThrough !== null) await pullAll(id, renewCurrentLease);
 			const backfilledThrough = await runBackfill(id);
 			await renewCurrentLease();
-			if (backfilledThrough !== null) await pullAll(id, renewCurrentLease);
+			if (backfilledThrough !== null) {
+				await pullAll(id, renewCurrentLease);
+				schedule(HOUSEHOLD_BACKFILL_INTERVAL_MS);
+			}
 			currentState = 'complete';
 			retryAttempt = 0;
 			await options.database.syncScopes.update(['household', options.householdId], {

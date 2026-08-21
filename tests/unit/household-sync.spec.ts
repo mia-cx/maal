@@ -565,6 +565,53 @@ describe('foreground household coordinator', () => {
 		);
 	});
 
+	test('continues a started backfill after the 30-second interval', async () => {
+		const database = await openDatabase('scheduled-backfill');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: true
+		});
+		const deviceId = String((await database.meta.get('deviceId'))!.value);
+		for (let index = 0; index < 30; index += 1) {
+			await database.meals.put(meal(uuidv7(), uuidv7(), deviceId));
+		}
+		const transport = new MemoryHouseholdServer().transport('user_alice');
+		const backfill = vi.spyOn(transport, 'backfill');
+		let current = new Date(timestamp);
+		const scheduled: { callback: () => void; delay: number }[] = [];
+		const timer = vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay) => {
+			if (typeof callback !== 'function') throw new TypeError('Expected a timer callback.');
+			scheduled.push({ callback, delay: Number(delay ?? 0) });
+			return scheduled.length as unknown as ReturnType<typeof setTimeout>;
+		});
+		const coordinator = createHouseholdSyncCoordinator({
+			database,
+			authSlotId: 'slot_alice',
+			workosUserId: 'user_alice',
+			householdId,
+			transport,
+			environment: environment({ saveData: false }),
+			now: () => current
+		});
+
+		try {
+			coordinator.start();
+			scheduled.shift()?.callback();
+			await coordinator.syncNow();
+			expect(backfill).toHaveBeenCalledTimes(1);
+			expect(scheduled[0]?.delay).toBe(HOUSEHOLD_BACKFILL_INTERVAL_MS);
+			current = new Date(current.getTime() + HOUSEHOLD_BACKFILL_INTERVAL_MS);
+			scheduled.shift()?.callback();
+			await coordinator.syncNow();
+			expect(backfill).toHaveBeenCalledTimes(2);
+		} finally {
+			coordinator.stop();
+			timer.mockRestore();
+		}
+	});
+
 	test('detaches and quarantines only the revoked member auth slot', async () => {
 		const database = await openDatabase('revoked');
 		await seedProfile(database, {
