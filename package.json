@@ -30,6 +30,7 @@
 		"test:proof:auth-slots": "playwright test --config playwright.auth-slots.config.ts",
 		"test:proof:auth-slots:api": "node scripts/prove-auth-slots-workos.mjs",
 		"test:proof:auth-slots:hosted": "node scripts/prove-auth-slots-hosted.mjs",
+		"test:proof:billing": "node scripts/prove-billing-services.mjs",
 		"perf:budget": "node scripts/check-build-budget.mjs",
 		"gen": "wrangler types",
 		"i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --silent",

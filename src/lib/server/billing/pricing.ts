@@ -36,12 +36,19 @@ export const decodeMaalPrice = (price: Stripe.Price, productId: string): Billing
 	};
 };
 
-export const listMaalPrices = async (stripe: Stripe, productId: string): Promise<BillingPrice[]> => {
+export const listMaalPrices = async (
+	stripe: Stripe,
+	productId: string
+): Promise<BillingPrice[]> => {
 	const page = await stripe.prices.list({ product: productId, active: true, limit: 100 });
 	const prices = page.data
 		.map((price) => decodeMaalPrice(price, productId))
 		.filter((price): price is BillingPrice => price !== null)
-		.sort((left, right) => ['week', 'month', 'year'].indexOf(left.interval) - ['week', 'month', 'year'].indexOf(right.interval));
+		.sort(
+			(left, right) =>
+				['week', 'month', 'year'].indexOf(left.interval) -
+				['week', 'month', 'year'].indexOf(right.interval)
+		);
 	return prices;
 };
 

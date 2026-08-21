@@ -1,7 +1,4 @@
-import type {
-	BillingCapability,
-	StripeSubscriptionStatus
-} from '$lib/domain/billing/contracts.js';
+import type { BillingCapability, StripeSubscriptionStatus } from '$lib/domain/billing/contracts.js';
 
 export const BILLING_GRACE_DAYS = 30 as const;
 export const BILLING_GRACE_MILLISECONDS = BILLING_GRACE_DAYS * 24 * 60 * 60 * 1_000;
@@ -17,7 +14,8 @@ export interface BillingProjectionInput {
 	readonly graceUntil: string | null;
 }
 
-const asUtc = (milliseconds: number): `${string}Z` => new Date(milliseconds).toISOString() as `${string}Z`;
+const asUtc = (milliseconds: number): `${string}Z` =>
+	new Date(milliseconds).toISOString() as `${string}Z`;
 
 export const graceWindowForStatus = (
 	status: StripeSubscriptionStatus,

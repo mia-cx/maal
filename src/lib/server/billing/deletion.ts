@@ -36,7 +36,11 @@ const refundableCharge = async (
 	if (!invoiceId || !item) return null;
 	const invoice = await stripe.invoices.retrieve(invoiceId);
 	if (invoice.amount_paid <= 0) return null;
-	const payments = await stripe.invoicePayments.list({ invoice: invoiceId, status: 'paid', limit: 100 });
+	const payments = await stripe.invoicePayments.list({
+		invoice: invoiceId,
+		status: 'paid',
+		limit: 100
+	});
 	const payment = payments.data.find(({ amount_paid }) => (amount_paid ?? 0) > 0);
 	if (!payment) return null;
 	let chargeId = expandedId(payment.payment.charge ?? null);

@@ -3,7 +3,6 @@ import { and, eq, gte, lte, or } from 'drizzle-orm';
 import type { StripeSubscriptionStatus } from '$lib/domain/billing/contracts.js';
 import { getDb } from '$lib/server/db/index.js';
 import {
-	billingAuditEvents,
 	billingSubscriptions,
 	billingTrialClaims,
 	householdDeletionRequests,
@@ -35,22 +34,26 @@ export class BillingRepository {
 
 	async subscription(householdId: string): Promise<BillingSubscriptionRow | null> {
 		return (
-			await getDb(this.database)
-				.select()
-				.from(billingSubscriptions)
-				.where(eq(billingSubscriptions.householdId, householdId))
-				.limit(1)
-		)[0] ?? null;
+			(
+				await getDb(this.database)
+					.select()
+					.from(billingSubscriptions)
+					.where(eq(billingSubscriptions.householdId, householdId))
+					.limit(1)
+			)[0] ?? null
+		);
 	}
 
 	async subscriptionByStripeId(subscriptionId: string): Promise<BillingSubscriptionRow | null> {
 		return (
-			await getDb(this.database)
-				.select()
-				.from(billingSubscriptions)
-				.where(eq(billingSubscriptions.stripeSubscriptionId, subscriptionId))
-				.limit(1)
-		)[0] ?? null;
+			(
+				await getDb(this.database)
+					.select()
+					.from(billingSubscriptions)
+					.where(eq(billingSubscriptions.stripeSubscriptionId, subscriptionId))
+					.limit(1)
+			)[0] ?? null
+		);
 	}
 
 	async trialClaimAvailability(
@@ -58,7 +61,10 @@ export class BillingRepository {
 		householdId: string
 	): Promise<'available' | 'user_already_claimed' | 'household_already_claimed'> {
 		const rows = await getDb(this.database)
-			.select({ workosUserId: billingTrialClaims.workosUserId, householdId: billingTrialClaims.householdId })
+			.select({
+				workosUserId: billingTrialClaims.workosUserId,
+				householdId: billingTrialClaims.householdId
+			})
 			.from(billingTrialClaims)
 			.where(
 				or(
@@ -77,11 +83,13 @@ export class BillingRepository {
 		householdId: string;
 		reservedAt: string;
 	}): Promise<void> {
-		await getDb(this.database).insert(billingTrialClaims).values({
-			...input,
-			state: 'reserved',
-			updatedAt: input.reservedAt
-		});
+		await getDb(this.database)
+			.insert(billingTrialClaims)
+			.values({
+				...input,
+				state: 'reserved',
+				updatedAt: input.reservedAt
+			});
 	}
 
 	async abandonTrialReservation(id: string): Promise<void> {
@@ -118,7 +126,13 @@ export class BillingRepository {
 				.prepare(
 					`UPDATE billing_trial_claims SET state = 'started', stripe_customer_id = ?, stripe_subscription_id = ?, started_at = ?, updated_at = ? WHERE id = ?`
 				)
-				.bind(p.stripeCustomerId, p.stripeSubscriptionId, input.startedAt, input.startedAt, input.claimId),
+				.bind(
+					p.stripeCustomerId,
+					p.stripeSubscriptionId,
+					input.startedAt,
+					input.startedAt,
+					input.claimId
+				),
 			this.subscriptionUpsertStatement(p, input.startedAt),
 			this.auditStatement({
 				idempotencyKey: `trial:${input.claimId}:started`,
@@ -156,7 +170,9 @@ export class BillingRepository {
 		if (existing?.state === 'processed') return 'duplicate';
 		// Increment in SQLite so retries never race a read-modify-write cycle.
 		await this.database
-			.prepare('UPDATE stripe_events SET attempts = attempts + 1, state = ? WHERE stripe_event_id = ?')
+			.prepare(
+				'UPDATE stripe_events SET attempts = attempts + 1, state = ? WHERE stripe_event_id = ?'
+			)
 			.bind('processing', input.id)
 			.run();
 		return 'acquired';
@@ -188,7 +204,9 @@ export class BillingRepository {
 
 	async failStripeEvent(eventId: string, safeErrorCode: string): Promise<void> {
 		await this.database
-			.prepare(`UPDATE stripe_events SET state = 'failed', safe_error_code = ? WHERE stripe_event_id = ?`)
+			.prepare(
+				`UPDATE stripe_events SET state = 'failed', safe_error_code = ? WHERE stripe_event_id = ?`
+			)
 			.bind(safeErrorCode, eventId)
 			.run();
 	}
@@ -227,24 +245,21 @@ export class BillingRepository {
 
 	async deletionRequest(householdId: string): Promise<HouseholdDeletionRow | null> {
 		return (
-			await getDb(this.database)
-				.select()
-				.from(householdDeletionRequests)
-				.where(eq(householdDeletionRequests.householdId, householdId))
-				.limit(1)
-		)[0] ?? null;
+			(
+				await getDb(this.database)
+					.select()
+					.from(householdDeletionRequests)
+					.where(eq(householdDeletionRequests.householdId, householdId))
+					.limit(1)
+			)[0] ?? null
+		);
 	}
 
-	async upsertDeletionRequest(
-		input: typeof householdDeletionRequests.$inferInsert
-	): Promise<void> {
-		await getDb(this.database)
-			.insert(householdDeletionRequests)
-			.values(input)
-			.onConflictDoUpdate({
-				target: householdDeletionRequests.householdId,
-				set: input
-			});
+	async upsertDeletionRequest(input: typeof householdDeletionRequests.$inferInsert): Promise<void> {
+		await getDb(this.database).insert(householdDeletionRequests).values(input).onConflictDoUpdate({
+			target: householdDeletionRequests.householdId,
+			set: input
+		});
 	}
 
 	async recoverHousehold(householdId: string, recoveredAt: string): Promise<boolean> {

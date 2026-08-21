@@ -1,9 +1,6 @@
 import type Stripe from 'stripe';
 
-import {
-	graceWindowForStatus,
-	projectBillingCapability
-} from '$lib/domain/billing/capability.js';
+import { graceWindowForStatus, projectBillingCapability } from '$lib/domain/billing/capability.js';
 import type {
 	BillingProjectionEnvelope,
 	StripeSubscriptionStatus
@@ -23,14 +20,17 @@ const utcFromSeconds = (seconds: number): `${string}Z` =>
 const stringId = (value: string | { id: string } | null): string | null =>
 	value === null ? null : typeof value === 'string' ? value : value.id;
 
-export const effectiveStripeStatus = (subscription: Stripe.Subscription): StripeSubscriptionStatus =>
-	subscription.pause_collection ? 'paused' : subscription.status;
+export const effectiveStripeStatus = (
+	subscription: Stripe.Subscription
+): StripeSubscriptionStatus => (subscription.pause_collection ? 'paused' : subscription.status);
 
 export const subscriptionPriceId = (subscription: Stripe.Subscription): string | null =>
 	subscription.items.data[0]?.price.id ?? null;
 
 export const subscriptionPeriodEnd = (subscription: Stripe.Subscription): string | null => {
-	const end = subscription.items.data.map((item) => item.current_period_end).sort((a, b) => b - a)[0];
+	const end = subscription.items.data
+		.map((item) => item.current_period_end)
+		.sort((a, b) => b - a)[0];
 	return end === undefined ? null : utcFromSeconds(end);
 };
 
@@ -51,7 +51,7 @@ export const projectionFromStripeSubscription = (input: {
 	const sameSubscription = input.existing?.stripeSubscriptionId === input.subscription.id;
 	const grace = graceWindowForStatus(
 		effectiveStripeStatus(input.subscription),
-		sameSubscription ? input.existing?.interruptionStartedAt ?? null : null,
+		sameSubscription ? (input.existing?.interruptionStartedAt ?? null) : null,
 		input.eventReceivedAt,
 		input.paidPeriodSucceeded
 	);
@@ -61,15 +61,17 @@ export const projectionFromStripeSubscription = (input: {
 		stripeSubscriptionId: input.subscription.id,
 		stripePriceId: priceId,
 		subscriberUserId:
-			input.subscription.metadata.workosUserId || input.subscriberUserId ||
-			input.existing?.subscriberUserId || null,
+			input.subscription.metadata.workosUserId ||
+			input.subscriberUserId ||
+			input.existing?.subscriberUserId ||
+			null,
 		status: effectiveStripeStatus(input.subscription),
 		currentPeriodEnd,
 		cancelAtPeriodEnd: input.subscription.cancel_at_period_end,
 		...grace,
 		lastSuccessfulPaymentAt: input.paidPeriodSucceeded
 			? input.eventReceivedAt
-			: input.existing?.lastSuccessfulPaymentAt ?? null,
+			: (input.existing?.lastSuccessfulPaymentAt ?? null),
 		eventId: input.eventId,
 		eventCreatedAt: input.eventCreatedAt
 	};
@@ -102,11 +104,7 @@ export const loadBillingProjection = async (input: {
 		input.now
 	);
 	const deletion = await input.repository.deletionRequest(input.householdId);
-	if (
-		deletion &&
-		deletion.state !== 'recovered' &&
-		deletion.state !== 'purged'
-	) {
+	if (deletion && deletion.state !== 'recovered' && deletion.state !== 'purged') {
 		capability = { ...capability, state: 'disabled', validUntil: null };
 	}
 	const alreadySubscribed = capability.state !== 'disabled';
@@ -115,7 +113,11 @@ export const loadBillingProjection = async (input: {
 		capability,
 		prices,
 		trialAvailable: !alreadySubscribed && availability === 'available',
-		trialUnavailableReason: alreadySubscribed ? 'already_subscribed' : availability === 'available' ? null : availability,
+		trialUnavailableReason: alreadySubscribed
+			? 'already_subscribed'
+			: availability === 'available'
+				? null
+				: availability,
 		refreshedAt: input.now as `${string}Z`
 	};
 };

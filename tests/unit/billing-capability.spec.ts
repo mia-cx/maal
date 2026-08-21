@@ -40,16 +40,12 @@ describe('billing capability projection', () => {
 			BILLING_GRACE_MILLISECONDS
 		);
 		expect(
-			projectBillingCapability(
-				{ ...row, status: 'paused', ...paused },
-				'2026-08-30T23:59:59.000Z'
-			).state
+			projectBillingCapability({ ...row, status: 'paused', ...paused }, '2026-08-30T23:59:59.000Z')
+				.state
 		).toBe('grace');
 		expect(
-			projectBillingCapability(
-				{ ...row, status: 'paused', ...paused },
-				'2026-09-01T00:00:00.001Z'
-			).state
+			projectBillingCapability({ ...row, status: 'paused', ...paused }, '2026-09-01T00:00:00.001Z')
+				.state
 		).toBe('disabled');
 	});
 

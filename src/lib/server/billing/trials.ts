@@ -2,10 +2,7 @@ import type Stripe from 'stripe';
 
 import { listMaalPrices, requireMaalPrice } from './pricing.js';
 import type { BillingRepository } from './repository.js';
-import {
-	assertTrialAvailable,
-	projectionFromStripeSubscription
-} from './subscriptions.js';
+import { assertTrialAvailable, projectionFromStripeSubscription } from './subscriptions.js';
 
 export const startMaalTrial = async (input: {
 	stripe: Stripe;
@@ -21,7 +18,9 @@ export const startMaalTrial = async (input: {
 	await assertTrialAvailable(input.repository, input.workosUserId, input.householdId, input.now);
 	const price = input.priceId
 		? await requireMaalPrice(input.stripe, input.productId, input.priceId)
-		: (await listMaalPrices(input.stripe, input.productId)).find(({ interval }) => interval === 'month');
+		: (await listMaalPrices(input.stripe, input.productId)).find(
+				({ interval }) => interval === 'month'
+			);
 	if (!price) throw new TrialConfigurationError();
 	const claimId = crypto.randomUUID();
 	try {
@@ -39,7 +38,6 @@ export const startMaalTrial = async (input: {
 
 	let customerId: string | null = null;
 	let subscriptionId: string | null = null;
-	let subscription: Stripe.Subscription | null = null;
 	try {
 		const customer = await input.stripe.customers.create(
 			{
@@ -49,7 +47,7 @@ export const startMaalTrial = async (input: {
 			{ idempotencyKey: `maal-trial-customer:${claimId}` }
 		);
 		customerId = customer.id;
-		subscription = await input.stripe.subscriptions.create(
+		const subscription = await input.stripe.subscriptions.create(
 			{
 				customer: customer.id,
 				items: [{ price: price.id }],
@@ -122,7 +120,10 @@ export class TrialConfigurationError extends Error {
 
 export class TrialStartError extends Error {
 	readonly _tag = 'TrialStartError';
-	constructor(readonly reason: 'claim_reservation_failed' | 'rolled_back' | 'rollback_pending', options?: ErrorOptions) {
+	constructor(
+		readonly reason: 'claim_reservation_failed' | 'rolled_back' | 'rollback_pending',
+		options?: ErrorOptions
+	) {
 		super('The trial could not be started.', options);
 	}
 }
