@@ -16,8 +16,8 @@ Port the approved prototype recipe library and editor unchanged at the interacti
 ## TODOs
 
 - [x] Define the complete recipe aggregate contract, lossless editor patch, local commands, queries, and retention behavior.
-- [~] Port the prototype recipe UI and interaction helpers without changing its visual or keyboard behavior.
-- [ ] Wire the menu route to Dexie and add offline, recovery, import-fidelity, and hidden-sidecar tests.
+- [x] Port the prototype recipe UI and interaction helpers without changing its visual or keyboard behavior.
+- [~] Wire the menu route to Dexie and add offline, recovery, import-fidelity, and hidden-sidecar tests.
 - [ ] Run focused and full validations and record any residual caveats.
 
 ## Notes
@@ -25,3 +25,4 @@ Port the approved prototype recipe library and editor unchanged at the interacti
 - Remote URL fetching and synchronization are owned by #64 and #61; this slice accepts an already-decoded imported candidate.
 - Recipe view models are projections only and are never written back as complete aggregates.
 - Domain/local validation: `pnpm test:unit -- tests/unit/recipes.spec.ts` (56 tests passed across 8 files) and `pnpm check` (0 diagnostics).
+- Prototype UI/helper validation: `pnpm test:unit -- src/lib/menu src/lib/recipes` (84 tests passed across 14 files) and `pnpm check` (0 diagnostics).
