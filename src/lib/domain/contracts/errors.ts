@@ -26,3 +26,7 @@ export class LocalRecoveryRequiredError extends Data.TaggedError('LocalRecoveryR
 export class LocalRecoveryConfirmationError extends Data.TaggedError(
 	'LocalRecoveryConfirmationError'
 )<LocalErrorFields> {}
+
+export class TaxonomyInvariantError extends Data.TaggedError(
+	'TaxonomyInvariantError'
+)<LocalErrorFields> {}
