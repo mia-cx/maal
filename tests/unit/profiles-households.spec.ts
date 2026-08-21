@@ -21,6 +21,8 @@ import {
 } from '$lib/client/local/index.js';
 import {
 	createHouseholdInvite,
+	createRemoteHousehold,
+	joinRemoteHousehold,
 	updateHouseholdMemberRole
 } from '$lib/client/household-administration.js';
 import { signOutLocalProfile } from '$lib/client/profile-sessions.js';
@@ -325,6 +327,71 @@ describe('offline households and cached authority', () => {
 		expect(stored).not.toHaveProperty('code');
 		expect(stored).not.toHaveProperty('codeHash');
 		expect(await hashInviteCode(created.code)).toMatch(/^[0-9a-f]{64}$/);
+	});
+
+	test('commits validated create and join projections before selecting the remote household', async () => {
+		const database = await openDatabase();
+		const alice = profile({ workosUserId: 'user_alice' });
+		await database.profiles.add(alice);
+		await addAuthSlot(database, alice, 'a');
+		const createdHousehold = household({ householdId: 'org_created', name: 'Created home' });
+		const joinedHousehold = household({ householdId: 'org_joined', name: 'Joined home' });
+		const createdMembership = membership({
+			membershipId: 'membership_created',
+			householdId: createdHousehold.householdId
+		});
+		const joinedMembership = membership({
+			membershipId: 'membership_joined',
+			householdId: joinedHousehold.householdId,
+			roleSlug: 'member'
+		});
+		const responses = [
+			{ household: createdHousehold, membership: createdMembership },
+			{ household: joinedHousehold, membership: joinedMembership }
+		];
+		const requests: Array<{ url: string; body: unknown }> = [];
+		const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			requests.push({
+				url: String(input),
+				body: init?.body ? JSON.parse(String(init.body)) : null
+			});
+			const payload = responses.shift();
+			if (!payload) throw new Error('Unexpected request');
+			return Response.json({ schemaVersion: 1, payload });
+		});
+
+		await expect(
+			createRemoteHousehold(
+				database,
+				alice.profileId,
+				{ name: 'Created home', locale: 'en-NL', timezone: 'Europe/Amsterdam' },
+				fetcher as typeof fetch
+			)
+		).resolves.toEqual({ householdId: createdHousehold.householdId });
+		await expect(
+			joinRemoteHousehold(database, alice.profileId, 'ABCD-EFGH-IJKL', fetcher as typeof fetch)
+		).resolves.toEqual({ householdId: joinedHousehold.householdId });
+
+		expect(requests).toEqual([
+			expect.objectContaining({
+				url: `/api/auth-slots/${'a'.repeat(32)}/households`,
+				body: { name: 'Created home', locale: 'en-NL', timezone: 'Europe/Amsterdam' }
+			}),
+			expect.objectContaining({
+				url: `/api/auth-slots/${'a'.repeat(32)}/households/join`,
+				body: { code: 'ABCD-EFGH-IJKL' }
+			})
+		]);
+		await expect(database.households.get(createdHousehold.householdId)).resolves.toEqual(
+			createdHousehold
+		);
+		await expect(database.memberships.get(joinedMembership.membershipId)).resolves.toEqual(
+			joinedMembership
+		);
+		await expect(database.uiState.get(`activeHouseholdId:${alice.profileId}`)).resolves.toEqual({
+			key: `activeHouseholdId:${alice.profileId}`,
+			value: joinedHousehold.householdId
+		});
 	});
 
 	test('commits decoded membership projections before returning from explicit role changes', async () => {

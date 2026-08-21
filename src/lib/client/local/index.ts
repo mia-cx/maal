@@ -1,4 +1,5 @@
 export * from './commands.js';
+export * from './browser.js';
 export * from './database.js';
 export * from './leases.js';
 export * from './live-query.js';

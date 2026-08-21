@@ -7,6 +7,7 @@ import {
 } from '$lib/domain/household/invites.js';
 import {
 	HouseholdInviteSummarySchema,
+	HouseholdSchema,
 	HouseholdRoleSchema,
 	MembershipSchema,
 	type HouseholdInviteSummary,
@@ -39,6 +40,10 @@ const InviteResponseSchema = Schema.Struct({
 const MembershipResponseSchema = Schema.Struct({
 	schemaVersion: Schema.Literal(1),
 	payload: MembershipSchema
+});
+const HouseholdMembershipResponseSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(1),
+	payload: Schema.Struct({ household: HouseholdSchema, membership: MembershipSchema })
 });
 
 const requestJson = async <A>(
@@ -86,6 +91,19 @@ const adminContext = async (
 	return { authSlotId: slot.authSlotId, membership: membership as Membership };
 };
 
+const profileSlot = async (
+	database: MaalDatabase,
+	profileId: string
+): Promise<{ authSlotId: string; workosUserId: string }> => {
+	const profile = await database.profiles.get(profileId);
+	if (!profile) throw new LocalProfileMissing({ profileId });
+	const slot = await database.authSlots.where('profileId').equals(profileId).first();
+	if (!slot || slot.sessionState === 'revoked') {
+		throw new HouseholdAdministrationUnavailable({ operation: 'authenticate', status: 401 });
+	}
+	return { authSlotId: slot.authSlotId, workosUserId: profile.workosUserId };
+};
+
 const slotHouseholdPath = (authSlotId: string, householdId: string, suffix: string): string =>
 	`/api/auth-slots/${encodeURIComponent(authSlotId)}/households/${encodeURIComponent(householdId)}/${suffix}`;
 
@@ -94,6 +112,76 @@ export interface CreatedHouseholdInvite {
 	readonly code: string;
 	readonly invite: HouseholdInviteSummary;
 }
+
+export const createRemoteHousehold = async (
+	database: MaalDatabase,
+	profileId: string,
+	input: { name: string; locale: string; timezone: string | null },
+	fetcher: Fetch = globalThis.fetch
+): Promise<{ householdId: string }> => {
+	const slot = await profileSlot(database, profileId);
+	const response = await requestJson(
+		fetcher,
+		`/api/auth-slots/${encodeURIComponent(slot.authSlotId)}/households`,
+		'create household',
+		{
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify(input)
+		},
+		HouseholdMembershipResponseSchema
+	);
+	await database.transaction(
+		'rw',
+		database.households,
+		database.memberships,
+		database.uiState,
+		async () => {
+			await database.households.put(response.payload.household);
+			await database.memberships.put(response.payload.membership);
+			await database.uiState.put({
+				key: `activeHouseholdId:${profileId}`,
+				value: response.payload.household.householdId
+			});
+		}
+	);
+	return { householdId: response.payload.household.householdId };
+};
+
+export const joinRemoteHousehold = async (
+	database: MaalDatabase,
+	profileId: string,
+	code: string,
+	fetcher: Fetch = globalThis.fetch
+): Promise<{ householdId: string }> => {
+	const slot = await profileSlot(database, profileId);
+	const response = await requestJson(
+		fetcher,
+		`/api/auth-slots/${encodeURIComponent(slot.authSlotId)}/households/join`,
+		'join household',
+		{
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ code })
+		},
+		HouseholdMembershipResponseSchema
+	);
+	await database.transaction(
+		'rw',
+		database.households,
+		database.memberships,
+		database.uiState,
+		async () => {
+			await database.households.put(response.payload.household);
+			await database.memberships.put(response.payload.membership);
+			await database.uiState.put({
+				key: `activeHouseholdId:${profileId}`,
+				value: response.payload.household.householdId
+			});
+		}
+	);
+	return { householdId: response.payload.household.householdId };
+};
 
 export const createHouseholdInvite = async (
 	database: MaalDatabase,
