@@ -16,8 +16,8 @@ Connect the existing Dexie household administration adapter to auth-slot-scoped 
 ## TODOs
 
 - [x] Define versioned Effect HTTP contracts, tagged failures, and a testable WorkOS identity adapter.
-- [~] Implement D1 projection, authorization, lock, invite, and compensation repositories.
-- [ ] Implement household administration services and auth-slot-scoped routes.
+- [x] Implement D1 projection, authorization, lock, invite, and compensation repositories.
+- [~] Implement household administration services and auth-slot-scoped routes.
 - [ ] Extend the Dexie client projection commit and reconnect prototype refresh and leave interactions.
 - [ ] Add Miniflare D1, route, client, and browser coverage.
 - [ ] Run focused and full validation and record the proof.
