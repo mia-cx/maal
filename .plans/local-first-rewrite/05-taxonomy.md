@@ -15,7 +15,7 @@ Deliver the lossless local taxonomy, alias, affine-unit conversion, food prefere
 
 ## Blocked by
 
-Local runtime slice.
+Local runtime and shared prototype-UI baseline slices.
 
 ## Implementation TODOs
 
