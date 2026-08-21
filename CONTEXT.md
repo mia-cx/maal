@@ -2,6 +2,10 @@
 
 Maal is a local-first meal-planning application. Local use is complete without a paid household subscription; a subscription adds remote synchronization and collaboration.
 
+## Product UI authority
+
+The in-scope UI at `main` commit `74a12ec38f6c297d1a6adbf596234c45212bac11` is already approved. The local-first rewrite preserves its routes, components, design tokens, copy, accessibility, and interactions—including the custom scroll SDK and complete calendar/schedule experience—and replaces only its data seams unless a later product decision explicitly changes it.
+
 ## Language
 
 **Local profile**:

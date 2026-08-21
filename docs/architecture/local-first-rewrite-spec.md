@@ -4,6 +4,8 @@ Status: implementation-driving v1 specification
 
 Prototype authority: `main` at `74a12ec38f6c297d1a6adbf596234c45212bac11`
 
+Prototype UI authority: the same commit's product routes, components, design tokens, and interaction modules
+
 Decision record: [`../wayfinder/local-first-rewrite/map.md`](../wayfinder/local-first-rewrite/map.md)
 
 ## 1. Product and system boundary
@@ -24,6 +26,19 @@ it is rate-limited and included in the one paid Maal plan.
 
 The locked stack is SvelteKit, Effect Schema, Dexie/IndexedDB, Cloudflare Workers, D1/Drizzle, WorkOS, Stripe,
 the Agents SDK stateless MCP handler, Vitest, and Playwright.
+
+### 1.1 Preserve the finished product UI
+
+This is a data-architecture rewrite, not a product redesign. Every in-scope product surface already implemented
+at the prototype authority commit is carried forward with the same information architecture, visual system,
+responsive layouts, copy, accessibility behavior, and interactions. Implementers replace server-backed stores
+and route data at their seams with Dexie commands and live queries; they do not recreate or reinterpret the UI.
+
+In particular, the dashboard slice reuses `src/lib/interaction/scroll-sdk.ts`, the complete
+`src/lib/components/dashboard/*schedule*` family, its drag/drop and keyboard interactions, the calendar and
+range-calendar primitives, and their existing tests. Calendar modes, continuous scrolling, retargetable
+animation, prepend-position preservation, fast-scroll overlays, meal-pool behavior, and responsive views are
+release behavior. Equivalent-looking replacements do not satisfy this requirement.
 
 ## 2. Runtime architecture
 
@@ -466,6 +481,9 @@ These are implementation proofs, not unresolved product decisions:
    routine Worker/D1 requests for free content use.
 6. MCP: stateless 2026-07-28 discovery and legacy stateless compatibility, every preset/scope, plan/membership
    revocation on next request, and parity with HTTP domain commands.
+7. UI preservation: every in-scope prototype route is present; prototype interaction/unit tests are retained;
+   screenshot and browser comparisons cover phone and desktop calendar modes, the custom scroll SDK, drag/drop,
+   keyboard planning, recipes, profiles, household settings, preferences, billing, and focused check-ins.
 
 ## 12. Implementation frontier
 
@@ -482,4 +500,5 @@ Implement vertical slices in this dependency order:
 
 No implementation slice may introduce HTTP-hydrated dashboard state, per-user Dexie databases, service-worker
 domain authority, client-timestamp ordering for routine live sync, D1 content traffic for free routine use, or
-a second paid tier.
+a second paid tier. No slice may redesign or substitute an in-scope prototype UI without an explicit later
+product decision.
