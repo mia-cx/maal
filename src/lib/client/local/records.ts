@@ -1,4 +1,5 @@
 import type { ConflictClocks, ScopeKind, UtcInstant } from '$lib/domain/contracts/primitives.js';
+import type { BillingCapability } from '$lib/domain/billing/contracts.js';
 import type {
 	Household,
 	HouseholdAppliance,
@@ -56,13 +57,7 @@ export interface LocalAggregateRecord extends LocalStoreRecord {
 	searchTokens?: string[];
 }
 
-export interface BillingCapabilityRecord {
-	householdId: string;
-	status: string;
-	validUntil: UtcInstant | null;
-	stale: boolean;
-	[key: string]: unknown;
-}
+export type BillingCapabilityRecord = BillingCapability;
 
 export interface McpKeySummaryRecord extends LocalStoreRecord {
 	ownerUserId: string;

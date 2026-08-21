@@ -48,7 +48,7 @@ import type {
 	UiStateRecord
 } from './records.js';
 
-export const CURRENT_DATABASE_VERSION = 3 as const;
+export const CURRENT_DATABASE_VERSION = 4 as const;
 
 export const DATABASE_V1_STORES = {
 	meta: '&key',
@@ -92,7 +92,7 @@ export const DATABASE_STORES = {
 	householdFoodDisplayPreferences: '&id,&[householdId+foodId+locale],householdId,foodId',
 	userUnitDisplayPreferences: '&id,&[workosUserId+baseUnitId+locale],workosUserId,baseUnitId',
 	householdUnitDisplayPreferences: '&id,&[householdId+baseUnitId+locale],householdId,baseUnitId',
-	billingCapabilities: '&householdId,status,validUntil,stale',
+	billingCapabilities: '&householdId,state,validUntil,stale',
 	mcpKeySummaries: '&id,ownerUserId,revokedAt',
 	syncScopes: '&[scopeKind+scopeId],state,leaseExpiresAt,lastSuccessAt',
 	backfillCheckpoints: '&[scopeKind+scopeId+entityKind],state',

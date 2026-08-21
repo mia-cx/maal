@@ -188,9 +188,9 @@ describe('shared device database', () => {
 			title: 'Preserved recipe'
 		});
 		await expect(migrated.meta.get('migrationState')).resolves.toMatchObject({
-			value: { from: 2, to: 3, state: 'complete' }
+			value: { from: 2, to: 4, state: 'complete' }
 		});
-		await expect(migrated.meta.get('databaseVersion')).resolves.toMatchObject({ value: 3 });
+		await expect(migrated.meta.get('databaseVersion')).resolves.toMatchObject({ value: 4 });
 		await expect(migrated.meta.get('deviceId')).resolves.toMatchObject({
 			key: 'deviceId'
 		});
@@ -200,7 +200,7 @@ describe('shared device database', () => {
 		const environment = environmentName();
 		const database = await openDatabase(environment);
 		const upgradedTab = new Dexie(database.name);
-		upgradedTab.version(3).stores({ ...DATABASE_STORES, versionProbe: '&id' });
+		upgradedTab.version(4).stores({ ...DATABASE_STORES, versionProbe: '&id' });
 		databases.push(upgradedTab);
 
 		await upgradedTab.open();
