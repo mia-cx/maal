@@ -516,6 +516,55 @@ describe('foreground household coordinator', () => {
 		expect(backfill).toHaveBeenCalledTimes(2);
 	});
 
+	test('includes the protocol envelope in the 256 KiB backfill limit', async () => {
+		const database = await openDatabase('backfill-envelope');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: true
+		});
+		const deviceId = String((await database.meta.get('deviceId'))!.value);
+		const sampleId = uuidv7();
+		const sampleMutationId = uuidv7();
+		const sample = meal(sampleId, sampleMutationId, deviceId, { notes: '' });
+		const sampleMutation: HouseholdSyncMutation = {
+			schemaVersion: CURRENT_SCHEMA_VERSION,
+			mutationId: uuidv7(),
+			originDeviceId: deviceId,
+			entityKind: 'meal',
+			entityId: sampleId,
+			conflictGroups: ['schedule'],
+			operation: 'upsert',
+			occurredAt: timestamp,
+			aggregate: sample
+		};
+		const targetMutationBytes = Math.floor((HOUSEHOLD_BACKFILL_MAX_BYTES - 64) / 2);
+		const sampleBytes = new TextEncoder().encode(JSON.stringify(sampleMutation)).byteLength;
+		const notes = 'x'.repeat(targetMutationBytes - sampleBytes);
+		for (let index = 0; index < 2; index += 1) {
+			await database.meals.put(meal(uuidv7(), uuidv7(), deviceId, { notes }));
+		}
+		const transport = new MemoryHouseholdServer().transport('user_alice');
+		const backfill = vi.spyOn(transport, 'backfill');
+		const coordinator = createHouseholdSyncCoordinator({
+			database,
+			authSlotId: 'slot_alice',
+			workosUserId: 'user_alice',
+			householdId,
+			transport,
+			environment: environment({ saveData: false })
+		});
+
+		await coordinator.syncNow();
+
+		const request = backfill.mock.calls[0]?.[1];
+		expect(request?.mutations).toHaveLength(1);
+		expect(new TextEncoder().encode(JSON.stringify(request)).byteLength).toBeLessThanOrEqual(
+			HOUSEHOLD_BACKFILL_MAX_BYTES
+		);
+	});
+
 	test('detaches and quarantines only the revoked member auth slot', async () => {
 		const database = await openDatabase('revoked');
 		await seedProfile(database, {

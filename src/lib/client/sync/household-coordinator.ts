@@ -367,7 +367,13 @@ const prepareBackfill = async (
 		}
 
 		const rows: OutboxRecord[] = [];
-		let byteCount = 0;
+		const mutations: HouseholdSyncMutation[] = [];
+		const requestCheckpoint: HouseholdBackfillCheckpoint = {
+			entityKind,
+			lastAggregateId: checkpoint?.lastAggregateId ?? null,
+			processedCount: checkpoint?.processedCount ?? 0,
+			priorityBoundary: checkpoint?.priorityBoundary ?? null
+		};
 		for (const { record, priorityKey } of records) {
 			const decoded = decodeHouseholdSyncAggregate(
 				entityKind,
@@ -394,16 +400,24 @@ const prepareBackfill = async (
 				occurredAt: decoded.aggregate.updatedAt as `${string}Z`,
 				aggregate: decoded.aggregate
 			};
-			const bytes = new TextEncoder().encode(JSON.stringify(mutation)).byteLength;
+			const requestBytes = new TextEncoder().encode(
+				JSON.stringify({
+					protocolVersion: CURRENT_PROTOCOL_VERSION,
+					deviceId,
+					audience: { kind: 'household', id: householdId },
+					checkpoint: requestCheckpoint,
+					mutations: [...mutations, mutation]
+				})
+			).byteLength;
 			if (
 				rows.length > 0 &&
 				(rows.length >= HOUSEHOLD_BACKFILL_BATCH_SIZE ||
-					byteCount + bytes > HOUSEHOLD_BACKFILL_MAX_BYTES)
+					requestBytes > HOUSEHOLD_BACKFILL_MAX_BYTES)
 			) {
 				break;
 			}
-			if (bytes > HOUSEHOLD_BACKFILL_MAX_BYTES) continue;
-			byteCount += bytes;
+			if (requestBytes > HOUSEHOLD_BACKFILL_MAX_BYTES) continue;
+			mutations.push(mutation);
 			rows.push({
 				mutationId,
 				authSlotId,
@@ -444,12 +458,7 @@ const prepareBackfill = async (
 		});
 		return {
 			rows,
-			checkpoint: {
-				entityKind,
-				lastAggregateId: checkpoint?.lastAggregateId ?? null,
-				processedCount: checkpoint?.processedCount ?? 0,
-				priorityBoundary: checkpoint?.priorityBoundary ?? null
-			}
+			checkpoint: requestCheckpoint
 		};
 	}
 	return null;
