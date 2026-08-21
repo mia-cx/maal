@@ -19,8 +19,8 @@ Replace the prototype's request-time Stripe status checks with a canonical D1 bi
 ## TODOs
 
 - [x] Implement billing contracts, capability projection, D1 event/claim/deletion repositories, and focused tests.
-- [~] Implement Stripe checkout, trial, webhook, transfer, refund/deletion services and authenticated routes.
-- [ ] Reconnect the approved prototype billing/settings UI to Dexie and explicit online actions.
+- [x] Implement Stripe checkout, trial, webhook, transfer, refund/deletion services and authenticated routes.
+- [~] Reconnect the approved prototype billing/settings UI to Dexie and explicit online actions.
 - [ ] Run local validation and the disposable real-service proof; record redacted evidence.
 
 ## Notes
@@ -29,3 +29,4 @@ Replace the prototype's request-time Stripe status checks with a canonical D1 bi
 - Stripe and D1 remain canonical. The WorkOS `maal` entitlement is accepted only if the staging matrix proves it.
 - Routine local capability reads never contact the Worker.
 - Validation: `pnpm test:unit -- tests/unit/billing-capability.spec.ts tests/unit/server-schema.spec.ts` (74 tests passed across the unit project).
+- Validation: `pnpm check` and `pnpm test:d1-schema` pass with the authenticated billing routes and Worker bindings.
