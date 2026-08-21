@@ -18,7 +18,7 @@ Port the approved prototype recipe library and editor unchanged at the interacti
 - [x] Define the complete recipe aggregate contract, lossless editor patch, local commands, queries, and retention behavior.
 - [x] Port the prototype recipe UI and interaction helpers without changing its visual or keyboard behavior.
 - [x] Wire the menu route to Dexie and add offline, recovery, import-fidelity, and hidden-sidecar tests.
-- [~] Run focused and full validations and record any residual caveats.
+- [x] Run focused and full validations and record any residual caveats.
 
 ## Notes
 
@@ -27,3 +27,5 @@ Port the approved prototype recipe library and editor unchanged at the interacti
 - Domain/local validation: `pnpm test:unit -- tests/unit/recipes.spec.ts` (56 tests passed across 8 files) and `pnpm check` (0 diagnostics).
 - Prototype UI/helper validation: `pnpm test:unit -- src/lib/menu src/lib/recipes` (84 tests passed across 14 files) and `pnpm check` (0 diagnostics).
 - Surface validation: browser component tests cover editor/recovery copy; the real `/menu` route creates while offline, reloads from IndexedDB, and issues zero `/api/` content requests.
+- Full validation: `pnpm validate` passed (Prettier, ESLint, Svelte check, 86 unit/browser tests, production build, 205,591 / 256,000 gzip JS budget, and 3 Playwright tests).
+- Caveat: Vite reports the menu route chunk at 539 kB minified (164 kB gzip); the repository's aggregate gzip budget still passes.
