@@ -39,9 +39,9 @@ export const meals = sqliteTable(
 	'meals',
 	{
 		id: text('id').primaryKey(),
-		householdId: text('household_id')
-			.notNull()
-			.references(() => households.householdId, { onDelete: 'cascade' }),
+		householdId: text('household_id').references(() => households.householdId, {
+			onDelete: 'cascade'
+		}),
 		sourceRecipeId: text('source_recipe_id').references(() => recipes.id, {
 			onDelete: 'set null'
 		}),
@@ -312,6 +312,9 @@ export const mealCheckIns = sqliteTable(
 	'meal_check_ins',
 	{
 		id: text('id').primaryKey(),
+		householdId: text('household_id')
+			.notNull()
+			.references(() => households.householdId, { onDelete: 'cascade' }),
 		reporterUserId: text('reporter_user_id')
 			.notNull()
 			.references(() => users.workosUserId, { onDelete: 'cascade' }),
@@ -323,6 +326,7 @@ export const mealCheckIns = sqliteTable(
 	},
 	(table) => [
 		uniqueIndex('meal_check_ins_meal_reporter_unique').on(table.mealId, table.reporterUserId),
+		index('meal_check_ins_household_idx').on(table.householdId),
 		index('meal_check_ins_reporter_idx').on(table.reporterUserId),
 		index('meal_check_ins_deleted_idx').on(table.deletedAt),
 		enumCheck('meal_check_ins_verdict_check', table.verdict, mealVerdictValues),

@@ -2,4 +2,8 @@ export * from './apply.js';
 export * from './capability.js';
 export * from './coordinator.js';
 export * from './device-coordinator.js';
+export * from './household-apply.js';
+export * from './household-capability.js';
+export * from './household-coordinator.js';
+export * from './household-transport.js';
 export * from './transport.js';

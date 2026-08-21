@@ -8,11 +8,30 @@ import {
 	PullRequestSchema,
 	PushRequestSchema
 } from '$lib/sync/contracts.js';
+import {
+	HouseholdBackfillRequestSchema,
+	HouseholdBootstrapRequestSchema,
+	HouseholdPullRequestSchema,
+	HouseholdPushRequestSchema,
+	type HouseholdSyncEntityKind
+} from '$lib/sync/household-contracts.js';
 
 import { authenticateSyncSlot } from './auth.js';
-import { d1UserSyncCapabilityAuthorizer, type UserSyncPermission } from './capability.js';
+import {
+	d1HouseholdSyncCapabilityAuthorizer,
+	d1UserSyncCapabilityAuthorizer,
+	type HouseholdSyncPermission,
+	type UserSyncPermission
+} from './capability.js';
 import { D1UserSyncRepository } from './d1-repository.js';
 import { ServerSyncMalformedRequest, ServerSyncUnavailable } from './errors.js';
+import { D1HouseholdSyncRepository } from './household-d1-repository.js';
+import {
+	backfillHouseholdSync,
+	bootstrapHouseholdSync,
+	pullHouseholdSync,
+	pushHouseholdSync
+} from './household-service.js';
 import { backfillUserSync, bootstrapUserSync, pullUserSync, pushUserSync } from './service.js';
 
 type SyncOperation = 'pull' | 'push' | 'bootstrap' | 'backfill';
@@ -27,6 +46,20 @@ const schemaFor = {
 
 const permissionFor = (operation: SyncOperation): UserSyncPermission =>
 	operation === 'pull' || operation === 'bootstrap' ? 'recipes:read' : 'recipes:write';
+
+const householdPermissionsFor = (
+	operation: SyncOperation,
+	entityKinds: readonly HouseholdSyncEntityKind[]
+): readonly HouseholdSyncPermission[] => {
+	if (operation === 'pull' || operation === 'bootstrap') return ['meals:read'];
+	const permissions = new Set<HouseholdSyncPermission>();
+	for (const entityKind of entityKinds) {
+		permissions.add(
+			entityKind === 'meal' || entityKind === 'meal_check_in' ? 'meals:write' : 'households:write'
+		);
+	}
+	return [...permissions];
+};
 
 const readBody = async (request: Request): Promise<unknown> => {
 	const length = Number(request.headers.get('content-length') ?? 0);
@@ -154,6 +187,66 @@ export const handleUserSyncRequest = async (
 		if (!database) {
 			throw new ServerSyncUnavailable({ code: 'd1_unavailable', message: 'D1 is unavailable.' });
 		}
+		const body = await readBody(event.request);
+		const audience =
+			typeof body === 'object' && body !== null && 'audience' in body
+				? (body as { audience?: unknown }).audience
+				: null;
+		const audienceKind =
+			typeof audience === 'object' && audience !== null && 'kind' in audience
+				? (audience as { kind?: unknown }).kind
+				: null;
+		if (audienceKind === 'household') {
+			const decoded =
+				operation === 'pull'
+					? decodeRequest(HouseholdPullRequestSchema, body)
+					: operation === 'push'
+						? decodeRequest(HouseholdPushRequestSchema, body)
+						: operation === 'bootstrap'
+							? decodeRequest(HouseholdBootstrapRequestSchema, body)
+							: decodeRequest(HouseholdBackfillRequestSchema, body);
+			const entityKinds =
+				'mutations' in decoded ? decoded.mutations.map(({ entityKind }) => entityKind) : [];
+			for (const permission of householdPermissionsFor(operation, entityKinds)) {
+				await d1HouseholdSyncCapabilityAuthorizer.authorize({
+					database,
+					workosUserId: slot.workosUserId,
+					householdId: decoded.audience.id,
+					activeWorkOSOrganizationIds: slot.activeOrganizationIds,
+					permission,
+					now: new Date().toISOString()
+				});
+			}
+			const repository = new D1HouseholdSyncRepository(database);
+			switch (operation) {
+				case 'pull': {
+					const request = decodeRequest(HouseholdPullRequestSchema, body);
+					return json(await pullHouseholdSync(repository, request.audience.id, request));
+				}
+				case 'push': {
+					const request = decodeRequest(HouseholdPushRequestSchema, body);
+					return json(
+						await pushHouseholdSync(repository, request.audience.id, slot.workosUserId, request)
+					);
+				}
+				case 'bootstrap': {
+					const request = decodeRequest(HouseholdBootstrapRequestSchema, body);
+					return json(await bootstrapHouseholdSync(repository, request.audience.id, request));
+				}
+				case 'backfill': {
+					const request = decodeRequest(HouseholdBackfillRequestSchema, body);
+					return json(
+						await backfillHouseholdSync(repository, request.audience.id, slot.workosUserId, request)
+					);
+				}
+			}
+		}
+		if (audienceKind !== 'user') {
+			throw new ServerSyncMalformedRequest({
+				code: 'audience_kind_invalid',
+				message: 'The sync audience kind is unsupported.'
+			});
+		}
 		await d1UserSyncCapabilityAuthorizer.authorize({
 			database,
 			workosUserId: slot.workosUserId,
@@ -161,7 +254,6 @@ export const handleUserSyncRequest = async (
 			permission: permissionFor(operation),
 			now: new Date().toISOString()
 		});
-		const body = await readBody(event.request);
 		const repository = new D1UserSyncRepository(database);
 		switch (operation) {
 			case 'pull':

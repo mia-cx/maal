@@ -1,6 +1,7 @@
 import { ServerSyncCapabilityDenied, ServerSyncPermissionDenied } from './errors.js';
 
 export type UserSyncPermission = 'recipes:read' | 'recipes:write';
+export type HouseholdSyncPermission = 'meals:read' | 'meals:write' | 'households:write';
 
 export interface UserSyncCapabilityInput {
 	readonly database: D1Database;
@@ -17,6 +18,24 @@ export interface UserSyncCapabilityGrant {
 
 export interface UserSyncCapabilityAuthorizer {
 	authorize(input: UserSyncCapabilityInput): Promise<UserSyncCapabilityGrant>;
+}
+
+export interface HouseholdSyncCapabilityInput {
+	readonly database: D1Database;
+	readonly workosUserId: string;
+	readonly householdId: string;
+	readonly activeWorkOSOrganizationIds: readonly string[];
+	readonly permission: HouseholdSyncPermission;
+	readonly now: string;
+}
+
+export interface HouseholdSyncCapabilityGrant {
+	readonly householdId: string;
+	readonly permission: HouseholdSyncPermission;
+}
+
+export interface HouseholdSyncCapabilityAuthorizer {
+	authorize(input: HouseholdSyncCapabilityInput): Promise<HouseholdSyncCapabilityGrant>;
 }
 
 interface CapabilityRow {
@@ -77,5 +96,50 @@ export const d1UserSyncCapabilityAuthorizer: UserSyncCapabilityAuthorizer = {
 			});
 		}
 		return { householdId: permitted.household_id, permission: input.permission };
+	}
+};
+
+export const d1HouseholdSyncCapabilityAuthorizer: HouseholdSyncCapabilityAuthorizer = {
+	async authorize(input) {
+		if (!input.activeWorkOSOrganizationIds.includes(input.householdId)) {
+			throw new ServerSyncPermissionDenied({
+				code: 'workos_membership_missing',
+				message: 'WorkOS does not report a current membership for this household.'
+			});
+		}
+		const row = await input.database
+			.prepare(
+				`SELECT hm.household_id, hm.permissions, bs.status, bs.grace_until
+				 FROM household_memberships hm
+				 LEFT JOIN billing_subscriptions bs ON bs.household_id = hm.household_id
+				 WHERE hm.household_id = ? AND hm.workos_user_id = ? AND hm.status = 'active'`
+			)
+			.bind(input.householdId, input.workosUserId)
+			.first<CapabilityRow>();
+		if (!row) {
+			throw new ServerSyncPermissionDenied({
+				code: 'membership_required',
+				message: 'The current D1 membership projection denies this household.'
+			});
+		}
+		if (!permissionsFor(row.permissions).includes(input.permission)) {
+			throw new ServerSyncPermissionDenied({
+				code: 'household_permission_required',
+				message: 'The current household membership lacks the required permission.'
+			});
+		}
+		const enabled =
+			row.status === 'active' ||
+			row.status === 'trialing' ||
+			((row.status === 'past_due' || row.status === 'paused') &&
+				row.grace_until !== null &&
+				row.grace_until >= input.now);
+		if (!enabled) {
+			throw new ServerSyncCapabilityDenied({
+				code: 'maal_plan_required',
+				message: 'An active or grace Maal plan is required.'
+			});
+		}
+		return { householdId: input.householdId, permission: input.permission };
 	}
 };
