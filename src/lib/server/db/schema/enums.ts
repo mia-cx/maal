@@ -47,6 +47,7 @@ export const deletionRequestStateValues = [
 	'cancelling',
 	'refunding',
 	'recoverable',
+	'recovered',
 	'purged',
 	'failed'
 ] as const;

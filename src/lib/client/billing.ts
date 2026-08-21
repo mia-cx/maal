@@ -1,0 +1,196 @@
+import { Schema } from 'effect';
+
+import type { MaalDatabase } from '$lib/client/local/database.js';
+import {
+	BillingProjectionEnvelopeSchema,
+	type BillingProjectionEnvelope
+} from '$lib/domain/billing/contracts.js';
+
+type Fetch = typeof globalThis.fetch;
+
+const slotForProfile = async (database: MaalDatabase, profileId: string): Promise<string> => {
+	const slot = await database.authSlots.where('profileId').equals(profileId).first();
+	if (!slot || slot.sessionState === 'revoked') throw new LocalBillingAuthRequired();
+	return slot.authSlotId;
+};
+
+const route = (slotId: string, action: string): string =>
+	`/api/auth-slots/${encodeURIComponent(slotId)}/billing/${action}`;
+
+const errorTag = async (response: Response): Promise<string> => {
+	const body = await response.json().catch(() => null);
+	return typeof body === 'object' && body !== null && 'error' in body
+		? JSON.stringify(body.error)
+		: `HTTP ${response.status}`;
+};
+
+const post = async <T>(
+	database: MaalDatabase,
+	profileId: string,
+	action: string,
+	body: Readonly<Record<string, unknown>>,
+	method: 'POST' | 'PATCH' = 'POST',
+	fetcher: Fetch = globalThis.fetch
+): Promise<T> => {
+	const slotId = await slotForProfile(database, profileId);
+	const response = await fetcher(route(slotId, action), {
+		method,
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(body)
+	});
+	if (!response.ok) throw new LocalBillingRequestFailed(await errorTag(response));
+	return (await response.json()) as T;
+};
+
+export const applyBillingProjection = async (
+	database: MaalDatabase,
+	envelope: BillingProjectionEnvelope
+): Promise<void> => {
+	const decoded = Schema.decodeUnknownSync(BillingProjectionEnvelopeSchema)(envelope);
+	await database.transaction(
+		'rw',
+		[database.billingCapabilities, database.remoteProjectionMeta],
+		async () => {
+			await database.billingCapabilities.put(decoded.capability);
+			await database.remoteProjectionMeta.put({
+				key: `billing:${decoded.capability.householdId}`,
+				refreshedAt: decoded.refreshedAt,
+				decodeVersion: decoded.schemaVersion,
+				value: {
+					prices: decoded.prices,
+					trialAvailable: decoded.trialAvailable,
+					trialUnavailableReason: decoded.trialUnavailableReason
+				}
+			});
+		}
+	);
+};
+
+export const refreshBillingProjection = async (
+	database: MaalDatabase,
+	profileId: string,
+	householdId: string,
+	fetcher: Fetch = globalThis.fetch
+): Promise<BillingProjectionEnvelope> => {
+	const slotId = await slotForProfile(database, profileId);
+	const response = await fetcher(
+		`${route(slotId, 'status')}?householdId=${encodeURIComponent(householdId)}`
+	);
+	if (!response.ok) throw new LocalBillingRequestFailed(await errorTag(response));
+	const decoded = Schema.decodeUnknownSync(BillingProjectionEnvelopeSchema)(await response.json());
+	await applyBillingProjection(database, decoded);
+	return decoded;
+};
+
+export const shouldRefreshBillingOnLaunch = async (
+	database: MaalDatabase,
+	householdId: string,
+	now = Date.now()
+): Promise<boolean> => {
+	const capability = await database.billingCapabilities.get(householdId);
+	if (!capability) return false;
+	if (capability.stale) return true;
+	if (capability.state === 'disabled') return false;
+	const projection = await database.remoteProjectionMeta.get(`billing:${householdId}`);
+	return (
+		!projection?.refreshedAt || now - Date.parse(projection.refreshedAt) > 24 * 60 * 60 * 1_000
+	);
+};
+
+export const beginCheckout = (
+	database: MaalDatabase,
+	profileId: string,
+	householdId: string,
+	priceId: string,
+	fetcher?: Fetch
+): Promise<{ url: string }> =>
+	post(
+		database,
+		profileId,
+		'checkout',
+		{ householdId, priceId, idempotencyKey: crypto.randomUUID() },
+		'POST',
+		fetcher
+	);
+
+export const beginTrial = (
+	database: MaalDatabase,
+	profileId: string,
+	householdId: string,
+	priceId: string | undefined,
+	fetcher?: Fetch
+): Promise<{ started: true }> =>
+	post(
+		database,
+		profileId,
+		'trial',
+		{ householdId, ...(priceId ? { priceId } : {}) },
+		'POST',
+		fetcher
+	);
+
+export const openBillingPortal = (
+	database: MaalDatabase,
+	profileId: string,
+	householdId: string,
+	fetcher?: Fetch
+): Promise<{ url: string }> =>
+	post(database, profileId, 'portal', { householdId }, 'POST', fetcher);
+
+export const transferBillingOwner = (
+	database: MaalDatabase,
+	profileId: string,
+	householdId: string,
+	newSubscriberUserId: string,
+	fetcher?: Fetch
+): Promise<{ transferred: true }> =>
+	post(database, profileId, 'transfer', { householdId, newSubscriberUserId }, 'POST', fetcher);
+
+export const requestHouseholdDeletion = async (
+	database: MaalDatabase,
+	profileId: string,
+	householdId: string,
+	fetcher?: Fetch
+): Promise<void> => {
+	await post(database, profileId, 'household-deletion', { householdId }, 'POST', fetcher);
+	await database.transaction(
+		'rw',
+		[database.households, database.billingCapabilities],
+		async () => {
+			await database.households.update(householdId, { deletionState: 'recoverable' });
+			const capability = await database.billingCapabilities.get(householdId);
+			if (capability) {
+				await database.billingCapabilities.put({
+					...capability,
+					state: 'disabled',
+					validUntil: null,
+					stale: false
+				});
+			}
+		}
+	);
+};
+
+export const recoverHousehold = async (
+	database: MaalDatabase,
+	profileId: string,
+	householdId: string,
+	fetcher?: Fetch
+): Promise<void> => {
+	await post(database, profileId, 'household-deletion', { householdId }, 'PATCH', fetcher);
+	await database.households.update(householdId, { deletionState: 'active' });
+};
+
+export class LocalBillingAuthRequired extends Error {
+	readonly _tag = 'LocalBillingAuthRequired';
+	constructor() {
+		super('Reauthenticate this profile to manage billing.');
+	}
+}
+
+export class LocalBillingRequestFailed extends Error {
+	readonly _tag = 'LocalBillingRequestFailed';
+	constructor(readonly safeMessage: string) {
+		super('The billing request failed.');
+	}
+}

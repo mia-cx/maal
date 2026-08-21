@@ -5,6 +5,7 @@
 	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
 
 	import * as m from '$lib/paraglide/messages.js';
+	import { recoverHousehold, requestHouseholdDeletion } from '$lib/client/billing.js';
 	import {
 		createHouseholdInvite,
 		removeHouseholdMember,
@@ -31,6 +32,7 @@
 	import { hasCachedPermission } from '$lib/domain/household/permissions.js';
 	import { inviteExpiryDays } from '$lib/domain/household/settings-parsing.js';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import BillingSettingsSection from '$lib/components/settings/billing-settings-section.svelte';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -86,12 +88,23 @@
 	let memberToRemove = $state<MemberView | null>(null);
 	let forkOpen = $state(false);
 	let forkName = $state('');
+	let deleteHouseholdOpen = $state(false);
 
 	const canManage = $derived(
 		household?.localOnly || hasCachedPermission(membership ?? undefined, 'households:write')
 	);
 	const readOnly = $derived(membership?.status === 'detached' || !canManage);
 	const isDetached = $derived(membership?.status === 'detached');
+	const transferCandidates = $derived(
+		members
+			.filter(
+				(member) =>
+					member.status === 'active' &&
+					member.roleSlug === 'admin' &&
+					member.workosUserId !== profile?.workosUserId
+			)
+			.map(({ workosUserId, name }) => ({ workosUserId, name }))
+	);
 	const roleOptions = [
 		{ value: 'admin', label: m.household_role_manager() },
 		{ value: 'member', label: m.household_role_adult() },
@@ -291,6 +304,35 @@
 			pending = false;
 		}
 	};
+
+	const deleteHousehold = async () => {
+		pending = true;
+		message = '';
+		try {
+			await requestHouseholdDeletion(database, profileId, householdId);
+			deleteHouseholdOpen = false;
+			message =
+				'The subscription was cancelled and any prorated cash refund was requested. This household can be recovered for 30 days.';
+		} catch {
+			message =
+				'Household deletion could not finish. No remote data was purged; retry to resume the cancellation and refund.';
+		} finally {
+			pending = false;
+		}
+	};
+
+	const recoverDeletion = async () => {
+		pending = true;
+		message = '';
+		try {
+			await recoverHousehold(database, profileId, householdId);
+			message = 'Household recovered. Its previous subscription was not recreated.';
+		} catch {
+			message = 'The household could not be recovered. The 30-day recovery window may have ended.';
+		} finally {
+			pending = false;
+		}
+	};
 </script>
 
 <Dialog.Root bind:open={inviteOpen}>
@@ -366,6 +408,31 @@
 				</Dialog.Footer>
 			</form>
 		{/if}
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={deleteHouseholdOpen}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>{m.household_delete_household_2()}</Dialog.Title>
+			<Dialog.Description>
+				Maal will cancel the subscription, issue a prorated cash refund for unused paid time, and
+				keep the remote household recoverable for 30 days. Local data remains available.
+			</Dialog.Description>
+		</Dialog.Header>
+		<Dialog.Footer>
+			<Button type="button" variant="outline" onclick={() => (deleteHouseholdOpen = false)}
+				>{m.settings_cancel()}</Button
+			>
+			<Button
+				type="button"
+				variant="destructive"
+				disabled={pending}
+				onclick={() => void deleteHousehold()}
+			>
+				{pending ? 'Cancelling and refunding…' : m.household_delete_household()}
+			</Button>
+		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
 
@@ -551,6 +618,18 @@
 				</div>{/if}
 		</section>
 
+		{#if canManage}
+			<BillingSettingsSection
+				{database}
+				{profileId}
+				{householdId}
+				householdName={household.name}
+				workosUserId={profile.workosUserId}
+				localOnly={household.localOnly}
+				{transferCandidates}
+			/>
+		{/if}
+
 		<section class="grid gap-3 border-t border-border pt-4">
 			<div class="grid gap-1">
 				<h2 class="text-sm font-medium">{m.household_members()}</h2>
@@ -660,13 +739,23 @@
 					title="Membership changes require the explicit online household action."
 					>{m.household_leave_household()}</Button
 				>
-				{#if canManage}<Button
-						type="button"
-						variant="destructive"
-						disabled
-						title="Cancel billing before household deletion."
-						>{m.household_delete_household()}</Button
-					>{/if}
+				{#if canManage && !household.localOnly}
+					{#if household.deletionState === 'recoverable'}
+						<Button
+							type="button"
+							variant="outline"
+							disabled={pending}
+							onclick={() => void recoverDeletion()}>Recover household</Button
+						>
+					{:else}
+						<Button
+							type="button"
+							variant="destructive"
+							disabled={pending}
+							onclick={() => (deleteHouseholdOpen = true)}>{m.household_delete_household()}</Button
+						>
+					{/if}
+				{/if}
 			</div>
 			<p class="text-xs text-muted-foreground">
 				Household deletion is available after its Maal plan is cancelled and any refund is complete.

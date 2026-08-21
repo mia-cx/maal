@@ -50,6 +50,9 @@ export const billingSubscriptions = sqliteTable(
 			.default(false),
 		interruptionStartedAt: text('interruption_started_at'),
 		graceUntil: text('grace_until'),
+		lastSuccessfulPaymentAt: text('last_successful_payment_at'),
+		lastStripeEventCreatedAt: text('last_stripe_event_created_at'),
+		lastStripeEventId: text('last_stripe_event_id'),
 		createdAt: createdAt(),
 		updatedAt: updatedAt()
 	},
@@ -110,6 +113,7 @@ export const householdDeletionRequests = sqliteTable(
 		requesterUserId: text('requester_user_id').notNull(),
 		state: text('state', { enum: deletionRequestStateValues }).notNull(),
 		stripeCancellationId: text('stripe_cancellation_id'),
+		stripeChargeId: text('stripe_charge_id'),
 		stripeRefundId: text('stripe_refund_id'),
 		previewedAmountMinor: integer('previewed_amount_minor'),
 		refundedAmountMinor: integer('refunded_amount_minor'),
