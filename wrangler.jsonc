@@ -23,6 +23,13 @@
 			"migrations_dir": "drizzle"
 		}
 	],
+	"ratelimits": [
+		{
+			"name": "RECIPE_URL_RATE_LIMIT",
+			"namespace_id": "1001",
+			"simple": { "limit": 10, "period": 60 }
+		}
+	],
 	"env": {
 		"staging": {
 			"name": "maal-v1-staging",
@@ -32,6 +39,13 @@
 					"database_name": "maal-v1-staging",
 					"database_id": "00000000-0000-0000-0000-000000000000",
 					"migrations_dir": "drizzle"
+				}
+			],
+			"ratelimits": [
+				{
+					"name": "RECIPE_URL_RATE_LIMIT",
+					"namespace_id": "1002",
+					"simple": { "limit": 10, "period": 60 }
 				}
 			]
 		},
@@ -43,6 +57,13 @@
 					"database_name": "maal-v1-production",
 					"database_id": "00000000-0000-0000-0000-000000000000",
 					"migrations_dir": "drizzle"
+				}
+			],
+			"ratelimits": [
+				{
+					"name": "RECIPE_URL_RATE_LIMIT",
+					"namespace_id": "1003",
+					"simple": { "limit": 10, "period": 60 }
 				}
 			]
 		}

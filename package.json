@@ -51,6 +51,7 @@
 		"@fontsource/lexend": "^5.2.11",
 		"@inlang/paraglide-js": "^2.18.2",
 		"@lucide/svelte": "^0.577.0",
+		"@modelcontextprotocol/client": "2.0.0",
 		"@playwright/test": "^1.60.0",
 		"@solar-icons/svelte": "^1.1.1",
 		"@sveltejs/adapter-cloudflare": "^7.2.8",
@@ -99,13 +100,16 @@
 	},
 	"dependencies": {
 		"@internationalized/date": "^3.12.2",
-		"@modelcontextprotocol/sdk": "^1.29.0",
+		"@modelcontextprotocol/sdk": "1.30.0",
+		"@modelcontextprotocol/server": "2.0.0",
 		"@workos-inc/node": "^10.7.0",
 		"@zip.js/zip.js": "^2.8.55",
+		"agents": "0.21.0",
 		"dexie": "^4.4.4",
 		"drizzle-orm": "^0.45.2",
 		"effect": "^3.21.4",
 		"stripe": "^22.3.1",
-		"uuidv7": "^1.2.1"
+		"uuidv7": "^1.2.1",
+		"zod": "^4.2.0"
 	}
 }

@@ -21,6 +21,14 @@ export interface SafeWorkOSUser {
 	readonly profilePictureUrl: string | null;
 }
 
+export interface LiveWorkOSMembership {
+	readonly membershipId: string;
+	readonly householdId: string;
+	readonly householdName: string;
+	readonly roleSlug: string;
+	readonly permissions: readonly string[];
+}
+
 export interface NewSlotSession extends AuthenticatedSlot {
 	readonly sealedSession: string;
 }
@@ -43,6 +51,7 @@ export interface AuthSlotAdapter {
 	): Promise<NewSlotSession | UnauthenticatedSlot>;
 	revoke(sessionId: string): Promise<void>;
 	listActiveOrganizationIds(userId: string): Promise<readonly string[]>;
+	listActiveMemberships(userId: string): Promise<readonly LiveWorkOSMembership[]>;
 }
 
 export interface AuthSlotServerConfig {
@@ -125,12 +134,29 @@ export function createWorkOSAuthSlotAdapter(config: AuthSlotServerConfig): AuthS
 		},
 
 		async listActiveOrganizationIds(userId) {
+			return (await this.listActiveMemberships(userId)).map(({ householdId }) => householdId);
+		},
+
+		async listActiveMemberships(userId) {
 			const page = await workos.userManagement.listOrganizationMemberships({
 				userId,
 				statuses: ['active']
 			});
 			const memberships = await page.autoPagination();
-			return memberships.map(({ organizationId }) => organizationId);
+			return Promise.all(
+				memberships.map(async (membership) => {
+					const role = await workos.authorization
+						.getOrganizationRole(membership.organizationId, membership.role.slug)
+						.catch(() => workos.authorization.getEnvironmentRole(membership.role.slug));
+					return {
+						membershipId: membership.id,
+						householdId: membership.organizationId,
+						householdName: membership.organizationName,
+						roleSlug: membership.role.slug,
+						permissions: role.permissions
+					};
+				})
+			);
 		}
 	};
 }
