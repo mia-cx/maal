@@ -8,7 +8,9 @@
 	import { recoverHousehold, requestHouseholdDeletion } from '$lib/client/billing.js';
 	import {
 		createHouseholdInvite,
+		leaveRemoteHousehold,
 		removeHouseholdMember,
+		refreshRemoteHousehold,
 		revokeHouseholdInvite,
 		updateHouseholdMemberRole,
 		type CreatedHouseholdInvite
@@ -86,15 +88,37 @@
 	let createdInvite = $state<CreatedHouseholdInvite | null>(null);
 	let removeMemberOpen = $state(false);
 	let memberToRemove = $state<MemberView | null>(null);
+	let leaveHouseholdOpen = $state(false);
 	let forkOpen = $state(false);
 	let forkName = $state('');
 	let deleteHouseholdOpen = $state(false);
+	let remoteRefreshStarted = false;
 
 	const canManage = $derived(
 		household?.localOnly || hasCachedPermission(membership ?? undefined, 'households:write')
 	);
 	const readOnly = $derived(membership?.status === 'detached' || !canManage);
 	const isDetached = $derived(membership?.status === 'detached');
+	const activeAdminCount = $derived(
+		members.filter((candidate) => candidate.status === 'active' && candidate.roleSlug === 'admin')
+			.length
+	);
+	const canLeave = $derived(
+		Boolean(
+			membership &&
+			membership.status === 'active' &&
+			membership.source === 'workos' &&
+			!membership.directoryManaged &&
+			!(membership.roleSlug === 'admin' && activeAdminCount <= 1)
+		)
+	);
+	const leaveDisabledReason = $derived(
+		membership?.directoryManaged
+			? 'Directory-managed members must leave through the identity provider.'
+			: membership?.roleSlug === 'admin' && activeAdminCount <= 1
+				? 'You are the last manager. Add another manager or delete the household instead.'
+				: null
+	);
 	const transferCandidates = $derived(
 		members
 			.filter(
@@ -122,20 +146,31 @@
 
 	onMount(() => {
 		const subscription = liveQuery(async () => {
-			const [nextHousehold, nextProfile, nextAppliances, nextMembers, nextInvites, profiles] =
-				await Promise.all([
-					database.households.get(householdId),
-					database.profiles.get(profileId),
-					database.householdAppliances.where('householdId').equals(householdId).toArray(),
-					database.memberships.where('householdId').equals(householdId).toArray(),
-					database.householdInvites.where('householdId').equals(householdId).toArray(),
-					database.profiles.toArray()
-				]);
+			const [
+				nextHousehold,
+				nextProfile,
+				nextAppliances,
+				nextMembers,
+				nextInvites,
+				profiles,
+				attributions
+			] = await Promise.all([
+				database.households.get(householdId),
+				database.profiles.get(profileId),
+				database.householdAppliances.where('householdId').equals(householdId).toArray(),
+				database.memberships.where('householdId').equals(householdId).toArray(),
+				database.householdInvites.where('householdId').equals(householdId).toArray(),
+				database.profiles.toArray(),
+				database.userAttributions.toArray()
+			]);
 			const nextMembership = nextProfile
 				? nextMembers.find(({ workosUserId }) => workosUserId === nextProfile.workosUserId)
 				: undefined;
 			const profilesByUser = new Map(
 				profiles.map((candidate) => [candidate.workosUserId, candidate])
+			);
+			const attributionsByUser = new Map(
+				attributions.map((candidate) => [candidate.workosUserId, candidate])
 			);
 			return {
 				household: nextHousehold ?? null,
@@ -143,10 +178,11 @@
 				membership: nextMembership ?? null,
 				members: nextMembers.map((candidate) => {
 					const local = profilesByUser.get(candidate.workosUserId);
+					const attribution = attributionsByUser.get(candidate.workosUserId);
 					return {
 						...candidate,
-						name: local?.displayName ?? candidate.workosUserId,
-						email: local?.email ?? null,
+						name: local?.displayName ?? attribution?.displayName ?? candidate.workosUserId,
+						email: local?.email ?? attribution?.email ?? null,
 						localProfileId: local?.profileId ?? null
 					};
 				}),
@@ -180,6 +216,17 @@
 				weekStartsOn = String(value.household.weekStartsOn) as '0' | '1';
 				defaultPlannedYield = String(value.household.defaultPlannedYield);
 				preferredDinnerTime = value.household.preferredDinnerTime ?? '';
+			}
+			if (
+				!remoteRefreshStarted &&
+				value.household &&
+				!value.household.localOnly &&
+				value.membership?.status === 'active'
+			) {
+				remoteRefreshStarted = true;
+				void refreshRemoteHousehold(database, profileId, householdId).catch(() => {
+					message = 'The latest household members and invites could not be loaded.';
+				});
 			}
 		});
 		return () => subscription.unsubscribe();
@@ -286,6 +333,20 @@
 			await revokeHouseholdInvite(database, profileId, householdId, inviteId);
 		} catch {
 			message = m.household_could_not_revoke_invite();
+		}
+	};
+
+	const leaveHousehold = async () => {
+		pending = true;
+		message = '';
+		try {
+			await leaveRemoteHousehold(database, profileId, householdId);
+			leaveHouseholdOpen = false;
+			message = 'You left the household. The local snapshot remains available to export.';
+		} catch {
+			message = m.household_could_not_leave_household();
+		} finally {
+			pending = false;
 		}
 	};
 
@@ -408,6 +469,28 @@
 				</Dialog.Footer>
 			</form>
 		{/if}
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={leaveHouseholdOpen}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>{m.household_leave_household_2()}</Dialog.Title>
+			<Dialog.Description>
+				{household ? m.household_leave_description({ householdName: household.name }) : ''}
+			</Dialog.Description>
+		</Dialog.Header>
+		<Dialog.Footer>
+			<Button type="button" variant="outline" onclick={() => (leaveHouseholdOpen = false)}
+				>{m.settings_cancel()}</Button
+			>
+			<Button
+				type="button"
+				variant="destructive"
+				disabled={pending}
+				onclick={() => void leaveHousehold()}>{m.household_leave_household()}</Button
+			>
+		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
 
@@ -735,9 +818,9 @@
 				<Button
 					type="button"
 					variant="outline"
-					disabled
-					title="Membership changes require the explicit online household action."
-					>{m.household_leave_household()}</Button
+					disabled={!canLeave}
+					title={leaveDisabledReason ?? undefined}
+					onclick={() => (leaveHouseholdOpen = true)}>{m.household_leave_household()}</Button
 				>
 				{#if canManage && !household.localOnly}
 					{#if household.deletionState === 'recoverable'}
@@ -757,6 +840,9 @@
 					{/if}
 				{/if}
 			</div>
+			{#if !canLeave && leaveDisabledReason}<p class="text-xs text-muted-foreground">
+					{leaveDisabledReason}
+				</p>{/if}
 			<p class="text-xs text-muted-foreground">
 				Household deletion is available after its Maal plan is cancelled and any refund is complete.
 			</p>

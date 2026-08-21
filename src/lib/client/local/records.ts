@@ -38,6 +38,7 @@ export type HouseholdApplianceRecord = HouseholdAppliance;
 export interface UserAttributionRecord {
 	workosUserId: string;
 	displayName: string;
+	email?: string | null;
 	profilePictureUrl: string | null;
 }
 

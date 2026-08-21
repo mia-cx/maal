@@ -1,12 +1,17 @@
 import { Data, Schema } from 'effect';
+import { uuidv7 } from 'uuidv7';
 
 import {
+	HouseholdAdministrationProjectionResponseSchema,
+	HouseholdInviteResponseSchema,
+	HouseholdMemberRemovalResponseSchema,
+	HouseholdMembershipResponseSchema,
+	type HouseholdAdministrationProjection,
 	CreateHouseholdInviteInputSchema,
 	createInviteCode,
 	type CreateHouseholdInviteInput
-} from '$lib/domain/household/invites.js';
+} from '$lib/domain/household/index.js';
 import {
-	HouseholdInviteSummarySchema,
 	HouseholdSchema,
 	HouseholdRoleSchema,
 	MembershipSchema,
@@ -16,7 +21,17 @@ import {
 } from '$lib/domain/household/contracts.js';
 import { requireCachedPermission } from '$lib/domain/household/permissions.js';
 import type { MaalDatabase } from '$lib/client/local/database.js';
+import { detachHouseholdSnapshot } from '$lib/client/local/households.js';
 import { LocalProfileMissing } from '$lib/client/local/profiles.js';
+
+const LegacyHouseholdMembershipResponseSchema = Schema.Struct({
+	schemaVersion: Schema.Literal(1),
+	payload: Schema.Struct({ household: HouseholdSchema, membership: MembershipSchema })
+});
+const CreateJoinResponseSchema = Schema.Union(
+	HouseholdAdministrationProjectionResponseSchema,
+	LegacyHouseholdMembershipResponseSchema
+);
 
 export class HouseholdAdministrationUnavailable extends Data.TaggedError(
 	'HouseholdAdministrationUnavailable'
@@ -32,19 +47,6 @@ export class HouseholdAdministrationDecodeError extends Data.TaggedError(
 }> {}
 
 type Fetch = typeof globalThis.fetch;
-
-const InviteResponseSchema = Schema.Struct({
-	schemaVersion: Schema.Literal(1),
-	payload: HouseholdInviteSummarySchema
-});
-const MembershipResponseSchema = Schema.Struct({
-	schemaVersion: Schema.Literal(1),
-	payload: MembershipSchema
-});
-const HouseholdMembershipResponseSchema = Schema.Struct({
-	schemaVersion: Schema.Literal(1),
-	payload: Schema.Struct({ household: HouseholdSchema, membership: MembershipSchema })
-});
 
 const requestJson = async <A>(
 	fetcher: Fetch,
@@ -107,6 +109,135 @@ const profileSlot = async (
 const slotHouseholdPath = (authSlotId: string, householdId: string, suffix: string): string =>
 	`/api/auth-slots/${encodeURIComponent(authSlotId)}/households/${encodeURIComponent(householdId)}/${suffix}`;
 
+const slotHouseholdBasePath = (authSlotId: string, householdId: string): string =>
+	`/api/auth-slots/${encodeURIComponent(authSlotId)}/households/${encodeURIComponent(householdId)}`;
+
+const commitHouseholdProjection = async (
+	database: MaalDatabase,
+	profileId: string,
+	projection: HouseholdAdministrationProjection,
+	selectHousehold: boolean
+): Promise<void> => {
+	const householdId = projection.household.householdId;
+	await database.transaction(
+		'rw',
+		database.households,
+		database.memberships,
+		database.householdInvites,
+		database.userAttributions,
+		database.remoteProjectionMeta,
+		database.uiState,
+		database.outbox,
+		async () => {
+			const [existingHousehold, existingMemberships, existingInvites, pendingHouseholdMutation] =
+				await Promise.all([
+					database.households.get(householdId),
+					database.memberships.where('householdId').equals(householdId).toArray(),
+					database.householdInvites.where('householdId').equals(householdId).toArray(),
+					database.outbox
+						.where('aggregateId')
+						.equals(householdId)
+						.filter(
+							(mutation) =>
+								mutation.scopeKind === 'household' &&
+								mutation.scopeId === householdId &&
+								mutation.status !== 'acknowledged' &&
+								mutation.status !== 'rejected'
+						)
+						.first()
+				]);
+			const household =
+				existingHousehold && pendingHouseholdMutation
+					? {
+							...projection.household,
+							name: existingHousehold.name,
+							locale: existingHousehold.locale,
+							timezone: existingHousehold.timezone,
+							weekStartsOn: existingHousehold.weekStartsOn,
+							defaultPlannedYield: existingHousehold.defaultPlannedYield,
+							preferredDinnerTime: existingHousehold.preferredDinnerTime,
+							revision: existingHousehold.revision,
+							updatedAt: existingHousehold.updatedAt,
+							conflictClocks: existingHousehold.conflictClocks
+						}
+					: projection.household;
+			await database.households.put(household);
+			await database.memberships.bulkPut(projection.members.map(({ membership }) => membership));
+			const projectedMembershipIds = new Set(
+				projection.members.map(({ membership }) => membership.membershipId)
+			);
+			for (const existing of existingMemberships) {
+				if (
+					existing.source === 'workos' &&
+					existing.status === 'active' &&
+					!projectedMembershipIds.has(existing.membershipId)
+				) {
+					await database.memberships.update(existing.membershipId, {
+						status: 'revoked',
+						updatedAt: projection.membership.lastVerifiedAt,
+						denialCode: 'workos_membership_missing'
+					});
+				}
+			}
+			await database.householdInvites.bulkPut([...projection.invites]);
+			const projectedInviteIds = new Set(projection.invites.map(({ id }) => id));
+			await database.householdInvites.bulkDelete(
+				existingInvites.filter(({ id }) => !projectedInviteIds.has(id)).map(({ id }) => id)
+			);
+			await database.userAttributions.bulkPut(
+				projection.members.map(({ user }) => ({
+					workosUserId: user.workosUserId,
+					displayName: user.displayName,
+					email: user.email,
+					profilePictureUrl: user.profilePictureUrl
+				}))
+			);
+			await database.remoteProjectionMeta.put({
+				key: `householdAdministration:${profileId}:${householdId}`,
+				refreshedAt: projection.membership.lastVerifiedAt,
+				decodeVersion: 1,
+				value: { memberCount: projection.members.length, inviteCount: projection.invites.length }
+			});
+			if (selectHousehold) {
+				await database.uiState.put({
+					key: `activeHouseholdId:${profileId}`,
+					value: householdId
+				});
+			}
+		}
+	);
+};
+
+const commitCreateJoinProjection = async (
+	database: MaalDatabase,
+	profileId: string,
+	projection:
+		| HouseholdAdministrationProjection
+		| { household: HouseholdAdministrationProjection['household']; membership: Membership },
+	selectHousehold: boolean
+): Promise<void> => {
+	if ('members' in projection) {
+		await commitHouseholdProjection(database, profileId, projection, selectHousehold);
+		return;
+	}
+	await database.transaction(
+		'rw',
+		database.households,
+		database.memberships,
+		database.uiState,
+		async () => {
+			await database.households.put(projection.household);
+			await database.memberships.put(projection.membership);
+			if (selectHousehold) {
+				await database.uiState.put({
+					key: `activeHouseholdId:${profileId}`,
+					value: projection.household.householdId
+				});
+			}
+		}
+	);
+};
+
 export interface CreatedHouseholdInvite {
 	/** Exists only in the caller's memory for the creation/share ceremony. */
 	readonly code: string;
@@ -126,25 +257,12 @@ export const createRemoteHousehold = async (
 		'create household',
 		{
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers: { 'content-type': 'application/json', 'idempotency-key': uuidv7() },
 			body: JSON.stringify(input)
 		},
-		HouseholdMembershipResponseSchema
+		CreateJoinResponseSchema
 	);
-	await database.transaction(
-		'rw',
-		database.households,
-		database.memberships,
-		database.uiState,
-		async () => {
-			await database.households.put(response.payload.household);
-			await database.memberships.put(response.payload.membership);
-			await database.uiState.put({
-				key: `activeHouseholdId:${profileId}`,
-				value: response.payload.household.householdId
-			});
-		}
-	);
+	await commitCreateJoinProjection(database, profileId, response.payload, true);
 	return { householdId: response.payload.household.householdId };
 };
 
@@ -164,23 +282,28 @@ export const joinRemoteHousehold = async (
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({ code })
 		},
-		HouseholdMembershipResponseSchema
+		CreateJoinResponseSchema
 	);
-	await database.transaction(
-		'rw',
-		database.households,
-		database.memberships,
-		database.uiState,
-		async () => {
-			await database.households.put(response.payload.household);
-			await database.memberships.put(response.payload.membership);
-			await database.uiState.put({
-				key: `activeHouseholdId:${profileId}`,
-				value: response.payload.household.householdId
-			});
-		}
-	);
+	await commitCreateJoinProjection(database, profileId, response.payload, true);
 	return { householdId: response.payload.household.householdId };
+};
+
+export const refreshRemoteHousehold = async (
+	database: MaalDatabase,
+	profileId: string,
+	householdId: string,
+	fetcher: Fetch = globalThis.fetch
+): Promise<HouseholdAdministrationProjection> => {
+	const { authSlotId } = await profileSlot(database, profileId);
+	const response = await requestJson(
+		fetcher,
+		slotHouseholdBasePath(authSlotId, householdId),
+		'refresh household',
+		{ method: 'GET' },
+		HouseholdAdministrationProjectionResponseSchema
+	);
+	await commitHouseholdProjection(database, profileId, response.payload, false);
+	return response.payload;
 };
 
 export const createHouseholdInvite = async (
@@ -201,7 +324,7 @@ export const createHouseholdInvite = async (
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({ ...decoded, code })
 		},
-		InviteResponseSchema
+		HouseholdInviteResponseSchema
 	);
 	await database.householdInvites.put(response.payload);
 	return { code, invite: response.payload };
@@ -220,7 +343,7 @@ export const revokeHouseholdInvite = async (
 		`${slotHouseholdPath(authSlotId, householdId, 'invites')}/${encodeURIComponent(inviteId)}`,
 		'revoke household invite',
 		{ method: 'DELETE' },
-		InviteResponseSchema
+		HouseholdInviteResponseSchema
 	);
 	await database.householdInvites.put(response.payload);
 	return response.payload;
@@ -249,7 +372,7 @@ export const updateHouseholdMemberRole = async (
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({ roleSlug: decoded.roleSlug })
 		},
-		MembershipResponseSchema
+		HouseholdMembershipResponseSchema
 	);
 	await database.memberships.put(response.payload);
 	return response.payload;
@@ -268,13 +391,31 @@ export const removeHouseholdMember = async (
 		`${slotHouseholdPath(authSlotId, householdId, 'members')}/${encodeURIComponent(membershipId)}`,
 		'remove household member',
 		{ method: 'DELETE' },
-		Schema.Struct({
-			schemaVersion: Schema.Literal(1),
-			payload: Schema.Struct({ removed: Schema.Boolean })
-		})
+		HouseholdMemberRemovalResponseSchema
 	);
 	await database.memberships.update(membershipId, {
 		status: 'revoked',
 		updatedAt: new Date().toISOString() as `${string}Z`
+	});
+};
+
+export const leaveRemoteHousehold = async (
+	database: MaalDatabase,
+	profileId: string,
+	householdId: string,
+	fetcher: Fetch = globalThis.fetch
+): Promise<void> => {
+	const { authSlotId } = await profileSlot(database, profileId);
+	await requestJson(
+		fetcher,
+		`${slotHouseholdBasePath(authSlotId, householdId)}/membership`,
+		'leave household',
+		{ method: 'DELETE' },
+		HouseholdMemberRemovalResponseSchema
+	);
+	await detachHouseholdSnapshot(database, {
+		profileId,
+		householdId,
+		denialCode: 'membership_left'
 	});
 };
