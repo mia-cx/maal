@@ -1,6 +1,8 @@
 import { Schema } from 'effect';
 
-export const CURRENT_SCHEMA_VERSION = 1 as const;
+import { CURRENT_SCHEMA_VERSION } from './versions.js';
+
+export { CURRENT_PROTOCOL_VERSION, CURRENT_SCHEMA_VERSION } from './versions.js';
 
 /** Wraps persisted and network payloads in an explicitly versioned contract. */
 export const versionedContract = <A, I, R>(payload: Schema.Schema<A, I, R>) =>
@@ -8,3 +10,6 @@ export const versionedContract = <A, I, R>(payload: Schema.Schema<A, I, R>) =>
 		schemaVersion: Schema.Literal(CURRENT_SCHEMA_VERSION),
 		payload
 	});
+
+export * from './errors.js';
+export * from './primitives.js';
