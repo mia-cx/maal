@@ -230,6 +230,38 @@ export const syncChanges = sqliteTable(
 	]
 );
 
+export const syncMutationReceipts = sqliteTable(
+	'sync_mutation_receipts',
+	{
+		mutationId: text('mutation_id').primaryKey(),
+		audienceKind: text('audience_kind', { enum: syncAudienceKindValues }).notNull(),
+		audienceId: text('audience_id').notNull(),
+		entityKind: text('entity_kind').notNull(),
+		entityId: text('entity_id').notNull(),
+		status: text('status', { enum: ['accepted', 'rejected'] }).notNull(),
+		sequence: integer('sequence'),
+		resultingRevision: integer('resulting_revision'),
+		errorCode: text('error_code'),
+		receivedAt: createdAt(),
+		retainUntil: text('retain_until').notNull()
+	},
+	(table) => [
+		index('sync_mutation_receipts_audience_idx').on(table.audienceKind, table.audienceId),
+		index('sync_mutation_receipts_retention_idx').on(table.retainUntil),
+		enumCheck(
+			'sync_mutation_receipts_audience_kind_check',
+			table.audienceKind,
+			syncAudienceKindValues
+		),
+		enumCheck('sync_mutation_receipts_status_check', table.status, ['accepted', 'rejected']),
+		check(
+			'sync_mutation_receipts_result_check',
+			sql`(${table.status} = 'accepted' AND ${table.sequence} > 0 AND ${table.resultingRevision} > 0 AND ${table.errorCode} IS NULL)
+			 OR (${table.status} = 'rejected' AND ${table.sequence} IS NULL AND ${table.resultingRevision} IS NULL AND ${table.errorCode} IS NOT NULL)`
+		)
+	]
+);
+
 export const syncEntityVersions = sqliteTable(
 	'sync_entity_versions',
 	{

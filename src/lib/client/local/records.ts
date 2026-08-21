@@ -107,6 +107,7 @@ export interface BackfillCheckpointRecord {
 	lastAggregateId: string | null;
 	processedCount: number;
 	state: 'pending' | 'running' | 'complete';
+	lastAttemptAt?: UtcInstant | null;
 }
 
 export interface UiStateRecord {

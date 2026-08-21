@@ -42,6 +42,7 @@ export interface AuthSlotAdapter {
 		organizationId?: string
 	): Promise<NewSlotSession | UnauthenticatedSlot>;
 	revoke(sessionId: string): Promise<void>;
+	listActiveOrganizationIds(userId: string): Promise<readonly string[]>;
 }
 
 export interface AuthSlotServerConfig {
@@ -121,6 +122,15 @@ export function createWorkOSAuthSlotAdapter(config: AuthSlotServerConfig): AuthS
 
 		async revoke(sessionId) {
 			await workos.userManagement.revokeSession({ sessionId });
+		},
+
+		async listActiveOrganizationIds(userId) {
+			const page = await workos.userManagement.listOrganizationMemberships({
+				userId,
+				statuses: ['active']
+			});
+			const memberships = await page.autoPagination();
+			return memberships.map(({ organizationId }) => organizationId);
 		}
 	};
 }

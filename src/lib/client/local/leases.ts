@@ -67,3 +67,37 @@ export const releaseSyncLease = async (
 		await database.syncScopes.update(key, { leaseOwner: null, leaseExpiresAt: null });
 		return true;
 	});
+
+export const renewSyncLease = async (
+	database: MaalDatabase,
+	lease: Pick<SyncLease, 'scopeKind' | 'scopeId' | 'owner'> & {
+		ttlMilliseconds: number;
+		now?: Date;
+	}
+): Promise<SyncLease | null> =>
+	database.transaction('rw', database.syncScopes, async () => {
+		const key: [string, string] = [lease.scopeKind, lease.scopeId];
+		const current = await database.syncScopes.get(key);
+		if (!current || current.leaseOwner !== lease.owner) return null;
+		const next: SyncLease = {
+			scopeKind: lease.scopeKind,
+			scopeId: lease.scopeId,
+			owner: lease.owner,
+			expiresAt: expiresAt(lease.now ?? new Date(), lease.ttlMilliseconds)
+		};
+		await database.syncScopes.update(key, { leaseExpiresAt: next.expiresAt });
+		return next;
+	});
+
+export const ownsSyncLease = async (
+	database: MaalDatabase,
+	lease: Pick<SyncLease, 'scopeKind' | 'scopeId' | 'owner'>,
+	now = new Date()
+): Promise<boolean> => {
+	const current = await database.syncScopes.get([lease.scopeKind, lease.scopeId]);
+	return Boolean(
+		current?.leaseOwner === lease.owner &&
+		current.leaseExpiresAt &&
+		Date.parse(current.leaseExpiresAt) > now.getTime()
+	);
+};

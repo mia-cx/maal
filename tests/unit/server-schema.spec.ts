@@ -53,6 +53,7 @@ const expectedTableNames = [
 	'sync_changes',
 	'sync_devices',
 	'sync_entity_versions',
+	'sync_mutation_receipts',
 	'sync_scope_state',
 	'sync_tombstones',
 	'unit_aliases',
