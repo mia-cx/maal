@@ -27,9 +27,8 @@ Add portable, user-visible domain archives and a shell-only PWA. Keep every doma
 - Imported user display rows go to `userAttributions`; imports never create synthetic profiles.
 - `pnpm vitest run tests/unit/local-runtime.spec.ts` passes 12 tests. `svelte-check` is clean.
 - `pnpm vitest run tests/unit/portability.spec.ts` passes 4 archive/remap/rollback tests.
-- `pnpm vitest run tests/unit/local-runtime.spec.ts tests/unit/portability.spec.ts tests/unit/pwa-messages.spec.ts` passes 19 tests.
-- `pnpm vitest run tests/unit/pwa-update-coordinator.spec.ts tests/unit/pwa-messages.spec.ts tests/unit/local-runtime.spec.ts` passes 16 tests, including a held second-tab drain.
+- The integration-focused gate passes 4 files / 22 tests, including a held second-tab drain, custom taxonomy remaps, and local-fork admin creation.
 - `pnpm exec playwright test tests/e2e/pwa-offline.e2e.ts --reporter=line` passes offline reopen with zero content API traffic.
 - Production build succeeds and `svelte-check` reports zero errors or warnings.
-- Final validation passes lint, 0-error `svelte-check`, 32 unit files / 153 tests, production build, and the 127,717 / 256,000-byte gzip budget. The final full browser gate passes 8 / 8 tests.
+- Final integration validation passes lint, 0-error `svelte-check`, 37 unit files / 190 tests, production build, and the 176,009 / 256,000-byte gzip budget. The full browser gate passes 8 / 8 tests, and the D1 schema gate passes.
 - Browser proof caught two first-install hazards before handoff: an unconditional `controllerchange` reload and an initial-install update prompt. Both now occur only for a coordinated replacement worker.
