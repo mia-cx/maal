@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { chromium, devices, firefox, webkit } from '@playwright/test';
-import { WorkOS } from '@workos-inc/node';
+import { NotFoundException, WorkOS } from '@workos-inc/node';
 
 const apiKey = process.env.WORKOS_API_KEY ?? '';
 const clientId = process.env.WORKOS_CLIENT_ID ?? '';
@@ -19,8 +19,10 @@ if (!browserType) throw new Error(`Unsupported proof browser: ${browserName}`);
 const workos = new WorkOS(apiKey, { clientId });
 const nonce = randomUUID();
 const password = `Maal-proof-${randomBytes(18).toString('base64url')}!9`;
-const createdUserIds = [];
+const createdUsers = [];
 const browser = await browserType.launch();
+let evidence;
+let cleanup;
 
 try {
 	const alice = await createProofUser('alice');
@@ -66,31 +68,28 @@ try {
 	);
 	await workos.userManagement.revokeSession({ sessionId: bobAfterAliceRevoke.sessionId });
 
-	process.stdout.write(
-		`${JSON.stringify(
-			{
-				result: 'passed',
-				loginSurface: 'Hosted AuthKit',
-				browser: browserName,
-				aliceUserId: alice.id,
-				bobUserId: bob.id,
-				aliceSessionId: aliceAuth.sessionId,
-				bobSessionId: bobAuth.sessionId,
-				aliceCookieBytes: aliceBytes,
-				bobCookieBytes: bobBytes,
-				aliceSurvivedBobLogin: true,
-				bobSurvivedAliceRevocation: true
-			},
-			null,
-			2
-		)}\n`
-	);
+	evidence = {
+		result: 'passed',
+		loginSurface: 'Hosted AuthKit',
+		browser: browserName,
+		browserVersion: browser.version(),
+		os: `${process.platform} ${process.arch}`,
+		aliceUserId: alice.id,
+		bobUserId: bob.id,
+		aliceSessionId: aliceAuth.sessionId,
+		bobSessionId: bobAuth.sessionId,
+		aliceCookieBytes: aliceBytes,
+		bobCookieBytes: bobBytes,
+		aliceSurvivedBobLogin: true,
+		bobSurvivedAliceRevocation: true
+	};
 } finally {
 	await browser.close();
-	for (const userId of createdUserIds) {
-		await workos.userManagement.deleteUser(userId).catch(() => undefined);
-	}
+	cleanup = await deleteAndVerifyUsers(createdUsers);
 }
+
+if (!evidence) throw new Error('The Hosted AuthKit proof did not produce evidence');
+process.stdout.write(`${JSON.stringify({ ...evidence, cleanup }, null, 2)}\n`);
 
 async function hostedCode(page, email, userPassword) {
 	const state = randomUUID();
@@ -147,8 +146,39 @@ async function createProofUser(label) {
 		lastName: `proof-${'y'.repeat(32)}`,
 		metadata: { proof: 'retained-auth-slots', device: 'shared-kitchen-display' }
 	});
-	createdUserIds.push(user.id);
+	createdUsers.push(user);
 	return user;
+}
+
+async function deleteAndVerifyUsers(users) {
+	const failures = [];
+	let verifiedDeleted = 0;
+	for (const user of users) {
+		try {
+			await workos.userManagement.deleteUser(user.id);
+			try {
+				await workos.userManagement.getUser(user.id);
+				throw new Error(`Disposable WorkOS user still resolves: ${user.id}`);
+			} catch (error) {
+				if (!(error instanceof NotFoundException)) throw error;
+			}
+			const matches = await workos.userManagement.listUsers({ email: user.email });
+			assert(
+				!matches.data.some(({ id }) => id === user.id),
+				`Disposable WorkOS user remains listed: ${user.id}`
+			);
+			verifiedDeleted += 1;
+		} catch (error) {
+			failures.push(error instanceof Error ? error.message : String(error));
+		}
+	}
+	if (failures.length > 0) throw new Error(`WorkOS cleanup failed: ${failures.join('; ')}`);
+	return {
+		attempted: users.length,
+		verifiedDeleted,
+		remainingDisposableUsers: users.length - verifiedDeleted,
+		verifiedAtUtc: new Date().toISOString()
+	};
 }
 
 function load(sealedSession) {

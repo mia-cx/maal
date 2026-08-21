@@ -1,34 +1,24 @@
 # Retained WorkOS auth-slot proof
 
-Status on 2026-08-21: local browser contract passed. Hosted AuthKit passed with disposable WorkOS staging users in Chromium and Firefox. Native Safari and iOS Safari remain open.
+Status on 2026-08-22: the local contract and WorkOS staging checks pass in Chromium and Firefox. Native macOS Safari, iOS Safari, and Android Chrome remain open in issue #70.
 
-## What is proven locally
+## Proven behavior
 
-- The installed WorkOS Node SDK accepts `provider=authkit`, `prompt=login`, `max_age=0`, and `login_hint` together.
-- Secure HTTP-only cookies with exact slot paths select Alice or Bob without sending the other sealed session.
-- App assets receive no slot session cookie.
-- Auth-slot projections discard access tokens, refresh tokens, and sealed sessions.
-- The local guard rejects a ninth authenticated slot.
-- The server rejects a sealed-session cookie whose complete serialized size reaches 4,096 bytes.
-- PIN reauthentication binds the callback to the original WorkOS user through a signed HTTP-only identity cookie.
+- Each profile uses an independent, host-only, path-scoped sealed-session cookie.
+- The callback's actual `Set-Cookie` line stays below 4,096 bytes and includes `Secure`, `HttpOnly`, `SameSite=Lax`, and the exact slot path.
+- Alice remains valid after Bob signs in. Bob remains valid after Alice refreshes, signs out, reauthenticates, and leaves the device.
+- The route proof uses `context.request`, which shares the browser context's cookie jar.
+- Each live run creates unique WorkOS staging users. Cleanup verifies each deleted user no longer resolves or appears in an email-filtered user list.
+- Proof output contains cookie names and byte counts. It never writes cookie values, credentials, authorization codes, or sealed sessions.
 
-## WorkOS staging result
+The direct WorkOS SDK proof measured 2,226-byte Alice and Bob cookies. Hosted AuthKit measured 2,248 to 2,269 bytes in Chromium 149 and Firefox 151.
 
-The direct WorkOS SDK proof created disposable Alice and Bob users, authenticated both, refreshed Alice, revoked Alice's exact session, and refreshed Bob again. Both complete serialized cookies measured 2,226 bytes. The script deleted both users in `finally`.
+## Local and staging commands
 
-The Hosted AuthKit proof then repeated the flow through the real staging login UI with `prompt=login`, `max_age=0`, and Bob's `login_hint` in the same browser context:
-
-| Browser      | Alice cookie |  Bob cookie | Alice survived Bob login | Bob survived Alice revocation |
-| ------------ | -----------: | ----------: | ------------------------ | ----------------------------- |
-| Chromium 149 |  2,269 bytes | 2,248 bytes | yes                      | yes                           |
-| Firefox 151  |  2,269 bytes | 2,269 bytes | yes                      | yes                           |
-
-The WorkOS staging API key, client ID, and cookie password came from an ignored file outside this worktree. The proof never copied or printed them. Every proof run deleted its disposable users.
-
-Run the local checks with:
+Run the local contract checks:
 
 ```sh
-pnpm test:unit -- tests/unit/auth-slots.spec.ts
+pnpm exec vitest run tests/unit/auth-slots.spec.ts tests/unit/auth-slot-proof-evidence.spec.ts
 pnpm exec playwright test tests/e2e/auth-slot-cookies.e2e.ts
 ```
 
@@ -40,19 +30,90 @@ pnpm test:proof:auth-slots:hosted
 AUTH_SLOT_PROOF_BROWSER=firefox pnpm test:proof:auth-slots:hosted
 ```
 
-Both scripts refuse to create users unless `WORKOS_API_KEY` starts with `sk_test_`.
-
-## Remaining browser gate
-
-Deploy this branch to the WorkOS staging application, set the five `AUTH_SLOT_PROOF_*` variables from `.env.example`, install the Playwright browsers, then run the full route proof:
+Run the deployed route proof with `AUTH_SLOT_PROOF_BASE_URL`, `WORKOS_API_KEY`, `WORKOS_CLIENT_ID`, and `WORKOS_COOKIE_PASSWORD` set. The harness creates and removes Alice and Bob itself:
 
 ```sh
-pnpm exec playwright install chromium firefox webkit
 pnpm test:proof:auth-slots
 ```
 
-The route proof signs Alice in, adds Bob with a forced active Hosted AuthKit login, compares their WorkOS identities, measures both real sealed cookies, refreshes Alice, signs Alice out, reauthenticates Alice, removes Alice, and confirms Bob remains authenticated throughout.
+Every Playwright project starts with `supplemental-`. Linux WebKit and device descriptors are engine checks only. They do not satisfy issue #70. Traces, screenshots, and videos stay disabled because they can retain credentials and cookies.
 
-Playwright WebKit could not launch here because the host lacks `libgtk-4`, `libavif`, `libmanette`, `libenchant`, `libsecret`, and `libwoff2dec`, and sudo is unavailable. WebKit and device profiles would still be engine checks, not native Safari proof. Before closing issue #58, repeat the deployed flow on native desktop Safari and one real iOS Safari device. Record browser versions, both WorkOS session IDs, cookie byte counts, and request cookie names without recording cookie values.
+## Native evidence adapter
 
-If Bob's Hosted AuthKit login replaces or revokes Alice, stop. Implement the custom WorkOS Authentication API UI, then run the same gate unchanged against that login surface.
+Create one private template per real target:
+
+```sh
+pnpm proof:auth-slots:evidence init native-macos-safari /tmp/maal-macos-safari.json
+pnpm proof:auth-slots:evidence init native-ios-safari /tmp/maal-ios-safari.json
+pnpm proof:auth-slots:evidence init native-android-chrome /tmp/maal-android-chrome.json
+```
+
+Create Alice and Bob through the WorkOS staging API. The command writes credentials only to a new mode-`0600` file and prints no credential:
+
+```sh
+pnpm proof:auth-slots:evidence fixtures-create /tmp/maal-auth-slot-fixtures.json
+```
+
+Use Safari Web Inspector, Chrome remote debugging, or a trusted real-device runner. Record the exact hardware, OS, and browser versions. Run Alice, then Bob, then Alice refresh, targeted Alice sign-out, Alice reauthentication, and Alice removal. Confirm Bob after each Alice operation.
+
+Use these fixed slots on the staging origin:
+
+```text
+Alice: 00112233445566778899aabbccddeeff
+Bob:   ffeeddccbbaa99887766554433221100
+```
+
+Open `/api/auth-slots/<slot>/authorize?purpose=add-profile&loginHint=<email>&returnTo=/` for each initial login. Use `purpose=reauthenticate` for Alice's second login. Invoke refresh, sign-out, and removal from the staging-origin console with `fetch` requests to the matching slot route. Never paste credentials or response headers into the console.
+
+Use these console calls in sequence, checking Bob's returned `workosUserId` after each Alice operation:
+
+```js
+await fetch('/api/auth-slots/00112233445566778899aabbccddeeff/refresh', {
+	method: 'POST',
+	headers: { 'content-type': 'application/json' },
+	body: '{}'
+}).then((response) => response.json());
+await fetch('/api/auth-slots/ffeeddccbbaa99887766554433221100/').then((response) =>
+	response.json()
+);
+await fetch('/api/auth-slots/00112233445566778899aabbccddeeff/sign-out', { method: 'POST' });
+await fetch('/api/auth-slots/ffeeddccbbaa99887766554433221100/').then((response) =>
+	response.json()
+);
+await fetch('/api/auth-slots/00112233445566778899aabbccddeeff/', { method: 'DELETE' });
+await fetch('/api/auth-slots/ffeeddccbbaa99887766554433221100/').then((response) =>
+	response.json()
+);
+```
+
+Copy each session response's exact `Set-Cookie` line into a private temporary file. Sanitize it through stdin:
+
+```sh
+pnpm proof:auth-slots:evidence inspect-cookie <32-character-slot-id> < /tmp/private-set-cookie.txt
+```
+
+The command emits only the cookie name, exact byte count, and required attributes. Paste that safe object into the target template, then delete the raw file. Record request cookie names only for one app asset and both slot routes. Check Cloudflare telemetry for whether D1 opened during the proof window.
+
+After the flow, revoke its sessions and remove both users. This command calls `deleteUser`, polls `getUser` and the email-filtered user list until both users are absent, prints sanitized cleanup evidence, and removes the private credential file only after success:
+
+```sh
+pnpm proof:auth-slots:evidence fixtures-cleanup /tmp/maal-auth-slot-fixtures.json
+```
+
+Record zero disposable users remaining in each target evidence file. If cleanup fails, the private file remains available for a retry.
+
+Validate each file, then the complete matrix:
+
+```sh
+pnpm proof:auth-slots:evidence validate /tmp/maal-macos-safari.json
+pnpm proof:auth-slots:evidence validate-matrix \
+  /tmp/maal-macos-safari.json \
+  /tmp/maal-ios-safari.json \
+  /tmp/maal-android-chrome.json
+```
+
+The validator rejects incomplete checks, cookie-policy failures, missing cleanup, template placeholders, and fields that could hold credentials or raw authentication material.
+
+## Remaining external action
+
+Run the matrix on native macOS Safari, a real iPhone or iPad, and a real Android device. A resized browser, Playwright WebKit, or device descriptor does not count. Issue #70 stays open until all three private evidence files validate and their safe facts are recorded.

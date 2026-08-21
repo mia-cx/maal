@@ -10,14 +10,15 @@ export default defineConfig({
 	retries: 0,
 	use: {
 		baseURL,
-		trace: 'retain-on-failure',
-		screenshot: 'only-on-failure'
+		trace: 'off',
+		screenshot: 'off',
+		video: 'off'
 	},
 	projects: [
-		{ name: 'desktop-chromium', use: { ...devices['Desktop Chrome'] } },
-		{ name: 'desktop-firefox', use: { ...devices['Desktop Firefox'] } },
-		{ name: 'desktop-webkit', use: { ...devices['Desktop Safari'] } },
-		{ name: 'ios-webkit-emulation', use: { ...devices['iPhone 15'] } },
-		{ name: 'android-chromium-emulation', use: { ...devices['Pixel 7'] } }
+		{ name: 'supplemental-desktop-chromium', use: { ...devices['Desktop Chrome'] } },
+		{ name: 'supplemental-desktop-firefox', use: { ...devices['Desktop Firefox'] } },
+		{ name: 'supplemental-linux-webkit', use: { ...devices['Desktop Safari'] } },
+		{ name: 'supplemental-ios-webkit-emulation', use: { ...devices['iPhone 15'] } },
+		{ name: 'supplemental-android-chromium-emulation', use: { ...devices['Pixel 7'] } }
 	]
 });
