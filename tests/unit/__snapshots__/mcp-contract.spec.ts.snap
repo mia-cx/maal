@@ -1,0 +1,487 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`public MCP contract > snapshots every advertised Effect-derived JSON Schema and annotation 1`] = `
+[
+  {
+    "annotations": {
+      "readOnlyHint": true,
+    },
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object",
+    },
+    "name": "list_user_households",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": true,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "householdId": {
+          "type": "string",
+        },
+        "includeArchived": {
+          "type": "boolean",
+        },
+        "limit": {
+          "type": "number",
+        },
+        "offset": {
+          "type": "number",
+        },
+        "query": {
+          "type": "string",
+        },
+      },
+      "required": [],
+      "type": "object",
+    },
+    "name": "list_user_recipes",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": true,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "householdId": {
+          "type": "string",
+        },
+        "recipeId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "recipeId",
+      ],
+      "type": "object",
+    },
+    "name": "get_user_recipe",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": false,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "householdId": {
+          "type": "string",
+        },
+        "recipe": {
+          "additionalProperties": false,
+          "properties": {
+            "cookTimeMinutes": {
+              "type": "number",
+            },
+            "description": {
+              "type": "string",
+            },
+            "image": {
+              "type": "string",
+            },
+            "imageUrl": {
+              "type": "string",
+            },
+            "ingredients": {
+              "items": {
+                "type": "string",
+              },
+              "type": "array",
+            },
+            "instructions": {
+              "items": {
+                "type": "string",
+              },
+              "type": "array",
+            },
+            "prepTimeMinutes": {
+              "type": "number",
+            },
+            "sourceAuthorName": {
+              "type": "string",
+            },
+            "sourceIsBasedOnUrl": {
+              "type": "string",
+            },
+            "sourcePublisherName": {
+              "type": "string",
+            },
+            "sourceSiteName": {
+              "type": "string",
+            },
+            "sourceUrl": {
+              "type": "string",
+            },
+            "title": {
+              "type": "string",
+            },
+            "userNotes": {
+              "type": "string",
+            },
+            "yield": {
+              "type": "number",
+            },
+          },
+          "required": [
+            "title",
+          ],
+          "type": "object",
+        },
+      },
+      "required": [
+        "recipe",
+      ],
+      "type": "object",
+    },
+    "name": "create_user_recipe",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": false,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "householdId": {
+          "type": "string",
+        },
+        "patch": {
+          "additionalProperties": false,
+          "properties": {
+            "cookTimeMinutes": {
+              "type": "number",
+            },
+            "description": {
+              "type": "string",
+            },
+            "image": {
+              "type": "string",
+            },
+            "imageUrl": {
+              "type": "string",
+            },
+            "ingredients": {
+              "items": {
+                "type": "string",
+              },
+              "type": "array",
+            },
+            "instructions": {
+              "items": {
+                "type": "string",
+              },
+              "type": "array",
+            },
+            "prepTimeMinutes": {
+              "type": "number",
+            },
+            "sourceAuthorName": {
+              "type": "string",
+            },
+            "sourceIsBasedOnUrl": {
+              "type": "string",
+            },
+            "sourcePublisherName": {
+              "type": "string",
+            },
+            "sourceSiteName": {
+              "type": "string",
+            },
+            "sourceUrl": {
+              "type": "string",
+            },
+            "title": {
+              "type": "string",
+            },
+            "userNotes": {
+              "type": "string",
+            },
+            "yield": {
+              "type": "number",
+            },
+          },
+          "required": [],
+          "type": "object",
+        },
+        "recipeId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "recipeId",
+        "patch",
+      ],
+      "type": "object",
+    },
+    "name": "update_user_recipe",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "readOnlyHint": false,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "householdId": {
+          "type": "string",
+        },
+        "recipeId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "recipeId",
+      ],
+      "type": "object",
+    },
+    "name": "delete_user_recipe",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": true,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "endDate": {
+          "type": "string",
+        },
+        "householdId": {
+          "type": "string",
+        },
+        "includeFloating": {
+          "type": "boolean",
+        },
+        "limit": {
+          "type": "number",
+        },
+        "offset": {
+          "type": "number",
+        },
+        "startDate": {
+          "type": "string",
+        },
+      },
+      "required": [],
+      "type": "object",
+    },
+    "name": "list_household_plan",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": false,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "customMeal": {
+          "additionalProperties": {
+            "$id": "/schemas/unknown",
+            "title": "unknown",
+          },
+          "properties": {},
+          "required": [],
+          "type": "object",
+        },
+        "date": {
+          "type": "string",
+        },
+        "householdId": {
+          "type": "string",
+        },
+        "plannedCookUserId": {
+          "type": "string",
+        },
+        "recipe": {
+          "additionalProperties": {
+            "$id": "/schemas/unknown",
+            "title": "unknown",
+          },
+          "properties": {},
+          "required": [],
+          "type": "object",
+        },
+        "servingsPlanned": {
+          "type": "number",
+        },
+        "time": {
+          "type": "string",
+        },
+        "url": {
+          "type": "string",
+        },
+        "userRecipeId": {
+          "type": "string",
+        },
+      },
+      "required": [],
+      "type": "object",
+    },
+    "name": "create_household_meal",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": false,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "householdId": {
+          "type": "string",
+        },
+        "meals": {
+          "items": {
+            "additionalProperties": {
+              "$id": "/schemas/unknown",
+              "title": "unknown",
+            },
+            "properties": {},
+            "required": [],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "meals",
+      ],
+      "type": "object",
+    },
+    "name": "create_household_meals",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": true,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "householdId": {
+          "type": "string",
+        },
+        "mealId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "mealId",
+      ],
+      "type": "object",
+    },
+    "name": "get_household_meal",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": false,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "householdId": {
+          "type": "string",
+        },
+        "mealId": {
+          "type": "string",
+        },
+        "patch": {
+          "additionalProperties": {
+            "$id": "/schemas/unknown",
+            "title": "unknown",
+          },
+          "properties": {},
+          "required": [],
+          "type": "object",
+        },
+      },
+      "required": [
+        "mealId",
+        "patch",
+      ],
+      "type": "object",
+    },
+    "name": "update_household_meal",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "readOnlyHint": false,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "householdId": {
+          "type": "string",
+        },
+        "mealId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "mealId",
+      ],
+      "type": "object",
+    },
+    "name": "delete_household_meal",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": false,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "cookTime": {
+          "type": "number",
+        },
+        "cookTimeMinutes": {
+          "type": "number",
+        },
+        "cooked": {
+          "type": "boolean",
+        },
+        "householdId": {
+          "type": "string",
+        },
+        "mealId": {
+          "type": "string",
+        },
+        "reason": {
+          "type": "string",
+        },
+        "verdict": {
+          "enum": [
+            "repeat",
+            "neutral",
+            "avoid",
+          ],
+          "type": "string",
+        },
+      },
+      "required": [
+        "mealId",
+        "verdict",
+      ],
+      "type": "object",
+    },
+    "name": "create_meal_check_in",
+  },
+]
+`;
