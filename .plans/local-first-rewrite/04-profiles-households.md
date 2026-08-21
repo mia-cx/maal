@@ -15,4 +15,4 @@ Deliver the offline profile switcher and household settings/member/invite admini
 
 ## Blocked by
 
-Local runtime and auth-slot slices.
+Local runtime, auth-slot, and shared prototype-UI baseline slices.
