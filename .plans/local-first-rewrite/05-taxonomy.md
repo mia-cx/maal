@@ -16,3 +16,16 @@ Deliver the lossless local taxonomy, alias, affine-unit conversion, food prefere
 ## Blocked by
 
 Local runtime slice.
+
+## Implementation TODOs
+
+- [x] Define field-complete Effect contracts and bundled global seed data.
+- [x] Type the Dexie taxonomy stores and install the versioned seed without overwriting edits.
+- [x] Add offline scoped commands, invariants, affine conversion, and query-time precedence.
+- [x] Preserve the prototype display/store seam on top of Dexie live queries.
+- [x] Prove lossless storage and mutation round trips, constraints, precedence, and reactivity.
+
+## Validation
+
+- `pnpm validate`
+- 21 unit tests and the foundation browser test pass; build budget is 32,636 / 256,000 gzip bytes.

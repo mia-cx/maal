@@ -2,6 +2,33 @@ import Dexie, { type Table } from 'dexie';
 import { uuidv7 } from 'uuidv7';
 
 import { LocalMigrationError } from '$lib/domain/contracts/errors.js';
+import {
+	GLOBAL_FOOD_ALIAS_SEED,
+	GLOBAL_FOOD_SEED,
+	GLOBAL_TAXONOMY_SEED_VERSION,
+	GLOBAL_UNIT_ALIAS_SEED,
+	GLOBAL_UNIT_SEED,
+	validateGlobalTaxonomySeed
+} from '$lib/domain/taxonomy/global-seed.js';
+import type {
+	Food,
+	FoodAlias,
+	FoodHouseholdAlias,
+	FoodHouseholdEntry,
+	FoodUserAlias,
+	FoodUserEntry,
+	HouseholdFoodDisplayPreference,
+	HouseholdUnitDisplayPreference,
+	Unit,
+	UnitAlias,
+	UnitHouseholdAlias,
+	UnitHouseholdEntry,
+	UnitUserAlias,
+	UnitUserEntry,
+	UserFoodDisplayPreference,
+	UserFoodPreference,
+	UserUnitDisplayPreference
+} from '$lib/domain/taxonomy/schema.js';
 
 import type {
 	AuthSlotRecord,
@@ -11,7 +38,6 @@ import type {
 	HouseholdInviteRecord,
 	HouseholdRecord,
 	LocalAggregateRecord,
-	LocalStoreRecord,
 	McpKeySummaryRecord,
 	MembershipRecord,
 	MetaRecord,
@@ -96,23 +122,23 @@ export class MaalDatabase extends Dexie {
 	recipes!: Table<LocalAggregateRecord, string>;
 	meals!: Table<LocalAggregateRecord, string>;
 	mealCheckIns!: Table<LocalAggregateRecord, string>;
-	foods!: Table<LocalStoreRecord, string>;
-	foodAliases!: Table<LocalStoreRecord, string>;
-	foodUserAliases!: Table<LocalStoreRecord, string>;
-	foodHouseholdAliases!: Table<LocalStoreRecord, string>;
-	foodUserEntries!: Table<LocalStoreRecord, string>;
-	foodHouseholdEntries!: Table<LocalStoreRecord, string>;
-	units!: Table<LocalStoreRecord, string>;
-	unitAliases!: Table<LocalStoreRecord, string>;
-	unitUserAliases!: Table<LocalStoreRecord, string>;
-	unitHouseholdAliases!: Table<LocalStoreRecord, string>;
-	unitUserEntries!: Table<LocalStoreRecord, string>;
-	unitHouseholdEntries!: Table<LocalStoreRecord, string>;
-	userFoodPreferences!: Table<LocalStoreRecord, string>;
-	userFoodDisplayPreferences!: Table<LocalStoreRecord, string>;
-	householdFoodDisplayPreferences!: Table<LocalStoreRecord, string>;
-	userUnitDisplayPreferences!: Table<LocalStoreRecord, string>;
-	householdUnitDisplayPreferences!: Table<LocalStoreRecord, string>;
+	foods!: Table<Food, string>;
+	foodAliases!: Table<FoodAlias, string>;
+	foodUserAliases!: Table<FoodUserAlias, string>;
+	foodHouseholdAliases!: Table<FoodHouseholdAlias, string>;
+	foodUserEntries!: Table<FoodUserEntry, string>;
+	foodHouseholdEntries!: Table<FoodHouseholdEntry, string>;
+	units!: Table<Unit, string>;
+	unitAliases!: Table<UnitAlias, string>;
+	unitUserAliases!: Table<UnitUserAlias, string>;
+	unitHouseholdAliases!: Table<UnitHouseholdAlias, string>;
+	unitUserEntries!: Table<UnitUserEntry, string>;
+	unitHouseholdEntries!: Table<UnitHouseholdEntry, string>;
+	userFoodPreferences!: Table<UserFoodPreference, string>;
+	userFoodDisplayPreferences!: Table<UserFoodDisplayPreference, string>;
+	householdFoodDisplayPreferences!: Table<HouseholdFoodDisplayPreference, string>;
+	userUnitDisplayPreferences!: Table<UserUnitDisplayPreference, string>;
+	householdUnitDisplayPreferences!: Table<HouseholdUnitDisplayPreference, string>;
 	billingCapabilities!: Table<BillingCapabilityRecord, string>;
 	mcpKeySummaries!: Table<McpKeySummaryRecord, string>;
 	outbox!: Table<OutboxRecord, string>;
@@ -183,6 +209,7 @@ export const openMaalDatabase = async (environment: string): Promise<MaalDatabas
 			}
 			if (records.length > 0) await database.meta.bulkPut(records);
 		});
+		await installGlobalTaxonomySeed(database);
 		return database;
 	} catch {
 		database.close();
@@ -191,4 +218,27 @@ export const openMaalDatabase = async (environment: string): Promise<MaalDatabas
 			message: 'The local database could not be migrated. Recovery is required.'
 		});
 	}
+};
+
+export const installGlobalTaxonomySeed = async (database: MaalDatabase): Promise<void> => {
+	validateGlobalTaxonomySeed();
+	await database.transaction(
+		'rw',
+		[database.meta, database.units, database.unitAliases, database.foods, database.foodAliases],
+		async () => {
+			const current = await database.meta.get('taxonomySeedVersion');
+			if (current?.value === GLOBAL_TAXONOMY_SEED_VERSION) return;
+			await database.units.bulkPut([...GLOBAL_UNIT_SEED]);
+			await database.unitAliases.bulkPut([...GLOBAL_UNIT_ALIAS_SEED]);
+			if (GLOBAL_FOOD_SEED.length > 0) await database.foods.bulkPut([...GLOBAL_FOOD_SEED]);
+			if (GLOBAL_FOOD_ALIAS_SEED.length > 0) {
+				await database.foodAliases.bulkPut([...GLOBAL_FOOD_ALIAS_SEED]);
+			}
+			await database.meta.put({
+				key: 'taxonomySeedVersion',
+				value: GLOBAL_TAXONOMY_SEED_VERSION,
+				updatedAt: nowUtc()
+			});
+		}
+	);
 };
