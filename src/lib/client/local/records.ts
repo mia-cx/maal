@@ -35,6 +35,12 @@ export type HouseholdInviteRecord = HouseholdInviteSummary;
 
 export type HouseholdApplianceRecord = HouseholdAppliance;
 
+export interface UserAttributionRecord {
+	workosUserId: string;
+	displayName: string;
+	profilePictureUrl: string | null;
+}
+
 export interface LocalStoreRecord {
 	[key: string]: unknown;
 	id: string;

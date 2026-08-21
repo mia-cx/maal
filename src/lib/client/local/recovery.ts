@@ -54,7 +54,7 @@ export const readRecoveryState = async (database: MaalDatabase): Promise<Recover
 };
 
 export const exportDecodableRecoveryData = async (
-	database: MaalDatabase,
+	database: Pick<MaalDatabase, 'name' | 'table'>,
 	decoders: RecoveryDecoders
 ): Promise<RecoveryExport> => {
 	const records: RecoveryExport['records'] = {};
@@ -86,11 +86,11 @@ export const exportDecodableRecoveryData = async (
 	};
 };
 
-export const getRecoveryResetConfirmation = (database: MaalDatabase): string =>
+export const getRecoveryResetConfirmation = (database: Pick<MaalDatabase, 'name'>): string =>
 	`RESET ${database.name}`;
 
 export const resetRecoveredDatabase = async (
-	database: MaalDatabase,
+	database: Pick<MaalDatabase, 'name' | 'delete'>,
 	confirmation: string
 ): Promise<void> => {
 	if (confirmation !== getRecoveryResetConfirmation(database)) {

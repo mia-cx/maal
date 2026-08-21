@@ -45,10 +45,13 @@ import type {
 	ProfileRecord,
 	RemoteProjectionMetaRecord,
 	SyncScopeRecord,
-	UiStateRecord
+	UiStateRecord,
+	UserAttributionRecord
 } from './records.js';
+import { pauseLocalCommits } from './commit-activity.js';
+import { publishLocalDatabaseEvent } from './database-events.js';
 
-export const CURRENT_DATABASE_VERSION = 4 as const;
+export const CURRENT_DATABASE_VERSION = 5 as const;
 
 export const DATABASE_V1_STORES = {
 	meta: '&key',
@@ -63,7 +66,7 @@ export const DATABASE_V1_STORES = {
 	uiState: '&key'
 } as const;
 
-export const DATABASE_STORES = {
+export const DATABASE_V4_STORES = {
 	...DATABASE_V1_STORES,
 	authSlots: '&authSlotId,&profileId,workosUserId,sessionState',
 	memberships:
@@ -97,6 +100,11 @@ export const DATABASE_STORES = {
 	syncScopes: '&[scopeKind+scopeId],state,leaseExpiresAt,lastSuccessAt',
 	backfillCheckpoints: '&[scopeKind+scopeId+entityKind],state',
 	remoteProjectionMeta: '&key'
+} as const;
+
+export const DATABASE_STORES = {
+	...DATABASE_V4_STORES,
+	userAttributions: '&workosUserId,displayName'
 } as const;
 
 export type LocalStoreName = keyof typeof DATABASE_STORES;
@@ -146,13 +154,14 @@ export class MaalDatabase extends Dexie {
 	backfillCheckpoints!: Table<BackfillCheckpointRecord, [string, string, string]>;
 	uiState!: Table<UiStateRecord, string>;
 	remoteProjectionMeta!: Table<RemoteProjectionMetaRecord, string>;
+	userAttributions!: Table<UserAttributionRecord, string>;
 
 	constructor(environment: string) {
 		super(getMaalDatabaseName(environment));
 
 		this.version(1).stores(DATABASE_V1_STORES);
 		this.version(2)
-			.stores(DATABASE_STORES)
+			.stores(DATABASE_V4_STORES)
 			.upgrade(async (transaction) => {
 				const timestamp = nowUtc();
 				await transaction.table<MetaRecord, string>('meta').bulkPut([
@@ -168,8 +177,8 @@ export class MaalDatabase extends Dexie {
 					}
 				]);
 			});
-		this.version(CURRENT_DATABASE_VERSION)
-			.stores(DATABASE_STORES)
+		this.version(4)
+			.stores(DATABASE_V4_STORES)
 			.upgrade(async (transaction) => {
 				const timestamp = nowUtc();
 				await transaction
@@ -203,7 +212,24 @@ export class MaalDatabase extends Dexie {
 				await transaction.table<MetaRecord, string>('meta').bulkPut([
 					{
 						key: 'migrationState',
-						value: { from: 2, to: CURRENT_DATABASE_VERSION, state: 'complete' },
+						value: { from: 2, to: 4, state: 'complete' },
+						updatedAt: timestamp
+					},
+					{
+						key: 'databaseVersion',
+						value: 4,
+						updatedAt: timestamp
+					}
+				]);
+			});
+		this.version(CURRENT_DATABASE_VERSION)
+			.stores(DATABASE_STORES)
+			.upgrade(async (transaction) => {
+				const timestamp = nowUtc();
+				await transaction.table<MetaRecord, string>('meta').bulkPut([
+					{
+						key: 'migrationState',
+						value: { from: 4, to: CURRENT_DATABASE_VERSION, state: 'complete' },
 						updatedAt: timestamp
 					},
 					{
@@ -224,9 +250,22 @@ export class MaalDatabase extends Dexie {
 			]);
 		});
 
-		this.on('versionchange', () => this.close());
+		this.on('versionchange', () => {
+			pauseLocalCommits(this.name, 'versionchange');
+			this.close();
+			publishLocalDatabaseEvent({ type: 'versionchange', databaseName: this.name });
+		});
+		this.on('blocked', () => {
+			publishLocalDatabaseEvent({ type: 'blocked', databaseName: this.name });
+		});
 	}
 }
+
+export const openRecoveryDatabase = async (environment: string): Promise<Dexie> => {
+	const database = new Dexie(getMaalDatabaseName(environment));
+	await database.open();
+	return database;
+};
 
 export const openMaalDatabase = async (environment: string): Promise<MaalDatabase> => {
 	const database = new MaalDatabase(environment);

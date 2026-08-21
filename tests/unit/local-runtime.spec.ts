@@ -9,6 +9,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import {
 	DATABASE_STORES,
 	DATABASE_V1_STORES,
+	CURRENT_DATABASE_VERSION,
 	MaalDatabase,
 	acquireSyncLease,
 	createDecodedLiveQuery,
@@ -18,8 +19,12 @@ import {
 	getRecoveryResetConfirmation,
 	markRecoveryRequired,
 	openMaalDatabase,
+	openRecoveryDatabase,
+	pauseLocalCommits,
 	readRecoveryState,
 	releaseSyncLease,
+	resetCommitActivityForTests,
+	resumeLocalCommits,
 	resetRecoveredDatabase
 } from '$lib/client/local/index.js';
 import {
@@ -56,6 +61,7 @@ afterEach(async () => {
 	await Promise.all([...databaseNames].map((name) => Dexie.delete(name)));
 	databases.length = 0;
 	databaseNames.clear();
+	resetCommitActivityForTests();
 });
 
 describe('shared contracts', () => {
@@ -188,9 +194,11 @@ describe('shared device database', () => {
 			title: 'Preserved recipe'
 		});
 		await expect(migrated.meta.get('migrationState')).resolves.toMatchObject({
-			value: { from: 2, to: 4, state: 'complete' }
+			value: { from: 4, to: CURRENT_DATABASE_VERSION, state: 'complete' }
 		});
-		await expect(migrated.meta.get('databaseVersion')).resolves.toMatchObject({ value: 4 });
+		await expect(migrated.meta.get('databaseVersion')).resolves.toMatchObject({
+			value: CURRENT_DATABASE_VERSION
+		});
 		await expect(migrated.meta.get('deviceId')).resolves.toMatchObject({
 			key: 'deviceId'
 		});
@@ -200,7 +208,9 @@ describe('shared device database', () => {
 		const environment = environmentName();
 		const database = await openDatabase(environment);
 		const upgradedTab = new Dexie(database.name);
-		upgradedTab.version(4).stores({ ...DATABASE_STORES, versionProbe: '&id' });
+		upgradedTab
+			.version(CURRENT_DATABASE_VERSION + 1)
+			.stores({ ...DATABASE_STORES, versionProbe: '&id' });
 		databases.push(upgradedTab);
 
 		await upgradedTab.open();
@@ -208,9 +218,51 @@ describe('shared device database', () => {
 		expect(database.isOpen()).toBe(false);
 		expect(upgradedTab.isOpen()).toBe(true);
 	});
+
+	test('opens the last committed schema for recovery without rerunning upgrades', async () => {
+		const environment = environmentName();
+		const name = getMaalDatabaseName(environment);
+		const previous = new Dexie(name);
+		previous.version(1).stores({ preserved: '&id' });
+		await previous.open();
+		await previous.table('preserved').put({ id: 'safe', title: 'Still here' });
+		previous.close();
+		databaseNames.add(name);
+
+		const recovery = await openRecoveryDatabase(environment);
+		databases.push(recovery);
+
+		await expect(recovery.table('preserved').get('safe')).resolves.toEqual({
+			id: 'safe',
+			title: 'Still here'
+		});
+	});
 });
 
 describe('local command boundary', () => {
+	test('refuses to begin a command while a coordinated update pauses writes', async () => {
+		const database = await openDatabase();
+		pauseLocalCommits(database.name, 'pwa-update');
+
+		await expect(
+			executeLocalCommand(database, {
+				authSlotId: uuidv7(),
+				scopeKind: 'user',
+				scopeId: 'user_alice',
+				entityKind: 'recipe',
+				aggregateId: uuidv7(),
+				conflictGroup: 'header',
+				operation: 'upsert',
+				originDeviceId: uuidv7(),
+				payload: { title: 'Blocked' },
+				payloadSchema: Schema.Struct({ title: Schema.String }),
+				writes: []
+			})
+		).rejects.toMatchObject({ _tag: 'LocalPersistenceError' });
+
+		resumeLocalCommits(database.name, 'pwa-update');
+	});
+
 	test('updates the aggregate, conflict clock, and outbox in one transaction', async () => {
 		const database = await openDatabase();
 		const aggregateId = uuidv7();

@@ -18,6 +18,7 @@ import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/schema.js';
 
 import type { LocalStoreName, MaalDatabase } from './database.js';
 import type { OutboxRecord } from './records.js';
+import { runTrackedLocalCommit } from './commit-activity.js';
 
 export type AggregateStoreName = Exclude<
 	LocalStoreName,
@@ -33,6 +34,7 @@ export type AggregateStoreName = Exclude<
 	| 'backfillCheckpoints'
 	| 'uiState'
 	| 'remoteProjectionMeta'
+	| 'userAttributions'
 >;
 
 export interface AggregateWrite {
@@ -130,76 +132,78 @@ export const executeLocalCommand = async (
 	const tables = [...new Set(command.writes.map(({ store }) => database.table(store)))];
 
 	try {
-		return await database.transaction('rw', [...tables, database.outbox], async () => {
-			const aggregates: unknown[] = [];
+		return await runTrackedLocalCommit(database.name, 'commit local command', () =>
+			database.transaction('rw', [...tables, database.outbox], async () => {
+				const aggregates: unknown[] = [];
 
-			for (const write of command.writes) {
-				const table = database.table(write.store);
-				const stored = await table.get(write.aggregateId);
-				const current = stored
-					? decode(write.schema, stored, `decode ${write.store} aggregate`)
-					: undefined;
-				const currentMetadata = stored
-					? decode(MutableAggregateSchema, stored, `decode ${write.store} metadata`)
-					: undefined;
-				const candidate = write.update(current);
-				if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) {
-					throw new LocalDecodeError({
-						operation: `update ${write.store} aggregate`,
-						message: 'A local command returned an invalid aggregate.'
-					});
+				for (const write of command.writes) {
+					const table = database.table(write.store);
+					const stored = await table.get(write.aggregateId);
+					const current = stored
+						? decode(write.schema, stored, `decode ${write.store} aggregate`)
+						: undefined;
+					const currentMetadata = stored
+						? decode(MutableAggregateSchema, stored, `decode ${write.store} metadata`)
+						: undefined;
+					const candidate = write.update(current);
+					if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) {
+						throw new LocalDecodeError({
+							operation: `update ${write.store} aggregate`,
+							message: 'A local command returned an invalid aggregate.'
+						});
+					}
+
+					const next = decode(
+						write.schema,
+						{
+							...candidate,
+							...(write.identity ?? { id: write.aggregateId }),
+							schemaVersion: CURRENT_SCHEMA_VERSION,
+							revision: (currentMetadata?.revision ?? 0) + 1,
+							createdAt: currentMetadata?.createdAt ?? occurredAt,
+							updatedAt: occurredAt,
+							conflictClocks: {
+								...(currentMetadata?.conflictClocks ?? {}),
+								...Object.fromEntries(write.conflictGroups.map((group) => [group, clock]))
+							}
+						},
+						`decode updated ${write.store} aggregate`
+					);
+					const encoded = encode(write.schema, next, `encode updated ${write.store} aggregate`);
+
+					await table.put(encoded);
+					aggregates.push(next);
 				}
 
-				const next = decode(
-					write.schema,
+				const mutation = decode(
+					OutboxMutationSchema,
 					{
-						...candidate,
-						...(write.identity ?? { id: write.aggregateId }),
 						schemaVersion: CURRENT_SCHEMA_VERSION,
-						revision: (currentMetadata?.revision ?? 0) + 1,
-						createdAt: currentMetadata?.createdAt ?? occurredAt,
-						updatedAt: occurredAt,
-						conflictClocks: {
-							...(currentMetadata?.conflictClocks ?? {}),
-							...Object.fromEntries(write.conflictGroups.map((group) => [group, clock]))
-						}
+						mutationId,
+						authSlotId: command.authSlotId,
+						scopeKind: command.scopeKind,
+						scopeId: command.scopeId,
+						entityKind: command.entityKind,
+						aggregateId: command.aggregateId,
+						conflictGroup: command.conflictGroup,
+						operation: command.operation,
+						occurredAt,
+						originDeviceId,
+						payload: encodedPayload
 					},
-					`decode updated ${write.store} aggregate`
+					'decode outbox mutation'
 				);
-				const encoded = encode(write.schema, next, `encode updated ${write.store} aggregate`);
+				const outboxRecord: OutboxRecord = {
+					...mutation,
+					status: 'pending',
+					nextAttemptAt: occurredAt,
+					attempts: 0
+				};
+				await database.outbox.add(outboxRecord);
 
-				await table.put(encoded);
-				aggregates.push(next);
-			}
-
-			const mutation = decode(
-				OutboxMutationSchema,
-				{
-					schemaVersion: CURRENT_SCHEMA_VERSION,
-					mutationId,
-					authSlotId: command.authSlotId,
-					scopeKind: command.scopeKind,
-					scopeId: command.scopeId,
-					entityKind: command.entityKind,
-					aggregateId: command.aggregateId,
-					conflictGroup: command.conflictGroup,
-					operation: command.operation,
-					occurredAt,
-					originDeviceId,
-					payload: encodedPayload
-				},
-				'decode outbox mutation'
-			);
-			const outboxRecord: OutboxRecord = {
-				...mutation,
-				status: 'pending',
-				nextAttemptAt: occurredAt,
-				attempts: 0
-			};
-			await database.outbox.add(outboxRecord);
-
-			return { mutationId, aggregates };
-		});
+				return { mutationId, aggregates };
+			})
+		);
 	} catch (error) {
 		if (hasLocalErrorTag(error)) throw error;
 		if (isQuotaError(error)) {
