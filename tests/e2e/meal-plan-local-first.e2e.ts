@@ -180,7 +180,7 @@ const seed = async (page: Page) => {
 			page.evaluate(async () => {
 				const databases = await indexedDB.databases();
 				return databases.some(
-					({ name, version }) => name === 'maal-v1:production' && version === 30
+					({ name, version }) => name === 'maal-v1:production' && version === 40
 				);
 			})
 		)
