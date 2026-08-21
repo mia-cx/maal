@@ -48,7 +48,7 @@ import type {
 	UiStateRecord
 } from './records.js';
 
-export const CURRENT_DATABASE_VERSION = 2 as const;
+export const CURRENT_DATABASE_VERSION = 3 as const;
 
 export const DATABASE_V1_STORES = {
 	meta: '&key',
@@ -151,14 +151,59 @@ export class MaalDatabase extends Dexie {
 		super(getMaalDatabaseName(environment));
 
 		this.version(1).stores(DATABASE_V1_STORES);
-		this.version(CURRENT_DATABASE_VERSION)
+		this.version(2)
 			.stores(DATABASE_STORES)
 			.upgrade(async (transaction) => {
 				const timestamp = nowUtc();
 				await transaction.table<MetaRecord, string>('meta').bulkPut([
 					{
 						key: 'migrationState',
-						value: { from: 1, to: CURRENT_DATABASE_VERSION, state: 'complete' },
+						value: { from: 1, to: 2, state: 'complete' },
+						updatedAt: timestamp
+					},
+					{
+						key: 'databaseVersion',
+						value: 2,
+						updatedAt: timestamp
+					}
+				]);
+			});
+		this.version(CURRENT_DATABASE_VERSION)
+			.stores(DATABASE_STORES)
+			.upgrade(async (transaction) => {
+				const timestamp = nowUtc();
+				await transaction
+					.table<ProfileRecord, string>('profiles')
+					.toCollection()
+					.modify((profile) => {
+						const mutable = profile as { profilePictureUrl?: string | null };
+						mutable.profilePictureUrl ??= null;
+					});
+				await transaction
+					.table<HouseholdRecord, string>('households')
+					.toCollection()
+					.modify((household) => {
+						const mutable = household as unknown as Record<string, unknown>;
+						mutable.name ??= 'Household';
+						mutable.locale ??= 'en-US';
+						mutable.timezone ??= null;
+						mutable.weekStartsOn ??= 1;
+						mutable.defaultPlannedYield ??= 1;
+						mutable.preferredDinnerTime ??= null;
+						mutable.createdByUserId ??= null;
+						mutable.deletionState ??= 'active';
+						mutable.localOnly ??= false;
+						mutable.schemaVersion ??= 1;
+						mutable.revision ??= 0;
+						mutable.createdAt ??= timestamp;
+						mutable.updatedAt ??= timestamp;
+						mutable.deletedAt ??= null;
+						mutable.conflictClocks ??= {};
+					});
+				await transaction.table<MetaRecord, string>('meta').bulkPut([
+					{
+						key: 'migrationState',
+						value: { from: 2, to: CURRENT_DATABASE_VERSION, state: 'complete' },
 						updatedAt: timestamp
 					},
 					{
