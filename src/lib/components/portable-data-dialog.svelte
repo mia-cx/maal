@@ -99,11 +99,19 @@
 		}
 	};
 
-	const resolveAllCollisions = async (resolution: 'keep-local' | 'replace') => {
+	const resolveCollisionKind = async (
+		kind: 'primary-id' | 'natural-key',
+		resolution: 'keep-local' | 'replace'
+	) => {
 		if (!archive || !plan) return;
-		resolutions = Object.fromEntries(
-			plan.collisions.map(({ collisionId }) => [collisionId, resolution])
-		);
+		resolutions = {
+			...resolutions,
+			...Object.fromEntries(
+				plan.collisions
+					.filter((collision) => collision.kind === kind)
+					.map(({ collisionId }) => [collisionId, resolution])
+			)
+		};
 		pending = true;
 		message = '';
 		failed = false;
@@ -203,13 +211,29 @@
 									size="xs"
 									variant="ghost"
 									disabled={pending}
-									onclick={() => void resolveAllCollisions('keep-local')}>Keep all local</Button
+									onclick={() => void resolveCollisionKind('primary-id', 'keep-local')}
+									>Keep same-ID local</Button
 								>
 								<Button
 									size="xs"
 									variant="ghost"
 									disabled={pending}
-									onclick={() => void resolveAllCollisions('replace')}>Replace all</Button
+									onclick={() => void resolveCollisionKind('primary-id', 'replace')}
+									>Replace same-ID</Button
+								>
+								<Button
+									size="xs"
+									variant="ghost"
+									disabled={pending}
+									onclick={() => void resolveCollisionKind('natural-key', 'keep-local')}
+									>Keep same-name local</Button
+								>
+								<Button
+									size="xs"
+									variant="ghost"
+									disabled={pending}
+									onclick={() => void resolveCollisionKind('natural-key', 'replace')}
+									>Replace same-name</Button
 								>
 							</div>
 						</div>

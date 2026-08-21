@@ -381,18 +381,18 @@ const resolveCandidate = async (
 };
 
 const taxonomyStores = [
-	'foods',
 	'units',
-	'foodUserEntries',
-	'foodHouseholdEntries',
 	'unitUserEntries',
 	'unitHouseholdEntries',
-	'foodAliases',
+	'foods',
+	'foodUserEntries',
+	'foodHouseholdEntries',
 	'unitAliases',
-	'foodUserAliases',
-	'foodHouseholdAliases',
 	'unitUserAliases',
-	'unitHouseholdAliases'
+	'unitHouseholdAliases',
+	'foodAliases',
+	'foodUserAliases',
+	'foodHouseholdAliases'
 ] as const satisfies readonly PortableImportStore[];
 
 const preferenceStores = [
@@ -410,6 +410,26 @@ const archiveRowsForStore = (
 	if (store in archive.taxonomy) return asRecord(archive.taxonomy)[store] as object[];
 	return asRecord(archive.preferences)[store] as object[];
 };
+
+const localForkMembership = (
+	householdId: string,
+	workosUserId: string,
+	createdAt: string
+): Record<string, unknown> => ({
+	membershipId: uuidv7(),
+	householdId,
+	workosUserId,
+	roleSlug: 'admin',
+	permissions: ['households:write', 'recipes:read', 'recipes:write', 'meals:read', 'meals:write'],
+	status: 'active',
+	directoryManaged: false,
+	workosCreatedAt: createdAt,
+	lastVerifiedAt: createdAt,
+	updatedAt: createdAt,
+	detachedAt: null,
+	denialCode: null,
+	source: 'localFork'
+});
 
 const validatePlannedUniqueness = (state: PlannerState): void => {
 	for (const [store, rows] of state.writes) {
@@ -589,27 +609,11 @@ export const planPortableImport = async (
 				deletionState: 'active',
 				deletedAt: null
 			});
-			addWrite(state, 'memberships', {
-				membershipId: uuidv7(),
-				householdId: id,
-				workosUserId: profile.workosUserId,
-				roleSlug: 'admin',
-				permissions: [
-					'households:write',
-					'recipes:read',
-					'recipes:write',
-					'meals:read',
-					'meals:write'
-				],
-				status: 'active',
-				directoryManaged: false,
-				workosCreatedAt: archive.manifest.createdAt,
-				lastVerifiedAt: archive.manifest.createdAt,
-				updatedAt: archive.manifest.createdAt,
-				detachedAt: null,
-				denialCode: null,
-				source: 'localFork'
-			});
+			addWrite(
+				state,
+				'memberships',
+				localForkMembership(id, profile.workosUserId, archive.manifest.createdAt)
+			);
 			warnings.push(`Household ${originalId} will be restored as a local-only copy.`);
 			continue;
 		}
@@ -622,6 +626,13 @@ export const planPortableImport = async (
 			if (decision.copied) {
 				candidate.localOnly = true;
 				candidate.createdByUserId = profile.workosUserId;
+				candidate.deletionState = 'active';
+				candidate.deletedAt = null;
+				addWrite(
+					state,
+					'memberships',
+					localForkMembership(id, profile.workosUserId, archive.manifest.createdAt)
+				);
 			}
 			addWrite(state, 'households', candidate);
 		}

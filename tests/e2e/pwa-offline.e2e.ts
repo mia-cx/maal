@@ -11,6 +11,22 @@ test('reopens the local shell offline without content API requests', async ({ co
 	});
 
 	await page.goto('/plan');
+	const manifest = await page.evaluate(async () => {
+		const response = await fetch('/manifest.webmanifest');
+		return response.json() as Promise<{
+			icons: { src: string; sizes: string; purpose: string; type: string }[];
+		}>;
+	});
+	expect(manifest.icons).toEqual([
+		{ src: '/icon-192.png', sizes: '192x192', purpose: 'any', type: 'image/png' },
+		{ src: '/icon-512.png', sizes: '512x512', purpose: 'any', type: 'image/png' },
+		{ src: '/icon-maskable-512.png', sizes: '512x512', purpose: 'maskable', type: 'image/png' }
+	]);
+	for (const icon of manifest.icons) {
+		const response = await page.request.get(icon.src);
+		expect(response.ok()).toBe(true);
+		expect(response.headers()['content-type']).toContain('image/png');
+	}
 	await page.evaluate(async () => navigator.serviceWorker.ready.then(() => undefined));
 	await expect(page.getByText('Maal update ready')).toHaveCount(0);
 	await page.reload();

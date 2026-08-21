@@ -413,6 +413,147 @@ describe('portable archives', () => {
 		expect(copiedEvents[0]?.recipeInstructionId).toBe(copiedInstructions[0]?.id);
 	});
 
+	test('gives an active-household copy a fresh local admin membership', async () => {
+		const source = await openDatabase();
+		const seeded = await seedContent(source);
+		const archive = await decodePortableArchive(
+			await exportPortableArchive(source, seeded.profileId, { createdAt: at(13) })
+		);
+		const target = await openDatabase();
+		const targetIdentity = await seedIdentity(target);
+		await target.households.update(targetIdentity.householdId, { name: 'Different local kitchen' });
+
+		const preview = await planPortableImport(target, archive, targetIdentity.profileId);
+		const householdCollision = preview.collisions.find(({ store }) => store === 'households');
+		expect(householdCollision).toMatchObject({ kind: 'primary-id' });
+		const resolutions = Object.fromEntries(
+			preview.collisions.map(({ collisionId }) => [collisionId, 'keep-local' as const])
+		);
+		const copyPlan = await planPortableImport(target, archive, targetIdentity.profileId, {
+			...resolutions,
+			[householdCollision!.collisionId]: 'import-as-copy'
+		});
+		await commitPortableImport(target, copyPlan);
+
+		const copiedHousehold = (await target.households.toArray()).find(
+			({ householdId }) => householdId !== targetIdentity.householdId
+		);
+		expect(copiedHousehold).toMatchObject({
+			localOnly: true,
+			deletionState: 'active',
+			createdByUserId: 'user_alice'
+		});
+		await expect(
+			target.memberships
+				.where('[householdId+status]')
+				.equals([copiedHousehold!.householdId, 'active'])
+				.first()
+		).resolves.toMatchObject({
+			workosUserId: 'user_alice',
+			roleSlug: 'admin',
+			source: 'localFork'
+		});
+	});
+
+	test('remaps custom taxonomy dependencies before aliases and display preferences', async () => {
+		const source = await openDatabase();
+		const seeded = await seedIdentity(source, { withHousehold: false });
+		const unitId = uuidv7();
+		const foodId = uuidv7();
+		const foodAliasId = uuidv7();
+		const metadata = {
+			schemaVersion: 1 as const,
+			revision: 1,
+			createdAt: at(10),
+			updatedAt: at(10),
+			deletedAt: null,
+			conflictClocks: {}
+		};
+		await source.unitUserEntries.put({
+			...metadata,
+			id: unitId,
+			workosUserId: seeded.workosUserId,
+			canonicalLabel: 'pinch',
+			baseUnitId: 'grams',
+			toBaseFactor: 0.25,
+			toBaseOffset: 0,
+			adoptionStatus: 'accepted'
+		});
+		await source.foodUserEntries.put({
+			...metadata,
+			id: foodId,
+			workosUserId: seeded.workosUserId,
+			canonicalLabel: 'spice mix',
+			defaultMeasureUnitId: unitId,
+			defaultMeasureBaseUnitId: 'grams',
+			adoptionStatus: 'accepted'
+		});
+		await source.foodUserAliases.put({
+			...metadata,
+			id: foodAliasId,
+			workosUserId: seeded.workosUserId,
+			foodId,
+			alias: 'house spice',
+			locale: 'en-US',
+			sourceDomain: null,
+			adoptionStatus: 'accepted',
+			defaultMeasureUnitId: unitId,
+			defaultMeasureBaseUnitId: 'grams'
+		});
+		await source.userFoodDisplayPreferences.put({
+			...metadata,
+			id: uuidv7(),
+			workosUserId: seeded.workosUserId,
+			foodId,
+			locale: 'en-US',
+			preferredFoodAliasScope: 'user',
+			preferredFoodAliasId: foodAliasId,
+			preferredMeasureUnitId: unitId,
+			preferredMeasureBaseUnitId: 'grams'
+		});
+
+		const archive = await decodePortableArchive(
+			await exportPortableArchive(source, seeded.profileId, { createdAt: at(13) })
+		);
+		const target = await openDatabase();
+		const targetIdentity = await seedIdentity(target, {
+			withHousehold: false,
+			workosUserId: 'user_bob'
+		});
+		const plan = await planPortableImport(target, archive, targetIdentity.profileId);
+		expect(plan.unresolvedCollisionIds).toEqual([]);
+		await commitPortableImport(target, plan);
+
+		const importedUnit = await target.unitUserEntries
+			.where('workosUserId')
+			.equals('user_bob')
+			.first();
+		const importedFood = await target.foodUserEntries
+			.where('workosUserId')
+			.equals('user_bob')
+			.first();
+		const importedAlias = await target.foodUserAliases
+			.where('workosUserId')
+			.equals('user_bob')
+			.first();
+		const importedPreference = await target.userFoodDisplayPreferences
+			.where('workosUserId')
+			.equals('user_bob')
+			.first();
+		expect(importedUnit?.id).not.toBe(unitId);
+		expect(importedFood).toMatchObject({ defaultMeasureUnitId: importedUnit?.id });
+		expect(importedAlias).toMatchObject({
+			foodId: importedFood?.id,
+			defaultMeasureUnitId: importedUnit?.id
+		});
+		expect(importedPreference).toMatchObject({
+			foodId: importedFood?.id,
+			preferredFoodAliasId: importedAlias?.id,
+			preferredMeasureUnitId: importedUnit?.id,
+			preferredMeasureBaseUnitId: 'grams'
+		});
+	});
+
 	test('rejects corrupt, unknown-path, and future-version archives', async () => {
 		await expect(decodePortableArchive(new Blob(['not a zip']))).rejects.toMatchObject({
 			code: 'invalid_zip'
