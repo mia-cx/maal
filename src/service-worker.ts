@@ -20,6 +20,7 @@ const absoluteRequest = (path: string): Request =>
 worker.addEventListener('install', (event) => {
 	event.waitUntil(
 		(async () => {
+			const replacesActiveWorker = worker.registration.active !== null;
 			const [assetCache, shellCache] = await Promise.all([
 				caches.open(ASSET_CACHE),
 				caches.open(SHELL_CACHE)
@@ -28,9 +29,14 @@ worker.addEventListener('install', (event) => {
 				assetCache.addAll(installAssets.map(absoluteRequest)),
 				shellCache.add(absoluteRequest(SHELL_URL))
 			]);
-			const clients = await worker.clients.matchAll({ type: 'window', includeUncontrolled: true });
-			for (const client of clients) {
-				client.postMessage({ type: 'UPDATE_WAITING', version, critical: false });
+			if (replacesActiveWorker) {
+				const clients = await worker.clients.matchAll({
+					type: 'window',
+					includeUncontrolled: true
+				});
+				for (const client of clients) {
+					client.postMessage({ type: 'UPDATE_WAITING', version, critical: false });
+				}
 			}
 		})()
 	);

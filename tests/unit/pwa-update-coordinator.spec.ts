@@ -59,6 +59,10 @@ class FakeServiceWorkers {
 	emitMessage(data: unknown): void {
 		for (const listener of this.listeners.get('message') ?? []) listener({ data });
 	}
+
+	emitControllerChange(): void {
+		for (const listener of this.listeners.get('controllerchange') ?? []) listener({ data: null });
+	}
 }
 
 class FakeRegistration {
@@ -105,6 +109,8 @@ describe('PWA update coordination', () => {
 		);
 
 		await Promise.all([first.start(), second.start()]);
+		firstServiceWorkers.emitControllerChange();
+		expect(reload).not.toHaveBeenCalled();
 		firstServiceWorkers.emitMessage({
 			type: 'UPDATE_WAITING',
 			version: 'build-2',
@@ -120,7 +126,8 @@ describe('PWA update coordination', () => {
 		await vi.waitFor(() => {
 			expect(waiting.messages).toContainEqual({ type: 'SKIP_WAITING', version: 'build-2' });
 		});
-		expect(reload).not.toHaveBeenCalled();
+		firstServiceWorkers.emitControllerChange();
+		expect(reload).toHaveBeenCalledTimes(2);
 
 		first.dispose();
 		second.dispose();

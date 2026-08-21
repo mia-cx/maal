@@ -151,7 +151,7 @@ const seedProfilesAndHousehold = async (page: Page) => {
 					request.onsuccess = () => resolve(request.result);
 				});
 				const ready =
-					database.version === 40 &&
+					database.version === 50 &&
 					['profiles', 'authSlots', 'households', 'memberships', 'uiState'].every((store) =>
 						database.objectStoreNames.contains(store)
 					);

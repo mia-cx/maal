@@ -12,6 +12,7 @@ test('reopens the local shell offline without content API requests', async ({ co
 
 	await page.goto('/plan');
 	await page.evaluate(async () => navigator.serviceWorker.ready.then(() => undefined));
+	await expect(page.getByText('Maal update ready')).toHaveCount(0);
 	await page.reload();
 	await expect
 		.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)))

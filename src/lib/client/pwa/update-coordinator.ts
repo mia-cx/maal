@@ -116,6 +116,7 @@ export class PwaUpdateCoordinator {
 			this.#announceUpdate(event.data.version, event.data.critical);
 		});
 		serviceWorker.addEventListener('controllerchange', () => {
+			if (!['preparing', 'waiting-for-tabs'].includes(this.#state.status)) return;
 			this.#post({
 				type: 'RELOAD',
 				tabId: this.tabId,
