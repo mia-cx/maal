@@ -42,8 +42,10 @@ export interface NativeAuthSlotEvidence {
 		readonly bobSessionId: string;
 	};
 	readonly cookies: {
-		readonly alice: CookieEvidence;
-		readonly bob: CookieEvidence;
+		readonly aliceInitial: CookieEvidence;
+		readonly bobInitial: CookieEvidence;
+		readonly aliceRefresh: CookieEvidence;
+		readonly aliceReauthentication: CookieEvidence;
 	};
 	readonly requestCookieNames: {
 		readonly appAsset: readonly string[];
@@ -168,7 +170,12 @@ export function createNativeEvidenceTemplate(target: NativeAuthSlotTarget): Nati
 			aliceSessionId: '<WorkOS session ID>',
 			bobSessionId: '<WorkOS session ID>'
 		},
-		cookies: { alice: { ...cookie }, bob: { ...cookie } },
+		cookies: {
+			aliceInitial: { ...cookie },
+			bobInitial: { ...cookie },
+			aliceRefresh: { ...cookie },
+			aliceReauthentication: { ...cookie }
+		},
 		requestCookieNames: { appAsset: [], aliceSlot: [], bobSlot: [] },
 		checks: {
 			distinctIdentities: true,
@@ -255,12 +262,24 @@ export function validateNativeEvidence(value: unknown): asserts value is NativeA
 	);
 
 	assertObject(value.cookies, 'cookies');
-	assertKeys(value.cookies, 'cookies', ['alice', 'bob']);
-	validateCookieEvidence(value.cookies.alice, 'cookies.alice');
-	validateCookieEvidence(value.cookies.bob, 'cookies.bob');
+	assertKeys(value.cookies, 'cookies', [
+		'aliceInitial',
+		'bobInitial',
+		'aliceRefresh',
+		'aliceReauthentication'
+	]);
+	validateCookieEvidence(value.cookies.aliceInitial, 'cookies.aliceInitial');
+	validateCookieEvidence(value.cookies.bobInitial, 'cookies.bobInitial');
+	validateCookieEvidence(value.cookies.aliceRefresh, 'cookies.aliceRefresh');
+	validateCookieEvidence(value.cookies.aliceReauthentication, 'cookies.aliceReauthentication');
 	assert(
-		value.cookies.alice.name !== value.cookies.bob.name,
+		value.cookies.aliceInitial.name !== value.cookies.bobInitial.name,
 		'Alice and Bob must use distinct cookies'
+	);
+	assert(
+		value.cookies.aliceRefresh.name === value.cookies.aliceInitial.name &&
+			value.cookies.aliceReauthentication.name === value.cookies.aliceInitial.name,
+		'Alice session responses must use the Alice cookie'
 	);
 	assertObject(value.requestCookieNames, 'requestCookieNames');
 	assertKeys(value.requestCookieNames, 'requestCookieNames', ['appAsset', 'aliceSlot', 'bobSlot']);
@@ -271,24 +290,24 @@ export function validateNativeEvidence(value: unknown): asserts value is NativeA
 	assertStringArray(aliceSlotCookieNames, 'requestCookieNames.aliceSlot');
 	assertStringArray(bobSlotCookieNames, 'requestCookieNames.bobSlot');
 	assert(
-		!appAssetCookieNames.includes(value.cookies.alice.name) &&
-			!appAssetCookieNames.includes(value.cookies.bob.name),
+		!appAssetCookieNames.includes(value.cookies.aliceInitial.name) &&
+			!appAssetCookieNames.includes(value.cookies.bobInitial.name),
 		'app assets must receive no retained session cookie'
 	);
 	assert(
-		aliceSlotCookieNames.includes(value.cookies.alice.name),
+		aliceSlotCookieNames.includes(value.cookies.aliceInitial.name),
 		'Alice route must receive the Alice session cookie'
 	);
 	assert(
-		!aliceSlotCookieNames.includes(value.cookies.bob.name),
+		!aliceSlotCookieNames.includes(value.cookies.bobInitial.name),
 		'Alice route received Bob session cookie'
 	);
 	assert(
-		bobSlotCookieNames.includes(value.cookies.bob.name),
+		bobSlotCookieNames.includes(value.cookies.bobInitial.name),
 		'Bob route must receive the Bob session cookie'
 	);
 	assert(
-		!bobSlotCookieNames.includes(value.cookies.alice.name),
+		!bobSlotCookieNames.includes(value.cookies.aliceInitial.name),
 		'Bob route received Alice session cookie'
 	);
 

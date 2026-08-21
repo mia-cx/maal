@@ -6,11 +6,11 @@ Repair the route proof and provide a sanitized native-device evidence adapter. K
 
 ## Acceptance criteria
 
-- [ ] Authenticated route requests share the browser cookie jar.
-- [ ] The proof measures the actual session `Set-Cookie` line and checks every required attribute.
-- [ ] Evidence contains browser, OS, routing, D1, session-isolation, and verified cleanup facts without secrets.
-- [ ] A human or trusted device runner can create and validate one private evidence file per native target.
-- [ ] The repository does not label Playwright emulation as native proof.
+- [x] Authenticated route requests share the browser cookie jar.
+- [x] The proof measures every actual session `Set-Cookie` line and checks every required attribute.
+- [x] Evidence contains browser, OS, routing, D1, session-isolation, and verified cleanup facts without secrets.
+- [x] A human or trusted device runner can create and validate one private evidence file per native target.
+- [x] The repository does not label Playwright emulation as native proof.
 
 ## TODOs
 
@@ -22,5 +22,5 @@ Repair the route proof and provide a sanitized native-device evidence adapter. K
 ## Notes
 
 - Native macOS Safari, iOS Safari, and Android Chrome are unavailable on this Linux host. Issue #70 must remain open.
-- Focused ESLint and 14 auth/evidence unit tests pass. The local cookie-path browser check passes.
-- `pnpm validate` passes: 32 unit files and 166 tests, production build, 145,184-byte initial gzip entry under the 256,000-byte budget, and seven Playwright tests.
+- Focused formatting, ESLint, 14 auth/evidence unit tests, and proof-project listing pass. The local cookie-path browser check passes in the full suite.
+- `pnpm validate` passes: 34 unit files and 178 tests, production build, 149,367-byte initial gzip entry under the 256,000-byte budget, and seven Playwright tests.

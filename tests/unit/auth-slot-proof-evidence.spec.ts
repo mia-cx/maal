@@ -81,8 +81,10 @@ function completeEvidence() {
 			bobSessionId: 'session_bob'
 		},
 		cookies: {
-			alice: cookieEvidence(ALICE_SLOT, 2200),
-			bob: cookieEvidence(BOB_SLOT, 2250)
+			aliceInitial: cookieEvidence(ALICE_SLOT, 2200),
+			bobInitial: cookieEvidence(BOB_SLOT, 2250),
+			aliceRefresh: cookieEvidence(ALICE_SLOT, 2210),
+			aliceReauthentication: cookieEvidence(ALICE_SLOT, 2220)
 		},
 		requestCookieNames: {
 			appAsset: [],

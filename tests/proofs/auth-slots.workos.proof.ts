@@ -64,6 +64,9 @@ test('Hosted AuthKit retains, refreshes, and revokes Alice and Bob independently
 		const bobSessionId = await sessionIdFromCookie(workos, bobLogin, BOB_SLOT);
 		const bobStatus = await status(context.request, baseURL!, BOB_SLOT);
 		expect(aliceStatus.workosUserId).not.toBe(bobStatus.workosUserId);
+		expect((await status(context.request, baseURL!, ALICE_SLOT)).workosUserId).toBe(
+			aliceStatus.workosUserId
+		);
 
 		const routing = await routingEvidence(context, page, baseURL!, ALICE_SLOT, BOB_SLOT);
 		expect(routing.appAsset).not.toContain(aliceCookie.name);
@@ -77,7 +80,7 @@ test('Hosted AuthKit retains, refreshes, and revokes Alice and Bob independently
 			data: {}
 		});
 		expect(refresh.ok()).toBe(true);
-		inspectSessionSetCookie(await refresh.headersArray(), ALICE_SLOT);
+		const aliceRefreshCookie = inspectSessionSetCookie(await refresh.headersArray(), ALICE_SLOT);
 		const bobAfterAliceRefresh = await status(context.request, baseURL!, BOB_SLOT);
 		expect(bobAfterAliceRefresh.workosUserId).toBe(bobStatus.workosUserId);
 
@@ -95,7 +98,7 @@ test('Hosted AuthKit retains, refreshes, and revokes Alice and Bob independently
 			password,
 			'reauthenticate'
 		);
-		inspectSessionSetCookie(aliceReauthentication, ALICE_SLOT);
+		const aliceReauthenticationCookie = inspectSessionSetCookie(aliceReauthentication, ALICE_SLOT);
 		expect((await status(context.request, baseURL!, ALICE_SLOT)).workosUserId).toBe(
 			aliceStatus.workosUserId
 		);
@@ -124,7 +127,12 @@ test('Hosted AuthKit retains, refreshes, and revokes Alice and Bob independently
 				aliceSessionId,
 				bobSessionId
 			},
-			cookies: { alice: aliceCookie, bob: bobCookie },
+			cookies: {
+				aliceInitial: aliceCookie,
+				bobInitial: bobCookie,
+				aliceRefresh: aliceRefreshCookie,
+				aliceReauthentication: aliceReauthenticationCookie
+			},
 			requestCookieNames: routing,
 			checks: {
 				distinctIdentities: true,

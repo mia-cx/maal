@@ -48,7 +48,7 @@ pnpm proof:auth-slots:evidence init native-ios-safari /tmp/maal-ios-safari.json
 pnpm proof:auth-slots:evidence init native-android-chrome /tmp/maal-android-chrome.json
 ```
 
-Create Alice and Bob through the WorkOS staging API. The command writes credentials only to a new mode-`0600` file and prints no credential:
+For each native target, create a fresh Alice and Bob through the WorkOS staging API. The command writes credentials only to a new mode-`0600` file and prints no credential. Do not reuse the pair on another target:
 
 ```sh
 pnpm proof:auth-slots:evidence fixtures-create /tmp/maal-auth-slot-fixtures.json
@@ -86,13 +86,13 @@ await fetch('/api/auth-slots/ffeeddccbbaa99887766554433221100/').then((response)
 );
 ```
 
-Copy each session response's exact `Set-Cookie` line into a private temporary file. Sanitize it through stdin:
+Copy the exact `Set-Cookie` header value for Alice's initial login, Bob's initial login, Alice's refresh, and Alice's reauthentication into separate private temporary files. Do not include the `Set-Cookie:` field name. Sanitize each value through stdin:
 
 ```sh
 pnpm proof:auth-slots:evidence inspect-cookie <32-character-slot-id> < /tmp/private-set-cookie.txt
 ```
 
-The command emits only the cookie name, exact byte count, and required attributes. Paste that safe object into the target template, then delete the raw file. Record request cookie names only for one app asset and both slot routes. Check Cloudflare telemetry for whether D1 opened during the proof window.
+The command emits only the cookie name, exact header-value byte count, and required attributes. Paste the four safe objects into the target template, then delete the raw files. Record request cookie names only for one app asset and both slot routes. Check Cloudflare telemetry for whether D1 opened during the proof window.
 
 After the flow, revoke its sessions and remove both users. This command calls `deleteUser`, polls `getUser` and the email-filtered user list until both users are absent, prints sanitized cleanup evidence, and removes the private credential file only after success:
 
