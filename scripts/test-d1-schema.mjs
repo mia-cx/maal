@@ -25,7 +25,7 @@ try {
 		'maal-v1-local',
 		'--local',
 		'--command',
-		"INSERT INTO users (workos_user_id) VALUES ('user_1'); INSERT INTO households (household_id, created_by_user_id) VALUES ('org_1', 'user_1');"
+		"INSERT INTO users (workos_user_id) VALUES ('user_1'), ('user_2'); INSERT INTO households (household_id, created_by_user_id) VALUES ('org_1', 'user_1'), ('org_2', 'user_2');"
 	]);
 	run(
 		[
@@ -61,6 +61,16 @@ try {
 			'--local',
 			'--command',
 			"INSERT INTO billing_trial_claims (id, workos_user_id, household_id, state, reserved_at) VALUES ('trial_2', 'user_1', 'org_2', 'reserved', '2026-08-21T00:00:00Z');"
+		],
+		false
+	);
+	run(
+		[
+			'execute',
+			'maal-v1-local',
+			'--local',
+			'--command',
+			"INSERT INTO billing_trial_claims (id, workos_user_id, household_id, state, reserved_at) VALUES ('trial_3', 'user_2', 'org_1', 'reserved', '2026-08-21T00:00:00Z');"
 		],
 		false
 	);

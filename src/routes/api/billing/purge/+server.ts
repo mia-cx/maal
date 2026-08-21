@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { WorkOS } from '@workos-inc/node';
+import { NotFoundException, WorkOS } from '@workos-inc/node';
 import { timingSafeEqual } from 'node:crypto';
 
 import {
@@ -41,7 +41,12 @@ export const POST: RequestHandler = async (event) => {
 			repository: new BillingRepository(environment.DB),
 			now: new Date().toISOString(),
 			deleteWorkOSOrganization: async (householdId) => {
-				await workos.organizations.deleteOrganization(householdId);
+				try {
+					await workos.organizations.deleteOrganization(householdId);
+				} catch (cause) {
+					// A retry after WorkOS succeeded but D1 failed must still finish the purge.
+					if (!(cause instanceof NotFoundException)) throw cause;
+				}
 			}
 		});
 		return json({ purged });
