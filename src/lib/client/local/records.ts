@@ -1,4 +1,11 @@
 import type { ConflictClocks, ScopeKind, UtcInstant } from '$lib/domain/contracts/primitives.js';
+import type {
+	Household,
+	HouseholdAppliance,
+	HouseholdInviteSummary,
+	Membership,
+	Profile
+} from '$lib/domain/household/contracts.js';
 
 export interface MetaRecord {
 	key: string;
@@ -6,19 +13,7 @@ export interface MetaRecord {
 	updatedAt: UtcInstant;
 }
 
-export interface ProfileRecord {
-	profileId: string;
-	workosUserId: string;
-	displayName: string;
-	email: string | null;
-	locale: string;
-	timezone: string | null;
-	pinSalt: string | null;
-	pinVerifier: string | null;
-	lockPolicy: 'none' | 'pin';
-	lastUsedAt: UtcInstant;
-	authState: 'authenticated' | 'reauthRequired' | 'signedOut';
-}
+export type ProfileRecord = Profile;
 
 export interface AuthSlotRecord {
 	authSlotId: string;
@@ -31,33 +26,13 @@ export interface AuthSlotRecord {
 	retryCount: number;
 }
 
-export interface HouseholdRecord {
-	[key: string]: unknown;
-	householdId: string;
-	createdByUserId?: string | null;
-	deletionState?: string;
-}
+export type HouseholdRecord = Household;
 
-export interface MembershipRecord {
-	[key: string]: unknown;
-	membershipId: string;
-	householdId: string;
-	workosUserId: string;
-	status: string;
-}
+export type MembershipRecord = Membership;
 
-export interface HouseholdInviteRecord extends LocalStoreRecord {
-	id: string;
-	householdId: string;
-	expiresAt: UtcInstant;
-	revokedAt: UtcInstant | null;
-}
+export type HouseholdInviteRecord = HouseholdInviteSummary;
 
-export interface HouseholdApplianceRecord extends LocalStoreRecord {
-	id: string;
-	householdId: string;
-	appliance: string;
-}
+export type HouseholdApplianceRecord = HouseholdAppliance;
 
 export interface LocalStoreRecord {
 	[key: string]: unknown;

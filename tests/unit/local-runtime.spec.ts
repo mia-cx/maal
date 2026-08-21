@@ -89,10 +89,11 @@ describe('shared device database', () => {
 
 		await database.profiles.bulkAdd([
 			{
-				profileId: 'alice-profile',
+				profileId: uuidv7(),
 				workosUserId: 'user_alice',
 				displayName: 'Alice',
 				email: null,
+				profilePictureUrl: null,
 				locale: 'en-NL',
 				timezone: 'Europe/Amsterdam',
 				pinSalt: null,
@@ -102,10 +103,11 @@ describe('shared device database', () => {
 				authState: 'authenticated'
 			},
 			{
-				profileId: 'bob-profile',
+				profileId: uuidv7(),
 				workosUserId: 'user_bob',
 				displayName: 'Bob',
 				email: null,
+				profilePictureUrl: null,
 				locale: 'en-NL',
 				timezone: 'Europe/Amsterdam',
 				pinSalt: null,
@@ -115,9 +117,44 @@ describe('shared device database', () => {
 				authState: 'authenticated'
 			}
 		]);
+		const timestamp = '2026-08-21T10:00:00.000Z';
 		await database.households.bulkAdd([
-			{ householdId: 'household_one', deletionState: 'active' },
-			{ householdId: 'household_two', deletionState: 'active' }
+			{
+				householdId: 'household_one',
+				name: 'One',
+				locale: 'en-NL',
+				timezone: 'Europe/Amsterdam',
+				weekStartsOn: 1,
+				defaultPlannedYield: 4,
+				preferredDinnerTime: '18:00',
+				createdByUserId: 'user_alice',
+				deletionState: 'active',
+				localOnly: false,
+				schemaVersion: 1,
+				revision: 1,
+				createdAt: timestamp,
+				updatedAt: timestamp,
+				deletedAt: null,
+				conflictClocks: {}
+			},
+			{
+				householdId: 'household_two',
+				name: 'Two',
+				locale: 'en-NL',
+				timezone: 'Europe/Amsterdam',
+				weekStartsOn: 1,
+				defaultPlannedYield: 2,
+				preferredDinnerTime: null,
+				createdByUserId: 'user_bob',
+				deletionState: 'active',
+				localOnly: false,
+				schemaVersion: 1,
+				revision: 1,
+				createdAt: timestamp,
+				updatedAt: timestamp,
+				deletedAt: null,
+				conflictClocks: {}
+			}
 		]);
 
 		await expect(database.profiles.count()).resolves.toBe(2);
@@ -151,9 +188,9 @@ describe('shared device database', () => {
 			title: 'Preserved recipe'
 		});
 		await expect(migrated.meta.get('migrationState')).resolves.toMatchObject({
-			value: { from: 1, to: 2, state: 'complete' }
+			value: { from: 2, to: 3, state: 'complete' }
 		});
-		await expect(migrated.meta.get('databaseVersion')).resolves.toMatchObject({ value: 2 });
+		await expect(migrated.meta.get('databaseVersion')).resolves.toMatchObject({ value: 3 });
 		await expect(migrated.meta.get('deviceId')).resolves.toMatchObject({
 			key: 'deviceId'
 		});
