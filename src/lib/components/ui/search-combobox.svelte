@@ -2,7 +2,7 @@
 	export type SearchComboboxOption = {
 		value: string;
 		label?: string;
-		keywords?: string[];
+		keywords?: readonly string[];
 	};
 </script>
 
@@ -90,7 +90,7 @@
 				{#each options as option (option.value)}
 					<Command.Item
 						value={option.value}
-						keywords={option.keywords}
+						keywords={option.keywords ? [...option.keywords] : undefined}
 						onSelect={() => {
 							value = option.value;
 							search = '';

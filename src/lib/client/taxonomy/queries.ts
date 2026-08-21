@@ -61,18 +61,18 @@ const ingredientUnitById: Readonly<Record<string, string>> = {
 export interface TaxonomyOption {
 	value: string;
 	label: string;
-	keywords?: string[];
+	keywords?: readonly string[];
 }
 
 export interface TaxonomyOptions {
-	weightPresetOptions: TaxonomyOption[];
-	volumePresetOptions: TaxonomyOption[];
-	temperaturePresetOptions: TaxonomyOption[];
-	baseUnitOptions: TaxonomyOption[];
-	unitAliasOptions: TaxonomyOption[];
-	measureUnitOptions: TaxonomyOption[];
-	foodOptions: TaxonomyOption[];
-	foodAliasOptions: TaxonomyOption[];
+	weightPresetOptions: readonly TaxonomyOption[];
+	volumePresetOptions: readonly TaxonomyOption[];
+	temperaturePresetOptions: readonly TaxonomyOption[];
+	baseUnitOptions: readonly TaxonomyOption[];
+	unitAliasOptions: readonly TaxonomyOption[];
+	measureUnitOptions: readonly TaxonomyOption[];
+	foodOptions: readonly TaxonomyOption[];
+	foodAliasOptions: readonly TaxonomyOption[];
 }
 
 export const readTaxonomySnapshot = async (database: MaalDatabase): Promise<TaxonomySnapshot> => {
@@ -413,16 +413,18 @@ export const loadTaxonomyOptions = async (
 	const effective = await loadEffectiveTaxonomyPreferences(database, params);
 	const ranks = localeRank(params.locale);
 	const localeSet = new Set(effective.localeFallbacks);
+	const globalUnitAliases = snapshot.unitAliases.filter((row) => row.sourceDomain === null);
+	const globalFoodAliases = snapshot.foodAliases.filter((row) => row.sourceDomain === null);
 	const unitLabels = bestByKey(
-		snapshot.unitAliases
-			.filter((row) => localeSet.has(row.locale) && row.sourceDomain === null)
+		globalUnitAliases
+			.filter((row) => localeSet.has(row.locale))
 			.map((row) => ({ ...row, scopeRank: row.defaultForLocale ? 0 : 1 })),
 		(row) => row.unitId,
 		ranks
 	);
 	const foodLabels = bestByKey(
-		snapshot.foodAliases
-			.filter((row) => localeSet.has(row.locale) && row.sourceDomain === null)
+		globalFoodAliases
+			.filter((row) => localeSet.has(row.locale))
 			.map((row) => ({ ...row, scopeRank: row.defaultForLocale ? 0 : 1 })),
 		(row) => row.foodId,
 		ranks
@@ -435,30 +437,14 @@ export const loadTaxonomyOptions = async (
 	const measureUnitOptions = [
 		...snapshot.units.map((unit) =>
 			unitOption(unit.id, unit.baseUnitId, unitLabels.get(unit.id)?.alias)
-		),
-		...snapshot.unitHouseholdEntries
-			.filter(
-				(row) =>
-					row.deletedAt === null &&
-					row.householdId === params.householdId &&
-					row.adoptionStatus !== 'rejected'
-			)
-			.map((unit) => unitOption(unit.id, unit.baseUnitId, unit.canonicalLabel)),
-		...snapshot.unitUserEntries
-			.filter(
-				(row) =>
-					row.deletedAt === null &&
-					row.workosUserId === params.workosUserId &&
-					row.adoptionStatus !== 'rejected'
-			)
-			.map((unit) => unitOption(unit.id, unit.baseUnitId, unit.canonicalLabel))
+		)
 	].sort((left, right) => left.label.localeCompare(right.label));
-	const aliases = [...new Set(snapshot.unitAliases.map((alias) => alias.alias))].map((alias) => ({
+	const aliases = [...new Set(globalUnitAliases.map((alias) => alias.alias))].map((alias) => ({
 		value: alias,
 		label: alias
 	}));
 	const preset = (baseUnitId: string) =>
-		snapshot.unitAliases
+		globalUnitAliases
 			.filter((alias) => alias.baseUnitId === baseUnitId && localeSet.has(alias.locale))
 			.map((alias) => ({ value: alias.alias, label: alias.alias }))
 			.filter(
@@ -472,23 +458,7 @@ export const loadTaxonomyOptions = async (
 				foodLabels.get(food.id)?.alias ??
 				labelFromId(food.id),
 			keywords: [food.id, labelFromId(food.id)]
-		})),
-		...snapshot.foodHouseholdEntries
-			.filter(
-				(row) =>
-					row.deletedAt === null &&
-					row.householdId === params.householdId &&
-					row.adoptionStatus !== 'rejected'
-			)
-			.map((food) => ({ value: food.id, label: food.canonicalLabel })),
-		...snapshot.foodUserEntries
-			.filter(
-				(row) =>
-					row.deletedAt === null &&
-					row.workosUserId === params.workosUserId &&
-					row.adoptionStatus !== 'rejected'
-			)
-			.map((food) => ({ value: food.id, label: food.canonicalLabel }))
+		}))
 	].sort((left, right) => left.label.localeCompare(right.label));
 
 	return {
@@ -501,7 +471,7 @@ export const loadTaxonomyOptions = async (
 		unitAliasOptions: aliases.sort((left, right) => left.label.localeCompare(right.label)),
 		measureUnitOptions,
 		foodOptions,
-		foodAliasOptions: [...new Set(snapshot.foodAliases.map((alias) => alias.alias))]
+		foodAliasOptions: [...new Set(globalFoodAliases.map((alias) => alias.alias))]
 			.map((alias) => ({ value: alias, label: alias }))
 			.sort((left, right) => left.label.localeCompare(right.label))
 	};

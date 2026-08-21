@@ -9,10 +9,13 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.js';
 import {
 	createTaxonomyPreferencesLiveQuery,
+	createHouseholdTaxonomyEditorLiveQuery,
 	decodeTaxonomyRecord,
 	deleteTaxonomyRecord,
 	encodeTaxonomyRecord,
+	loadDisplayOverrideRows,
 	loadEffectiveTaxonomyPreferences,
+	saveHouseholdDisplayOverrides,
 	upsertTaxonomyRecord,
 	type TaxonomyCommandContext,
 	type TaxonomyDraft,
@@ -511,6 +514,83 @@ describe('query-time resolution and affine conversion', () => {
 });
 
 describe('prototype display compatibility', () => {
+	test('edits the household override rows offline through the prototype view shape', async () => {
+		const database = await openDatabase();
+		await addFoodFixture(database);
+		const context = commandContext(database);
+		const params = {
+			workosUserId: 'user_alice',
+			householdId: 'household_one',
+			locale: 'en-US'
+		};
+		const live = createHouseholdTaxonomyEditorLiveQuery(database, params);
+		const updates: string[] = [];
+		const unsubscribe = live.subscribe((view) => {
+			updates.push(view.displayOverrideRows.preferredTemperatureUnit ?? 'unset');
+		});
+		await expect(
+			saveHouseholdDisplayOverrides(context, params, {
+				preferredMassUnit: '',
+				preferredVolumeUnit: 'ml',
+				preferredTemperatureUnit: '°C',
+				unitOverrides: [],
+				ingredientOverrides: []
+			})
+		).rejects.toMatchObject({ _tag: 'TaxonomyInvariantError' });
+		await expect(database.outbox.count()).resolves.toBe(0);
+
+		await saveHouseholdDisplayOverrides(context, params, {
+			preferredMassUnit: 'lb',
+			preferredVolumeUnit: 'cup',
+			preferredTemperatureUnit: '°F',
+			unitOverrides: [{ baseUnit: 'each', preferredUnitAlias: 'portion' }],
+			ingredientOverrides: [
+				{
+					baseFood: 'tomatoes',
+					preferredFoodAlias: 'love apples',
+					preferredMeasureUnit: 'kilograms'
+				}
+			]
+		});
+
+		await expect.poll(() => updates.at(-1)).toBe('°F');
+		const rows = await loadDisplayOverrideRows(database, params.householdId, params.locale);
+		expect(rows).toMatchObject({
+			preferredMassUnit: 'lb',
+			preferredVolumeUnit: 'cup',
+			preferredTemperatureUnit: '°F',
+			unitOverrides: [{ baseUnit: 'each', preferredUnitAlias: 'portion' }],
+			ingredientOverrides: [
+				{
+					baseFood: 'tomatoes',
+					preferredFoodAlias: 'love apples',
+					preferredMeasureUnit: 'kilograms'
+				}
+			]
+		});
+		await expect(database.unitHouseholdAliases.count()).resolves.toBe(1);
+		await expect(database.foodHouseholdAliases.count()).resolves.toBe(1);
+		await expect(database.outbox.count()).resolves.toBe(7);
+
+		await saveHouseholdDisplayOverrides(context, params, {
+			preferredMassUnit: 'lb',
+			preferredVolumeUnit: 'cup',
+			preferredTemperatureUnit: '°F',
+			unitOverrides: [],
+			ingredientOverrides: []
+		});
+		const removedRows = await loadDisplayOverrideRows(database, params.householdId, params.locale);
+		expect(removedRows.unitOverrides).toEqual([]);
+		expect(removedRows.ingredientOverrides).toEqual([]);
+		await expect(
+			database.householdUnitDisplayPreferences.filter((row) => row.deletedAt !== null).count()
+		).resolves.toBe(1);
+		await expect(
+			database.householdFoodDisplayPreferences.filter((row) => row.deletedAt !== null).count()
+		).resolves.toBe(1);
+		unsubscribe();
+	});
+
 	test('retains preferred mass and ingredient-specific display behavior', async () => {
 		const database = await openDatabase();
 		const preferences = await loadEffectiveTaxonomyPreferences(database, {

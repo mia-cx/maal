@@ -1,4 +1,27 @@
 {
 	"$schema": "https://inlang.com/schema/inlang-message-format",
-	"hello_world": "Hello, {name} from en!"
+	"hello_world": "Hello, {name} from en!",
+	"household_aliases_overrides": "Aliases & overrides",
+	"household_units": "Units",
+	"household_weight_unit": "Weight unit",
+	"household_select_weight_unit": "Select weight unit",
+	"household_search_units": "Search units...",
+	"household_volume_unit": "Volume unit",
+	"household_select_volume_unit": "Select volume unit",
+	"household_temperature_unit": "Temperature unit",
+	"household_select_temperature_unit": "Select temperature unit",
+	"household_base_unit": "Base unit",
+	"household_base_unit_2": "base unit",
+	"household_preferred_alias": "Preferred alias",
+	"household_alias_placeholder": "alias",
+	"menu_remove": "Remove",
+	"household_add_unit_override": "Add unit override",
+	"menu_ingredients": "Ingredients",
+	"household_base_food": "Base food",
+	"household_base_food_2": "base food",
+	"household_search_foods": "Search foods...",
+	"household_measure_unit": "Measure unit",
+	"household_unit_placeholder": "unit",
+	"household_add_ingredient_override": "Add ingredient override",
+	"household_save_overrides": "Save overrides"
 }
