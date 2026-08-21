@@ -1,3 +1,6 @@
-// Domain tables are introduced by their vertical slices. Keeping this entry point stable lets Drizzle
-// generate migrations without coupling callers to the eventual per-aggregate schema modules.
-export {};
+export * from './enums.js';
+export * from './identity.js';
+export * from './meals.js';
+export * from './platform.js';
+export * from './recipes.js';
+export * from './taxonomy.js';

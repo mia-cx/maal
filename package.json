@@ -23,6 +23,7 @@
 		"format": "prettier --write .",
 		"test": "pnpm test:unit && pnpm test:e2e",
 		"test:unit": "vitest run",
+		"test:d1-schema": "node scripts/test-d1-schema.mjs",
 		"test:unit:watch": "vitest",
 		"test:e2e": "playwright test",
 		"test:e2e:install": "playwright install chromium",
