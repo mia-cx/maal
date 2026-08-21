@@ -15,8 +15,8 @@ Add portable, user-visible domain archives and a shell-only PWA. Keep every doma
 ## TODOs
 
 - [x] Add the attribution store, recovery-safe database opening, migration events, and shared commit gate.
-- [~] Implement versioned ZIP schemas, visibility selection, guarded decode, collision planning, remapping, and atomic commit.
-- [ ] Wire prototype-styled archive, update, and recovery controls into existing application seams.
+- [x] Implement versioned ZIP schemas, visibility selection, guarded decode, collision planning, remapping, and atomic commit.
+- [~] Wire prototype-styled archive, update, and recovery controls into existing application seams.
 - [ ] Add the shell-only service worker, install assets, safe update protocol, and offline boot behavior.
 - [ ] Prove round trips, rejection/rollback, remaps, recovery, update gating, offline reopen, and zero free content traffic.
 
@@ -26,3 +26,4 @@ Add portable, user-visible domain archives and a shell-only PWA. Keep every doma
 - The service worker never reads IndexedDB and never handles domain APIs.
 - Imported user display rows go to `userAttributions`; imports never create synthetic profiles.
 - `pnpm vitest run tests/unit/local-runtime.spec.ts` passes 12 tests. `svelte-check` is clean.
+- `pnpm vitest run tests/unit/portability.spec.ts` passes 4 archive/remap/rollback tests.

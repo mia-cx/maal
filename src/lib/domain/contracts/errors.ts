@@ -30,3 +30,15 @@ export class LocalRecoveryConfirmationError extends Data.TaggedError(
 export class TaxonomyInvariantError extends Data.TaggedError(
 	'TaxonomyInvariantError'
 )<LocalErrorFields> {}
+
+export class PortableArchiveError extends Data.TaggedError('PortableArchiveError')<
+	LocalErrorFields & {
+		readonly code:
+			| 'invalid_zip'
+			| 'resource_limit'
+			| 'unsupported_version'
+			| 'invalid_content'
+			| 'unresolved_collision'
+			| 'commit_failed';
+	}
+> {}

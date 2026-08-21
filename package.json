@@ -101,6 +101,7 @@
 		"@internationalized/date": "^3.12.2",
 		"@modelcontextprotocol/sdk": "^1.29.0",
 		"@workos-inc/node": "^10.7.0",
+		"@zip.js/zip.js": "^2.8.55",
 		"dexie": "^4.4.4",
 		"drizzle-orm": "^0.45.2",
 		"effect": "^3.21.4",
