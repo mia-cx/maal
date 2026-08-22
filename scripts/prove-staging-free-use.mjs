@@ -5,13 +5,13 @@ import { validateStagingOrigin } from './lib/staging-cutover-proof.mjs';
 
 const baseUrl = validateStagingOrigin(process.env.MAAL_STAGING_BASE_URL);
 const browser = await chromium.launch();
-const context = await browser.newContext({ serviceWorkers: 'block' });
+const context = await browser.newContext();
 const page = await context.newPage();
 const contentRequests = [];
 const pageErrors = [];
 
 page.on('pageerror', (error) => pageErrors.push(error.name));
-page.on('request', (request) => {
+context.on('request', (request) => {
 	const pathname = new URL(request.url()).pathname;
 	if (
 		pathname === '/mcp' ||

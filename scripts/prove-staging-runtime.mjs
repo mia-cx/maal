@@ -146,6 +146,30 @@ try {
 
 	stage = 'stateless MCP and paid sync convergence';
 	await setBillingState(created.householdId, 'active', null, null);
+	const readOnlyKey = await createMcpKey(slotId, session, created.householdId, 'read-only', {
+		preset: 'read_only_planner',
+		scopes: ['households:read', 'recipes:read', 'meals:read', 'check_ins:read', 'food_profile:read']
+	});
+	await useMcpKey(readOnlyKey.key, async (client) => {
+		const denied = await client.callTool({
+			name: 'create_household_meal',
+			arguments: {
+				householdId: created.householdId,
+				customMeal: {
+					title: 'This write must be rejected',
+					ingredients: ['water'],
+					instructions: ['Do not cook.']
+				},
+				date: new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)
+			}
+		});
+		assert(denied.isError, 'A read-only MCP key performed a write.');
+		assert(
+			JSON.stringify(denied).includes('insufficient_scope'),
+			'The read-only MCP write failed for an unexpected reason.'
+		);
+	});
+	checks.mcpReadOnlyScopeDeniedWrite = true;
 	const key = await createFullAccessKey(slotId, session, created.householdId, 'convergence');
 	const toolCount = await useMcpKey(key.key, async (client) => {
 		const listed = await client.listTools();
@@ -277,24 +301,31 @@ process.stdout.write(
 );
 
 async function createFullAccessKey(authSlotId, session, householdId, suffix) {
+	return createMcpKey(authSlotId, session, householdId, suffix, {
+		preset: 'full_access',
+		scopes: [
+			'households:read',
+			'households:write',
+			'recipes:read',
+			'recipes:write',
+			'meals:read',
+			'meals:write',
+			'check_ins:read',
+			'check_ins:write',
+			'food_profile:read',
+			'food_profile:write'
+		]
+	});
+}
+
+async function createMcpKey(authSlotId, session, householdId, suffix, access) {
 	return slotJson(authSlotId, session, 'mcp-keys', {
 		method: 'POST',
 		body: {
 			label: `Disposable ${suffix}`,
-			preset: 'full_access',
+			preset: access.preset,
 			grantMode: 'selected',
-			scopes: [
-				'households:read',
-				'households:write',
-				'recipes:read',
-				'recipes:write',
-				'meals:read',
-				'meals:write',
-				'check_ins:read',
-				'check_ins:write',
-				'food_profile:read',
-				'food_profile:write'
-			],
+			scopes: access.scopes,
 			selectedHouseholdIds: [householdId]
 		}
 	});
@@ -447,6 +478,8 @@ async function d1Execute(command) {
 				'--remote',
 				'--config',
 				config.wranglerConfigPath,
+				'--env',
+				'staging',
 				'--command',
 				command,
 				'--json'
