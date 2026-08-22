@@ -26,9 +26,8 @@ Replace the rewrite's incremental migration history with one baseline generated 
 - Test seam: the repository's D1 migration runner and its observable schema/migration state.
 - Product decision from #85: do not preserve or bridge the prototype migration lineage.
 - No remote D1, deployment, or provider command is allowed in this issue.
-- The retired chain had 138 schema objects: 55 tables including D1 metadata and 83 indexes.
-- Its raw normalized SQL fingerprint was `58ec0ece9b72e662541335084522b1e044aa18546d6524f4d2e8a7beed9b7aa9`.
-- Its semantic fingerprint, which ignores column declaration order, was `530668bba4bd77fdb5f355a4f0ab25e2808bbd36c663bd182fff15fdc782752e`.
+- The retired chain had 137 application schema objects: 54 tables and 83 indexes. Proof excludes D1 system metadata.
+- Its application-schema fingerprint, which ignores column declaration order and D1 system metadata, was `34996c8b649513416979b0ac7bdabbd514f62d314a894cd8e8eb9745e1238d10`.
 - Drizzle generated `drizzle/0000_rewrite_baseline.sql`; the fresh baseline has the same semantic fingerprint.
 - Drizzle Kit generated the custom `drizzle/0001_global_taxonomy_seed.sql` migration shell.
 - `pnpm db:generate:seed` renders that migration from the canonical TypeScript seed.

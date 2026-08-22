@@ -77,7 +77,7 @@ pnpm test:d1-schema
 pnpm exec wrangler d1 migrations list maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging
 pnpm exec wrangler d1 time-travel info maal-staging --config .wrangler/staging-proof.jsonc --env staging
 pnpm exec wrangler d1 export maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging --no-data --output=/absolute/private/path/maal-staging-before-rewrite.sql
-node scripts/generate-d1-reset-sql.mjs /absolute/private/path/maal-staging-before-rewrite.sql /absolute/private/path/maal-staging-reset.sql
+node scripts/generate-d1-reset-sql.mjs maal-staging /absolute/private/path/maal-staging-before-rewrite.sql /absolute/private/path/maal-staging-reset.sql
 ```
 
 Review both private SQL files. The generated file must drop every exported application table, view, and
@@ -345,7 +345,7 @@ Production keeps separate provider objects from staging and uses the existing `m
    pnpm exec wrangler d1 migrations list maal-prod --remote --config .wrangler/production-cutover.jsonc --env production
    pnpm exec wrangler d1 time-travel info maal-prod --config .wrangler/production-cutover.jsonc --env production
    pnpm exec wrangler d1 export maal-prod --remote --config .wrangler/production-cutover.jsonc --env production --no-data --output=/absolute/private/path/maal-prod-before-rewrite.sql
-   node scripts/generate-d1-reset-sql.mjs /absolute/private/path/maal-prod-before-rewrite.sql /absolute/private/path/maal-prod-reset.sql
+   node scripts/generate-d1-reset-sql.mjs maal-prod /absolute/private/path/maal-prod-before-rewrite.sql /absolute/private/path/maal-prod-reset.sql
    ```
 
    Review both SQL files and record the bookmark. Require the production-specific confirmation before the

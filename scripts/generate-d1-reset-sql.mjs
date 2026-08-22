@@ -1,16 +1,35 @@
-import { open, readFile } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
+import { open, readFile, realpath } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, resolve } from 'node:path';
 
-const [schemaPath, outputPath] = process.argv.slice(2);
-if (!schemaPath || !outputPath || !isAbsolute(schemaPath) || !isAbsolute(outputPath)) {
+const [databaseName, schemaPath, outputPath] = process.argv.slice(2);
+const allowedDatabaseNames = new Set(['maal-staging', 'maal-prod']);
+if (
+	!databaseName ||
+	!allowedDatabaseNames.has(databaseName) ||
+	!schemaPath ||
+	!outputPath ||
+	!isAbsolute(schemaPath) ||
+	!isAbsolute(outputPath)
+) {
 	throw new TypeError(
-		'Usage: node scripts/generate-d1-reset-sql.mjs /absolute/private/schema.sql /absolute/private/reset.sql'
+		'Usage: node scripts/generate-d1-reset-sql.mjs <maal-staging|maal-prod> /absolute/private/<database>-before-rewrite.sql /absolute/private/<database>-reset.sql'
 	);
 }
-const repository = resolve('.');
 if (
-	resolve(schemaPath).startsWith(`${repository}/`) ||
-	resolve(outputPath).startsWith(`${repository}/`)
+	basename(schemaPath) !== `${databaseName}-before-rewrite.sql` ||
+	basename(outputPath) !== `${databaseName}-reset.sql`
+) {
+	throw new TypeError(
+		'The schema export and reset filenames must match the exact D1 database name.'
+	);
+}
+const repository = await realpath(resolve('.'));
+const resolvedSchemaPath = await realpath(schemaPath);
+const resolvedOutputDirectory = await realpath(dirname(outputPath));
+const isInsideRepository = (path) => path === repository || path.startsWith(`${repository}/`);
+if (
+	isInsideRepository(resolvedSchemaPath) ||
+	isInsideRepository(resolve(resolvedOutputDirectory, basename(outputPath)))
 ) {
 	throw new TypeError('D1 schema exports and reset SQL must stay outside the repository.');
 }
@@ -23,16 +42,21 @@ const names = (kind) => {
 	);
 	return [...source.matchAll(pattern)]
 		.map((match) => match[1] ?? match[2] ?? match[3] ?? match[4])
-		.filter((name) => !name.startsWith('sqlite_') && !name.startsWith('_cf_'));
+		.filter((name) => {
+			const normalized = name.toLowerCase();
+			return !normalized.startsWith('sqlite_') && !normalized.startsWith('_cf_');
+		});
 };
+const triggers = [...new Set(names('TRIGGER'))].sort();
 const views = [...new Set(names('VIEW'))].sort();
 const tables = [...new Set([...names('TABLE'), 'd1_migrations'])].sort().reverse();
 if (tables.length === 1)
 	throw new TypeError('The schema export did not contain an application table.');
 const identifier = (name) => `"${name.replaceAll('"', '""')}"`;
 const statements = [
-	'-- Generated reset for an operator-reviewed D1 schema export.',
+	`-- Generated reset for the operator-reviewed ${databaseName} D1 schema export.`,
 	'PRAGMA defer_foreign_keys = ON;',
+	...triggers.map((name) => `DROP TRIGGER IF EXISTS ${identifier(name)};`),
 	...views.map((name) => `DROP VIEW IF EXISTS ${identifier(name)};`),
 	...tables.map((name) => `DROP TABLE IF EXISTS ${identifier(name)};`),
 	'PRAGMA defer_foreign_keys = OFF;'

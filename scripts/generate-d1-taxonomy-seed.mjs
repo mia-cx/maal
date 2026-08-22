@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import { createServer } from 'vite';
@@ -108,7 +108,17 @@ try {
 		'-- Generated from src/lib/domain/taxonomy/global-seed.ts. Do not edit by hand.',
 		statements.join('\n--> statement-breakpoint\n')
 	].join('\n');
-	await writeFile(target, `${source}\n`, 'utf8');
+	const rendered = `${source}\n`;
+	if (process.argv.includes('--check')) {
+		const current = await readFile(target, 'utf8');
+		if (current !== rendered) {
+			throw new TypeError(
+				'The checked-in D1 taxonomy seed differs from src/lib/domain/taxonomy/global-seed.ts.'
+			);
+		}
+	} else {
+		await writeFile(target, rendered, 'utf8');
+	}
 } finally {
 	await vite.close();
 }
