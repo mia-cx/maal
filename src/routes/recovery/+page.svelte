@@ -17,11 +17,12 @@
 	import * as Alert from '$lib/components/ui/alert/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
+	import WordmarkLogo from '$lib/components/wordmark-logo.svelte';
 
 	let database = $state<Dexie | null>(null);
 	let confirmation = $state('');
 	let pending = $state(false);
-	let message = $state('Opening the local database without running migrations…');
+	let message = $state('Checking which local records can be read…');
 	let failed = $state(false);
 	const requiredConfirmation = $derived(database ? getRecoveryResetConfirmation(database) : '');
 
@@ -29,7 +30,7 @@
 		void getBrowserRecoveryDatabase()
 			.then((opened) => {
 				database = opened;
-				message = 'The database is open in recovery-only mode.';
+				message = 'Your local data is ready for a read-only recovery export.';
 			})
 			.catch((error: unknown) => {
 				failed = true;
@@ -76,14 +77,22 @@
 
 <svelte:head><title>Local data recovery · Maal</title></svelte:head>
 
-<main class="grid min-h-svh place-items-center bg-background px-4 py-10 text-foreground">
-	<div class="grid w-full max-w-xl gap-5">
-		<header class="grid gap-2">
-			<p class="text-sm font-medium text-primary">Local data recovery</p>
-			<h1 class="text-2xl font-semibold tracking-tight">Save what is readable before resetting</h1>
-			<p class="text-sm text-muted-foreground">
-				Maal has not attempted another database upgrade and will not reset data automatically.
-			</p>
+<main
+	class="grid min-h-svh place-items-center overflow-y-auto bg-background px-4 py-10 text-foreground"
+>
+	<div class="grid w-full max-w-xl gap-6">
+		<header class="grid gap-4">
+			<WordmarkLogo class="h-6 w-auto justify-self-start" />
+			<div class="grid gap-2">
+				<p class="text-sm font-medium text-primary">Local data recovery</p>
+				<h1 class="text-2xl font-semibold tracking-tight text-balance">
+					Save your readable data first
+				</h1>
+				<p class="text-sm text-muted-foreground text-pretty">
+					Normal startup has stopped. Maal will not sync, change, or reset local data on this
+					screen.
+				</p>
+			</div>
 		</header>
 
 		<Alert.Root variant={failed ? 'destructive' : 'default'}>
@@ -91,16 +100,17 @@
 			<Alert.Description>{message}</Alert.Description>
 		</Alert.Root>
 
-		<section class="grid gap-3 rounded-xl border bg-card p-4 text-card-foreground">
+		<section class="grid gap-4 rounded-xl border bg-card p-5 text-card-foreground">
 			<div>
-				<h2 class="font-medium">1. Download readable data</h2>
-				<p class="text-sm text-muted-foreground">
+				<h2 class="font-medium">Download readable data</h2>
+				<p class="mt-1 text-sm text-muted-foreground text-pretty">
 					This unencrypted JSON excludes profile PINs, auth sessions, billing, sync queues, and UI
 					state. Damaged rows are counted and skipped.
 				</p>
 			</div>
 			<Button
-				variant="outline"
+				size="lg"
+				class="min-h-11 w-full sm:w-fit"
 				disabled={!database || pending}
 				onclick={() => void downloadRecovery()}
 			>
@@ -109,18 +119,25 @@
 		</section>
 
 		<section
-			class="grid gap-3 rounded-xl border border-destructive/40 bg-card p-4 text-card-foreground"
+			class="grid gap-4 rounded-xl border border-destructive/40 bg-card p-5 text-card-foreground"
 		>
 			<div>
-				<h2 class="font-medium">2. Reset local data</h2>
-				<p class="text-sm text-muted-foreground">
+				<h2 class="font-medium text-destructive">Reset local data</h2>
+				<p class="mt-1 text-sm text-muted-foreground text-pretty">
 					This permanently deletes this browser’s Maal database. Type
 					<code class="rounded bg-muted px-1 py-0.5">{requiredConfirmation || 'RESET …'}</code> to continue.
 				</p>
 			</div>
-			<Input bind:value={confirmation} autocomplete="off" aria-label="Reset confirmation" />
+			<Input
+				class="min-h-11 text-base sm:text-sm"
+				bind:value={confirmation}
+				autocomplete="off"
+				aria-label="Reset confirmation"
+			/>
 			<Button
 				variant="destructive"
+				size="lg"
+				class="min-h-11 w-full sm:w-fit"
 				disabled={!database || pending || confirmation !== requiredConfirmation}
 				onclick={() => void resetDatabase()}
 			>

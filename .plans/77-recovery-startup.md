@@ -16,7 +16,7 @@ Keep the recovery route outside normal Dexie, sync, auth callback, and PWA start
 
 - [x] Gate client startup and root application helpers around recovery.
 - [x] Bound salvage reads and cover them with focused unit tests.
-- [ ] Refine the existing recovery screen around export-first and explicit reset behavior.
+- [x] Refine the existing recovery screen around export-first and explicit reset behavior.
 - [ ] Add the failed-schema browser proof and run focused validation.
 
 ## Notes
@@ -26,3 +26,4 @@ Keep the recovery route outside normal Dexie, sync, auth callback, and PWA start
 - Full `pnpm validate` waits for the serialized integration slot.
 - `pnpm check` passes after the startup gate.
 - `pnpm exec vitest run tests/unit/local-runtime.spec.ts` passes 13 tests, including one-row recovery batches.
+- `pnpm check` passes after the recovery screen refinement.
