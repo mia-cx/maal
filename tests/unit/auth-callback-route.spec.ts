@@ -117,6 +117,7 @@ describe('stable retained-profile callback HTTP seam', () => {
 });
 
 async function stateFor(authSlotId: string, nonce: string, overrides: Partial<AuthFlow> = {}) {
+	const issuedAt = Date.now() - 1_000;
 	return sealAuthFlow(
 		{
 			schemaVersion: 1,
@@ -125,8 +126,8 @@ async function stateFor(authSlotId: string, nonce: string, overrides: Partial<Au
 			expectedUserId: null,
 			returnTo: '/',
 			nonce,
-			issuedAt: new Date(Date.now() - 1_000).toISOString(),
-			expiresAt: new Date(Date.now() + 599_000).toISOString(),
+			issuedAt: new Date(issuedAt).toISOString(),
+			expiresAt: new Date(issuedAt + 600_000).toISOString(),
 			...overrides
 		} as AuthFlow,
 		COOKIE_PASSWORD
