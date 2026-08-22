@@ -85,8 +85,11 @@ export const d1UserSyncCapabilityAuthorizer: UserSyncCapabilityAuthorizer = {
 				   AND (
 				     hdr.state IS NULL OR (
 				       hdr.state = 'recovered'
-				       AND hdr.stripe_cancellation_id IS NOT NULL
-				       AND bs.stripe_subscription_id <> hdr.stripe_cancellation_id
+				       AND bs.stripe_subscription_id IS NOT NULL
+				       AND (
+				         hdr.stripe_cancellation_id IS NULL
+				         OR bs.stripe_subscription_id <> hdr.stripe_cancellation_id
+				       )
 				     )
 				   )
 				   AND (
@@ -159,8 +162,9 @@ export const d1HouseholdSyncCapabilityAuthorizer: HouseholdSyncCapabilityAuthori
 		if (
 			row.deletion_state !== null &&
 			(row.deletion_state !== 'recovered' ||
-				row.stripe_cancellation_id === null ||
-				row.stripe_subscription_id === row.stripe_cancellation_id)
+				row.stripe_subscription_id === null ||
+				(row.stripe_cancellation_id !== null &&
+					row.stripe_subscription_id === row.stripe_cancellation_id))
 		) {
 			throw new ServerSyncCapabilityDenied({
 				code: 'household_deletion_pending',

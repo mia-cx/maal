@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
 import { describe, expect, it } from 'vitest';
 
+import { createMaalCheckout } from '$lib/server/billing/checkout.js';
 import { proratedRefundMinor } from '$lib/server/billing/deletion.js';
 import { decodeMaalPrice, MAAL_PRICE_LOOKUP_KEYS } from '$lib/server/billing/pricing.js';
 import {
@@ -80,6 +81,7 @@ describe('Maal Stripe catalog', () => {
 describe('Stripe subscription projection', () => {
 	it('keeps a recovered household disabled until Stripe projects a distinct restarted subscription', async () => {
 		let stripeSubscriptionId = 'sub_cancelled';
+		let stripeCancellationId: string | null = 'sub_cancelled';
 		const repository = {
 			subscription: async () => ({
 				householdId: 'org_kitchen',
@@ -103,7 +105,7 @@ describe('Stripe subscription projection', () => {
 				householdId: 'org_kitchen',
 				requesterUserId: 'user_alice',
 				state: 'recovered' as const,
-				stripeCancellationId: 'sub_cancelled',
+				stripeCancellationId,
 				stripeChargeId: null,
 				stripeRefundId: null,
 				previewedAmountMinor: null,
@@ -132,6 +134,36 @@ describe('Stripe subscription projection', () => {
 		await expect(load()).resolves.toMatchObject({ capability: { state: 'disabled' } });
 		stripeSubscriptionId = 'sub_restarted';
 		await expect(load()).resolves.toMatchObject({ capability: { state: 'enabled' } });
+
+		stripeCancellationId = null;
+		stripeSubscriptionId = 'sub_first';
+		await expect(load()).resolves.toMatchObject({ capability: { state: 'enabled' } });
+		let checkoutSessions = 0;
+		await expect(
+			createMaalCheckout({
+				repository: repository as never,
+				stripe: {
+					prices: { retrieve: async () => price() },
+					checkout: {
+						sessions: {
+							create: async () => {
+								checkoutSessions += 1;
+								return { url: 'https://example.test/checkout' };
+							}
+						}
+					}
+				} as unknown as Stripe,
+				productId: 'prod_maal',
+				householdId: 'org_kitchen',
+				workosUserId: 'user_alice',
+				email: 'alice@example.test',
+				priceId: 'price_monthly',
+				origin: 'https://maal.example.test',
+				idempotencyKey: 'checkout-first-subscription',
+				now: '2026-08-22T12:00:00.000Z'
+			})
+		).rejects.toMatchObject({ _tag: 'BillingConflictError', reason: 'already_subscribed' });
+		expect(checkoutSessions).toBe(0);
 	});
 
 	it('treats intentional collection pause as the same grace status as paused', () => {

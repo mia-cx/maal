@@ -323,6 +323,28 @@ describe('D1 household sync', () => {
 				now: timestamp
 			})
 		).resolves.toMatchObject({ householdId });
+		await database
+			.prepare(
+				'UPDATE household_deletion_requests SET stripe_cancellation_id = NULL WHERE household_id = ?'
+			)
+			.bind(householdId)
+			.run();
+		await database
+			.prepare(
+				"UPDATE billing_subscriptions SET stripe_subscription_id = 'sub_first' WHERE household_id = ?"
+			)
+			.bind(householdId)
+			.run();
+		await expect(
+			d1HouseholdSyncCapabilityAuthorizer.authorize({
+				database,
+				workosUserId: aliceId,
+				householdId,
+				activeWorkOSMemberships: [liveMembership()],
+				permission: 'meals:read',
+				now: timestamp
+			})
+		).resolves.toMatchObject({ householdId });
 	});
 
 	test('uses D1 commit order live and original event time only for historical backfill', async () => {

@@ -20,6 +20,8 @@ deletion-state denial, profile removal, and portable import reconciliation.
       unresolvable rows through supported recovery export and restore operations.
 - [x] Status-only check-in gestures converge after a planned cook leaves the household.
 - [x] A recovered household stays sync-disabled until a replacement subscription distinct from the canceled one is projected.
+- [x] A recovered free household with no canceled subscription accepts its first non-null paid subscription across billing,
+      discovery, and sync authorization.
 - [x] Household and user mutation batches validate completely before their first repository write.
 - [x] Focused D1, Worker, local, browser, and full validation gates pass.
 
@@ -36,6 +38,7 @@ and portable archive import. Regression tests exercise behavior only through tho
 - [x] Discover remote household state on a fresh device and harden live WorkOS authorization and deletion denial.
 - [x] Preserve retained check-ins and harden portable taxonomy and aggregate import.
 - [x] Close populated-migration, convergence, recovered-subscription, and batch-atomicity merger blockers.
+- [x] Cover recovered households without a prior Stripe cancellation identity.
 - [x] Run focused local, D1, Worker, browser, prototype-preservation, and full validation gates.
 
 ## Notes
@@ -49,6 +52,8 @@ and portable archive import. Regression tests exercise behavior only through tho
 - Profile/portability slice: 15 focused tests passed.
 - Merger follow-up: 55 focused migration, schema, D1, service, discovery, and billing tests passed; Drizzle
   generation reported no schema drift and the complete D1 migration chain passed.
+- Final identity re-audit: 20 focused billing, discovery, user-sync, and household-sync tests passed,
+  including checkout duplicate prevention for the first post-recovery subscription.
 - Final gates: D1 migration chain passed; 10 protected prototype files matched byte-for-byte; full
   `pnpm validate` passed with 60 unit files / 319 tests, production build and budget, and 22 Playwright
   tests.

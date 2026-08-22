@@ -257,6 +257,25 @@ describe('D1 user sync repository', () => {
 				now: timestamp
 			})
 		).resolves.toMatchObject({ householdId: 'org_paid' });
+		await database
+			.prepare(
+				"UPDATE household_deletion_requests SET stripe_cancellation_id = NULL WHERE household_id = 'org_paid'"
+			)
+			.run();
+		await database
+			.prepare(
+				"UPDATE billing_subscriptions SET stripe_subscription_id = 'sub_first' WHERE household_id = 'org_paid'"
+			)
+			.run();
+		await expect(
+			d1UserSyncCapabilityAuthorizer.authorize({
+				database,
+				workosUserId: userId,
+				activeWorkOSMemberships: [liveMembership()],
+				permission: 'recipes:read',
+				now: timestamp
+			})
+		).resolves.toMatchObject({ householdId: 'org_paid' });
 	});
 
 	test('commits normalized state, idempotency receipt, version, change, and scope sequence atomically', async () => {

@@ -5,8 +5,8 @@ export const deletionAllowsProjectedSubscription = (
 	if (deletion === null) return true;
 	return (
 		deletion.state === 'recovered' &&
-		deletion.stripeCancellationId !== null &&
 		subscription !== null &&
-		subscription.stripeSubscriptionId !== deletion.stripeCancellationId
+		(deletion.stripeCancellationId === null ||
+			subscription.stripeSubscriptionId !== deletion.stripeCancellationId)
 	);
 };

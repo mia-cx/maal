@@ -156,5 +156,32 @@ describe('authenticated household discovery', () => {
 			now
 		});
 		expect(restarted?.capability.state).toBe('enabled');
+
+		await database
+			.prepare(
+				`UPDATE household_deletion_requests SET stripe_cancellation_id = NULL
+				 WHERE household_id = 'org_family'`
+			)
+			.run();
+		await database
+			.prepare(
+				"UPDATE billing_subscriptions SET stripe_subscription_id = 'sub_first' WHERE household_id = 'org_family'"
+			)
+			.run();
+		const [firstPaid] = await discoverActiveHouseholds({
+			database,
+			workosUserId: 'user_alice',
+			liveMemberships: [
+				{
+					membershipId: 'membership_alice',
+					householdId: 'org_family',
+					householdName: 'Family',
+					roleSlug: 'member',
+					permissions: ['meals:read']
+				}
+			],
+			now
+		});
+		expect(firstPaid?.capability.state).toBe('enabled');
 	});
 });
