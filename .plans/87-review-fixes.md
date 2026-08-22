@@ -26,7 +26,7 @@ Tests exercise those interfaces without reaching into private helpers.
 - [x] Persist oversized backfill outcomes and let later user and household records progress.
 - [x] Validate user and household mutation conflict and deletion semantics before repository writes.
 - [x] Expire cached capabilities locally and restrict launch refresh to previously paid projections.
-- [ ] Move the cookie override into pnpm's workspace configuration.
+- [x] Move the cookie override into pnpm's workspace configuration.
 - [ ] Run focused D1/schema gates, check, lint, and one bounded full validation.
 
 ## Notes
@@ -39,3 +39,4 @@ Tests exercise those interfaces without reaching into private helpers.
 - Oversized-backfill slice: 2 files / 29 tests passed. A single request may use the Worker's 1 MiB bound; larger records get a persisted rejection and advance the checkpoint.
 - Server-validation slice: 2 files / 33 tests passed. Every batch validates entity conflict groups and operation/deletedAt agreement before its first commit.
 - Capability-expiry slice: 3 files / 39 tests passed. Active and grace projections stop at validUntil; launch refresh scans only stale or expired households with prior Stripe state.
+- pnpm override slice: 1 file / 2 tests passed. `pnpm install --lockfile-only` retained the cookie override without the ignored-package-field warning.
