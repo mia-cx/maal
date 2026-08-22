@@ -20,7 +20,7 @@ Connect the existing Dexie household administration adapter to auth-slot-scoped 
 - [x] Implement household administration services and auth-slot-scoped routes.
 - [x] Extend the Dexie client projection commit and reconnect prototype refresh and leave interactions.
 - [x] Add Miniflare D1, route, client, and browser coverage.
-- [ ] Run focused and full validation and record the proof.
+- [x] Run focused and full validation and record the proof.
 
 ## Notes
 
@@ -31,3 +31,5 @@ Connect the existing Dexie household administration adapter to auth-slot-scoped 
 - `pnpm vitest run tests/unit/household-administration-client.spec.ts tests/unit/household-administration-d1.spec.ts tests/unit/profiles-households.spec.ts` passes 15 tests.
 - `pnpm playwright test tests/e2e/profiles-households.e2e.ts` passes all 3 browser tests, including the retained-auth-slot leave flow and the zero-routine-API-request profile flow.
 - Household refresh remains explicit instead of running on component mount, preserving the zero-request local/free path.
+- `pnpm validate` passes: formatting/lint, zero Svelte diagnostics, 197 unit tests, production build and performance budget, and 9 browser tests.
+- `pnpm test:d1-schema` passes against the full migration chain.

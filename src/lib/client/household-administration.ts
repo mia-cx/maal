@@ -121,13 +121,15 @@ const commitHouseholdProjection = async (
 	const householdId = projection.household.householdId;
 	await database.transaction(
 		'rw',
-		database.households,
-		database.memberships,
-		database.householdInvites,
-		database.userAttributions,
-		database.remoteProjectionMeta,
-		database.uiState,
-		database.outbox,
+		[
+			database.households,
+			database.memberships,
+			database.householdInvites,
+			database.userAttributions,
+			database.remoteProjectionMeta,
+			database.uiState,
+			database.outbox
+		],
 		async () => {
 			const [existingHousehold, existingMemberships, existingInvites, pendingHouseholdMutation] =
 				await Promise.all([

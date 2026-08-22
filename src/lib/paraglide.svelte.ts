@@ -1,5 +1,4 @@
 import type { Locale as _Locale } from '$lib/paraglide/runtime';
-import type { Pathname } from '$app/types';
 import { browser } from '$app/environment';
 import { goto } from '$app/navigation';
 import { resolve } from '$app/paths';
@@ -23,8 +22,8 @@ export class Locale {
 
 		overwriteSetLocale((locale) => {
 			this.#current = locale;
-			const localizedPath = localizeUrl(page.url.pathname, { locale }).pathname as Pathname;
-			goto(resolve(localizedPath));
+			const localizedPath = localizeUrl(page.url.pathname, { locale }).pathname;
+			goto(resolve(localizedPath as '/'));
 		});
 	}
 }

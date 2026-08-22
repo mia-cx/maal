@@ -74,7 +74,7 @@ const decode = <A>(schema: Schema.Schema<A>, input: unknown): A => {
 	}
 };
 
-const requiredParam = (event: RequestEvent, key: string): string => {
+const requiredParam = (event: RequestEvent, key: keyof RequestEvent['params']): string => {
 	const value = event.params[key]?.trim();
 	if (!value) throw new HouseholdAdministrationError({ code: 'malformed_request' });
 	return value;
