@@ -18,7 +18,7 @@ Drive the preserved calendar's loaded-range signal into a bounded Dexie live que
 - [x] Connect the schedule range callback to a replaceable Dexie live query.
 - [x] Add large-history unit and performance coverage.
 - [x] Extend browser interaction and visual regression coverage.
-- [~] Run focused checks and the full validation suite.
+- [x] Run focused checks and the full validation suite.
 
 ## Notes
 
@@ -27,4 +27,6 @@ Drive the preserved calendar's loaded-range signal into a bounded Dexie live que
 - Focused Vitest: 3 files and 12 tests passed.
 - Focused Playwright: 3 tests passed, including existing desktop and phone screenshots.
 - `pnpm check`: 0 errors and 0 warnings.
-- Full validation is waiting for the integration branch's serialized test slot.
+- Full `pnpm validate`: lint passed, Svelte check found 0 errors and 0 warnings, 46 unit
+  files and 263 tests passed, production build and 178055/256000-byte gzip budget passed,
+  and 12 Playwright tests passed.
