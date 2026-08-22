@@ -356,6 +356,87 @@ describe('foreground user coordinator', () => {
 		await expect(database.unitUserEntries.get(row.id)).resolves.toEqual(aggregate);
 	});
 
+	test('reveals a masked authoritative aggregate when the pending mutation is rejected', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const entityId = uuidv7();
+		const mutationId = uuidv7();
+		const originDeviceId = uuidv7();
+		const local = userUnit({
+			id: entityId,
+			canonicalLabel: 'local spoon',
+			conflictClocks: { row: { mutationId, originDeviceId, occurredAt: timestamp } }
+		});
+		const remoteMutationId = uuidv7();
+		const remote = userUnit({
+			id: entityId,
+			canonicalLabel: 'remote spoon',
+			revision: 2,
+			conflictClocks: {
+				row: { mutationId: remoteMutationId, originDeviceId: uuidv7(), occurredAt: timestamp }
+			}
+		});
+		await database.unitUserEntries.put(local);
+		await database.outbox.put({
+			mutationId,
+			authSlotId,
+			scopeKind: 'user',
+			scopeId: userId,
+			status: 'pending',
+			occurredAt: timestamp,
+			aggregateId: entityId,
+			entityKind: 'unitUserEntry',
+			conflictGroup: 'row',
+			operation: 'upsert',
+			originDeviceId,
+			payload: {},
+			nextAttemptAt: timestamp,
+			attempts: 0
+		});
+		const transport = noOpTransport();
+		transport.pull = async (_slot, request) =>
+			request.after === 0
+				? {
+						...emptyPull(1),
+						changes: [
+							{
+								sequence: 1,
+								mutationId: remoteMutationId,
+								originDeviceId: remote.conflictClocks.row!.originDeviceId,
+								entityKind: 'unitUserEntry',
+								entityId,
+								conflictGroups: ['row'],
+								operation: 'upsert',
+								resultingRevision: 2,
+								occurredAt: timestamp,
+								receivedAt: timestamp,
+								aggregate: remote,
+								tombstoneExpiresAt: null
+							}
+						]
+					}
+				: emptyPull(request.after);
+		transport.push = async () => ({
+			protocolVersion: 1,
+			receipts: [{ mutationId, status: 'rejected', errorCode: 'historical_loser' }],
+			committedThrough: 1
+		});
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport,
+			environment: environment()
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+		await expect(database.outbox.get(mutationId)).resolves.toMatchObject({
+			status: 'rejected',
+			rejectionCode: 'historical_loser'
+		});
+		await expect(database.unitUserEntries.get(entityId)).resolves.toEqual(remote);
+	});
+
 	test('does not leave Dexie or its cursor half-applied when a remote aggregate is malformed', async () => {
 		const database = await openDatabase();
 		await seedPaidProfile(database);

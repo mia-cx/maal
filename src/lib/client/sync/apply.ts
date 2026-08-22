@@ -3,6 +3,7 @@ import type { OutboxRecord, SyncScopeRecord } from '$lib/client/local/records.js
 import { decodeUserSyncAggregate, USER_SYNC_ENTITY_DESCRIPTORS } from '$lib/sync/user-entities.js';
 import type {
 	BootstrapResponse,
+	MutationReceipt,
 	PullResponse,
 	SnapshotManifestEntry,
 	SyncChange,
@@ -58,11 +59,19 @@ export const applyUserPullPage = async (
 	await database.transaction('rw', [...tables, database.outbox, database.syncScopes], async () => {
 		const pending = await pendingUserOutbox(database, workosUserId);
 		const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));
+		const pendingByKey = Map.groupBy(pending, (row) => keyFor(row.entityKind, row.aggregateId));
 		const localIntent = new Map<string, unknown>();
 		for (const aggregate of decoded) {
 			const key = keyFor(aggregate.entityKind, aggregate.entityId);
 			if (pendingKeys.has(key)) {
-				localIntent.set(key, await database.table(aggregate.store).get(aggregate.entityId));
+				if (!localIntent.has(key)) {
+					localIntent.set(key, await database.table(aggregate.store).get(aggregate.entityId));
+				}
+				for (const row of pendingByKey.get(key) ?? []) {
+					await database.outbox.update(row.mutationId, {
+						authoritativeSnapshot: aggregate.aggregate
+					});
+				}
 			}
 			await database.table(aggregate.store).put(aggregate.aggregate);
 		}
@@ -91,6 +100,53 @@ export const applyUserPullPage = async (
 			lastErrorCode: null
 		};
 		await database.syncScopes.put(next);
+	});
+};
+
+export const applyUserMutationReceipts = async (
+	database: MaalDatabase,
+	workosUserId: string,
+	receipts: readonly MutationReceipt[],
+	now = new Date()
+): Promise<void> => {
+	const resolved = await Promise.all(
+		receipts.map(async (receipt) => {
+			const row = await database.outbox.get(receipt.mutationId);
+			const authoritative =
+				row && receipt.status === 'rejected' && row.authoritativeSnapshot !== undefined
+					? decodeUserSyncAggregate(
+							row.entityKind as UserSyncEntityKind,
+							row.aggregateId,
+							workosUserId,
+							row.authoritativeSnapshot
+						)
+					: null;
+			return { receipt, row, authoritative };
+		})
+	);
+	const tables = resolved.flatMap(({ authoritative }) =>
+		authoritative ? [database.table(authoritative.store)] : []
+	);
+	await database.transaction('rw', [...new Set(tables), database.outbox], async () => {
+		for (const { receipt, row, authoritative } of resolved) {
+			if (!row) continue;
+			if (receipt.status === 'accepted' || receipt.status === 'duplicate') {
+				await database.outbox.update(receipt.mutationId, {
+					status: 'acknowledged',
+					acknowledgedSequence: receipt.sequence,
+					acknowledgedAt: now.toISOString()
+				});
+				continue;
+			}
+			await database.outbox.update(receipt.mutationId, {
+				status: 'rejected',
+				rejectionCode: receipt.errorCode,
+				acknowledgedAt: now.toISOString()
+			});
+			if (authoritative) {
+				await database.table(authoritative.store).put(authoritative.aggregate);
+			}
+		}
 	});
 };
 

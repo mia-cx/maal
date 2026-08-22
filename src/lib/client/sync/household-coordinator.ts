@@ -19,8 +19,7 @@ import {
 	SyncLeaseLost,
 	SyncPermissionDenied,
 	SyncTransportError,
-	SyncUnauthenticated,
-	type MutationReceipt
+	SyncUnauthenticated
 } from '$lib/sync/contracts.js';
 import {
 	HOUSEHOLD_SYNC_ENTITY_KINDS,
@@ -37,6 +36,7 @@ import {
 
 import {
 	applyHouseholdBootstrap,
+	applyHouseholdMutationReceipts,
 	applyHouseholdPullPage,
 	buildHouseholdSnapshotManifest
 } from './household-apply.js';
@@ -194,32 +194,6 @@ const hydrateMutation = async (
 		occurredAt: row.occurredAt,
 		aggregate: decoded.aggregate
 	};
-};
-
-const updateOutboxFromReceipts = async (
-	database: MaalDatabase,
-	receipts: readonly MutationReceipt[],
-	now: Date
-): Promise<void> => {
-	await database.transaction('rw', database.outbox, async () => {
-		for (const receipt of receipts) {
-			const row = await database.outbox.get(receipt.mutationId);
-			if (!row) continue;
-			if (receipt.status === 'accepted' || receipt.status === 'duplicate') {
-				await database.outbox.update(receipt.mutationId, {
-					status: 'acknowledged',
-					acknowledgedSequence: receipt.sequence,
-					acknowledgedAt: utc(now)
-				});
-			} else if ('errorCode' in receipt) {
-				await database.outbox.update(receipt.mutationId, {
-					status: 'rejected',
-					rejectionCode: receipt.errorCode,
-					acknowledgedAt: utc(now)
-				});
-			}
-		}
-	});
 };
 
 const markSending = async (
@@ -560,7 +534,12 @@ export const createHouseholdSyncCoordinator = (
 				baseCursor: scope?.cursor ?? null,
 				mutations
 			});
-			await updateOutboxFromReceipts(options.database, response.receipts, now());
+			await applyHouseholdMutationReceipts(
+				options.database,
+				options.householdId,
+				response.receipts,
+				now()
+			);
 			return response.committedThrough;
 		} catch (error) {
 			await requeue(options.database, rows, now());
@@ -593,7 +572,12 @@ export const createHouseholdSyncCoordinator = (
 				checkpoint: prepared.checkpoint,
 				mutations
 			});
-			await updateOutboxFromReceipts(options.database, response.receipts, now());
+			await applyHouseholdMutationReceipts(
+				options.database,
+				options.householdId,
+				response.receipts,
+				now()
+			);
 			const last = prepared.rows.at(-1)!;
 			await options.database.backfillCheckpoints.put({
 				scopeKind: 'household',

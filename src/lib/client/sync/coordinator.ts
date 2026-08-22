@@ -22,7 +22,6 @@ import {
 	SyncUnauthenticated,
 	UserSyncEntityKindSchema,
 	type BackfillCheckpoint,
-	type MutationReceipt,
 	type SyncMutation,
 	type UserSyncEntityKind
 } from '$lib/sync/contracts.js';
@@ -32,7 +31,12 @@ import {
 	USER_SYNC_ENTITY_DESCRIPTORS
 } from '$lib/sync/user-entities.js';
 
-import { applyUserBootstrap, applyUserPullPage, buildUserSnapshotManifest } from './apply.js';
+import {
+	applyUserBootstrap,
+	applyUserMutationReceipts,
+	applyUserPullPage,
+	buildUserSnapshotManifest
+} from './apply.js';
 import { resolveLocalUserSyncCapability, type LocalUserSyncCapability } from './capability.js';
 import type { UserSyncTransport } from './transport.js';
 
@@ -174,32 +178,6 @@ const hydrateMutation = async (
 		occurredAt: row.occurredAt,
 		aggregate: decoded.aggregate
 	};
-};
-
-const updateOutboxFromReceipts = async (
-	database: MaalDatabase,
-	receipts: readonly MutationReceipt[],
-	now: Date
-): Promise<void> => {
-	await database.transaction('rw', database.outbox, async () => {
-		for (const receipt of receipts) {
-			const row = await database.outbox.get(receipt.mutationId);
-			if (!row) continue;
-			if (receipt.status === 'accepted' || receipt.status === 'duplicate') {
-				await database.outbox.update(receipt.mutationId, {
-					status: 'acknowledged',
-					acknowledgedSequence: receipt.sequence,
-					acknowledgedAt: utc(now)
-				});
-			} else if ('errorCode' in receipt) {
-				await database.outbox.update(receipt.mutationId, {
-					status: 'rejected',
-					rejectionCode: receipt.errorCode,
-					acknowledgedAt: utc(now)
-				});
-			}
-		}
-	});
 };
 
 const requeue = async (
@@ -480,7 +458,12 @@ export const createUserSyncCoordinator = (
 				baseCursor: scope?.cursor ?? null,
 				mutations
 			});
-			await updateOutboxFromReceipts(options.database, response.receipts, now());
+			await applyUserMutationReceipts(
+				options.database,
+				options.workosUserId,
+				response.receipts,
+				now()
+			);
 			return response.committedThrough;
 		} catch (error) {
 			await requeue(options.database, rows, now());
@@ -510,7 +493,12 @@ export const createUserSyncCoordinator = (
 				checkpoint: prepared.checkpoint,
 				mutations
 			});
-			await updateOutboxFromReceipts(options.database, response.receipts, now());
+			await applyUserMutationReceipts(
+				options.database,
+				options.workosUserId,
+				response.receipts,
+				now()
+			);
 			const last = prepared.rows.at(-1)!;
 			await options.database.backfillCheckpoints.put({
 				scopeKind: 'user',

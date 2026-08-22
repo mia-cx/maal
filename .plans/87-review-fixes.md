@@ -22,7 +22,7 @@ Tests exercise those interfaces without reaching into private helpers.
 
 ## TODOs
 
-- [ ] Reconcile authoritative user and household state after rejected masked mutations.
+- [x] Reconcile authoritative user and household state after rejected masked mutations.
 - [ ] Persist oversized backfill outcomes and let later user and household records progress.
 - [ ] Validate user and household mutation conflict and deletion semantics before repository writes.
 - [ ] Expire cached capabilities locally and restrict launch refresh to previously paid projections.
@@ -35,3 +35,4 @@ Tests exercise those interfaces without reaching into private helpers.
 - Preserve `drizzle/0000_rewrite_baseline.sql`, `drizzle/0001_global_taxonomy_seed.sql`, and the canonical 40-unit/184-alias seed byte-for-byte.
 - No remote D1, WorkOS, Stripe, Cloudflare, deployment, issue, or PR mutation runs in this worktree.
 - Vitest and Playwright stay at four workers or fewer. Test suites never overlap.
+- Rejected-receipt slice: 2 files / 27 tests passed. Masked remote snapshots and receipt state now commit atomically.

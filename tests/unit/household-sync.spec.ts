@@ -462,6 +462,86 @@ describe('foreground household coordinator', () => {
 		expect(await bob.meals.get(mealId)).toMatchObject({ date: '2026-08-24' });
 	});
 
+	test('reveals a masked authoritative meal when the pending mutation is rejected', async () => {
+		const database = await openDatabase('rejected-masked-pull');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: true
+		});
+		const mealId = uuidv7();
+		const mutationId = uuidv7();
+		const deviceId = String((await database.meta.get('deviceId'))!.value);
+		await addLocalMealIntent(database, {
+			mealId,
+			mutationId,
+			authSlotId: 'slot_alice',
+			originDeviceId: deviceId,
+			date: '2026-08-24'
+		});
+		const remoteMutationId = uuidv7();
+		const remote = meal(mealId, remoteMutationId, uuidv7(), {
+			date: '2026-08-23',
+			revision: 2
+		});
+		const transport = new MemoryHouseholdServer().transport('user_alice');
+		transport.pull = async (_slot, request) =>
+			request.after === 0
+				? {
+						protocolVersion: 1,
+						changes: [
+							{
+								sequence: 1,
+								mutationId: remoteMutationId,
+								originDeviceId: remote.conflictClocks.schedule!.originDeviceId,
+								actorUserId: 'user_bob',
+								entityKind: 'meal',
+								entityId: mealId,
+								conflictGroups: ['schedule'],
+								operation: 'upsert',
+								resultingRevision: 2,
+								occurredAt: timestamp,
+								receivedAt: timestamp,
+								aggregate: remote,
+								tombstoneExpiresAt: null
+							}
+						],
+						throughSequence: 1,
+						retainedFloor: 0,
+						bootstrapGeneration: 1,
+						hasMore: false
+					}
+				: {
+						protocolVersion: 1,
+						changes: [],
+						throughSequence: request.after,
+						retainedFloor: 0,
+						bootstrapGeneration: 1,
+						hasMore: false
+					};
+		transport.push = async () => ({
+			protocolVersion: 1,
+			receipts: [{ mutationId, status: 'rejected', errorCode: 'historical_loser' }],
+			committedThrough: 1
+		});
+		const coordinator = createHouseholdSyncCoordinator({
+			database,
+			authSlotId: 'slot_alice',
+			workosUserId: 'user_alice',
+			householdId,
+			transport,
+			environment: environment()
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+		await expect(database.outbox.get(mutationId)).resolves.toMatchObject({
+			status: 'rejected',
+			rejectionCode: 'historical_loser'
+		});
+		await expect(database.meals.get(mealId)).resolves.toEqual(remote);
+	});
+
 	test('keeps lapse changes local, then reconciles them after resubscription', async () => {
 		const database = await openDatabase('lapse');
 		await seedProfile(database, {
