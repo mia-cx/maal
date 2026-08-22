@@ -1,8 +1,8 @@
 # Staging cutover and release proof
 
-Status: **blocked on the WorkOS callback contract described below.** Do not call the staging candidate
-release-ready until that blocker is fixed and the live proof passes. Native Safari and Android retained-slot
-evidence remains tracked separately in #70.
+Status: **the live run requires #83's stable callback contract to be in the candidate.** Do not call the
+staging candidate release-ready until that dependency is present and the live proof passes. Native Safari
+and Android retained-slot evidence remains tracked separately in #70.
 
 This runbook provisions an isolated Cloudflare staging Worker and D1 database, connects WorkOS staging and a
 Stripe test sandbox, runs disposable release proofs, and removes every proof fixture. It never requires a real
@@ -23,26 +23,19 @@ user, live Stripe object, production WorkOS key, or committed infrastructure ID.
 - `proof:staging live` creates and removes disposable objects. `preflight`, `contracts`, build, dry-run deploy,
   migration list, D1 info, and read-only queries do not.
 
-## Release blocker: dynamic WorkOS callback paths
+## Stable WorkOS callback contract
 
-Maal currently asks WorkOS to redirect to
-`https://<origin>/api/auth-slots/<random-128-bit-slot>/callback`. WorkOS requires the requested redirect URI to
-match one configured on the application. Its documented wildcard support covers the leftmost subdomain and,
-for local development, a localhost or loopback port. It does not cover path segments. An operator therefore
-cannot allowlist arbitrary profile slot callbacks with one supported URI.
-
-Source: [WorkOS Get authorization URL, Redirect URI and Wildcards](https://workos.com/docs/reference/authkit/authentication/get-authorization-url).
-
-The two fixed proof callbacks can be registered to diagnose the rest of staging:
+The candidate must ask WorkOS to redirect every profile login to this one registered URI:
 
 ```text
-https://<staging-origin>/api/auth-slots/00112233445566778899aabbccddeeff/callback
-https://<staging-origin>/api/auth-slots/ffeeddccbbaa99887766554433221100/callback
+https://<staging-origin>/api/auth/callback
 ```
 
-That does **not** satisfy the release gate for normal generated slots. Fix the application to use a stable
-registered callback while retaining the slot in authenticated, tamper-resistant flow state; then rerun every
-gate. Do not add generated callback URIs to WorkOS one by one.
+The slot stays in authenticated, tamper-resistant flow state and must never appear in the redirect URI. WorkOS
+requires the authorization request's redirect URI to match a configured redirect URI; its wildcard support
+does not make arbitrary path segments configurable. Source:
+[WorkOS Get authorization URL — Redirect URI and Wildcards](https://workos.com/docs/reference/authkit/authentication/get-authorization-url).
+The hosted and deployed proofs assert the exact URI and fail if `auth-slots` or a slot appears in its path.
 
 ## 1. Provision D1 and prepare the private Wrangler file
 
@@ -100,8 +93,8 @@ In the WorkOS **staging** environment:
 
 1. Select the Maal web application and retain its staging Client ID/API key.
 2. Configure the staging origin as the application/homepage origin.
-3. Register the two exact proof callbacks above. After the callback blocker is fixed, replace them with the
-   single stable application callback and make it the default.
+3. Register exactly `https://<staging-origin>/api/auth/callback` and make it the default redirect. Do not
+   register per-slot callbacks.
 4. Confirm the `admin`, `member`, and `child` organization roles exist. The staging proof creator uses `admin`,
    which must have all ten Maal permissions: `households`, `recipes`, `meals`, `check_ins`, and `food_profile`,
    each with `read` and `write`. Verify the intended member/child mapping against the product role policy.
@@ -203,6 +196,12 @@ webhook deliveries/retries, and WorkOS API errors. Do not copy request headers, 
 or provider objects into evidence. Wrangler configuration is the source of truth for observability and
 triggers; see [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/).
 
+For the free-use gate, isolate the browser run by its `x-maal-proof-trace` deployment-label header and exact
+UTC window. In Workers Logs/traces, verify that every same-origin API call is one of the explicit auth,
+billing-status, or household-admin reads reported by the proof. In D1 analytics, verify the same trace window
+opened D1 zero times. Record only the integer `0` as `MAAL_STAGING_FREE_D1_OPEN_COUNT`; do not export raw logs,
+URLs, account IDs, database IDs, or request headers.
+
 ## 6. Run the guarded proof
 
 Load the following values from a private mode-`0600` operator environment outside the repository. The proof
@@ -217,6 +216,7 @@ MAAL_STAGING_DATABASE_NAME=maal-v1-staging
 MAAL_STAGING_WRANGLER_CONFIG=.wrangler/staging-proof.jsonc
 MAAL_STAGING_FIXTURE_FILE=/absolute/private/path/maal-staging-fixtures.json
 MAAL_STAGING_EVIDENCE_FILE=/absolute/private/path/maal-staging-evidence.json
+MAAL_STAGING_FREE_D1_OPEN_COUNT=0
 WORKOS_API_KEY=<WorkOS-staging-key>
 WORKOS_CLIENT_ID=<WorkOS-staging-client>
 WORKOS_COOKIE_PASSWORD=<staging-cookie-key>
@@ -234,8 +234,8 @@ pnpm proof:staging contracts
 pnpm proof:staging live
 ```
 
-The live command intentionally cannot pass the deployed retained-slot route gate until the callback blocker is
-fixed. It still fails closed and attempts provider cleanup. Do not waive or hand-edit that result.
+Run the live command only from a candidate containing #83. It asserts the exact stable callback before creating
+fixtures and fails closed while attempting provider cleanup. Do not waive or hand-edit the result.
 
 The gates prove:
 
@@ -245,8 +245,9 @@ The gates prove:
 - deployed duplicate/out-of-order webhooks, 30-day grace, paid sync/D1 convergence, lapse denial, resubscribe
   recovery, read-only MCP denial, stateless MCP discovery/write, key revocation on the next request, household
   deletion/recovery, retention purge, and zero-remnant cleanup;
-- a local-only recipe created offline and reopened online while the browser context—including its service
-  worker—makes zero paid content requests;
+- a local-only recipe created offline and reopened online while every same-origin API/MCP call is checked
+  against an explicit auth/billing/admin allowlist and operator-correlated Cloudflare telemetry reports zero D1
+  opens;
 - focused unit contracts plus the complete D1 migration/schema contract.
 
 MCP uses the stateless `2026-07-28` request model and `server/discover`; the current protocol removes transport
@@ -258,9 +259,12 @@ sessions and makes each HTTP request self-contained. See the
 Successful proof output must report all booleans true and all remnant counts zero. Confirm separately:
 
 - the disposable WorkOS user and organization no longer resolve;
-- the disposable Stripe customer/subscriptions are absent for the unique proof email;
-- D1 has no proof user, trial claim, household, Stripe event, MCP key, sync row, or domain aggregate tied to the
-  private fixture IDs.
+- the disposable Stripe customer is deleted, its subscriptions are canceled, Checkout sessions are expired,
+  disposable catalog objects are inactive/detached, and the immutable successful test refund remains only as
+  the provider's financial audit artifact;
+- D1 has no proof user, trial claim, household, billing/audit/deletion row, asynchronous or forged Stripe event,
+  MCP key, sync change/scope/version/tombstone/receipt/device row, or domain aggregate tied to the private
+  fixture IDs.
 
 The harness performs and verifies those checks. If it reports an interrupted cleanup, keep the private ledger
 and rerun:
@@ -297,7 +301,7 @@ The restore command returns a bookmark that can undo the restore; retain both in
 
 Production is a fresh environment, not a promotion of staging objects:
 
-1. Resolve the stable WorkOS callback blocker and obtain a fully passing sanitized staging proof.
+1. Confirm #83's stable WorkOS callback is deployed and obtain a fully passing sanitized staging proof.
 2. Create `maal-v1-production`, use a separate ignored Wrangler file with its real D1 ID, capture its Time
    Travel bookmark, and apply the same committed migrations.
 3. Recreate the WorkOS application redirects, roles/permissions, branding, production API key, and Client ID.
