@@ -24,7 +24,7 @@ current forward-only D1 migration chain instead of creating versioned replacemen
 
 ## TODOs
 
-- [ ] Add failing resource-name contracts, then restore existing Worker and D1 bindings in Wrangler config.
+- [x] Add failing resource-name contracts, then restore existing Worker and D1 bindings in Wrangler config.
 - [ ] Add failing migration/preflight contracts, then align scripts and guarded staging validation.
 - [ ] Rewrite architecture and cutover guidance around inspecting and migrating long-lived D1 databases in place.
 - [ ] Run focused staging contracts, the D1 migration chain, and full validation.
@@ -36,3 +36,6 @@ current forward-only D1 migration chain instead of creating versioned replacemen
 - The shared browser Dexie database remains `maal-v1:<environment>`. This issue changes Cloudflare resource
   names, not the IndexedDB schema namespace.
 - Remote operations are out of scope for this branch.
+- Red: `pnpm exec vitest run tests/unit/deployment-resource-names.spec.ts` failed on every versioned Worker and
+  D1 name.
+- Green: the same command passes 3 tests. `pnpm gen` accepts the restored bindings.
