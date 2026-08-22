@@ -1,5 +1,5 @@
 import { mkdir, open, stat, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 export const STAGING_CONFIRMATION = 'create-and-remove-disposable-staging-fixtures';
 
@@ -8,6 +8,7 @@ const requiredLiveSettings = [
 	'MAAL_STAGING_DEPLOYMENT_LABEL',
 	'MAAL_STAGING_DATABASE_NAME',
 	'MAAL_STAGING_WRANGLER_CONFIG',
+	'MAAL_STAGING_FIXTURE_FILE',
 	'WORKOS_API_KEY',
 	'WORKOS_CLIENT_ID',
 	'WORKOS_COOKIE_PASSWORD',
@@ -36,6 +37,18 @@ export const contractProofFiles = [
 	'tests/unit/mcp-tools.spec.ts'
 ];
 
+export const validateStagingOrigin = (value) => {
+	if (!value?.trim()) throw new Error('MAAL_STAGING_BASE_URL is required.');
+	const url = new URL(value);
+	if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+		throw new Error('MAAL_STAGING_BASE_URL must be a clean HTTPS staging origin.');
+	}
+	if (url.hostname === 'maal.mia.cx') {
+		throw new Error('Staging proof refuses the production Maal hostname.');
+	}
+	return url.origin;
+};
+
 export const validateLiveEnvironment = async (environment, repositoryRoot) => {
 	const missing = requiredLiveSettings.filter((name) => !environment[name]?.trim());
 	if (environment.MAAL_STAGING_PROOF_CONFIRM !== STAGING_CONFIRMATION) {
@@ -61,19 +74,7 @@ export const validateLiveEnvironment = async (environment, repositoryRoot) => {
 		throw new Error('Staging proof only accepts MAAL_STAGING_DATABASE_NAME=maal-v1-staging.');
 	}
 
-	const baseUrl = new URL(environment.MAAL_STAGING_BASE_URL);
-	if (
-		baseUrl.protocol !== 'https:' ||
-		baseUrl.username ||
-		baseUrl.password ||
-		baseUrl.search ||
-		baseUrl.hash
-	) {
-		throw new Error('MAAL_STAGING_BASE_URL must be a clean HTTPS staging origin.');
-	}
-	if (baseUrl.hostname === 'maal.mia.cx') {
-		throw new Error('Staging proof refuses the production Maal hostname.');
-	}
+	const baseUrl = validateStagingOrigin(environment.MAAL_STAGING_BASE_URL);
 	if (!/^[-a-zA-Z0-9_.]{1,80}$/.test(environment.MAAL_STAGING_DEPLOYMENT_LABEL)) {
 		throw new Error('MAAL_STAGING_DEPLOYMENT_LABEL must be a short non-secret label.');
 	}
@@ -83,11 +84,20 @@ export const validateLiveEnvironment = async (environment, repositoryRoot) => {
 	if (!configStats?.isFile()) {
 		throw new Error('MAAL_STAGING_WRANGLER_CONFIG must name an existing ignored Wrangler file.');
 	}
+	if (!isAbsolute(environment.MAAL_STAGING_FIXTURE_FILE)) {
+		throw new Error('MAAL_STAGING_FIXTURE_FILE must be an absolute private temporary path.');
+	}
+	const fixturePath = resolve(environment.MAAL_STAGING_FIXTURE_FILE);
+	const fixtureRelative = relative(repositoryRoot, fixturePath);
+	if (!fixtureRelative.startsWith('..') || fixtureRelative === '') {
+		throw new Error('MAAL_STAGING_FIXTURE_FILE must stay outside the repository.');
+	}
 	return {
-		baseUrl: baseUrl.origin,
+		baseUrl,
 		deploymentLabel: environment.MAAL_STAGING_DEPLOYMENT_LABEL,
 		databaseName: environment.MAAL_STAGING_DATABASE_NAME,
 		wranglerConfigPath: configPath,
+		fixturePath,
 		providerModes: { workos: 'staging', stripe: 'test', cloudflare: 'staging' }
 	};
 };
@@ -109,6 +119,30 @@ export const summarizeBillingEvidence = (value) => ({
 	},
 	checks: booleanChecks(value?.checks),
 	cleanup: cleanupSummary(value?.cleanup)
+});
+
+export const summarizeBooleanProof = (value) => ({
+	result: value?.result === 'passed' ? 'passed' : 'failed',
+	checks: booleanChecks(value?.checks),
+	cleanup:
+		value?.cleanup && typeof value.cleanup === 'object'
+			? Object.fromEntries(
+					Object.entries(value.cleanup).filter(
+						([name, item]) =>
+							/^[a-zA-Z][a-zA-Z0-9]{0,79}$/.test(name) &&
+							(typeof item === 'boolean' || (Number.isSafeInteger(item) && item >= 0))
+					)
+				)
+			: {},
+	observed:
+		value?.observed && typeof value.observed === 'object'
+			? Object.fromEntries(
+					Object.entries(value.observed).filter(
+						([name, item]) =>
+							/^[a-zA-Z][a-zA-Z0-9]{0,79}$/.test(name) && Number.isSafeInteger(item) && item >= 0
+					)
+				)
+			: {}
 });
 
 export const safeCommandEvidence = ({ name, result, startedAt, finishedAt }) => ({

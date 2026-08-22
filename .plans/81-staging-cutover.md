@@ -19,8 +19,8 @@ and Stripe proofs, run the full local contract matrix, and emit only sanitized e
 ## TODOs
 
 - [x] Add a fail-closed staging preflight, sanitized evidence writer, and focused contract matrix.
-- [~] Compose the existing provider proofs and live deployment checks behind one guarded command.
-- [ ] Document provisioning, deployment, observation, cleanup, rollback-forward, and production handoff.
+- [x] Compose the existing provider proofs and live deployment checks behind one guarded command.
+- [~] Document provisioning, deployment, observation, cleanup, rollback-forward, and production handoff.
 - [ ] Test the proof tooling and record focused validation for the merger.
 
 ## Notes
@@ -33,3 +33,6 @@ and Stripe proofs, run the full local contract matrix, and emit only sanitized e
   2026-07-28 Streamable HTTP.
 - Safety unit proof: `pnpm exec vitest run tests/unit/staging-cutover-proof.spec.ts` passed 3 tests.
 - Empty live preflight fails before network or provider access and lists all missing operator inputs.
+- Runtime proof cleanup is restartable from a mode-`0600` fixture ledger outside the repository. The ledger
+  is removed only after WorkOS, Stripe, and D1 zero-remnant checks pass.
+- Composition syntax checks and the focused safety unit proof passed after adding the cleanup ledger.

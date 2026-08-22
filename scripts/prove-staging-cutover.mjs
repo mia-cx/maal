@@ -6,6 +6,9 @@ import { fileURLToPath } from 'node:url';
 import {
 	contractProofFiles,
 	safeCommandEvidence,
+	summarizeAuthEvidence,
+	summarizeBillingEvidence,
+	summarizeBooleanProof,
 	validateLiveEnvironment,
 	writeSanitizedEvidence
 } from './lib/staging-cutover-proof.mjs';
@@ -63,8 +66,74 @@ switch (command) {
 		process.stdout.write(`Sanitized contract evidence: ${path}\n`);
 		break;
 	}
-	case 'live':
-		throw new Error('Live staging composition is not implemented yet. Run preflight first.');
+	case 'live': {
+		const config = await validateLiveEnvironment(process.env, root);
+		await assertIgnored(config.wranglerConfigPath);
+		const startedAt = new Date().toISOString();
+		const output =
+			process.env.MAAL_STAGING_EVIDENCE_FILE ?? `/tmp/maal-staging-proof/live-${Date.now()}.json`;
+		const providerEnvironment = {
+			...process.env,
+			AUTH_SLOT_PROOF_BASE_URL: config.baseUrl,
+			AUTH_SLOT_PROOF_DEPLOYMENT_LABEL: config.deploymentLabel,
+			AUTH_SLOT_PROOF_GIT_COMMIT: await gitCommit()
+		};
+		await run('pnpm', ['proof:staging', 'contracts'], {
+			env: {
+				...providerEnvironment,
+				MAAL_STAGING_EVIDENCE_FILE: `${output}.contracts.json`
+			}
+		});
+		const authApi = summarizeAuthEvidence(
+			await runJson('pnpm', ['test:proof:auth-slots:api'], providerEnvironment)
+		);
+		const authHosted = summarizeAuthEvidence(
+			await runJson('pnpm', ['test:proof:auth-slots:hosted'], providerEnvironment)
+		);
+		await run('pnpm', ['test:proof:auth-slots'], { env: providerEnvironment });
+		const billing = summarizeBillingEvidence(
+			await runJson('pnpm', ['test:proof:billing'], providerEnvironment)
+		);
+		const runtime = summarizeBooleanProof(
+			await runJson('pnpm', ['test:proof:staging:runtime'], providerEnvironment)
+		);
+		const freeUse = summarizeBooleanProof(
+			await runJson('pnpm', ['test:proof:staging:free-use'], providerEnvironment)
+		);
+		for (const [name, proof] of Object.entries({
+			authApi,
+			authHosted,
+			billing,
+			runtime,
+			freeUse
+		})) {
+			if (proof.result !== 'passed') throw new Error(`Staging proof ${name} did not pass.`);
+		}
+		const path = await writeSanitizedEvidence(output, {
+			schemaVersion: 1,
+			result: 'passed',
+			deploymentLabel: config.deploymentLabel,
+			providerModes: config.providerModes,
+			proof: safeCommandEvidence({
+				name: 'staging-cutover-live',
+				result: 'passed',
+				startedAt,
+				finishedAt: new Date().toISOString()
+			}),
+			gates: {
+				retainedSlots: { directApi: authApi, hostedAuthKit: authHosted, deployedRoute: 'passed' },
+				billing,
+				runtime,
+				freeUse
+			},
+			nativeBrowserMatrix: { issue: 70, status: 'external-proof-required' },
+			secretsIncluded: false,
+			infrastructureIdsIncluded: false,
+			personalDataIncluded: false
+		});
+		process.stdout.write(`Sanitized live evidence: ${path}\n`);
+		break;
+	}
 	case 'help':
 		process.stdout.write(
 			[
@@ -91,7 +160,7 @@ function run(executable, args, options = {}) {
 		const child = spawn(executable, args, {
 			cwd: root,
 			stdio: options.reject === false ? 'ignore' : 'inherit',
-			env: process.env
+			env: options.env ?? process.env
 		});
 		child.once('error', rejectPromise);
 		child.once('exit', (code, signal) => {
@@ -100,4 +169,47 @@ function run(executable, args, options = {}) {
 			else rejectPromise(new Error(`${executable} failed with ${signal ?? `exit ${exitCode}`}.`));
 		});
 	});
+}
+
+function runJson(executable, args, environment) {
+	return new Promise((resolvePromise, rejectPromise) => {
+		const child = spawn(executable, args, {
+			cwd: root,
+			stdio: ['ignore', 'pipe', 'ignore'],
+			env: environment
+		});
+		let stdout = '';
+		child.stdout.on('data', (chunk) => {
+			stdout += chunk.toString();
+			if (stdout.length > 1_000_000) child.kill();
+		});
+		child.once('error', rejectPromise);
+		child.once('exit', (code) => {
+			if (code !== 0) {
+				rejectPromise(new Error(`${args[0]} failed without publishing provider output.`));
+				return;
+			}
+			try {
+				resolvePromise(JSON.parse(stdout));
+			} catch {
+				rejectPromise(new Error(`${args[0]} returned invalid proof JSON.`));
+			}
+		});
+	});
+}
+
+async function gitCommit() {
+	let output = '';
+	await new Promise((resolvePromise, rejectPromise) => {
+		const child = spawn('git', ['rev-parse', 'HEAD'], {
+			cwd: root,
+			stdio: ['ignore', 'pipe', 'ignore']
+		});
+		child.stdout.on('data', (chunk) => (output += chunk.toString()));
+		child.once('error', rejectPromise);
+		child.once('exit', (code) =>
+			code === 0 ? resolvePromise() : rejectPromise(new Error('Could not read the proof commit.'))
+		);
+	});
+	return output.trim();
 }

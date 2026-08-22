@@ -7,6 +7,7 @@ import {
 	STAGING_CONFIRMATION,
 	summarizeAuthEvidence,
 	summarizeBillingEvidence,
+	summarizeBooleanProof,
 	validateLiveEnvironment,
 	writeSanitizedEvidence
 } from '../../scripts/lib/staging-cutover-proof.mjs';
@@ -17,6 +18,7 @@ const liveEnvironment = (configPath: string) => ({
 	MAAL_STAGING_DEPLOYMENT_LABEL: 'staging-candidate-abc123',
 	MAAL_STAGING_DATABASE_NAME: 'maal-v1-staging',
 	MAAL_STAGING_WRANGLER_CONFIG: configPath,
+	MAAL_STAGING_FIXTURE_FILE: join(tmpdir(), 'maal-proof-private-fixtures.json'),
 	WORKOS_API_KEY: 'sk_test_workos_secret',
 	WORKOS_CLIENT_ID: 'client_staging',
 	WORKOS_COOKIE_PASSWORD: 'a'.repeat(32),
@@ -57,6 +59,7 @@ describe('staging cutover proof safety', () => {
 			deploymentLabel: 'staging-candidate-abc123',
 			databaseName: 'maal-v1-staging',
 			wranglerConfigPath: configPath,
+			fixturePath: join(tmpdir(), 'maal-proof-private-fixtures.json'),
 			providerModes: { workos: 'staging', stripe: 'test', cloudflare: 'staging' }
 		});
 	});
@@ -80,11 +83,18 @@ describe('staging cutover proof safety', () => {
 			checks: { trialCreated: true, refundCreated: true },
 			cleanup: { attempted: 10, failed: ['secret provider error'] }
 		});
+		const runtime = summarizeBooleanProof({
+			result: 'passed',
+			checks: { paidSyncConverged: true },
+			cleanup: { d1RowsRemaining: 0, workosUserDeleted: true, rawId: 'org_private' },
+			observed: { paidContentRequestCount: 0, rawUrl: 'https://private.example' },
+			secret: 'mk_private'
+		});
 		const directory = await mkdtemp(join(tmpdir(), 'maal-staging-proof-'));
 		const evidenceDirectory = join(directory, 'private');
 		await mkdir(evidenceDirectory, { mode: 0o700 });
 		const path = join(evidenceDirectory, 'evidence.json');
-		await writeSanitizedEvidence(path, { auth, billing });
+		await writeSanitizedEvidence(path, { auth, billing, runtime });
 		const encoded = await readFile(path, 'utf8');
 		expect(encoded).not.toMatch(
 			/user_private|session_private|cookie_private|cus_private|provider error/
@@ -115,6 +125,12 @@ describe('staging cutover proof safety', () => {
 					failedCount: 1,
 					verifiedAtUtc: null
 				}
+			},
+			runtime: {
+				result: 'passed',
+				checks: { paidSyncConverged: true },
+				cleanup: { d1RowsRemaining: 0, workosUserDeleted: true },
+				observed: { paidContentRequestCount: 0 }
 			}
 		});
 		await expect(writeSanitizedEvidence(path, { result: 'overwrite' })).rejects.toThrow();
