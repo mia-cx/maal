@@ -7,16 +7,16 @@ Drizzle baseline or canonical taxonomy seed.
 
 ## Acceptance criteria
 
-- [ ] Household deletion enters recovery only after its required Stripe refund succeeds and resumes safely.
-- [ ] Sync and MCP enforce paid-period deadlines, continuous grace, and recovered-household subscription identity.
-- [ ] The billing owner cannot be demoted or removed until ownership transfers or billing ends.
-- [ ] Scheduled maintenance resolves stale trial reservations, rollback resources, and all household recovery rows.
-- [ ] Stripe webhooks project canonical subscription state without stale same-second restoration.
-- [ ] Portable import restarts sync and records authoritative replacement deletions.
-- [ ] MCP recipe propagation intersects paid grants with live and projected `meals:write` permission.
-- [ ] MCP key create and reroll require paid service, bounded key creation, and canonical UTC expiry.
-- [ ] Every advertised MCP scope has an authorized working tool.
-- [ ] Focused regressions and bounded release gates pass with the Drizzle chain and taxonomy seed unchanged.
+- [x] Household deletion enters recovery only after its required Stripe refund succeeds and resumes safely.
+- [x] Sync and MCP enforce paid-period deadlines, continuous grace, and recovered-household subscription identity.
+- [x] The billing owner cannot be demoted or removed until ownership transfers or billing ends.
+- [x] Scheduled maintenance resolves stale trial reservations, rollback resources, and all household recovery rows.
+- [x] Stripe webhooks project canonical subscription state without stale same-second restoration.
+- [x] Portable import restarts sync and records authoritative replacement deletions.
+- [x] MCP recipe propagation intersects paid grants with live and projected `meals:write` permission.
+- [x] MCP key create and reroll require paid service, bounded key creation, and canonical UTC expiry.
+- [x] Every advertised MCP scope has an authorized working tool.
+- [x] Focused regressions and bounded release gates pass with the Drizzle chain and taxonomy seed unchanged.
 
 ## TODOs
 
@@ -26,7 +26,7 @@ Drizzle baseline or canonical taxonomy seed.
 - [x] Restart portable-import backfill and preserve authoritative deletion intent for natural-key replacements.
 - [x] Harden MCP key management, paid authorization, expiry, recovered households, and recipe propagation.
 - [x] Add authorized household administration, check-in read, and food-profile MCP tools.
-- [ ] Run one bounded final validation and prove the migrations and seed remain byte-identical.
+- [x] Run one bounded final validation and prove the migrations and seed remain byte-identical.
 
 ## Notes
 
@@ -53,3 +53,7 @@ Drizzle baseline or canonical taxonomy seed.
 - MCP scope slice: 4 files / 38 tests passed. Check-in reads and user food-profile reads/writes use the
   shared normalized sync repositories. Invite and member administration delegates to the existing
   WorkOS-plus-D1 service after MCP scope and effective-membership authorization.
+- Final gate: D1 schema/seed check passed; lint passed; Svelte check reported 0 errors and 0 warnings;
+  66 unit files / 368 tests passed; production build and 189,887 / 256,000-byte initial gzip budget
+  passed; 22 Playwright tests passed with four workers. Both migrations and the taxonomy seed match
+  their base-commit SHA-256 hashes byte-for-byte.
