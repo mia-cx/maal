@@ -14,8 +14,8 @@ Replace the rewrite's incremental migration history with one baseline generated 
 
 ## TODOs
 
-- [~] Add a migration-runner contract that records the old chain fingerprint and requires schema equivalence.
-- [ ] Generate and commit the fresh Drizzle baseline from the current schema.
+- [x] Add a migration-runner contract that records the old chain fingerprint and requires schema equivalence.
+- [x] Generate and commit the fresh Drizzle baseline from the current schema.
 - [ ] Add the populated-prototype fail-closed contract and update migration consumers.
 - [ ] Rewrite staging and production reset-first cutover instructions.
 - [ ] Run focused and full validation and record exact evidence.
@@ -25,3 +25,7 @@ Replace the rewrite's incremental migration history with one baseline generated 
 - Test seam: the repository's D1 migration runner and its observable schema/migration state.
 - Product decision from #85: do not preserve or bridge the prototype migration lineage.
 - No remote D1, deployment, or provider command is allowed in this issue.
+- The retired chain had 138 schema objects: 55 tables including D1 metadata and 83 indexes.
+- Its raw normalized SQL fingerprint was `58ec0ece9b72e662541335084522b1e044aa18546d6524f4d2e8a7beed9b7aa9`.
+- Its semantic fingerprint, which ignores column declaration order, was `530668bba4bd77fdb5f355a4f0ab25e2808bbd36c663bd182fff15fdc782752e`.
+- Drizzle generated `drizzle/0000_rewrite_baseline.sql`; the fresh baseline has the same semantic fingerprint.

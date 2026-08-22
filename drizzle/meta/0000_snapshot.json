@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ebfb4046-c5de-469c-8f54-5fd9d9b0c225",
+  "id": "c57e74f1-f380-45a7-a8c0-4387264046c3",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "household_appliances": {
@@ -488,6 +488,14 @@
           "notNull": true,
           "autoincrement": false
         },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'Household'"
+        },
         "locale": {
           "name": "locale",
           "type": "text",
@@ -802,6 +810,126 @@
         }
       }
     },
+    "meal_check_in_recovery": {
+      "name": "meal_check_in_recovery",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "household_id": {
+          "name": "household_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reporter_user_id": {
+          "name": "reporter_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "meal_id": {
+          "name": "meal_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cook_time_minutes": {
+          "name": "cook_time_minutes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verdict": {
+          "name": "verdict",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "schema_version": {
+          "name": "schema_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "recovery_reason": {
+          "name": "recovery_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "preserved_at": {
+          "name": "preserved_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "meal_check_in_recovery_verdict_check": {
+          "name": "meal_check_in_recovery_verdict_check",
+          "value": "\"meal_check_in_recovery\".\"verdict\" IN ('repeat', 'neutral', 'avoid')"
+        },
+        "meal_check_in_recovery_reason_check": {
+          "name": "meal_check_in_recovery_reason_check",
+          "value": "\"meal_check_in_recovery\".\"recovery_reason\" IN ('household_unresolved')"
+        }
+      }
+    },
     "meal_check_ins": {
       "name": "meal_check_ins",
       "columns": {
@@ -809,6 +937,13 @@
           "name": "id",
           "type": "text",
           "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "household_id": {
+          "name": "household_id",
+          "type": "text",
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
@@ -896,6 +1031,13 @@
           ],
           "isUnique": true
         },
+        "meal_check_ins_household_idx": {
+          "name": "meal_check_ins_household_idx",
+          "columns": [
+            "household_id"
+          ],
+          "isUnique": false
+        },
         "meal_check_ins_reporter_idx": {
           "name": "meal_check_ins_reporter_idx",
           "columns": [
@@ -912,6 +1054,19 @@
         }
       },
       "foreignKeys": {
+        "meal_check_ins_household_id_households_household_id_fk": {
+          "name": "meal_check_ins_household_id_households_household_id_fk",
+          "tableFrom": "meal_check_ins",
+          "tableTo": "households",
+          "columnsFrom": [
+            "household_id"
+          ],
+          "columnsTo": [
+            "household_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "meal_check_ins_reporter_user_id_users_workos_user_id_fk": {
           "name": "meal_check_ins_reporter_user_id_users_workos_user_id_fk",
           "tableFrom": "meal_check_ins",
@@ -2351,6 +2506,27 @@
           "notNull": false,
           "autoincrement": false
         },
+        "last_successful_payment_at": {
+          "name": "last_successful_payment_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_stripe_event_created_at": {
+          "name": "last_stripe_event_created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_stripe_event_id": {
+          "name": "last_stripe_event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -2557,6 +2733,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "stripe_charge_id": {
+          "name": "stripe_charge_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "stripe_refund_id": {
           "name": "stripe_refund_id",
           "type": "text",
@@ -2638,7 +2821,7 @@
       "checkConstraints": {
         "household_deletion_requests_state_check": {
           "name": "household_deletion_requests_state_check",
-          "value": "\"household_deletion_requests\".\"state\" IN ('requested', 'cancelling', 'refunding', 'recoverable', 'purged', 'failed')"
+          "value": "\"household_deletion_requests\".\"state\" IN ('requested', 'cancelling', 'refunding', 'recoverable', 'recovered', 'purged', 'failed')"
         },
         "household_deletion_requests_preview_amount_nonnegative": {
           "name": "household_deletion_requests_preview_amount_nonnegative",
@@ -3244,6 +3427,20 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "winning_actor_user_id": {
+          "name": "winning_actor_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "winning_received_at": {
+          "name": "winning_received_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {},
@@ -3273,6 +3470,123 @@
         "sync_entity_versions_sequence_positive": {
           "name": "sync_entity_versions_sequence_positive",
           "value": "\"sync_entity_versions\".\"last_sequence\" > 0"
+        }
+      }
+    },
+    "sync_mutation_receipts": {
+      "name": "sync_mutation_receipts",
+      "columns": {
+        "mutation_id": {
+          "name": "mutation_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "audience_kind": {
+          "name": "audience_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "audience_id": {
+          "name": "audience_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_kind": {
+          "name": "entity_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_id": {
+          "name": "entity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resulting_revision": {
+          "name": "resulting_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        },
+        "retain_until": {
+          "name": "retain_until",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "sync_mutation_receipts_audience_idx": {
+          "name": "sync_mutation_receipts_audience_idx",
+          "columns": [
+            "audience_kind",
+            "audience_id"
+          ],
+          "isUnique": false
+        },
+        "sync_mutation_receipts_retention_idx": {
+          "name": "sync_mutation_receipts_retention_idx",
+          "columns": [
+            "retain_until"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "sync_mutation_receipts_audience_kind_check": {
+          "name": "sync_mutation_receipts_audience_kind_check",
+          "value": "\"sync_mutation_receipts\".\"audience_kind\" IN ('user', 'household')"
+        },
+        "sync_mutation_receipts_status_check": {
+          "name": "sync_mutation_receipts_status_check",
+          "value": "\"sync_mutation_receipts\".\"status\" IN ('accepted', 'rejected')"
+        },
+        "sync_mutation_receipts_result_check": {
+          "name": "sync_mutation_receipts_result_check",
+          "value": "(\"sync_mutation_receipts\".\"status\" = 'accepted' AND \"sync_mutation_receipts\".\"sequence\" > 0 AND \"sync_mutation_receipts\".\"resulting_revision\" > 0 AND \"sync_mutation_receipts\".\"error_code\" IS NULL)\n\t\t\t OR (\"sync_mutation_receipts\".\"status\" = 'rejected' AND \"sync_mutation_receipts\".\"sequence\" IS NULL AND \"sync_mutation_receipts\".\"resulting_revision\" IS NULL AND \"sync_mutation_receipts\".\"error_code\" IS NOT NULL)"
         }
       }
     },
