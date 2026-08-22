@@ -35,7 +35,7 @@ Replace the rewrite's incremental migration history with one baseline generated 
 - `pnpm test:d1-schema` proves both files apply once, leave no pending migrations, and fail closed over populated prototype tables.
 - `scripts/generate-d1-reset-sql.mjs` turns a private schema-only export into a private reset file without touching D1.
 - The runbook requires a Time Travel bookmark, traffic pause, exact environment phrase, zero application objects, both applied migration names, and golden taxonomy counts.
-- `pnpm test:d1-schema` passed after the final changes.
-- `pnpm proof:staging contracts` passed 17 files and 126 tests plus the D1 schema runner; sanitized evidence is `/tmp/maal-staging-proof/contracts-1787407130374.json`.
-- `pnpm validate` passed 62 unit files and 327 tests, the production build, the 187,204 / 256,000-byte initial SPA budget, and 22 browser tests.
+- `pnpm test:d1-schema` passed after the final changes, including deterministic taxonomy seed drift detection.
+- `pnpm proof:staging contracts` passed 17 files and 126 tests plus the D1 schema runner; sanitized evidence is `/tmp/maal-staging-proof/contracts-1787407964159.json`.
+- `pnpm validate` passed 63 unit files and 330 tests, the production build, the 187,212 / 256,000-byte initial SPA budget, and 22 browser tests.
 - Validation performed no remote D1, deployment, or provider operation.
