@@ -7,6 +7,7 @@ import type {
 	UserSyncEntityKind
 } from '$lib/sync/contracts.js';
 import { decodeUserSyncAggregate } from '$lib/sync/user-entities.js';
+import { pruneSyncRetentionBatch } from '$lib/server/maintenance/sync-retention.js';
 
 import { incomingWinsHistoricalConflict, type WinningClock } from './reconciliation.js';
 import {
@@ -46,6 +47,10 @@ interface ReceiptRow {
 	sequence: number | null;
 	resulting_revision: number | null;
 	error_code: string | null;
+}
+
+interface ActiveTombstoneRow {
+	payload: string;
 }
 
 interface VersionRow {
@@ -339,6 +344,40 @@ const receiptFromRow = (row: ReceiptRow, duplicate = false): MutationReceipt => 
 		sequence: null,
 		resultingRevision: null,
 		errorCode: row.error_code ?? 'rejected'
+	};
+};
+
+const rejectMutation = async (
+	database: D1Database,
+	workosUserId: string,
+	mutation: SyncMutation,
+	receivedAt: string,
+	errorCode: string
+): Promise<MutationReceipt> => {
+	const retainUntil = new Date(Date.parse(receivedAt) + 365 * 86_400_000).toISOString();
+	await database
+		.prepare(
+			`INSERT INTO sync_mutation_receipts
+			 (mutation_id, audience_kind, audience_id, entity_kind, entity_id, status, sequence,
+			  resulting_revision, error_code, created_at, retain_until)
+			 VALUES (?, 'user', ?, ?, ?, 'rejected', NULL, NULL, ?, ?, ?)`
+		)
+		.bind(
+			mutation.mutationId,
+			workosUserId,
+			mutation.entityKind,
+			mutation.entityId,
+			errorCode,
+			receivedAt,
+			retainUntil
+		)
+		.run();
+	return {
+		mutationId: mutation.mutationId,
+		status: 'rejected',
+		sequence: null,
+		resultingRevision: null,
+		errorCode
 	};
 };
 
@@ -720,6 +759,35 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			input.actorUserId,
 			input.mutation.aggregate
 		);
+		const activeTombstone = await this.database
+			.prepare(
+				`SELECT c.payload FROM sync_tombstones t
+				 JOIN sync_changes c ON c.seq = t.deletion_sequence
+				 WHERE t.audience_kind = 'user' AND t.audience_id = ? AND t.entity_kind = ?
+				  AND t.entity_id = ? AND t.expires_at > ?`
+			)
+			.bind(input.actorUserId, input.mutation.entityKind, input.mutation.entityId, input.receivedAt)
+			.first<ActiveTombstoneRow>();
+		if (activeTombstone && input.mutation.operation === 'upsert') {
+			const deletedAggregate = decodeStoredPayload(activeTombstone.payload).payload.aggregate;
+			const intentionalSoftDeleteRestore =
+				input.mode === 'live' &&
+				input.mutation.entityKind === 'recipe' &&
+				input.mutation.conflictGroups.length === 1 &&
+				input.mutation.conflictGroups[0] === 'deletion' &&
+				isRecipeAggregate(deletedAggregate as StoredRecipe) &&
+				isRecipeAggregate(decodedIncoming.aggregate as StoredRecipe) &&
+				decodedIncoming.aggregate.deletedAt === null;
+			if (!intentionalSoftDeleteRestore) {
+				return rejectMutation(
+					this.database,
+					input.actorUserId,
+					input.mutation,
+					input.receivedAt,
+					'tombstoned_entity'
+				);
+			}
+		}
 		const versions = await readVersions(
 			this.database,
 			input.actorUserId,
@@ -747,29 +815,13 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			Date.parse(input.receivedAt) + 365 * 86_400_000
 		).toISOString();
 		if (acceptedGroups.length === 0) {
-			await this.database
-				.prepare(
-					`INSERT INTO sync_mutation_receipts
-				 (mutation_id, audience_kind, audience_id, entity_kind, entity_id, status, sequence,
-				  resulting_revision, error_code, created_at, retain_until)
-				 VALUES (?, 'user', ?, ?, ?, 'rejected', NULL, NULL, 'historical_loser', ?, ?)`
-				)
-				.bind(
-					input.mutation.mutationId,
-					input.actorUserId,
-					input.mutation.entityKind,
-					input.mutation.entityId,
-					input.receivedAt,
-					receiptRetainUntil
-				)
-				.run();
-			return {
-				mutationId: input.mutation.mutationId,
-				status: 'rejected',
-				sequence: null,
-				resultingRevision: null,
-				errorCode: 'historical_loser'
-			};
+			return rejectMutation(
+				this.database,
+				input.actorUserId,
+				input.mutation,
+				input.receivedAt,
+				'historical_loser'
+			);
 		}
 
 		const current =
@@ -954,24 +1006,9 @@ export class D1UserSyncRepository implements UserSyncRepository {
 	}
 
 	async prune(input: { now: string; changeCutoff: string }): Promise<void> {
-		await this.database.batch([
-			this.database
-				.prepare(`DELETE FROM sync_changes WHERE received_at < ? AND tombstone_expires_at IS NULL`)
-				.bind(input.changeCutoff),
-			this.database
-				.prepare(
-					`DELETE FROM sync_changes WHERE tombstone_expires_at IS NOT NULL AND tombstone_expires_at <= ?`
-				)
-				.bind(input.now),
-			this.database.prepare('DELETE FROM sync_tombstones WHERE expires_at <= ?').bind(input.now),
-			this.database
-				.prepare('DELETE FROM sync_mutation_receipts WHERE retain_until <= ?')
-				.bind(input.now),
-			this.database.prepare(
-				`UPDATE sync_scope_state SET earliest_retained_sequence = COALESCE(
-				 (SELECT MIN(seq) FROM sync_changes c WHERE c.audience_kind = sync_scope_state.audience_kind
-				  AND c.audience_id = sync_scope_state.audience_id), latest_sequence)`
-			)
-		]);
+		await pruneSyncRetentionBatch(this.database, {
+			audienceKind: 'user',
+			...input
+		});
 	}
 }

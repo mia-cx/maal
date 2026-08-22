@@ -3,13 +3,14 @@
 	"name": "maal-v1-local",
 	"compatibility_date": "2026-07-15",
 	"compatibility_flags": ["nodejs_compat"],
-	"main": ".svelte-kit/cloudflare/_worker.js",
+	"main": "src/worker.ts",
 	"assets": {
 		"binding": "ASSETS",
 		"directory": ".svelte-kit/cloudflare"
 	},
 	"workers_dev": true,
 	"preview_urls": true,
+	"triggers": { "crons": ["17 3 * * *"] },
 	"observability": {
 		"enabled": true,
 		"logs": { "head_sampling_rate": 1 },
@@ -33,6 +34,7 @@
 	"env": {
 		"staging": {
 			"name": "maal-v1-staging",
+			"triggers": { "crons": ["17 3 * * *"] },
 			"d1_databases": [
 				{
 					"binding": "DB",
@@ -51,6 +53,7 @@
 		},
 		"production": {
 			"name": "maal-v1-production",
+			"triggers": { "crons": ["17 3 * * *"] },
 			"d1_databases": [
 				{
 					"binding": "DB",

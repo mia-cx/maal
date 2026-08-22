@@ -7,6 +7,7 @@ import type {
 	HouseholdSyncMutation
 } from '$lib/sync/household-contracts.js';
 import { decodeHouseholdSyncAggregate } from '$lib/sync/household-entities.js';
+import { pruneSyncRetentionBatch } from '$lib/server/maintenance/sync-retention.js';
 
 import { incomingWinsHistoricalConflict, type WinningClock } from './reconciliation.js';
 import {
@@ -1044,30 +1045,9 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 	}
 
 	async prune(input: { now: string; changeCutoff: string }): Promise<void> {
-		await this.database.batch([
-			this.database
-				.prepare(`DELETE FROM sync_changes WHERE received_at < ? AND tombstone_expires_at IS NULL`)
-				.bind(input.changeCutoff),
-			this.database
-				.prepare(
-					`DELETE FROM sync_changes WHERE tombstone_expires_at IS NOT NULL AND tombstone_expires_at <= ?`
-				)
-				.bind(input.now),
-			this.database.prepare('DELETE FROM sync_tombstones WHERE expires_at <= ?').bind(input.now),
-			this.database
-				.prepare('DELETE FROM sync_mutation_receipts WHERE retain_until <= ?')
-				.bind(input.now),
-			this.database.prepare(
-				`UPDATE sync_scope_state SET
-				 bootstrap_generation = bootstrap_generation + CASE
-				  WHEN earliest_retained_sequence != COALESCE(
-				   (SELECT MIN(seq) FROM sync_changes c WHERE c.audience_kind = sync_scope_state.audience_kind
-				    AND c.audience_id = sync_scope_state.audience_id), latest_sequence)
-				  THEN 1 ELSE 0 END,
-				 earliest_retained_sequence = COALESCE(
-				  (SELECT MIN(seq) FROM sync_changes c WHERE c.audience_kind = sync_scope_state.audience_kind
-				   AND c.audience_id = sync_scope_state.audience_id), latest_sequence)`
-			)
-		]);
+		await pruneSyncRetentionBatch(this.database, {
+			audienceKind: 'household',
+			...input
+		});
 	}
 }

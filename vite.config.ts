@@ -14,7 +14,7 @@ export default defineConfig({
 				runes: ({ filename }) =>
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
-			adapter: adapter(),
+			adapter: adapter({ config: 'wrangler.sveltekit.jsonc' }),
 			typescript: {
 				config: (config) => {
 					config.include.push('../drizzle.config.ts');

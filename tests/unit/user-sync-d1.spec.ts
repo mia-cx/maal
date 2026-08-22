@@ -445,5 +445,113 @@ describe('D1 user sync repository', () => {
 				aggregate: expect.objectContaining({ purgeReason: 'permanent_delete' })
 			})
 		);
+
+		const staleUpsertId = uuidv7();
+		await expect(
+			repository.commit({
+				actorUserId: userId,
+				deviceId,
+				mode: 'live',
+				receivedAt: '2026-08-22T12:00:01.000Z',
+				mutation: {
+					...create,
+					mutationId: staleUpsertId,
+					conflictGroups: ['header'],
+					occurredAt: '2026-08-20T12:00:00.000Z',
+					aggregate: recipeAggregate(entityId, staleUpsertId)
+				}
+			})
+		).resolves.toMatchObject({ status: 'rejected', errorCode: 'tombstoned_entity' });
+	});
+
+	test('allows an explicit live restore for a recoverable recipe tombstone', async () => {
+		const repository = new D1UserSyncRepository(database);
+		const entityId = uuidv7();
+		const createId = uuidv7();
+		const original = recipeAggregate(entityId, createId);
+		await repository.commit({
+			actorUserId: userId,
+			deviceId,
+			mode: 'live',
+			receivedAt: timestamp,
+			mutation: {
+				schemaVersion: 1,
+				mutationId: createId,
+				originDeviceId: deviceId,
+				entityKind: 'recipe',
+				entityId,
+				conflictGroups: ['aggregate'],
+				operation: 'upsert',
+				occurredAt: timestamp,
+				aggregate: original
+			}
+		});
+
+		const deleteId = uuidv7();
+		const deletedAt = '2026-08-22T12:00:00.000Z' as const;
+		const deleted = {
+			...original,
+			revision: 2,
+			updatedAt: deletedAt,
+			deletedAt,
+			conflictClocks: {
+				...original.conflictClocks,
+				deletion: { occurredAt: deletedAt, originDeviceId: deviceId, mutationId: deleteId }
+			}
+		};
+		await repository.commit({
+			actorUserId: userId,
+			deviceId,
+			mode: 'live',
+			receivedAt: deletedAt,
+			mutation: {
+				schemaVersion: 1,
+				mutationId: deleteId,
+				originDeviceId: deviceId,
+				entityKind: 'recipe',
+				entityId,
+				conflictGroups: ['deletion'],
+				operation: 'delete',
+				occurredAt: deletedAt,
+				aggregate: deleted
+			}
+		});
+
+		const restoreId = uuidv7();
+		const restoredAt = '2026-08-23T12:00:00.000Z' as const;
+		await expect(
+			repository.commit({
+				actorUserId: userId,
+				deviceId,
+				mode: 'live',
+				receivedAt: restoredAt,
+				mutation: {
+					schemaVersion: 1,
+					mutationId: restoreId,
+					originDeviceId: deviceId,
+					entityKind: 'recipe',
+					entityId,
+					conflictGroups: ['deletion'],
+					operation: 'upsert',
+					occurredAt: restoredAt,
+					aggregate: {
+						...deleted,
+						updatedAt: restoredAt,
+						deletedAt: null,
+						conflictClocks: {
+							...deleted.conflictClocks,
+							deletion: {
+								occurredAt: restoredAt,
+								originDeviceId: deviceId,
+								mutationId: restoreId
+							}
+						}
+					}
+				}
+			})
+		).resolves.toMatchObject({ status: 'accepted' });
+		await expect(
+			database.prepare('SELECT deleted_at FROM recipes WHERE id = ?').bind(entityId).first()
+		).resolves.toEqual({ deleted_at: null });
 	});
 });
