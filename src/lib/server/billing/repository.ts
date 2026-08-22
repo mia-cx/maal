@@ -1,4 +1,4 @@
-import { and, eq, gte, lte, or } from 'drizzle-orm';
+import { and, eq, gte, or } from 'drizzle-orm';
 
 import type { StripeSubscriptionStatus } from '$lib/domain/billing/contracts.js';
 import { getDb } from '$lib/server/db/index.js';
@@ -28,6 +28,77 @@ export interface SubscriptionProjectionWrite {
 	readonly eventId: string;
 	readonly eventCreatedAt: string;
 }
+
+const HOUSEHOLD_PURGE_CLAIM_CODE = 'purge_claimed';
+
+const HOUSEHOLD_PURGE_STATEMENTS = [
+	`DELETE FROM meal_instruction_events WHERE rowid IN (
+		SELECT event.rowid FROM meal_instruction_events event
+		JOIN meal_instructions instruction ON instruction.id = event.meal_instruction_id
+		JOIN meals meal ON meal.id = instruction.meal_id
+		WHERE meal.household_id = ?1 ORDER BY event.rowid LIMIT ?2
+	)`,
+	...[
+		'meal_appliance_requirements',
+		'meal_classifications',
+		'meal_ingredients',
+		'meal_instructions',
+		'meal_media',
+		'meal_nutrition_facts'
+	].map(
+		(table) =>
+			`DELETE FROM ${table} WHERE rowid IN (
+				SELECT child.rowid FROM ${table} child JOIN meals meal ON meal.id = child.meal_id
+				WHERE meal.household_id = ?1 ORDER BY child.rowid LIMIT ?2
+			)`
+	),
+	`DELETE FROM meal_check_ins WHERE rowid IN (
+		SELECT check_in.rowid FROM meal_check_ins check_in
+		WHERE check_in.household_id = ?1 OR check_in.meal_id IN (
+			SELECT id FROM meals WHERE household_id = ?1
+		) ORDER BY check_in.rowid LIMIT ?2
+	)`,
+	...[
+		'meals',
+		'household_appliances',
+		'household_invites',
+		'household_membership_mutation_locks',
+		'household_memberships',
+		'food_household_aliases',
+		'food_household_entries',
+		'household_food_display_overrides',
+		'household_unit_display_overrides',
+		'unit_household_aliases',
+		'unit_household_entries',
+		'mcp_key_households',
+		'billing_subscriptions'
+	].map(
+		(table) =>
+			`DELETE FROM ${table} WHERE rowid IN (
+				SELECT rowid FROM ${table} WHERE household_id = ?1 ORDER BY rowid LIMIT ?2
+			)`
+	),
+	...[
+		'sync_mutation_receipts',
+		'sync_changes',
+		'sync_entity_versions',
+		'sync_tombstones',
+		'sync_scope_state'
+	].map(
+		(table) =>
+			`DELETE FROM ${table} WHERE rowid IN (
+				SELECT rowid FROM ${table}
+				WHERE audience_kind = 'household' AND audience_id = ?1 ORDER BY rowid LIMIT ?2
+			)`
+	)
+] as const;
+
+const boundedSize = (size: number): number => {
+	if (!Number.isSafeInteger(size) || size < 1 || size > 500) {
+		throw new TypeError('Household purge batch size must be between 1 and 500.');
+	}
+	return size;
+};
 
 export class BillingRepository {
 	constructor(readonly database: D1Database) {}
@@ -278,31 +349,92 @@ export class BillingRepository {
 		return rows.length > 0;
 	}
 
-	async expiredRecoverableHouseholds(now: string): Promise<string[]> {
-		return (
-			await getDb(this.database)
-				.select({ householdId: householdDeletionRequests.householdId })
-				.from(householdDeletionRequests)
-				.where(
-					and(
-						eq(householdDeletionRequests.state, 'recoverable'),
-						lte(householdDeletionRequests.recoverableUntil, now)
-					)
-				)
-		).map(({ householdId }) => householdId);
+	async claimExpiredRecoverableHouseholds(now: string, limit = 10): Promise<string[]> {
+		const size = boundedSize(limit);
+		const rows = await this.database
+			.prepare(
+				`UPDATE household_deletion_requests
+				 SET state = 'requested', safe_error_code = ?, updated_at = ?
+				 WHERE household_id IN (
+				  SELECT household_id FROM household_deletion_requests
+				  WHERE state = 'recoverable' AND recoverable_until <= ?
+				  ORDER BY recoverable_until, household_id LIMIT ?
+				 ) RETURNING household_id`
+			)
+			.bind(HOUSEHOLD_PURGE_CLAIM_CODE, now, now, size)
+			.all<{ household_id: string }>();
+		return rows.results.map(({ household_id }) => household_id);
 	}
 
-	async purgeHouseholdContent(householdId: string, purgedAt: string): Promise<void> {
-		// Foreign-key cascades remove household-owned normalized content. User recipes survive and
-		// their saved-from reference is SET NULL by the schema.
+	async claimedHouseholdPurges(now: string, limit = 10): Promise<string[]> {
+		const size = boundedSize(limit);
+		return (
+			await this.database
+				.prepare(
+					`SELECT household_id FROM household_deletion_requests
+					 WHERE state = 'requested' AND safe_error_code = ? AND recoverable_until <= ?
+					 ORDER BY recoverable_until, household_id LIMIT ?`
+				)
+				.bind(HOUSEHOLD_PURGE_CLAIM_CODE, now, size)
+				.all<{ household_id: string }>()
+		).results.map(({ household_id }) => household_id);
+	}
+
+	async purgeHouseholdContentBatch(
+		householdId: string,
+		purgedAt: string,
+		batchSize = 100
+	): Promise<{ complete: boolean; rowsDeleted: number }> {
+		const size = boundedSize(batchSize);
+		const claim = await this.database
+			.prepare(
+				`SELECT 1 AS present FROM household_deletion_requests
+				 WHERE household_id = ? AND state = 'requested' AND safe_error_code = ?
+				  AND recoverable_until <= ?`
+			)
+			.bind(householdId, HOUSEHOLD_PURGE_CLAIM_CODE, purgedAt)
+			.first<{ present: number }>();
+		if (!claim) return { complete: false, rowsDeleted: 0 };
+
+		let remaining = size;
+		let rowsDeleted = 0;
+		for (const statement of HOUSEHOLD_PURGE_STATEMENTS) {
+			const result = await this.database.prepare(statement).bind(householdId, remaining).run();
+			rowsDeleted += result.meta.changes;
+			remaining -= result.meta.changes;
+			if (remaining === 0) return { complete: false, rowsDeleted };
+		}
+
+		const detached = await this.database
+			.prepare(
+				`UPDATE recipes SET saved_from_household_id = NULL WHERE rowid IN (
+				 SELECT rowid FROM recipes WHERE saved_from_household_id = ? ORDER BY rowid LIMIT ?
+				)`
+			)
+			.bind(householdId, remaining)
+			.run();
+		rowsDeleted += detached.meta.changes;
+		remaining -= detached.meta.changes;
+		if (remaining === 0) return { complete: false, rowsDeleted };
+
 		await this.database.batch([
 			this.database.prepare('DELETE FROM households WHERE household_id = ?').bind(householdId),
 			this.database
 				.prepare(
-					`UPDATE household_deletion_requests SET state = 'purged', purged_at = ?, updated_at = ?, safe_error_code = NULL WHERE household_id = ?`
+					`UPDATE household_deletion_requests SET state = 'purged', purged_at = ?,
+					 updated_at = ?, safe_error_code = NULL WHERE household_id = ? AND state = 'requested'
+					 AND safe_error_code = ?`
 				)
-				.bind(purgedAt, purgedAt, householdId)
+				.bind(purgedAt, purgedAt, householdId, HOUSEHOLD_PURGE_CLAIM_CODE),
+			this.auditStatement({
+				idempotencyKey: `household:${householdId}:purged`,
+				householdId,
+				actorUserId: null,
+				eventType: 'household_purged_after_recovery_window',
+				occurredAt: purgedAt
+			})
 		]);
+		return { complete: true, rowsDeleted };
 	}
 
 	async audit(input: {

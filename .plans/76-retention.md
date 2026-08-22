@@ -17,7 +17,7 @@ purges from a configured Cloudflare scheduled handler using D1 server time, boun
 
 - [x] Add bounded foreground recipe retention for retained local auth slots and keep unacknowledged purge tombstones.
 - [x] Add scoped, bounded D1 sync retention with retained-floor updates and a scheduled Worker entrypoint.
-- [ ] Add claimed, bounded, retry-safe household purge after the recovery window.
+- [x] Add claimed, bounded, retry-safe household purge after the recovery window.
 - [ ] Run focused validation and record the serialized full-validation handoff.
 
 ## Notes
@@ -29,3 +29,5 @@ purges from a configured Cloudflare scheduled handler using D1 server time, boun
 - Focused local validation: `pnpm exec vitest run tests/unit/recipes.spec.ts` (7 tests passed).
 - Focused D1 validation: scheduled retention plus user/household repositories passed 12 tests.
 - `pnpm gen` accepts the custom fetch/scheduled Worker entrypoint and configured UTC cron.
+- Household purge validation: focused retention/billing tests passed 8 tests; `pnpm check` reports 0 diagnostics.
+- The existing `requested` deletion state is reserved as the post-window purge claim with safe code `purge_claimed`; this avoids a destructive schema rebuild and closes the recovery race before WorkOS deletion.

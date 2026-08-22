@@ -7,6 +7,7 @@ import {
 	billingErrorResponse,
 	purgeExpiredHouseholds
 } from '$lib/server/billing/index.js';
+import { readD1ServerNow } from '$lib/server/maintenance/index.js';
 import type { RequestHandler } from './$types';
 
 type MaintenanceEnvironment = {
@@ -37,9 +38,9 @@ export const POST: RequestHandler = async (event) => {
 		const workos = new WorkOS(environment.WORKOS_API_KEY, {
 			...(environment.WORKOS_CLIENT_ID ? { clientId: environment.WORKOS_CLIENT_ID } : {})
 		});
-		const purged = await purgeExpiredHouseholds({
+		const result = await purgeExpiredHouseholds({
 			repository: new BillingRepository(environment.DB),
-			now: new Date().toISOString(),
+			now: await readD1ServerNow(environment.DB),
 			deleteWorkOSOrganization: async (householdId) => {
 				try {
 					await workos.organizations.deleteOrganization(householdId);
@@ -49,7 +50,7 @@ export const POST: RequestHandler = async (event) => {
 				}
 			}
 		});
-		return json({ purged });
+		return json(result);
 	} catch (cause) {
 		return billingErrorResponse(cause);
 	}

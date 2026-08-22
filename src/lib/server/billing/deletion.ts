@@ -75,7 +75,11 @@ export const deleteHouseholdAfterRefund = async (input: {
 	now: string;
 }): Promise<HouseholdDeletionRow> => {
 	const existingRequest = await input.repository.deletionRequest(input.householdId);
-	if (existingRequest?.state === 'recoverable' || existingRequest?.state === 'purged') {
+	if (
+		existingRequest?.state === 'recoverable' ||
+		existingRequest?.state === 'purged' ||
+		(existingRequest?.state === 'requested' && existingRequest.safeErrorCode === 'purge_claimed')
+	) {
 		return existingRequest;
 	}
 	const billing = await input.repository.subscription(input.householdId);
@@ -230,20 +234,24 @@ export const purgeExpiredHouseholds = async (input: {
 	repository: BillingRepository;
 	now: string;
 	deleteWorkOSOrganization: (householdId: string) => Promise<void>;
-}): Promise<string[]> => {
-	const householdIds = await input.repository.expiredRecoverableHouseholds(input.now);
+	householdLimit?: number;
+	rowBatchSize?: number;
+}): Promise<{ purged: string[]; pending: string[]; rowsDeleted: number }> => {
+	const householdLimit = input.householdLimit ?? 10;
+	await input.repository.claimExpiredRecoverableHouseholds(input.now, householdLimit);
+	const householdIds = await input.repository.claimedHouseholdPurges(input.now, householdLimit);
 	const purged: string[] = [];
+	const pending: string[] = [];
+	let rowsDeleted = 0;
 	for (const householdId of householdIds) {
 		await input.deleteWorkOSOrganization(householdId);
-		await input.repository.purgeHouseholdContent(householdId, input.now);
-		await input.repository.audit({
-			idempotencyKey: `household:${householdId}:purged`,
+		const result = await input.repository.purgeHouseholdContentBatch(
 			householdId,
-			actorUserId: null,
-			eventType: 'household_purged_after_recovery_window',
-			occurredAt: input.now
-		});
-		purged.push(householdId);
+			input.now,
+			input.rowBatchSize
+		);
+		rowsDeleted += result.rowsDeleted;
+		(result.complete ? purged : pending).push(householdId);
 	}
-	return purged;
+	return { purged, pending, rowsDeleted };
 };
