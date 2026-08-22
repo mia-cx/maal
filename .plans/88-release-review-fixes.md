@@ -60,6 +60,7 @@ Drizzle baseline or canonical taxonomy seed.
 - Merge audit: fixed terminal refund retry and missed-webhook reconciliation, kept local deletion
   pending until refund success, made stale-trial cleanup restore live Stripe subscriptions and retain
   used claims, released customer-only claims, applied billing-owner deadlines, and required both MCP
-  key scope and canonical WorkOS/D1 permissions. Focused regressions passed 84/84, the final trial
-  file passed 5/5, and `pnpm check` reported 0 errors and 0 warnings. Migration and seed hashes still
-  match the base commit byte-for-byte.
+  key scope and canonical WorkOS/D1 permissions. The first focused batch passed 83/84; after fixing
+  its one refund fixture, both billing files passed 10/10 and the final trial file passed 5/5.
+  `pnpm check` reported 0 errors and 0 warnings. Migration and seed hashes still match the base commit
+  byte-for-byte.
