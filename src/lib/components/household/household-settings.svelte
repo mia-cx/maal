@@ -32,6 +32,7 @@
 	} from '$lib/domain/household/contracts.js';
 	import { hasCachedPermission } from '$lib/domain/household/permissions.js';
 	import { inviteExpiryDays } from '$lib/domain/household/settings-parsing.js';
+	import HouseholdTaxonomyPreferences from '$lib/components/household/household-taxonomy-preferences.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import BillingSettingsSection from '$lib/components/settings/billing-settings-section.svelte';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
@@ -70,6 +71,8 @@
 	let members = $state<MemberView[]>([]);
 	let invites = $state<HouseholdInviteRecord[]>([]);
 	let profile = $state<Profile | null>(null);
+	let authSlotId = $state<string | null>(null);
+	let originDeviceId = $state<string | null>(null);
 	let appliances = $state<ApplianceView[]>([]);
 	let loadedRevision = $state<string | null>(null);
 	let name = $state('');
@@ -151,7 +154,9 @@
 				nextMembers,
 				nextInvites,
 				profiles,
-				attributions
+				attributions,
+				nextAuthSlot,
+				device
 			] = await Promise.all([
 				database.households.get(householdId),
 				database.profiles.get(profileId),
@@ -159,7 +164,9 @@
 				database.memberships.where('householdId').equals(householdId).toArray(),
 				database.householdInvites.where('householdId').equals(householdId).toArray(),
 				database.profiles.toArray(),
-				database.userAttributions.toArray()
+				database.userAttributions.toArray(),
+				database.authSlots.where('profileId').equals(profileId).first(),
+				database.meta.get('deviceId')
 			]);
 			const nextMembership = nextProfile
 				? nextMembers.find(({ workosUserId }) => workosUserId === nextProfile.workosUserId)
@@ -173,6 +180,8 @@
 			return {
 				household: nextHousehold ?? null,
 				profile: nextProfile ?? null,
+				authSlotId: nextAuthSlot?.authSlotId ?? null,
+				originDeviceId: typeof device?.value === 'string' ? device.value : null,
 				membership: nextMembership ?? null,
 				members: nextMembers.map((candidate) => {
 					const local = profilesByUser.get(candidate.workosUserId);
@@ -199,6 +208,8 @@
 		}).subscribe((value) => {
 			household = value.household;
 			profile = value.profile;
+			authSlotId = value.authSlotId;
+			originDeviceId = value.originDeviceId;
 			membership = value.membership;
 			members = value.members;
 			invites = value.invites;
@@ -658,6 +669,21 @@
 			</form>
 		</section>
 
+		{#if originDeviceId}
+			<HouseholdTaxonomyPreferences
+				{database}
+				authSlotId={authSlotId ?? `signed-out:${profileId}`}
+				{originDeviceId}
+				workosUserId={profile.workosUserId}
+				{householdId}
+				locale={household.locale}
+				canManageHousehold={!readOnly}
+				onerror={() => {
+					message = 'Household preferences could not be saved.';
+				}}
+			/>
+		{/if}
+
 		<section class="grid gap-3 border-t border-border pt-4">
 			<h2 class="text-sm font-medium">{m.household_appliances()}</h2>
 			<div class="flex flex-wrap gap-2">
@@ -720,6 +746,7 @@
 							{#if canManage && !member.directoryManaged && member.workosUserId !== profile.workosUserId && !household.localOnly}
 								<select
 									class="h-8 rounded-md border border-input bg-background px-2 text-xs"
+									aria-label={`Role for ${member.name}`}
 									value={member.roleSlug}
 									onchange={(event) =>
 										void changeRole(member, event.currentTarget.value as HouseholdRole)}
