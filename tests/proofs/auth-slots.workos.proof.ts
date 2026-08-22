@@ -56,12 +56,12 @@ test('Hosted AuthKit retains, refreshes, and revokes Alice and Bob independently
 
 		const aliceLogin = await addProfile(page, ALICE_SLOT, alice.email, password);
 		const aliceCookie = inspectSessionSetCookie(aliceLogin, ALICE_SLOT);
-		const aliceSessionId = await sessionIdFromCookie(workos, aliceLogin, ALICE_SLOT);
+		await assertCookieAuthenticates(workos, aliceLogin, ALICE_SLOT);
 		const aliceStatus = await status(context.request, baseURL!, ALICE_SLOT);
 
 		const bobLogin = await addProfile(page, BOB_SLOT, bob.email, password);
 		const bobCookie = inspectSessionSetCookie(bobLogin, BOB_SLOT);
-		const bobSessionId = await sessionIdFromCookie(workos, bobLogin, BOB_SLOT);
+		await assertCookieAuthenticates(workos, bobLogin, BOB_SLOT);
 		const bobStatus = await status(context.request, baseURL!, BOB_SLOT);
 		expect(aliceStatus.workosUserId).not.toBe(bobStatus.workosUserId);
 		expect((await status(context.request, baseURL!, ALICE_SLOT)).workosUserId).toBe(
@@ -121,12 +121,6 @@ test('Hosted AuthKit retains, refreshes, and revokes Alice and Bob independently
 			runAtUtc: new Date().toISOString(),
 			device: runtime.device,
 			browser: runtime.browser,
-			identities: {
-				aliceWorkosUserId: aliceStatus.workosUserId,
-				bobWorkosUserId: bobStatus.workosUserId,
-				aliceSessionId,
-				bobSessionId
-			},
 			cookies: {
 				aliceInitial: aliceCookie,
 				bobInitial: bobCookie,
@@ -224,7 +218,7 @@ async function createProofUser(
 	return user;
 }
 
-async function sessionIdFromCookie(
+async function assertCookieAuthenticates(
 	workos: WorkOS,
 	headers: readonly { readonly name: string; readonly value: string }[],
 	slotId: string
@@ -241,7 +235,6 @@ async function sessionIdFromCookie(
 		.loadSealedSession({ sessionData: sealedSession, cookiePassword })
 		.authenticate();
 	if (!result.authenticated) throw new Error(`WorkOS could not authenticate ${name}`);
-	return result.sessionId;
 }
 
 async function routingEvidence(

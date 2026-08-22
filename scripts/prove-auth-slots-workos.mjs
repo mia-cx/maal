@@ -64,10 +64,6 @@ try {
 
 	evidence = {
 		result: 'passed',
-		aliceUserId: alice.id,
-		bobUserId: bob.id,
-		aliceSessionId: aliceAuth.sessionId,
-		bobSessionId: bobAuth.sessionId,
 		aliceCookieBytes: aliceBytes,
 		bobCookieBytes: bobBytes,
 		bobSurvivedAliceRefresh: true,

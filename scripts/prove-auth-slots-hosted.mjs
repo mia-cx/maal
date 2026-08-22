@@ -15,6 +15,10 @@ if (!apiKey.startsWith('sk_test_'))
 if (!clientId || cookiePassword.length < 32)
 	throw new Error('WorkOS proof configuration is incomplete');
 if (!browserType) throw new Error(`Unsupported proof browser: ${browserName}`);
+const redirect = new URL(redirectUri);
+if (redirect.pathname !== '/api/auth/callback' || /auth-slots|slot/i.test(redirect.pathname)) {
+	throw new Error('Hosted proof requires the stable slot-free /api/auth/callback redirect URI');
+}
 
 const workos = new WorkOS(apiKey, { clientId });
 const nonce = randomUUID();
@@ -74,10 +78,6 @@ try {
 		browser: browserName,
 		browserVersion: browser.version(),
 		os: `${process.platform} ${process.arch}`,
-		aliceUserId: alice.id,
-		bobUserId: bob.id,
-		aliceSessionId: aliceAuth.sessionId,
-		bobSessionId: bobAuth.sessionId,
 		aliceCookieBytes: aliceBytes,
 		bobCookieBytes: bobBytes,
 		aliceSurvivedBobLogin: true,
