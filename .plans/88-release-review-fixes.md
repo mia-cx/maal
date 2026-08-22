@@ -23,7 +23,7 @@ Drizzle baseline or canonical taxonomy seed.
 - [x] Make the refund/deletion saga and canonical webhook projection fail closed and resumable.
 - [x] Enforce paid-period deadlines and protect the current billing owner in all membership mutations.
 - [x] Reconcile stale trial resources and purge check-in recovery rows in scheduled maintenance.
-- [ ] Restart portable-import backfill and preserve authoritative deletion intent for natural-key replacements.
+- [x] Restart portable-import backfill and preserve authoritative deletion intent for natural-key replacements.
 - [ ] Harden MCP key management, paid authorization, expiry, recovered households, and recipe propagation.
 - [ ] Add authorized household administration, check-in read, and food-profile MCP tools.
 - [ ] Run one bounded final validation and prove the migrations and seed remain byte-identical.
@@ -43,3 +43,6 @@ Drizzle baseline or canonical taxonomy seed.
 - Maintenance slice: 2 files / 5 tests passed. Empty one-hour reservations release safely. Cleaned
   rollback claims become consumed claims, so cleanup stops without reopening either trial allowance. Final
   household purge now removes matching check-in recovery rows. Svelte check passed with 0 errors and 0 warnings.
+- Portability slice: 1 file / 8 tests passed. Import clears affected backfill checkpoints and wakes the
+  matching device sync manager. Replacing an acknowledged natural-key row enqueues its deletion snapshot
+  before writing the imported identity. Svelte check passed with 0 errors and 0 warnings.

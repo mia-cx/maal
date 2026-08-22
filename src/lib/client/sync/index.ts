@@ -6,4 +6,5 @@ export * from './household-apply.js';
 export * from './household-capability.js';
 export * from './household-coordinator.js';
 export * from './household-transport.js';
+export * from './requests.js';
 export * from './transport.js';

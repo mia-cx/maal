@@ -9,6 +9,7 @@ import {
 	type HouseholdSyncTransport
 } from './household-transport.js';
 import { createUserSyncCoordinator, type UserSyncCoordinator } from './coordinator.js';
+import { subscribeLocalSyncRequests } from './requests.js';
 import { createFetchUserSyncTransport, type UserSyncTransport } from './transport.js';
 
 export interface DeviceSyncManager {
@@ -121,11 +122,24 @@ export const startDeviceSync = (
 	database.billingCapabilities.hook('updating', capabilityChanged);
 	database.billingCapabilities.hook('deleting', capabilityChanged);
 	void reconcileAuthSlots();
+	const unsubscribeSyncRequests = subscribeLocalSyncRequests((event) => {
+		if (event.databaseName !== database.name) return;
+		for (const scope of event.scopes) {
+			if (scope.scopeKind === 'user') {
+				for (const coordinator of coordinators.values()) coordinator.notifyLocalMutation();
+				continue;
+			}
+			for (const [key, coordinator] of householdCoordinators) {
+				if (key.endsWith(`\u0000${scope.scopeId}`)) coordinator.notifyLocalMutation();
+			}
+		}
+	});
 
 	return {
 		reconcileAuthSlots,
 		stop() {
 			stopped = true;
+			unsubscribeSyncRequests();
 			database.outbox.hook('creating').unsubscribe(notifyOutbox);
 			database.authSlots.hook('creating').unsubscribe(authSlotChanged);
 			database.authSlots.hook('updating').unsubscribe(authSlotChanged);

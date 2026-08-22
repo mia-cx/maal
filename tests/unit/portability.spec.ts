@@ -24,6 +24,7 @@ import {
 	commitImportedRecipeCandidate,
 	type RecipeCommandContext
 } from '$lib/client/recipes/index.js';
+import { subscribeLocalSyncRequests } from '$lib/client/sync/index.js';
 import type { PortableArchive } from '$lib/domain/portability/schema.js';
 import { MEAL_CONFLICT_GROUPS } from '$lib/domain/meals/schema.js';
 import {
@@ -442,6 +443,107 @@ describe('portable archives', () => {
 		const copiedInstructions = copied?.instructions as { id: string }[];
 		const copiedEvents = copied?.instructionEvents as { recipeInstructionId: string }[];
 		expect(copiedEvents[0]?.recipeInstructionId).toBe(copiedInstructions[0]?.id);
+	});
+
+	test('restarts completed backfill and deletes an acknowledged natural-key replacement remotely', async () => {
+		const source = await openDatabase();
+		const seeded = await seedContent(source);
+		const archive = await decodePortableArchive(
+			await exportPortableArchive(source, seeded.profileId, { createdAt: at(13) })
+		);
+		const target = await openDatabase();
+		const targetIdentity = await seedIdentity(target);
+		const localPreferenceId = uuidv7();
+		await target.foodUserEntries.put({
+			id: tomatoFoodId,
+			workosUserId: 'user_alice',
+			canonicalLabel: 'Tomato',
+			defaultMeasureUnitId: null,
+			defaultMeasureBaseUnitId: null,
+			adoptionStatus: 'accepted',
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: at(10),
+			updatedAt: at(10),
+			deletedAt: null,
+			conflictClocks: {}
+		});
+		await target.userFoodPreferences.put({
+			id: localPreferenceId,
+			workosUserId: 'user_alice',
+			foodId: tomatoFoodId,
+			preference: 'dislike',
+			reason: null,
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: at(10),
+			updatedAt: at(10),
+			deletedAt: null,
+			conflictClocks: {}
+		});
+		await target.outbox.put({
+			mutationId: uuidv7(),
+			authSlotId: 'slot-target',
+			scopeKind: 'user',
+			scopeId: 'user_alice',
+			status: 'acknowledged',
+			occurredAt: at(10),
+			aggregateId: localPreferenceId,
+			entityKind: 'userFoodPreference',
+			conflictGroup: 'row',
+			operation: 'upsert',
+			originDeviceId: deviceId,
+			payload: {},
+			nextAttemptAt: at(10),
+			attempts: 0,
+			acknowledgedSequence: 8
+		});
+		await target.backfillCheckpoints.put({
+			scopeKind: 'user',
+			scopeId: 'user_alice',
+			entityKind: 'userFoodPreference',
+			priorityBoundary: null,
+			lastAggregateId: localPreferenceId,
+			processedCount: 1,
+			state: 'complete'
+		});
+
+		const preview = await planPortableImport(target, archive, targetIdentity.profileId);
+		const natural = preview.collisions.find(
+			({ store, kind }) => store === 'userFoodPreferences' && kind === 'natural-key'
+		)!;
+		const resolutions = Object.fromEntries(
+			preview.collisions.map(({ collisionId }) => [
+				collisionId,
+				collisionId === natural.collisionId ? ('replace' as const) : ('keep-local' as const)
+			])
+		);
+		const plan = await planPortableImport(target, archive, targetIdentity.profileId, resolutions);
+		const syncEvents: unknown[] = [];
+		const unsubscribe = subscribeLocalSyncRequests((event) => syncEvents.push(event));
+		await commitPortableImport(target, plan);
+		unsubscribe();
+
+		await expect(target.userFoodPreferences.get(localPreferenceId)).resolves.toBeUndefined();
+		await expect(
+			target.outbox
+				.where('aggregateId')
+				.equals(localPreferenceId)
+				.filter(({ operation, status }) => operation === 'delete' && status === 'pending')
+				.first()
+		).resolves.toMatchObject({
+			entityKind: 'userFoodPreference',
+			snapshot: { deletedAt: expect.any(String) }
+		});
+		await expect(
+			target.backfillCheckpoints.get(['user', 'user_alice', 'userFoodPreference'])
+		).resolves.toBeUndefined();
+		expect(syncEvents).toEqual([
+			expect.objectContaining({
+				databaseName: target.name,
+				scopes: expect.arrayContaining([{ scopeKind: 'user', scopeId: 'user_alice' }])
+			})
+		]);
 	});
 
 	test('gives an active-household copy a fresh local admin membership', async () => {
