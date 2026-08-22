@@ -483,5 +483,206 @@ exports[`public MCP contract > snapshots every advertised Effect-derived JSON Sc
     },
     "name": "create_meal_check_in",
   },
+  {
+    "annotations": {
+      "readOnlyHint": true,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "householdId": {
+          "type": "string",
+        },
+        "mealId": {
+          "type": "string",
+        },
+      },
+      "required": [],
+      "type": "object",
+    },
+    "name": "list_meal_check_ins",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": true,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "householdId": {
+          "type": "string",
+        },
+      },
+      "required": [],
+      "type": "object",
+    },
+    "name": "get_food_profile",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": false,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "foodId": {
+          "type": "string",
+        },
+        "householdId": {
+          "type": "string",
+        },
+        "preference": {
+          "enum": [
+            "favourite",
+            "like",
+            "dislike",
+            "disallowed",
+          ],
+          "type": "string",
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+      },
+      "required": [
+        "foodId",
+        "preference",
+      ],
+      "type": "object",
+    },
+    "name": "set_food_preference",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": false,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "expiresInDays": {
+          "enum": [
+            1,
+            7,
+            30,
+          ],
+          "type": "number",
+        },
+        "householdId": {
+          "type": "string",
+        },
+        "maxUses": {
+          "anyOf": [
+            {
+              "type": "number",
+            },
+            {
+              "type": "null",
+            },
+          ],
+        },
+        "roleSlug": {
+          "enum": [
+            "member",
+            "child",
+          ],
+          "type": "string",
+        },
+      },
+      "required": [
+        "roleSlug",
+        "expiresInDays",
+      ],
+      "type": "object",
+    },
+    "name": "create_household_invite",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "readOnlyHint": false,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "householdId": {
+          "type": "string",
+        },
+        "inviteId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "inviteId",
+      ],
+      "type": "object",
+    },
+    "name": "revoke_household_invite",
+  },
+  {
+    "annotations": {
+      "readOnlyHint": false,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "householdId": {
+          "type": "string",
+        },
+        "membershipId": {
+          "type": "string",
+        },
+        "roleSlug": {
+          "enum": [
+            "admin",
+            "member",
+            "child",
+          ],
+          "type": "string",
+        },
+      },
+      "required": [
+        "membershipId",
+        "roleSlug",
+      ],
+      "type": "object",
+    },
+    "name": "update_household_member_role",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "readOnlyHint": false,
+    },
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false,
+      "properties": {
+        "householdId": {
+          "type": "string",
+        },
+        "membershipId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "membershipId",
+      ],
+      "type": "object",
+    },
+    "name": "remove_household_member",
+  },
 ]
 `;

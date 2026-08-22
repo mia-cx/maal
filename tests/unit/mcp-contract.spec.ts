@@ -24,7 +24,14 @@ const expectedTools = [
 	'get_household_meal',
 	'update_household_meal',
 	'delete_household_meal',
-	'create_meal_check_in'
+	'create_meal_check_in',
+	'list_meal_check_ins',
+	'get_food_profile',
+	'set_food_preference',
+	'create_household_invite',
+	'revoke_household_invite',
+	'update_household_member_role',
+	'remove_household_member'
 ] as const;
 
 const sourceFiles = async (directory: string): Promise<string[]> => {

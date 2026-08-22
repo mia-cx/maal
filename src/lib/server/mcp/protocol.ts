@@ -11,6 +11,10 @@ import {
 	type LiveMembershipProvider
 } from './authorization.js';
 import type { McpPrincipal } from './contracts.js';
+import {
+	createMcpHouseholdAdministrationPort,
+	type McpHouseholdAdministrationPort
+} from './administration.js';
 import { registerToolHandlers } from './registry.js';
 import { tools } from './tools.js';
 
@@ -34,6 +38,7 @@ export const createMaalMcpHandler = (input: {
 	principal: McpPrincipal;
 	domain: RemoteDomainPort;
 	limiter: RemoteComputeLimiter;
+	administration: McpHouseholdAdministrationPort;
 	fetchCandidate?: typeof fetchRecipeCandidate;
 	onServerCreated?: (server: Server, era: 'modern' | 'legacy') => void;
 }) =>
@@ -43,7 +48,8 @@ export const createMaalMcpHandler = (input: {
 				principal: input.principal,
 				domain: input.domain,
 				limiter: input.limiter,
-				fetchRecipeCandidate: input.fetchCandidate ?? fetchRecipeCandidate
+				fetchRecipeCandidate: input.fetchCandidate ?? fetchRecipeCandidate,
+				administration: input.administration
 			});
 			input.onServerCreated?.(server, era);
 			return server;
@@ -64,6 +70,7 @@ export const handleMcpPost = async (input: {
 	membershipProvider?: LiveMembershipProvider;
 	domain?: RemoteDomainPort;
 	limiter?: RemoteComputeLimiter;
+	administration?: McpHouseholdAdministrationPort;
 	fetchCandidate?: typeof fetchRecipeCandidate;
 	onServerCreated?: (server: Server, era: 'modern' | 'legacy') => void;
 }): Promise<Response> => {
@@ -88,6 +95,8 @@ export const handleMcpPost = async (input: {
 		principal,
 		domain: input.domain ?? new D1RemoteDomainPort(input.environment.DB),
 		limiter,
+		administration:
+			input.administration ?? createMcpHouseholdAdministrationPort(principal, input.environment),
 		...(input.fetchCandidate ? { fetchCandidate: input.fetchCandidate } : {}),
 		...(input.onServerCreated ? { onServerCreated: input.onServerCreated } : {})
 	});

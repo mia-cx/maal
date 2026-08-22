@@ -2,11 +2,13 @@ import { describe, expect, test, vi } from 'vitest';
 
 import type { MealAggregate, MealCheckIn } from '$lib/domain/meals/schema.js';
 import type { RecipeAggregate, RecipeImportedCandidate } from '$lib/domain/recipes/schema.js';
+import type { UserFoodPreference } from '$lib/domain/taxonomy/schema.js';
 import {
 	cloneRecipeAsMeal,
 	createRecipeAggregate,
 	linkedMealMatchesRecipeSnapshot,
 	type RemoteDomainPort,
+	type RemoteFoodProfile,
 	type RemoteHouseholdSummary
 } from '$lib/server/domain/remote-port.js';
 import { candidateFromToolRecipe, patchRecipe } from '$lib/server/mcp/builders.js';
@@ -33,6 +35,7 @@ class SpyDomain implements RemoteDomainPort {
 	recipe = existingRecipe;
 	meal = existingMeal;
 	checkIn: MealCheckIn | null = null;
+	foodPreference: UserFoodPreference | null = null;
 
 	async listHouseholds(): Promise<readonly RemoteHouseholdSummary[]> {
 		this.calls.push('listHouseholds');
@@ -73,6 +76,29 @@ class SpyDomain implements RemoteDomainPort {
 		this.checkIn = input.aggregate;
 		return input.aggregate;
 	}
+	async listMealCheckIns(): Promise<readonly MealCheckIn[]> {
+		this.calls.push('listMealCheckIns');
+		return this.checkIn ? [this.checkIn] : [];
+	}
+	async getUserFoodProfile(): Promise<RemoteFoodProfile> {
+		this.calls.push('getUserFoodProfile');
+		return {
+			foodUserAliases: [],
+			foodUserEntries: [],
+			unitUserAliases: [],
+			unitUserEntries: [],
+			userFoodPreferences: this.foodPreference ? [this.foodPreference] : [],
+			userFoodDisplayPreferences: [],
+			userUnitDisplayPreferences: []
+		};
+	}
+	async writeUserFoodPreference(input: {
+		aggregate: UserFoodPreference;
+	}): Promise<UserFoodPreference> {
+		this.calls.push('writeUserFoodPreference');
+		this.foodPreference = input.aggregate;
+		return input.aggregate;
+	}
 }
 
 const principal = {
@@ -96,6 +122,12 @@ const contextFor = (domain: SpyDomain, overrides: Partial<McpContext> = {}): Mcp
 	domain,
 	limiter: { limit: async () => ({ success: true }) },
 	fetchRecipeCandidate: async () => candidateFromToolRecipe({ title: 'Imported soup' }),
+	administration: {
+		createInvite: async () => ({ code: 'INVITECODE12', invite: {} as never }),
+		revokeInvite: async () => ({}) as never,
+		updateMemberRole: async () => ({}) as never,
+		removeMember: async () => undefined
+	},
 	...overrides
 });
 
@@ -166,7 +198,22 @@ const adapterCases: ReadonlyArray<{
 		name: 'create_meal_check_in',
 		args: { mealId: existingMeal.id, verdict: 'repeat', cooked: true },
 		expected: ['getHouseholdMeal', 'getMealCheckIn', 'writeMealCheckIn', 'writeHouseholdMeal']
-	}
+	},
+	{ name: 'list_meal_check_ins', args: {}, expected: ['listMealCheckIns'] },
+	{ name: 'get_food_profile', args: {}, expected: ['getUserFoodProfile'] },
+	{
+		name: 'set_food_preference',
+		args: { foodId: 'food_onion', preference: 'like' },
+		expected: ['getUserFoodProfile', 'writeUserFoodPreference']
+	},
+	{ name: 'create_household_invite', args: { roleSlug: 'member', expiresInDays: 7 }, expected: [] },
+	{ name: 'revoke_household_invite', args: { inviteId: 'invite_1' }, expected: [] },
+	{
+		name: 'update_household_member_role',
+		args: { membershipId: 'membership_bob', roleSlug: 'member' },
+		expected: []
+	},
+	{ name: 'remove_household_member', args: { membershipId: 'membership_bob' }, expected: [] }
 ];
 
 describe('MCP tool adapters', () => {
@@ -300,6 +347,54 @@ describe('MCP tool adapters', () => {
 				.handler(context, {
 					recipe: recipeInput
 				})
+		).rejects.toMatchObject({ code: 'insufficient_scope' });
+		expect(domain.calls).toEqual([]);
+	});
+
+	test('household administration tools delegate only after scope and role authorization', async () => {
+		const domain = new SpyDomain();
+		const createInvite = vi.fn<McpContext['administration']['createInvite']>(async () => ({
+			code: 'INVITECODE12',
+			invite: {} as never
+		}));
+		const context = contextFor(domain, {
+			administration: {
+				createInvite,
+				revokeInvite: vi.fn(async () => ({}) as never),
+				updateMemberRole: vi.fn(async () => ({}) as never),
+				removeMember: vi.fn(async () => undefined)
+			}
+		});
+		await tools
+			.find(({ name }) => name === 'create_household_invite')!
+			.handler(context, {
+				roleSlug: 'child',
+				expiresInDays: 30,
+				maxUses: 2
+			});
+		expect(createInvite).toHaveBeenCalledWith({
+			householdId,
+			roleSlug: 'child',
+			expiresInDays: 30,
+			maxUses: 2
+		});
+	});
+
+	test.each([
+		['households:write', 'create_household_invite', { roleSlug: 'member', expiresInDays: 7 }],
+		['check_ins:read', 'list_meal_check_ins', {}],
+		['food_profile:read', 'get_food_profile', {}],
+		['food_profile:write', 'set_food_preference', { foodId: 'food_onion', preference: 'like' }]
+	] as const)('%s scope is enforced by its public tool', async (scope, name, args) => {
+		const domain = new SpyDomain();
+		const context = contextFor(domain, {
+			principal: {
+				...principal,
+				scopes: principal.scopes.filter((candidate) => candidate !== scope)
+			}
+		});
+		await expect(
+			tools.find((tool) => tool.name === name)!.handler(context, args)
 		).rejects.toMatchObject({ code: 'insufficient_scope' });
 		expect(domain.calls).toEqual([]);
 	});

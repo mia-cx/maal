@@ -1,5 +1,6 @@
 import type { ToolAnnotations } from '@modelcontextprotocol/server';
 import { Schema } from 'effect';
+import { uuidv7 } from 'uuidv7';
 
 import {
 	allMealConflictGroups,
@@ -26,7 +27,12 @@ import {
 	text
 } from './builders.js';
 import type { McpContext } from './context.js';
-import { requireScope, resolveHousehold, resolveUserRecipeProof } from './context.js';
+import {
+	requireScope,
+	resolveHousehold,
+	resolveUserDataProof,
+	resolveUserRecipeProof
+} from './context.js';
 import { toolError } from './results.js';
 import {
 	createRecipeShape,
@@ -534,6 +540,150 @@ export const tools: readonly ToolDefinition[] = [
 				operation: 'upsert'
 			});
 			return { checkIn, meal: updatedMeal };
+		}
+	},
+	{
+		name: 'list_meal_check_ins',
+		description:
+			'List active household meal check-ins, optionally narrowed to one meal. Returns each household member’s focused repeat verdict, cook time, and notes.',
+		inputSchema: Schema.Struct({
+			...optionalHouseholdInput,
+			mealId: Schema.optional(Schema.String)
+		}),
+		annotations: { readOnlyHint: true },
+		handler: async (context, args) => {
+			const household = resolveHousehold(context, args, 'check_ins:read', 'meals:read');
+			const mealId = text(args.mealId);
+			return {
+				checkIns: await context.domain.listMealCheckIns(
+					household.householdId,
+					...(mealId ? [mealId] : [])
+				)
+			};
+		}
+	},
+	{
+		name: 'get_food_profile',
+		description:
+			'Read the key owner’s active food preferences, custom foods and units, aliases, and display overrides. User-owned profile data is available through any granted paid household.',
+		inputSchema: Schema.Struct({ ...optionalHouseholdInput }),
+		annotations: { readOnlyHint: true },
+		handler: async (context, args) => {
+			resolveUserDataProof(context, args, 'food_profile:read');
+			return { profile: await context.domain.getUserFoodProfile(context.principal.ownerUserId) };
+		}
+	},
+	{
+		name: 'set_food_preference',
+		description:
+			'Create or update the key owner’s preference for one canonical or custom food. Use favourite, like, dislike, or disallowed and optionally record a short reason.',
+		inputSchema: Schema.Struct({
+			...optionalHouseholdInput,
+			foodId: Schema.String,
+			preference: Schema.Literal('favourite', 'like', 'dislike', 'disallowed'),
+			reason: Schema.optional(Schema.NullOr(Schema.String))
+		}),
+		annotations: { readOnlyHint: false },
+		handler: async (context, args) => {
+			resolveUserDataProof(context, args, 'food_profile:write');
+			const foodId = requiredText(args.foodId, 'foodId');
+			const profile = await context.domain.getUserFoodProfile(context.principal.ownerUserId);
+			const existing = profile.userFoodPreferences.find((row) => row.foodId === foodId);
+			const now = new Date().toISOString() as `${string}Z`;
+			const preference = await context.domain.writeUserFoodPreference({
+				actorUserId: context.principal.ownerUserId,
+				aggregate: {
+					id: existing?.id ?? uuidv7(),
+					workosUserId: context.principal.ownerUserId,
+					foodId,
+					preference:
+						args.preference === 'favourite' ||
+						args.preference === 'dislike' ||
+						args.preference === 'disallowed'
+							? args.preference
+							: 'like',
+					reason: args.reason === null ? null : text(args.reason),
+					schemaVersion: 1,
+					revision: existing?.revision ?? 0,
+					createdAt: existing?.createdAt ?? now,
+					updatedAt: now,
+					deletedAt: null,
+					conflictClocks: existing?.conflictClocks ?? {}
+				}
+			});
+			return { preference };
+		}
+	},
+	{
+		name: 'create_household_invite',
+		description:
+			'Create a Maal invite code for a household member or child. The returned plaintext code is shown once; share it with the intended person.',
+		inputSchema: Schema.Struct({
+			...optionalHouseholdInput,
+			roleSlug: Schema.Literal('member', 'child'),
+			expiresInDays: Schema.Literal(1, 7, 30),
+			maxUses: Schema.optional(Schema.NullOr(Schema.Number))
+		}),
+		annotations: { readOnlyHint: false },
+		handler: async (context, args) => {
+			const household = resolveHousehold(context, args, 'households:write', 'households:write');
+			const maxUses = args.maxUses === null ? null : boundedInt(args.maxUses, 1, 1, 100);
+			return context.administration.createInvite({
+				householdId: household.householdId,
+				roleSlug: args.roleSlug === 'child' ? 'child' : 'member',
+				expiresInDays:
+					args.expiresInDays === 1 || args.expiresInDays === 30 ? args.expiresInDays : 7,
+				maxUses
+			});
+		}
+	},
+	{
+		name: 'revoke_household_invite',
+		description: 'Revoke an unused or partially used Maal household invite immediately.',
+		inputSchema: Schema.Struct({ ...optionalHouseholdInput, inviteId: Schema.String }),
+		annotations: { readOnlyHint: false, destructiveHint: true },
+		handler: async (context, args) => {
+			const household = resolveHousehold(context, args, 'households:write', 'households:write');
+			return {
+				invite: await context.administration.revokeInvite(
+					household.householdId,
+					requiredText(args.inviteId, 'inviteId')
+				)
+			};
+		}
+	},
+	{
+		name: 'update_household_member_role',
+		description:
+			'Change a household member between admin, member, and child. Billing-owner and last-admin protections still apply.',
+		inputSchema: Schema.Struct({
+			...optionalHouseholdInput,
+			membershipId: Schema.String,
+			roleSlug: Schema.Literal('admin', 'member', 'child')
+		}),
+		annotations: { readOnlyHint: false },
+		handler: async (context, args) => {
+			const household = resolveHousehold(context, args, 'households:write', 'households:write');
+			return {
+				membership: await context.administration.updateMemberRole(
+					household.householdId,
+					requiredText(args.membershipId, 'membershipId'),
+					args.roleSlug === 'admin' || args.roleSlug === 'child' ? args.roleSlug : 'member'
+				)
+			};
+		}
+	},
+	{
+		name: 'remove_household_member',
+		description:
+			'Remove a household member. Current billing-owner, last-admin, and directory-managed protections still apply.',
+		inputSchema: Schema.Struct({ ...optionalHouseholdInput, membershipId: Schema.String }),
+		annotations: { readOnlyHint: false, destructiveHint: true },
+		handler: async (context, args) => {
+			const household = resolveHousehold(context, args, 'households:write', 'households:write');
+			const membershipId = requiredText(args.membershipId, 'membershipId');
+			await context.administration.removeMember(household.householdId, membershipId);
+			return { householdId: household.householdId, membershipId, removed: true };
 		}
 	}
 ];

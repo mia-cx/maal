@@ -25,7 +25,7 @@ Drizzle baseline or canonical taxonomy seed.
 - [x] Reconcile stale trial resources and purge check-in recovery rows in scheduled maintenance.
 - [x] Restart portable-import backfill and preserve authoritative deletion intent for natural-key replacements.
 - [x] Harden MCP key management, paid authorization, expiry, recovered households, and recipe propagation.
-- [ ] Add authorized household administration, check-in read, and food-profile MCP tools.
+- [x] Add authorized household administration, check-in read, and food-profile MCP tools.
 - [ ] Run one bounded final validation and prove the migrations and seed remain byte-identical.
 
 ## Notes
@@ -50,3 +50,6 @@ Drizzle baseline or canonical taxonomy seed.
   storage caps eight live keys and twenty creations per rolling day. Expiry accepts canonical future UTC
   instants only. Recovered households require a new subscription identity, and recipe propagation requires
   `meals:write` in the effective household intersection.
+- MCP scope slice: 4 files / 38 tests passed. Check-in reads and user food-profile reads/writes use the
+  shared normalized sync repositories. Invite and member administration delegates to the existing
+  WorkOS-plus-D1 service after MCP scope and effective-membership authorization.
