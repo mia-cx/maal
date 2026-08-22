@@ -278,7 +278,19 @@ describe('meal lifecycle and focused check-ins', () => {
 			reason: 'Good enough for Tuesday.'
 		});
 		expect(checkedIn.checkIn).not.toHaveProperty('cooked');
-		expect(await database.outbox.count()).toBe(4);
+		expect(await database.outbox.count()).toBe(5);
+		expect(
+			(await database.outbox.filter(({ occurredAt }) => occurredAt === at(23)).toArray()).map(
+				({ entityKind, aggregateId, conflictGroup }) => ({
+					entityKind,
+					aggregateId,
+					conflictGroup
+				})
+			)
+		).toEqual([
+			{ entityKind: 'meal_check_in', aggregateId: checkedIn.checkIn.id, conflictGroup: 'response' },
+			{ entityKind: 'meal', aggregateId: meal.id, conflictGroup: 'status' }
+		]);
 
 		await deleteMeal(database, mealContext(at(24)), meal.id);
 		expect(await listHouseholdMeals(database, 'org_family')).toEqual([]);

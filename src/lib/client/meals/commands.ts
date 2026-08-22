@@ -334,6 +334,8 @@ export const saveMealCheckIn = async (
 		.equals([mealId, context.reporterUserId])
 		.first();
 	const checkInId = existing?.id ?? uuidv7();
+	const checkInMutationId = uuidv7();
+	const mealStatusMutationId = uuidv7();
 	const payload = decode(
 		MealCheckInPayloadSchema,
 		{
@@ -370,12 +372,23 @@ export const saveMealCheckIn = async (
 		operation: 'upsert',
 		originDeviceId: context.originDeviceId,
 		occurredAt,
+		mutationId: checkInMutationId,
+		additionalMutations: [
+			{
+				mutationId: mealStatusMutationId,
+				entityKind: 'meal',
+				aggregateId: mealId,
+				conflictGroup: 'status',
+				operation: 'upsert'
+			}
+		],
 		payload,
 		payloadSchema: MealCheckInPayloadSchema,
 		writes: [
 			{
 				store: 'meals',
 				aggregateId: mealId,
+				mutationId: mealStatusMutationId,
 				conflictGroups: ['status'],
 				schema: StoredMealSchema,
 				update: (current) => ({

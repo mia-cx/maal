@@ -6,6 +6,7 @@ import { uuidv7 } from 'uuidv7';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
+import { HouseholdSchema } from '$lib/domain/household/contracts.js';
 import { MealAggregateSchema, MealCheckInSchema } from '$lib/domain/meals/schema.js';
 import {
 	D1HouseholdSyncRepository,
@@ -47,7 +48,8 @@ beforeEach(async () => {
 		'drizzle/0001_long_mysterio.sql',
 		'drizzle/0002_naive_the_liberteens.sql',
 		'drizzle/0003_glossy_leader.sql',
-		'drizzle/0004_right_sway.sql'
+		'drizzle/0004_right_sway.sql',
+		'drizzle/0005_needy_khan.sql'
 	]) {
 		await applyMigration(migration);
 	}
@@ -174,6 +176,61 @@ const mealMutation = (
 });
 
 describe('D1 household sync', () => {
+	test('commits and bootstraps the household settings aggregate', async () => {
+		const repository = new D1HouseholdSyncRepository(database);
+		const mutationId = uuidv7();
+		const settings = Schema.decodeUnknownSync(HouseholdSchema)({
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+			deletedAt: null,
+			conflictClocks: {
+				settings: { occurredAt: timestamp, originDeviceId: deviceId, mutationId }
+			},
+			householdId,
+			name: 'Friday table',
+			locale: 'en-NL',
+			timezone: 'Europe/Amsterdam',
+			weekStartsOn: 1,
+			defaultPlannedYield: 6,
+			preferredDinnerTime: '18:30',
+			createdByUserId: aliceId,
+			deletionState: 'active',
+			localOnly: false
+		});
+
+		await expect(
+			repository.commit({
+				householdId,
+				actorUserId: aliceId,
+				deviceId,
+				mutation: {
+					schemaVersion: 1,
+					mutationId,
+					originDeviceId: deviceId,
+					entityKind: 'household',
+					entityId: householdId,
+					conflictGroups: ['settings'],
+					operation: 'upsert',
+					occurredAt: timestamp,
+					aggregate: settings
+				},
+				mode: 'live',
+				receivedAt: timestamp
+			})
+		).resolves.toMatchObject({ status: 'accepted' });
+		await expect(repository.bootstrap(householdId)).resolves.toMatchObject({
+			aggregates: [
+				expect.objectContaining({
+					entityKind: 'household',
+					entityId: householdId,
+					aggregate: expect.objectContaining({ name: 'Friday table', defaultPlannedYield: 6 })
+				})
+			]
+		});
+	});
+
 	test('intersects the exact current WorkOS membership, D1 permission, and paid/grace capability', async () => {
 		await expect(
 			d1HouseholdSyncCapabilityAuthorizer.authorize({

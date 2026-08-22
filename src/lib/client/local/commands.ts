@@ -40,10 +40,19 @@ export type AggregateStoreName = Exclude<
 export interface AggregateWrite {
 	store: AggregateStoreName;
 	aggregateId: string;
+	mutationId?: string;
 	identity?: Readonly<Record<string, unknown>>;
 	conflictGroups: readonly string[];
 	schema: Schema.Schema.AnyNoContext;
 	update: (current: unknown | undefined) => unknown;
+}
+
+export interface AdditionalOutboxMutation {
+	mutationId: string;
+	entityKind: string;
+	aggregateId: string;
+	conflictGroup: string;
+	operation: 'upsert' | 'delete';
 }
 
 export interface LocalCommand {
@@ -60,6 +69,7 @@ export interface LocalCommand {
 	payload: unknown;
 	payloadSchema: Schema.Schema.AnyNoContext;
 	writes: readonly AggregateWrite[];
+	additionalMutations?: readonly AdditionalOutboxMutation[];
 }
 
 const isQuotaError = (error: unknown, seen = new Set<unknown>()): boolean => {
@@ -122,11 +132,16 @@ export const executeLocalCommand = async (
 		'decode mutation time'
 	);
 	const originDeviceId = decode(DomainIdSchema, command.originDeviceId, 'decode device ID');
-	const clock = decode(
-		ConflictClockSchema,
-		{ mutationId, occurredAt, originDeviceId },
-		'decode conflict clock'
-	);
+	const clockFor = (candidateMutationId: string) =>
+		decode(
+			ConflictClockSchema,
+			{
+				mutationId: decode(DomainIdSchema, candidateMutationId, 'decode related mutation ID'),
+				occurredAt,
+				originDeviceId
+			},
+			'decode conflict clock'
+		);
 	const decodedPayload = decode(command.payloadSchema, command.payload, 'decode command payload');
 	const encodedPayload = encode(command.payloadSchema, decodedPayload, 'encode command payload');
 	const tables = [...new Set(command.writes.map(({ store }) => database.table(store)))];
@@ -137,6 +152,7 @@ export const executeLocalCommand = async (
 				const aggregates: unknown[] = [];
 
 				for (const write of command.writes) {
+					const clock = clockFor(write.mutationId ?? mutationId);
 					const table = database.table(write.store);
 					const stored = await table.get(write.aggregateId);
 					const current = stored
@@ -175,31 +191,39 @@ export const executeLocalCommand = async (
 					aggregates.push(next);
 				}
 
-				const mutation = decode(
-					OutboxMutationSchema,
+				const mutationInputs = [
 					{
-						schemaVersion: CURRENT_SCHEMA_VERSION,
 						mutationId,
-						authSlotId: command.authSlotId,
-						scopeKind: command.scopeKind,
-						scopeId: command.scopeId,
 						entityKind: command.entityKind,
 						aggregateId: command.aggregateId,
 						conflictGroup: command.conflictGroup,
-						operation: command.operation,
-						occurredAt,
-						originDeviceId,
-						payload: encodedPayload
+						operation: command.operation
 					},
-					'decode outbox mutation'
-				);
-				const outboxRecord: OutboxRecord = {
-					...mutation,
-					status: 'pending',
-					nextAttemptAt: occurredAt,
-					attempts: 0
-				};
-				await database.outbox.add(outboxRecord);
+					...(command.additionalMutations ?? [])
+				];
+				const outboxRecords = mutationInputs.map((input): OutboxRecord => {
+					const mutation = decode(
+						OutboxMutationSchema,
+						{
+							schemaVersion: CURRENT_SCHEMA_VERSION,
+							...input,
+							authSlotId: command.authSlotId,
+							scopeKind: command.scopeKind,
+							scopeId: command.scopeId,
+							occurredAt,
+							originDeviceId,
+							payload: encodedPayload
+						},
+						'decode outbox mutation'
+					);
+					return {
+						...mutation,
+						status: 'pending',
+						nextAttemptAt: occurredAt,
+						attempts: 0
+					};
+				});
+				await database.outbox.bulkAdd(outboxRecords);
 
 				return { mutationId, aggregates };
 			})

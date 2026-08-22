@@ -41,6 +41,7 @@ beforeEach(async () => {
 	await applyMigration('drizzle/0002_naive_the_liberteens.sql');
 	await applyMigration('drizzle/0003_glossy_leader.sql');
 	await applyMigration('drizzle/0004_right_sway.sql');
+	await applyMigration('drizzle/0005_needy_khan.sql');
 	await database
 		.prepare(
 			"INSERT INTO units (id, base_unit_id, to_base_factor, to_base_offset) VALUES ('grams', 'grams', 1, 0)"

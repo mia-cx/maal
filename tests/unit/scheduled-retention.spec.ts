@@ -37,7 +37,8 @@ beforeEach(async () => {
 		'drizzle/0001_long_mysterio.sql',
 		'drizzle/0002_naive_the_liberteens.sql',
 		'drizzle/0003_glossy_leader.sql',
-		'drizzle/0004_right_sway.sql'
+		'drizzle/0004_right_sway.sql',
+		'drizzle/0005_needy_khan.sql'
 	]) {
 		await applyMigration(migration);
 	}

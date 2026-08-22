@@ -259,11 +259,20 @@ describe('offline households and cached authority', () => {
 			occurredAt: timestamp
 		});
 		const applianceId = uuidv7();
+		const secondApplianceId = uuidv7();
 		await updateHouseholdAppliances(database, {
 			profileId: alice.profileId,
 			householdId: home.householdId,
 			occurredAt: timestamp,
-			appliances: [{ id: applianceId, appliance: 'oven', available: true, notes: null }]
+			appliances: [
+				{ id: applianceId, appliance: 'oven', available: true, notes: null },
+				{
+					id: secondApplianceId,
+					appliance: 'stovetop',
+					available: true,
+					notes: 'Induction'
+				}
+			]
 		});
 
 		await expect(database.households.get(home.householdId)).resolves.toMatchObject({
@@ -274,7 +283,29 @@ describe('offline households and cached authority', () => {
 			appliance: 'oven',
 			available: true
 		});
-		await expect(database.outbox.count()).resolves.toBe(2);
+		expect(
+			(await database.outbox.toArray()).map(({ entityKind, aggregateId, conflictGroup }) => ({
+				entityKind,
+				aggregateId,
+				conflictGroup
+			}))
+		).toEqual([
+			{
+				entityKind: 'household',
+				aggregateId: home.householdId,
+				conflictGroup: 'settings'
+			},
+			{
+				entityKind: 'householdAppliance',
+				aggregateId: applianceId,
+				conflictGroup: 'row'
+			},
+			{
+				entityKind: 'householdAppliance',
+				aggregateId: secondApplianceId,
+				conflictGroup: 'row'
+			}
+		]);
 		await expect(
 			updateHouseholdSettings(database, {
 				profileId: bob.profileId,

@@ -27,7 +27,7 @@ and portable archive import. Regression tests exercise behavior only through tho
 ## TODOs
 
 - [x] Make pruned-log bootstrap self-contained and fix user bootstrap page ordering.
-- [ ] Emit supported household settings, appliance, meal-status, and check-in mutations atomically.
+- [x] Emit supported household settings, appliance, meal-status, and check-in mutations atomically.
 - [ ] Discover remote household state on a fresh device and harden live WorkOS authorization and deletion denial.
 - [ ] Preserve retained check-ins and harden portable taxonomy and aggregate import.
 - [ ] Run focused local, D1, Worker, browser, prototype-preservation, and full validation gates.
@@ -38,3 +38,4 @@ and portable archive import. Regression tests exercise behavior only through tho
 - Prototype authority: `main@74a12ec38f6c297d1a6adbf596234c45212bac11`.
 - No browser MCP and no UI redesign.
 - Bootstrap slice: 26 focused tests passed; the complete D1 migration chain passed.
+- Local mutation slice: 43 focused tests passed; D1 migration and Svelte checks passed.

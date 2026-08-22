@@ -2,7 +2,7 @@ import { Schema } from 'effect';
 
 import type { AggregateStoreName } from '$lib/client/local/commands.js';
 import { LocalDecodeError } from '$lib/domain/contracts/errors.js';
-import { HouseholdApplianceSchema } from '$lib/domain/household/contracts.js';
+import { HouseholdApplianceSchema, HouseholdSchema } from '$lib/domain/household/contracts.js';
 import { MealCheckInSchema, StoredMealSchema } from '$lib/domain/meals/schema.js';
 import {
 	FoodHouseholdAliasSchema,
@@ -21,6 +21,7 @@ export interface HouseholdSyncEntityDescriptor {
 }
 
 export const HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS = {
+	household: { store: 'households', schema: HouseholdSchema },
 	meal: { store: 'meals', schema: StoredMealSchema },
 	meal_check_in: { store: 'mealCheckIns', schema: MealCheckInSchema },
 	householdAppliance: { store: 'householdAppliances', schema: HouseholdApplianceSchema },
@@ -65,7 +66,8 @@ export const decodeHouseholdSyncAggregate = (
 			updatedAt: string;
 			deletedAt: string | null;
 		};
-		if (aggregate.id !== entityId) throw new Error('entity mismatch');
+		const aggregateId = entityKind === 'household' ? aggregate.householdId : aggregate.id;
+		if (aggregateId !== entityId) throw new Error('entity mismatch');
 		if (entityKind !== 'meal_check_in' && aggregate.householdId !== householdId) {
 			throw new Error('household mismatch');
 		}

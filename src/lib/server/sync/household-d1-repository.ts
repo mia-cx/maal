@@ -67,6 +67,7 @@ interface StoredChangePayload {
 }
 
 const HOUSEHOLD_TABLES = {
+	household: 'households',
 	householdAppliance: 'household_appliances',
 	foodHouseholdAlias: 'food_household_aliases',
 	foodHouseholdEntry: 'food_household_entries',
@@ -77,6 +78,21 @@ const HOUSEHOLD_TABLES = {
 } as const;
 
 const HOUSEHOLD_TABLE_COLUMNS = {
+	household: [
+		'householdId',
+		'name',
+		'locale',
+		'timezone',
+		'weekStartsOn',
+		'defaultPlannedYield',
+		'preferredDinnerTime',
+		'createdByUserId',
+		'schemaVersion',
+		'revision',
+		'createdAt',
+		'updatedAt',
+		'deletedAt'
+	],
 	householdAppliance: [
 		'id',
 		'householdId',
@@ -485,6 +501,13 @@ const normalizedStatements = (
 			})
 		];
 	}
+	if (entityKind === 'household') {
+		return [
+			upsert(database, 'households', pickSnake(aggregate, HOUSEHOLD_TABLE_COLUMNS.household), [
+				'household_id'
+			])
+		];
+	}
 	const table = HOUSEHOLD_TABLES[entityKind];
 	return [upsert(database, table, pickSnake(aggregate, HOUSEHOLD_TABLE_COLUMNS[entityKind]))];
 };
@@ -563,6 +586,20 @@ const readNormalizedAggregate = async (
 	entityId: string
 ): Promise<unknown | null> => {
 	const versions = await readVersions(database, householdId, entityKind, entityId);
+	if (entityKind === 'household') {
+		const row = await database
+			.prepare('SELECT * FROM households WHERE household_id = ?')
+			.bind(householdId)
+			.first<Record<string, unknown>>();
+		return row
+			? {
+					...camelize(row),
+					deletionState: 'active',
+					localOnly: false,
+					conflictClocks: conflictClocks(versions)
+				}
+			: null;
+	}
 	if (entityKind === 'meal_check_in') {
 		const row = await database
 			.prepare('SELECT * FROM meal_check_ins WHERE id = ? AND household_id = ?')

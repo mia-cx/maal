@@ -208,9 +208,10 @@ export const buildHouseholdSnapshotManifest = async (
 		const records = (await database.table(descriptor.store).toArray()) as Record<string, unknown>[];
 		for (const record of records) {
 			if (!(await belongsToHousehold(database, householdId, entityKind, record))) continue;
+			const entityId = entityKind === 'household' ? record.householdId : record.id;
 			const decoded = decodeHouseholdSyncAggregate(
 				entityKind,
-				String(record.id),
+				String(entityId),
 				householdId,
 				record
 			);

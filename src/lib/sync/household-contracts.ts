@@ -9,6 +9,7 @@ import {
 import { MutationReceiptSchema } from './contracts.js';
 
 export const HOUSEHOLD_SYNC_ENTITY_KINDS = [
+	'household',
 	'meal',
 	'meal_check_in',
 	'householdAppliance',
@@ -32,13 +33,14 @@ export type HouseholdSyncAudience = typeof HouseholdSyncAudienceSchema.Type;
 const CursorSchema = Schema.NonNegativeInt;
 const NullableCursorSchema = Schema.NullOr(CursorSchema);
 const ProtocolVersionSchema = Schema.Literal(CURRENT_PROTOCOL_VERSION);
+const HouseholdEntityIdSchema = Schema.String.pipe(Schema.minLength(1));
 
 export const HouseholdSyncMutationSchema = Schema.Struct({
 	schemaVersion: Schema.Literal(CURRENT_SCHEMA_VERSION),
 	mutationId: DomainIdSchema,
 	originDeviceId: DomainIdSchema,
 	entityKind: HouseholdSyncEntityKindSchema,
-	entityId: DomainIdSchema,
+	entityId: HouseholdEntityIdSchema,
 	conflictGroups: Schema.NonEmptyArray(Schema.String.pipe(Schema.minLength(1))),
 	operation: Schema.Literal('upsert', 'delete'),
 	occurredAt: UtcInstantSchema,
@@ -77,7 +79,7 @@ export const HouseholdSyncChangeSchema = Schema.Struct({
 	originDeviceId: DomainIdSchema,
 	actorUserId: Schema.String.pipe(Schema.minLength(1)),
 	entityKind: HouseholdSyncEntityKindSchema,
-	entityId: DomainIdSchema,
+	entityId: HouseholdEntityIdSchema,
 	conflictGroups: Schema.NonEmptyArray(Schema.String.pipe(Schema.minLength(1))),
 	operation: Schema.Literal('upsert', 'delete'),
 	resultingRevision: Schema.NonNegativeInt,
@@ -100,7 +102,7 @@ export type HouseholdPullResponse = typeof HouseholdPullResponseSchema.Type;
 
 export const HouseholdSnapshotManifestEntrySchema = Schema.Struct({
 	entityKind: HouseholdSyncEntityKindSchema,
-	entityId: DomainIdSchema,
+	entityId: HouseholdEntityIdSchema,
 	revision: Schema.NonNegativeInt,
 	updatedAt: UtcInstantSchema,
 	previousServerAck: Schema.Boolean
@@ -119,7 +121,7 @@ export type HouseholdBootstrapRequest = typeof HouseholdBootstrapRequestSchema.T
 
 export const HouseholdReconciliationInstructionSchema = Schema.Struct({
 	entityKind: HouseholdSyncEntityKindSchema,
-	entityId: DomainIdSchema,
+	entityId: HouseholdEntityIdSchema,
 	action: Schema.Literal('delete_acknowledged_absence', 'keep_for_backfill')
 });
 export type HouseholdReconciliationInstruction =
@@ -139,7 +141,7 @@ export type HouseholdBootstrapResponse = typeof HouseholdBootstrapResponseSchema
 
 export const HouseholdBackfillCheckpointSchema = Schema.Struct({
 	entityKind: HouseholdSyncEntityKindSchema,
-	lastAggregateId: Schema.NullOr(DomainIdSchema),
+	lastAggregateId: Schema.NullOr(HouseholdEntityIdSchema),
 	processedCount: Schema.NonNegativeInt,
 	priorityBoundary: Schema.NullOr(Schema.String)
 });

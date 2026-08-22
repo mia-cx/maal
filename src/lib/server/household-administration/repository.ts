@@ -275,14 +275,15 @@ export class HouseholdAdministrationRepository {
 				this.database
 					.prepare(
 						`INSERT INTO households
-						 (household_id, locale, timezone, week_starts_on, default_planned_yield,
+						 (household_id, name, locale, timezone, week_starts_on, default_planned_yield,
 						  preferred_dinner_time, created_by_user_id, schema_version, revision,
 						  created_at, updated_at, deleted_at)
-						 VALUES (?, ?, ?, 1, 4, NULL, ?, 1, 1, ?, ?, NULL)
+						 VALUES (?, ?, ?, ?, 1, 4, NULL, ?, 1, 1, ?, ?, NULL)
 						 ON CONFLICT(household_id) DO NOTHING`
 					)
 					.bind(
 						input.householdId,
+						input.settings.name,
 						input.settings.locale,
 						input.settings.timezone,
 						input.workosUserId,

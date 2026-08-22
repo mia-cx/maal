@@ -175,24 +175,35 @@ export const updateHouseholdAppliances = async (
 		input.householdId,
 		'households:write'
 	);
+	if (appliances.length === 0) return [];
+	const mutationIds = appliances.map(() => uuidv7());
 	return (
 		await executeLocalCommand(database, {
 			authSlotId: actor.authSlotId,
 			scopeKind: 'household',
 			scopeId: input.householdId,
-			entityKind: 'household',
-			aggregateId: input.householdId,
-			conflictGroup: 'appliances',
+			entityKind: 'householdAppliance',
+			aggregateId: appliances[0]!.id,
+			conflictGroup: 'row',
 			operation: 'upsert',
 			originDeviceId: actor.originDeviceId,
 			occurredAt: input.occurredAt,
+			mutationId: mutationIds[0],
+			additionalMutations: appliances.slice(1).map((appliance, index) => ({
+				mutationId: mutationIds[index + 1]!,
+				entityKind: 'householdAppliance',
+				aggregateId: appliance.id,
+				conflictGroup: 'row',
+				operation: 'upsert' as const
+			})),
 			payload: { householdId: input.householdId, appliances },
 			payloadSchema: ApplianceCommandPayloadSchema,
-			writes: appliances.map((appliance) => ({
+			writes: appliances.map((appliance, index) => ({
 				store: 'householdAppliances' as const,
 				aggregateId: appliance.id,
+				mutationId: mutationIds[index],
 				identity: { id: appliance.id, householdId: input.householdId },
-				conflictGroups: ['appliances'],
+				conflictGroups: ['row'],
 				schema: HouseholdApplianceSchema,
 				update: (current: unknown) => ({
 					...(current as Record<string, unknown> | undefined),

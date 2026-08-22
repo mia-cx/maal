@@ -24,6 +24,7 @@ export const households = sqliteTable(
 	'households',
 	{
 		householdId: text('household_id').primaryKey(),
+		name: text('name').notNull().default('Household'),
 		locale: text('locale').notNull().default('en-US'),
 		timezone: text('timezone'),
 		weekStartsOn: integer('week_starts_on').notNull().default(1),

@@ -55,6 +55,7 @@ const LEASE_TTL_MS = 60_000;
 const PULL_PAGE_SIZE = 100;
 
 const BACKFILL_ENTITY_ORDER: readonly HouseholdSyncEntityKind[] = [
+	'household',
 	'meal',
 	'meal_check_in',
 	'householdAppliance',
@@ -255,7 +256,8 @@ const priorityKeyFor = (
 	record: Record<string, unknown>,
 	now: Date
 ): string => {
-	if (entityKind !== 'meal') return `5:${String(record.id)}`;
+	const entityId = entityKind === 'household' ? record.householdId : record.id;
+	if (entityKind !== 'meal') return `5:${String(entityId)}`;
 	const date = typeof record.date === 'string' ? record.date : null;
 	if (date === null) return `4:${String(record.id)}`;
 	const today = now.toISOString().slice(0, 10);
@@ -375,9 +377,10 @@ const prepareBackfill = async (
 			priorityBoundary: checkpoint?.priorityBoundary ?? null
 		};
 		for (const { record, priorityKey } of records) {
+			const entityId = entityKind === 'household' ? record.householdId : record.id;
 			const decoded = decodeHouseholdSyncAggregate(
 				entityKind,
-				String(record.id),
+				String(entityId),
 				householdId,
 				record
 			);
