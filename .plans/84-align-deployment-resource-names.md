@@ -7,13 +7,13 @@ current forward-only D1 migration chain instead of creating versioned replacemen
 
 ## Acceptance criteria
 
-- [ ] Local, staging, and production D1 names are `maal-local`, `maal-staging`, and `maal-prod`.
-- [ ] Local, staging, and production Worker names are `maal-local`, `maal-staging`, and `maal`.
-- [ ] Tracked Wrangler config retains the existing staging and production D1 IDs.
-- [ ] Migration scripts and guarded staging preflight use the same resource names.
-- [ ] Architecture notes and the cutover runbook require in-place schema migrations for future app versions.
-- [ ] No remote resource is created, deployed, migrated, or otherwise changed.
-- [ ] Focused staging contracts, the local D1 chain, and `pnpm validate` pass.
+- [x] Local, staging, and production D1 names are `maal-local`, `maal-staging`, and `maal-prod`.
+- [x] Local, staging, and production Worker names are `maal-local`, `maal-staging`, and `maal`.
+- [x] Tracked Wrangler config retains the existing staging and production D1 IDs.
+- [x] Migration scripts and guarded staging preflight use the same resource names.
+- [x] Architecture notes and the cutover runbook require in-place schema migrations for future app versions.
+- [x] No remote resource is created, deployed, migrated, or otherwise changed.
+- [x] Focused staging contracts, the local D1 chain, and `pnpm validate` pass.
 
 ## Test seams
 
@@ -27,7 +27,7 @@ current forward-only D1 migration chain instead of creating versioned replacemen
 - [x] Add failing resource-name contracts, then restore existing Worker and D1 bindings in Wrangler config.
 - [x] Add failing migration/preflight contracts, then align scripts and guarded staging validation.
 - [x] Rewrite architecture and cutover guidance around inspecting and migrating long-lived D1 databases in place.
-- [ ] Run focused staging contracts, the D1 migration chain, and full validation.
+- [x] Run focused staging contracts, the D1 migration chain, and full validation.
 
 ## Notes
 
@@ -47,3 +47,7 @@ current forward-only D1 migration chain instead of creating versioned replacemen
   production in-place migration sequence.
 - Green: the architecture matrix and runbook identify all three long-lived environments. The staging and
   production procedures inspect, bookmark, and migrate the existing D1 databases without publishing IDs.
+- Final staging contracts: 17 files and 126 tests passed, followed by the local D1 migration/schema proof.
+- Final validation: formatting, ESLint, generated Worker types, Svelte diagnostics, 324 unit tests, production
+  build, 187,208/256,000-byte entry budget, and 22 Playwright tests passed.
+- Wrangler dry-runs resolved staging to `maal-staging` and production to `maal-prod`. Both exited before deploy.
