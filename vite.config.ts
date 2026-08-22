@@ -44,6 +44,7 @@ export default defineConfig({
 	},
 	test: {
 		expect: { requireAssertions: true },
+		maxWorkers: 4,
 		coverage: {
 			provider: 'v8',
 			reporter: ['text', 'html', 'json-summary'],

@@ -68,6 +68,7 @@ CREATE INDEX `household_memberships_user_status_idx` ON `household_memberships` 
 CREATE INDEX `household_memberships_household_status_idx` ON `household_memberships` (`household_id`,`status`);--> statement-breakpoint
 CREATE TABLE `households` (
 	`household_id` text PRIMARY KEY NOT NULL,
+	`name` text DEFAULT 'Household' NOT NULL,
 	`locale` text DEFAULT 'en-US' NOT NULL,
 	`timezone` text,
 	`week_starts_on` integer DEFAULT 1 NOT NULL,
@@ -114,8 +115,28 @@ CREATE TABLE `meal_appliance_requirements` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `meal_appliance_requirements_unique` ON `meal_appliance_requirements` (`meal_id`,`appliance`);--> statement-breakpoint
+CREATE TABLE `meal_check_in_recovery` (
+	`id` text PRIMARY KEY NOT NULL,
+	`household_id` text,
+	`reporter_user_id` text NOT NULL,
+	`meal_id` text,
+	`cook_time_minutes` integer,
+	`verdict` text NOT NULL,
+	`reason` text,
+	`schema_version` integer DEFAULT 1 NOT NULL,
+	`revision` integer DEFAULT 1 NOT NULL,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	`deleted_at` text,
+	`recovery_reason` text NOT NULL,
+	`preserved_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	CONSTRAINT "meal_check_in_recovery_verdict_check" CHECK("meal_check_in_recovery"."verdict" IN ('repeat', 'neutral', 'avoid')),
+	CONSTRAINT "meal_check_in_recovery_reason_check" CHECK("meal_check_in_recovery"."recovery_reason" IN ('household_unresolved'))
+);
+--> statement-breakpoint
 CREATE TABLE `meal_check_ins` (
 	`id` text PRIMARY KEY NOT NULL,
+	`household_id` text NOT NULL,
 	`reporter_user_id` text NOT NULL,
 	`meal_id` text,
 	`cook_time_minutes` integer,
@@ -126,6 +147,7 @@ CREATE TABLE `meal_check_ins` (
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`deleted_at` text,
+	FOREIGN KEY (`household_id`) REFERENCES `households`(`household_id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`reporter_user_id`) REFERENCES `users`(`workos_user_id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`meal_id`) REFERENCES `meals`(`id`) ON UPDATE no action ON DELETE set null,
 	CONSTRAINT "meal_check_ins_verdict_check" CHECK("meal_check_ins"."verdict" IN ('repeat', 'neutral', 'avoid')),
@@ -134,6 +156,7 @@ CREATE TABLE `meal_check_ins` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `meal_check_ins_meal_reporter_unique` ON `meal_check_ins` (`meal_id`,`reporter_user_id`);--> statement-breakpoint
+CREATE INDEX `meal_check_ins_household_idx` ON `meal_check_ins` (`household_id`);--> statement-breakpoint
 CREATE INDEX `meal_check_ins_reporter_idx` ON `meal_check_ins` (`reporter_user_id`);--> statement-breakpoint
 CREATE INDEX `meal_check_ins_deleted_idx` ON `meal_check_ins` (`deleted_at`);--> statement-breakpoint
 CREATE TABLE `meal_classifications` (
@@ -344,6 +367,9 @@ CREATE TABLE `billing_subscriptions` (
 	`cancel_at_period_end` integer DEFAULT false NOT NULL,
 	`interruption_started_at` text,
 	`grace_until` text,
+	`last_successful_payment_at` text,
+	`last_stripe_event_created_at` text,
+	`last_stripe_event_id` text,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	FOREIGN KEY (`household_id`) REFERENCES `households`(`household_id`) ON UPDATE no action ON DELETE cascade,
@@ -375,6 +401,7 @@ CREATE TABLE `household_deletion_requests` (
 	`requester_user_id` text NOT NULL,
 	`state` text NOT NULL,
 	`stripe_cancellation_id` text,
+	`stripe_charge_id` text,
 	`stripe_refund_id` text,
 	`previewed_amount_minor` integer,
 	`refunded_amount_minor` integer,
@@ -384,7 +411,7 @@ CREATE TABLE `household_deletion_requests` (
 	`purged_at` text,
 	`safe_error_code` text,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
-	CONSTRAINT "household_deletion_requests_state_check" CHECK("household_deletion_requests"."state" IN ('requested', 'cancelling', 'refunding', 'recoverable', 'purged', 'failed')),
+	CONSTRAINT "household_deletion_requests_state_check" CHECK("household_deletion_requests"."state" IN ('requested', 'cancelling', 'refunding', 'recoverable', 'recovered', 'purged', 'failed')),
 	CONSTRAINT "household_deletion_requests_preview_amount_nonnegative" CHECK("household_deletion_requests"."previewed_amount_minor" IS NULL OR "household_deletion_requests"."previewed_amount_minor" >= 0),
 	CONSTRAINT "household_deletion_requests_refund_amount_nonnegative" CHECK("household_deletion_requests"."refunded_amount_minor" IS NULL OR "household_deletion_requests"."refunded_amount_minor" >= 0)
 );
@@ -481,12 +508,34 @@ CREATE TABLE `sync_entity_versions` (
 	`winning_occurred_at` text NOT NULL,
 	`winning_origin_device_id` text NOT NULL,
 	`winning_mutation_id` text NOT NULL,
+	`winning_actor_user_id` text,
+	`winning_received_at` text,
 	PRIMARY KEY(`audience_kind`, `audience_id`, `entity_kind`, `entity_id`, `conflict_group`),
 	CONSTRAINT "sync_entity_versions_audience_kind_check" CHECK("sync_entity_versions"."audience_kind" IN ('user', 'household')),
 	CONSTRAINT "sync_entity_versions_revision_positive" CHECK("sync_entity_versions"."revision" > 0),
 	CONSTRAINT "sync_entity_versions_sequence_positive" CHECK("sync_entity_versions"."last_sequence" > 0)
 );
 --> statement-breakpoint
+CREATE TABLE `sync_mutation_receipts` (
+	`mutation_id` text PRIMARY KEY NOT NULL,
+	`audience_kind` text NOT NULL,
+	`audience_id` text NOT NULL,
+	`entity_kind` text NOT NULL,
+	`entity_id` text NOT NULL,
+	`status` text NOT NULL,
+	`sequence` integer,
+	`resulting_revision` integer,
+	`error_code` text,
+	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	`retain_until` text NOT NULL,
+	CONSTRAINT "sync_mutation_receipts_audience_kind_check" CHECK("sync_mutation_receipts"."audience_kind" IN ('user', 'household')),
+	CONSTRAINT "sync_mutation_receipts_status_check" CHECK("sync_mutation_receipts"."status" IN ('accepted', 'rejected')),
+	CONSTRAINT "sync_mutation_receipts_result_check" CHECK(("sync_mutation_receipts"."status" = 'accepted' AND "sync_mutation_receipts"."sequence" > 0 AND "sync_mutation_receipts"."resulting_revision" > 0 AND "sync_mutation_receipts"."error_code" IS NULL)
+			 OR ("sync_mutation_receipts"."status" = 'rejected' AND "sync_mutation_receipts"."sequence" IS NULL AND "sync_mutation_receipts"."resulting_revision" IS NULL AND "sync_mutation_receipts"."error_code" IS NOT NULL))
+);
+--> statement-breakpoint
+CREATE INDEX `sync_mutation_receipts_audience_idx` ON `sync_mutation_receipts` (`audience_kind`,`audience_id`);--> statement-breakpoint
+CREATE INDEX `sync_mutation_receipts_retention_idx` ON `sync_mutation_receipts` (`retain_until`);--> statement-breakpoint
 CREATE TABLE `sync_scope_state` (
 	`audience_kind` text NOT NULL,
 	`audience_id` text NOT NULL,

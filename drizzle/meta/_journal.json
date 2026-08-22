@@ -5,43 +5,15 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1787339756104,
-      "tag": "0000_quick_hitman",
+      "when": 1787404746634,
+      "tag": "0000_rewrite_baseline",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "6",
-      "when": 1787344317327,
-      "tag": "0001_long_mysterio",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1787348882619,
-      "tag": "0002_naive_the_liberteens",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1787350200749,
-      "tag": "0003_glossy_leader",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1787393129644,
-      "tag": "0004_right_sway",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1787393532760,
-      "tag": "0005_needy_khan",
+      "when": 1787405111991,
+      "tag": "0001_global_taxonomy_seed",
       "breakpoints": true
     }
   ]

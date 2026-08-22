@@ -1,1 +1,0 @@
-ALTER TABLE `households` ADD `name` text DEFAULT 'Household' NOT NULL;

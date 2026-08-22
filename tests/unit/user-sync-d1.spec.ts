@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-
 import { Miniflare } from 'miniflare';
 import { uuidv7 } from 'uuidv7';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -11,6 +9,7 @@ import {
 	pullUserSync
 } from '$lib/server/sync/index.js';
 import type { SyncMutation } from '$lib/sync/contracts.js';
+import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js';
 
 const userId = 'user_alice';
 const timestamp = '2026-08-21T12:00:00.000Z' as const;
@@ -25,16 +24,6 @@ const liveMembership = (overrides: Record<string, unknown> = {}) => ({
 	...overrides
 });
 
-const applyMigration = async (path: string): Promise<void> => {
-	const source = await readFile(path, 'utf8');
-	for (const statement of source
-		.split('--> statement-breakpoint')
-		.map((part) => part.trim())
-		.filter(Boolean)) {
-		await database.prepare(statement).run();
-	}
-};
-
 beforeEach(async () => {
 	miniflare = new Miniflare({
 		modules: true,
@@ -44,17 +33,7 @@ beforeEach(async () => {
 		d1Databases: ['DB']
 	});
 	database = await miniflare.getD1Database('DB');
-	await applyMigration('drizzle/0000_quick_hitman.sql');
-	await applyMigration('drizzle/0001_long_mysterio.sql');
-	await applyMigration('drizzle/0002_naive_the_liberteens.sql');
-	await applyMigration('drizzle/0003_glossy_leader.sql');
-	await applyMigration('drizzle/0004_right_sway.sql');
-	await applyMigration('drizzle/0005_needy_khan.sql');
-	await database
-		.prepare(
-			"INSERT INTO units (id, base_unit_id, to_base_factor, to_base_offset) VALUES ('grams', 'grams', 1, 0)"
-		)
-		.run();
+	await applyD1Migrations(database, await readD1MigrationFiles());
 });
 
 afterEach(async () => {

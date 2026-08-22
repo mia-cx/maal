@@ -1,6 +1,5 @@
-import { readFile } from 'node:fs/promises';
-
 import { Miniflare } from 'miniflare';
+import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js';
 
 export const MCP_TEST_NOW = '2026-08-22T12:00:00.000Z';
 export const MCP_TEST_USER = 'user_alice';
@@ -30,22 +29,7 @@ export const createMcpTestDatabase = async (): Promise<{
 		d1Databases: ['DB']
 	});
 	const database = await miniflare.getD1Database('DB');
-	for (const migration of [
-		'drizzle/0000_quick_hitman.sql',
-		'drizzle/0001_long_mysterio.sql',
-		'drizzle/0002_naive_the_liberteens.sql',
-		'drizzle/0003_glossy_leader.sql',
-		'drizzle/0004_right_sway.sql',
-		'drizzle/0005_needy_khan.sql'
-	]) {
-		const source = await readFile(migration, 'utf8');
-		for (const statement of source
-			.split('--> statement-breakpoint')
-			.map((part) => part.trim())
-			.filter(Boolean)) {
-			await database.prepare(statement).run();
-		}
-	}
+	await applyD1Migrations(database, await readD1MigrationFiles());
 	return { miniflare, database };
 };
 

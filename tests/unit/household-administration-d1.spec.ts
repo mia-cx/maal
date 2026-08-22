@@ -1,5 +1,3 @@
-import { readFile, readdir } from 'node:fs/promises';
-
 import type { RequestEvent } from '@sveltejs/kit';
 import { Miniflare } from 'miniflare';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -15,6 +13,7 @@ import {
 	type IdentityMembership,
 	type IdentityUser
 } from '$lib/server/household-administration/index.js';
+import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js';
 
 const timestamp = '2026-08-22T08:00:00.000Z';
 const aliceId = 'user_alice';
@@ -159,22 +158,6 @@ let repository: HouseholdAdministrationRepository;
 let identity: FakeHouseholdIdentity;
 let now = timestamp;
 
-const applyMigrations = async (): Promise<void> => {
-	const paths = (await readdir('drizzle'))
-		.filter((name) => name.endsWith('.sql'))
-		.toSorted()
-		.map((name) => `drizzle/${name}`);
-	for (const path of paths) {
-		const source = await readFile(path, 'utf8');
-		for (const statement of source
-			.split('--> statement-breakpoint')
-			.map((part) => part.trim())
-			.filter(Boolean)) {
-			await database.prepare(statement).run();
-		}
-	}
-};
-
 const actor = (
 	workosUserId: string,
 	activeOrganizationIds: readonly string[]
@@ -226,7 +209,7 @@ beforeEach(async () => {
 		d1Databases: ['DB']
 	});
 	database = await miniflare.getD1Database('DB');
-	await applyMigrations();
+	await applyD1Migrations(database, await readD1MigrationFiles());
 	repository = new HouseholdAdministrationRepository(database);
 	identity = new FakeHouseholdIdentity();
 	now = timestamp;
