@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 
 const persistenceDirectory = mkdtempSync(join(tmpdir(), 'maal-d1-schema-'));
 const wrangler = ['exec', 'wrangler', 'd1'];
+const databaseName = 'maal-local';
 
 const run = (args, expectedSuccess = true) => {
 	const result = spawnSync('pnpm', [...wrangler, ...args, '--persist-to', persistenceDirectory], {
@@ -19,10 +20,10 @@ const run = (args, expectedSuccess = true) => {
 };
 
 try {
-	run(['migrations', 'apply', 'maal-v1-local', '--local']);
+	run(['migrations', 'apply', databaseName, '--local']);
 	run([
 		'execute',
-		'maal-v1-local',
+		databaseName,
 		'--local',
 		'--command',
 		"INSERT INTO users (workos_user_id) VALUES ('user_1'), ('user_2'); INSERT INTO households (household_id, created_by_user_id) VALUES ('org_1', 'user_1'), ('org_2', 'user_2');"
@@ -30,7 +31,7 @@ try {
 	run(
 		[
 			'execute',
-			'maal-v1-local',
+			databaseName,
 			'--local',
 			'--command',
 			"INSERT INTO meals (id, household_id, title, status) VALUES ('meal_bad_status', 'org_1', 'Soup', 'postponed');"
@@ -40,7 +41,7 @@ try {
 	run(
 		[
 			'execute',
-			'maal-v1-local',
+			databaseName,
 			'--local',
 			'--command',
 			"INSERT INTO household_memberships (membership_id, household_id, workos_user_id, role_slug, permissions, status, workos_created_at, last_verified_at) VALUES ('membership_1', 'org_1', 'user_1', 'admin', 'not-json', 'active', '2026-08-21T00:00:00Z', '2026-08-21T00:00:00Z');"
@@ -49,7 +50,7 @@ try {
 	);
 	run([
 		'execute',
-		'maal-v1-local',
+		databaseName,
 		'--local',
 		'--command',
 		"INSERT INTO billing_trial_claims (id, workos_user_id, household_id, state, reserved_at) VALUES ('trial_1', 'user_1', 'org_1', 'reserved', '2026-08-21T00:00:00Z');"
@@ -57,7 +58,7 @@ try {
 	run(
 		[
 			'execute',
-			'maal-v1-local',
+			databaseName,
 			'--local',
 			'--command',
 			"INSERT INTO billing_trial_claims (id, workos_user_id, household_id, state, reserved_at) VALUES ('trial_2', 'user_1', 'org_2', 'reserved', '2026-08-21T00:00:00Z');"
@@ -67,7 +68,7 @@ try {
 	run(
 		[
 			'execute',
-			'maal-v1-local',
+			databaseName,
 			'--local',
 			'--command',
 			"INSERT INTO billing_trial_claims (id, workos_user_id, household_id, state, reserved_at) VALUES ('trial_3', 'user_2', 'org_1', 'reserved', '2026-08-21T00:00:00Z');"

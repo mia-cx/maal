@@ -5,6 +5,20 @@ import { describe, expect, test } from 'vitest';
 const readJson = async (path: string) => JSON.parse(await readFile(path, 'utf8'));
 
 describe('Cloudflare deployment resource names', () => {
+	test('migrates each long-lived D1 database in place', async () => {
+		const packageJson = await readJson('package.json');
+
+		expect({
+			local: packageJson.scripts?.['db:migrate:local'],
+			staging: packageJson.scripts?.['db:migrate:staging'],
+			production: packageJson.scripts?.['db:migrate:production']
+		}).toEqual({
+			local: 'wrangler d1 migrations apply maal-local --local',
+			staging: 'wrangler d1 migrations apply maal-staging --remote --env staging',
+			production: 'wrangler d1 migrations apply maal-prod --remote --env production'
+		});
+	});
+
 	test('binds every environment to its long-lived Worker and D1 database', async () => {
 		const config = await readJson('wrangler.jsonc');
 

@@ -35,7 +35,7 @@ const liveEnvironment = (configPath: string) => ({
 	MAAL_STAGING_PROOF_CONFIRM: STAGING_CONFIRMATION,
 	MAAL_STAGING_BASE_URL: 'https://staging.maal.test',
 	MAAL_STAGING_DEPLOYMENT_LABEL: 'staging-candidate-abc123',
-	MAAL_STAGING_DATABASE_NAME: 'maal-v1-staging',
+	MAAL_STAGING_DATABASE_NAME: 'maal-staging',
 	MAAL_STAGING_WRANGLER_CONFIG: configPath,
 	MAAL_STAGING_FIXTURE_FILE: join(tmpdir(), 'maal-proof-private-fixtures.json'),
 	MAAL_STAGING_EVIDENCE_FILE: join(tmpdir(), 'maal-proof-private-evidence.json'),
@@ -59,7 +59,7 @@ const stagingWrangler = {
 	},
 	env: {
 		staging: {
-			name: 'maal-v1-staging',
+			name: 'maal-staging',
 			vars: { MAAL_PROOF_TELEMETRY: 'staging-only' },
 			triggers: { crons: ['17 3 * * *'] },
 			ratelimits: [
@@ -72,7 +72,7 @@ const stagingWrangler = {
 			d1_databases: [
 				{
 					binding: 'DB',
-					database_name: 'maal-v1-staging',
+					database_name: 'maal-staging',
 					database_id: '123e4567-e89b-42d3-a456-426614174000',
 					migrations_dir: 'drizzle'
 				}
@@ -111,7 +111,7 @@ describe('staging cutover proof safety', () => {
 			baseUrl: 'https://staging.maal.test',
 			authCallbackUrl: 'https://staging.maal.test/api/auth/callback',
 			deploymentLabel: 'staging-candidate-abc123',
-			databaseName: 'maal-v1-staging',
+			databaseName: 'maal-staging',
 			wranglerConfigPath: configPath,
 			fixturePath: join(tmpdir(), 'maal-proof-private-fixtures.json'),
 			evidencePath: join(tmpdir(), 'maal-proof-private-evidence.json'),
@@ -132,6 +132,12 @@ describe('staging cutover proof safety', () => {
 		expect(stableAuthCallback('https://staging.maal.test')).toBe(
 			'https://staging.maal.test/api/auth/callback'
 		);
+		await expect(
+			validateLiveEnvironment(
+				{ ...liveEnvironment(configPath), MAAL_STAGING_DATABASE_NAME: 'maal-v1-staging' },
+				directory
+			)
+		).rejects.toThrow('only accepts MAAL_STAGING_DATABASE_NAME=maal-staging');
 		await expect(
 			validateLiveEnvironment(
 				{

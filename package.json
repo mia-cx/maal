@@ -43,9 +43,9 @@
 		"gen": "wrangler types",
 		"i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --silent",
 		"db:generate": "drizzle-kit generate",
-		"db:migrate:local": "wrangler d1 migrations apply maal-v1-local --local",
-		"db:migrate:staging": "wrangler d1 migrations apply maal-v1-staging --remote --env staging",
-		"db:migrate:production": "wrangler d1 migrations apply maal-v1-production --remote --env production",
+		"db:migrate:local": "wrangler d1 migrations apply maal-local --local",
+		"db:migrate:staging": "wrangler d1 migrations apply maal-staging --remote --env staging",
+		"db:migrate:production": "wrangler d1 migrations apply maal-prod --remote --env production",
 		"db:studio": "drizzle-kit studio",
 		"validate": "pnpm lint && pnpm check && pnpm test:unit && pnpm build && pnpm perf:budget && pnpm test:e2e"
 	},

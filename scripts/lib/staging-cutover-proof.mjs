@@ -87,8 +87,8 @@ export const validateLiveEnvironment = async (environment, repositoryRoot) => {
 	if (environment.WORKOS_COOKIE_PASSWORD.length < 32) {
 		throw new Error('WORKOS_COOKIE_PASSWORD must contain at least 32 characters.');
 	}
-	if (environment.MAAL_STAGING_DATABASE_NAME !== 'maal-v1-staging') {
-		throw new Error('Staging proof only accepts MAAL_STAGING_DATABASE_NAME=maal-v1-staging.');
+	if (environment.MAAL_STAGING_DATABASE_NAME !== 'maal-staging') {
+		throw new Error('Staging proof only accepts MAAL_STAGING_DATABASE_NAME=maal-staging.');
 	}
 
 	const baseUrl = validateStagingOrigin(environment.MAAL_STAGING_BASE_URL);
@@ -142,8 +142,8 @@ const validateWranglerStagingConfig = async (path) => {
 	if (!Array.isArray(compatibilityFlags) || !compatibilityFlags.includes('nodejs_compat')) {
 		throw new Error('Wrangler staging requires the nodejs_compat compatibility flag.');
 	}
-	if (staging?.name !== 'maal-v1-staging') {
-		throw new Error('Wrangler staging Worker name must be maal-v1-staging.');
+	if (staging?.name !== 'maal-staging') {
+		throw new Error('Wrangler staging Worker name must be maal-staging.');
 	}
 	if (staging.vars?.MAAL_PROOF_TELEMETRY !== 'staging-only') {
 		throw new Error('Wrangler staging must enable staging-only proof telemetry.');
@@ -155,13 +155,11 @@ const validateWranglerStagingConfig = async (path) => {
 			? databases[0]
 			: null;
 	if (
-		database?.database_name !== 'maal-v1-staging' ||
+		database?.database_name !== 'maal-staging' ||
 		database.migrations_dir !== 'drizzle' ||
 		!validInfrastructureUuid(database.database_id)
 	) {
-		throw new Error(
-			'Wrangler staging DB binding must name the provisioned maal-v1-staging D1 database.'
-		);
+		throw new Error('Wrangler staging DB binding must name the existing maal-staging D1 database.');
 	}
 	const rateLimits = staging.ratelimits;
 	const rateLimit =
