@@ -17,7 +17,7 @@ export, and routine free content use without Worker or D1 requests.
 
 ## TODOs
 
-- [~] Add the D1 migration-chain command to CI and prove the CI command boundary.
+- [x] Add the D1 migration-chain command to CI and prove the CI command boundary.
 - [ ] Prove the two-tab service-worker update protocol through real browser pages and a real worker.
 - [ ] Prove quota-abort atomicity and recovery export through the browser UI.
 - [ ] Record a final free-use content trace that distinguishes Worker/D1 routes from shell assets.
