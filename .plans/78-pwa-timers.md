@@ -7,18 +7,18 @@ stop, and restart without duplicate listeners or work.
 
 ## Acceptance criteria
 
-- [ ] Timer methods use receiver-safe runtime wrappers.
-- [ ] Repeated and overlapping lifecycle calls do not duplicate timers, channels, or listeners.
-- [ ] Update prepare, drain, ACK, activation, and reload behavior stays unchanged.
-- [ ] First install stays silent and recovery-route startup is safe.
-- [ ] Focused unit and Chromium, Firefox, and WebKit startup regressions pass where available.
+- [x] Timer methods use receiver-safe runtime wrappers.
+- [x] Repeated and overlapping lifecycle calls do not duplicate timers, channels, or listeners.
+- [x] Update prepare, drain, ACK, activation, and reload behavior stays unchanged.
+- [x] First install stays silent and recovery-route startup is safe.
+- [x] Focused unit and Chromium, Firefox, and WebKit startup regressions pass where available.
 
 ## TODOs
 
 - [x] Add focused failing regressions for receiver-sensitive timers and coordinator lifecycle behavior.
 - [x] Implement receiver-safe timers and idempotent coordinator lifecycle cleanup.
 - [x] Extend the real PWA startup browser proof and run the available browser matrix.
-- [ ] Run final focused validation and record exact results.
+- [x] Run final focused validation and record exact results.
 
 ## Notes
 
@@ -30,3 +30,5 @@ stop, and restart without duplicate listeners or work.
 - Chromium passes 2 focused PWA tests. Firefox passes the same 2 tests.
 - WebKit is installed but cannot launch on this host because its GTK, AVIF, Manette, Enchant, Secret,
   and WOFF2 runtime libraries are absent.
+- Final `pnpm validate` passes formatting, ESLint, a 0-error/0-warning Svelte check, 48 unit files / 269
+  tests, the production build, the 178,401 / 256,000-byte gzip budget, and 13 Chromium E2E tests.
