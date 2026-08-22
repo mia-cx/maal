@@ -7,12 +7,12 @@ validation, cached billing capability expiry, and the active pnpm security overr
 
 ## Acceptance criteria
 
-- [ ] Rejected user and household mutations reveal the authoritative remote aggregate after a masked pull.
-- [ ] Oversized user and household backfill records reach a persisted terminal result without blocking later records.
-- [ ] User and household sync reject invalid conflict groups and deletion semantics before any repository write.
-- [ ] Expired cached paid capabilities cannot start sync, and launch refresh does not contact remote services for free households.
-- [ ] The cookie override lives in pnpm's active workspace configuration and survives lockfile regeneration.
-- [ ] Focused regression and bounded full validation gates pass without changing the Drizzle chain or taxonomy seed.
+- [x] Rejected user and household mutations reveal the authoritative remote aggregate after a masked pull.
+- [x] Oversized user and household backfill records reach a persisted terminal result without blocking later records.
+- [x] User and household sync reject invalid conflict groups and deletion semantics before any repository write.
+- [x] Expired cached paid capabilities cannot start sync, and launch refresh does not contact remote services for free households.
+- [x] The cookie override lives in pnpm's active workspace configuration and survives lockfile regeneration.
+- [x] Focused regression and bounded full validation gates pass without changing the Drizzle chain or taxonomy seed.
 
 ## Test seams
 
@@ -27,7 +27,7 @@ Tests exercise those interfaces without reaching into private helpers.
 - [x] Validate user and household mutation conflict and deletion semantics before repository writes.
 - [x] Expire cached capabilities locally and restrict launch refresh to previously paid projections.
 - [x] Move the cookie override into pnpm's workspace configuration.
-- [ ] Run focused D1/schema gates, check, lint, and one bounded full validation.
+- [x] Run focused D1/schema gates, check, lint, and one bounded full validation.
 
 ## Notes
 
@@ -40,3 +40,5 @@ Tests exercise those interfaces without reaching into private helpers.
 - Server-validation slice: 2 files / 33 tests passed. Every batch validates entity conflict groups and operation/deletedAt agreement before its first commit.
 - Capability-expiry slice: 3 files / 39 tests passed. Active and grace projections stop at validUntil; launch refresh scans only stale or expired households with prior Stripe state.
 - pnpm override slice: 1 file / 2 tests passed. `pnpm install --lockfile-only` retained the cookie override without the ignored-package-field warning.
+- Final gates: the fresh D1 schema and seed chain passed; 6 focused files / 54 tests passed; check and lint passed; `pnpm validate` passed with 63 unit files / 342 tests, a 189,361-byte initial gzip entry, and 22 Playwright tests.
+- The fresh Drizzle baseline, taxonomy seed migration, and TypeScript taxonomy seed have no diff from the ticket base.

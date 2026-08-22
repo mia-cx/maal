@@ -23,8 +23,8 @@ describe('local release automation', () => {
 		]);
 		const packageJson = JSON.parse(packageSource) as { pnpm?: unknown };
 
-		expect(workspace).toMatch(/(?:^|\n)overrides:\n  'cookie@<0\.7\.0': 0\.7\.2(?:\n|$)/);
-		expect(lockfile).toMatch(/(?:^|\n)overrides:\n  cookie@<0\.7\.0: 0\.7\.2(?:\n|$)/);
+		expect(workspace).toMatch(/(?:^|\n)overrides:\n {2}'cookie@<0\.7\.0': 0\.7\.2(?:\n|$)/);
+		expect(lockfile).toMatch(/(?:^|\n)overrides:\n {2}cookie@<0\.7\.0: 0\.7\.2(?:\n|$)/);
 		expect(packageJson.pnpm).toBeUndefined();
 	});
 });

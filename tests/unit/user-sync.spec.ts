@@ -443,7 +443,15 @@ describe('foreground user coordinator', () => {
 				: emptyPull(request.after);
 		transport.push = async () => ({
 			protocolVersion: 1,
-			receipts: [{ mutationId, status: 'rejected', errorCode: 'historical_loser' }],
+			receipts: [
+				{
+					mutationId,
+					status: 'rejected',
+					sequence: null,
+					resultingRevision: null,
+					errorCode: 'historical_loser'
+				}
+			],
 			committedThrough: 1
 		});
 		const coordinator = createUserSyncCoordinator({

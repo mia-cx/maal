@@ -87,7 +87,8 @@ export const decodeUserSyncAggregate = (
 export const isAllowedUserConflictGroup = (
 	entityKind: UserSyncEntityKind,
 	group: string
-): boolean => USER_SYNC_ENTITY_DESCRIPTORS[entityKind].conflictGroups.includes(group);
+): boolean =>
+	(USER_SYNC_ENTITY_DESCRIPTORS[entityKind].conflictGroups as readonly string[]).includes(group);
 
 export const readConflictGroupsForMutation = (
 	aggregate: Record<string, unknown>,

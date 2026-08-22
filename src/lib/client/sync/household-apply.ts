@@ -160,6 +160,7 @@ export const applyHouseholdMutationReceipts = async (
 					});
 					continue;
 				}
+				if (!('errorCode' in receipt)) continue;
 				await database.outbox.update(receipt.mutationId, {
 					status: 'rejected',
 					rejectionCode: receipt.errorCode,

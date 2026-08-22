@@ -603,7 +603,15 @@ describe('foreground household coordinator', () => {
 					};
 		transport.push = async () => ({
 			protocolVersion: 1,
-			receipts: [{ mutationId, status: 'rejected', errorCode: 'historical_loser' }],
+			receipts: [
+				{
+					mutationId,
+					status: 'rejected',
+					sequence: null,
+					resultingRevision: null,
+					errorCode: 'historical_loser'
+				}
+			],
 			committedThrough: 1
 		});
 		const coordinator = createHouseholdSyncCoordinator({

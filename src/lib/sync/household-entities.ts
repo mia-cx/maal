@@ -110,7 +110,10 @@ export const decodeHouseholdSyncAggregate = (
 export const isAllowedHouseholdConflictGroup = (
 	entityKind: HouseholdSyncEntityKind,
 	group: string
-): boolean => HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS[entityKind].conflictGroups.includes(group);
+): boolean =>
+	(HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS[entityKind].conflictGroups as readonly string[]).includes(
+		group
+	);
 
 export const assertHouseholdMutationActor = (
 	entityKind: HouseholdSyncEntityKind,
