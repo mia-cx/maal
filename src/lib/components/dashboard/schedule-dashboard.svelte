@@ -17,6 +17,7 @@
 	import { dropTargetFromPointer, moveMealToDropTarget } from './schedule-dnd.js';
 	import { cardDirectionByKey, focusMealCard } from './schedule-keyboard.js';
 	import { isMealInPool, sortMealPool } from './schedule-ordering.js';
+	import type { MealRange } from './schedule-ranges.js';
 	import type {
 		DailyScrollState,
 		HouseholdMember,
@@ -46,6 +47,7 @@
 		onmealcheckin,
 		oncreaterecipe,
 		onimporturl,
+		onloadedrangechange,
 		onuistatechange
 	}: {
 		meals?: Meal[];
@@ -66,6 +68,7 @@
 		onmealcheckin?: (payload: MealCheckInPayload) => Promise<Meal>;
 		oncreaterecipe?: (recipe: RecipeMenuItem, date?: string) => Promise<Meal>;
 		onimporturl?: (url: string, date?: string) => Promise<Meal>;
+		onloadedrangechange?: (range: MealRange) => void;
 		onuistatechange?: (state: ScheduleUiSnapshot) => void | Promise<void>;
 	} = $props();
 
@@ -98,6 +101,7 @@
 	let secondaryScrollElement: HTMLElement | null = null;
 	let secondaryScrollX = 0;
 	let secondaryScrollY = 0;
+	let renderedMealRangeKey = '';
 
 	const mealPool = $derived(sortMealPool(scheduleMeals.filter(isMealInPool)));
 	const plannedMeals = $derived(scheduleMeals.filter((meal) => !isMealInPool(meal)));
@@ -215,7 +219,12 @@
 	const updateVisibleAnchor = (date: Date) => {
 		anchorDate = startOfDay(date);
 	};
-	const updateRenderedMealRange = () => {};
+	const updateRenderedMealRange = (range: MealRange) => {
+		const key = `${range.start}:${range.end}`;
+		if (key === renderedMealRangeKey) return;
+		renderedMealRangeKey = key;
+		onloadedrangechange?.(range);
+	};
 
 	const replaceMeal = (nextMeal: Meal) => {
 		scheduleMeals = scheduleMeals.map((meal) => (meal.id === nextMeal.id ? nextMeal : meal));

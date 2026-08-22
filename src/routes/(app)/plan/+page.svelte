@@ -5,8 +5,7 @@
 
 	import {
 		deleteMeal,
-		listHouseholdMeals,
-		listMealCheckIns,
+		liveMealCalendarRange,
 		mealAggregateToScheduleMeal,
 		membershipsToHouseholdMembers,
 		planRecipeAsMeal,
@@ -16,6 +15,7 @@
 		saveMealCheckIn,
 		updateMealSchedule,
 		writeScheduleUiState,
+		type MealCalendarRange,
 		type MealCommandContext,
 		type ScheduleUiState
 	} from '$lib/client/meals/index.js';
@@ -44,7 +44,7 @@
 		defaultMealServings: number;
 		weekStartsOn: 'sunday' | 'monday';
 		householdTimeZone?: string;
-		meals: Meal[];
+		mealPool: Meal[];
 		recipes: RecipeMenuItem[];
 		householdMembers: HouseholdMember[];
 		uiState: ScheduleUiState;
@@ -52,7 +52,10 @@
 
 	let database = $state<MaalDatabase | null>(null);
 	let view = $state<PlanView | null>(null);
+	let calendarMeals = $state<Meal[]>([]);
+	let renderedMealRange = $state<MealCalendarRange | null>(null);
 	let error = $state<string | null>(null);
+	const dashboardMeals = $derived(view ? [...calendarMeals, ...view.mealPool] : []);
 
 	const commandContext = async (): Promise<MealCommandContext> => {
 		if (!database || !view) throw new Error('Choose a local household first.');
@@ -74,7 +77,7 @@
 		if (!database || !view) throw new Error('Local meal storage is still opening.');
 		const sortOrder =
 			target?.kind === 'date'
-				? sortOrderForUntimedInsertion(view.meals, target.date, target.index)
+				? sortOrderForUntimedInsertion(calendarMeals, target.date, target.index)
 				: null;
 		const planned = await planRecipeAsMeal(database, await commandContext(), recipe.id, {
 			date: date ?? null,
@@ -130,6 +133,11 @@
 		await writeScheduleUiState(database, view.profileId, view.householdId, state);
 	};
 
+	const updateRenderedMealRange = (range: MealCalendarRange): void => {
+		if (renderedMealRange?.start === range.start && renderedMealRange.end === range.end) return;
+		renderedMealRange = range;
+	};
+
 	onMount(() => {
 		let subscription: { unsubscribe: () => void } | undefined;
 		void getBrowserDatabase()
@@ -144,33 +152,17 @@
 					if (typeof activeHousehold?.value !== 'string') return null;
 					const household = await opened.households.get(activeHousehold.value);
 					if (!household) return null;
-					const [mealAggregates, checkIns, recipeAggregates, memberships, profiles, uiState] =
-						await Promise.all([
-							listHouseholdMeals(opened, household.householdId),
-							listMealCheckIns(
-								opened,
-								new Set(
-									(
-										await opened.meals.where('householdId').equals(household.householdId).toArray()
-									).map(({ id }) => id)
-								)
-							),
-							listRecipes(opened, profile.workosUserId),
-							opened.memberships.where('householdId').equals(household.householdId).toArray(),
-							opened.profiles.toArray(),
-							readScheduleUiState(
-								opened,
-								profile.profileId,
-								household.householdId,
-								household.timezone ?? undefined
-							)
-						]);
-					const latestCheckInByMeal = new Map(
-						checkIns
-							.filter(({ mealId }) => mealId !== null)
-							.toSorted((left, right) => left.updatedAt.localeCompare(right.updatedAt))
-							.map((checkIn) => [checkIn.mealId!, checkIn])
-					);
+					const [recipeAggregates, memberships, profiles, uiState] = await Promise.all([
+						listRecipes(opened, profile.workosUserId),
+						opened.memberships.where('householdId').equals(household.householdId).toArray(),
+						opened.profiles.toArray(),
+						readScheduleUiState(
+							opened,
+							profile.profileId,
+							household.householdId,
+							household.timezone ?? undefined
+						)
+					]);
 					return {
 						profileId: profile.profileId,
 						userId: profile.workosUserId,
@@ -178,22 +170,19 @@
 						defaultMealServings: household.defaultPlannedYield,
 						weekStartsOn: household.weekStartsOn === 0 ? 'sunday' : 'monday',
 						householdTimeZone: household.timezone ?? undefined,
-						meals: [
-							...mealAggregates.map((meal) =>
-								mealAggregateToScheduleMeal(
-									meal,
-									latestCheckInByMeal.get(meal.id),
-									household.timezone ?? undefined
-								)
-							),
-							...recipeAggregates.map(recipeAggregateToPoolMeal)
-						],
+						mealPool: recipeAggregates.map(recipeAggregateToPoolMeal),
 						recipes: recipeAggregates.map(recipeAggregateToPickerItem),
 						householdMembers: membershipsToHouseholdMembers(memberships, profiles),
 						uiState
 					};
 				}).subscribe({
 					next: (nextView) => {
+						const previousScope = view ? `${view.profileId}:${view.householdId}` : null;
+						const nextScope = nextView ? `${nextView.profileId}:${nextView.householdId}` : null;
+						if (previousScope !== nextScope) {
+							calendarMeals = [];
+							renderedMealRange = null;
+						}
 						view = nextView;
 						error = null;
 					},
@@ -207,6 +196,43 @@
 			});
 		return () => subscription?.unsubscribe();
 	});
+
+	$effect(() => {
+		const opened = database;
+		const activeView = view;
+		const range = renderedMealRange;
+		if (!opened || !activeView || !range) return;
+		const queryScope = `${activeView.profileId}:${activeView.householdId}:${range.start}:${range.end}`;
+		const isCurrentQuery = () =>
+			view !== null &&
+			renderedMealRange !== null &&
+			`${view.profileId}:${view.householdId}:${renderedMealRange.start}:${renderedMealRange.end}` ===
+				queryScope;
+		const subscription = liveMealCalendarRange(opened, activeView.householdId, range).subscribe({
+			next: ({ meals, checkIns }) => {
+				if (!isCurrentQuery()) return;
+				const latestCheckInByMeal = new Map(
+					checkIns
+						.filter(({ mealId }) => mealId !== null)
+						.toSorted((left, right) => left.updatedAt.localeCompare(right.updatedAt))
+						.map((checkIn) => [checkIn.mealId!, checkIn])
+				);
+				calendarMeals = meals.map((meal) =>
+					mealAggregateToScheduleMeal(
+						meal,
+						latestCheckInByMeal.get(meal.id),
+						activeView.householdTimeZone
+					)
+				);
+				error = null;
+			},
+			error: () => {
+				if (!isCurrentQuery()) return;
+				error = 'Your local meal plan could not be read.';
+			}
+		});
+		return () => subscription.unsubscribe();
+	});
 </script>
 
 <svelte:head><title>Meal plan · Maal</title></svelte:head>
@@ -218,7 +244,7 @@
 			{#if view}
 				{#key `${view.profileId}:${view.householdId}`}
 					<ScheduleDashboard
-						meals={view.meals}
+						meals={dashboardMeals}
 						recipes={view.recipes}
 						weekStartsOn={view.weekStartsOn}
 						householdTimeZone={view.householdTimeZone}
@@ -230,6 +256,7 @@
 						onmealdelete={removeMeal}
 						onmealcheckin={checkIn}
 						oncreaterecipe={createRecipeAndMeal}
+						onloadedrangechange={updateRenderedMealRange}
 						onuistatechange={saveUiState}
 					/>
 				{/key}
