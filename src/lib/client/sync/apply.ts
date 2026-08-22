@@ -26,11 +26,14 @@ const pendingUserOutbox = async (
 
 const decodedChanges = (
 	workosUserId: string,
-	changes: readonly SyncChange[]
+	changes: readonly SyncChange[],
+	requireSequenceOrder: boolean
 ): ReturnType<typeof decodeUserSyncAggregate>[] => {
 	let prior = -1;
 	return changes.map((change) => {
-		if (change.sequence <= prior) throw new TypeError('Sync changes must be strictly ordered.');
+		if (requireSequenceOrder && change.sequence <= prior) {
+			throw new TypeError('Sync changes must be strictly ordered.');
+		}
 		prior = change.sequence;
 		return decodeUserSyncAggregate(
 			change.entityKind,
@@ -47,7 +50,7 @@ export const applyUserPullPage = async (
 	response: PullResponse,
 	now = new Date()
 ): Promise<void> => {
-	const decoded = decodedChanges(workosUserId, response.changes);
+	const decoded = decodedChanges(workosUserId, response.changes, true);
 	if (response.changes.some(({ sequence }) => sequence > response.throughSequence)) {
 		throw new TypeError('A sync page cannot advance behind one of its changes.');
 	}
@@ -97,7 +100,8 @@ export const applyUserBootstrap = async (
 	response: BootstrapResponse,
 	now = new Date()
 ): Promise<void> => {
-	const decoded = decodedChanges(workosUserId, response.aggregates);
+	// Bootstrap pages use a stable entity-key order for pagination, not commit order.
+	const decoded = decodedChanges(workosUserId, response.aggregates, false);
 	const tables = [...new Set(decoded.map(({ store }) => database.table(store)))];
 	for (const instruction of response.instructions) {
 		tables.push(database.table(USER_SYNC_ENTITY_DESCRIPTORS[instruction.entityKind].store));

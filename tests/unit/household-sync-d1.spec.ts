@@ -46,7 +46,8 @@ beforeEach(async () => {
 		'drizzle/0000_quick_hitman.sql',
 		'drizzle/0001_long_mysterio.sql',
 		'drizzle/0002_naive_the_liberteens.sql',
-		'drizzle/0003_glossy_leader.sql'
+		'drizzle/0003_glossy_leader.sql',
+		'drizzle/0004_right_sway.sql'
 	]) {
 		await applyMigration(migration);
 	}
@@ -348,5 +349,31 @@ describe('D1 household sync', () => {
 				limit: 10
 			})
 		).rejects.toMatchObject({ _tag: 'SyncBootstrapRequired', code: 'cursor_expired' });
+	});
+
+	test('rebuilds bootstrap with its winning actor after ordinary changes are pruned', async () => {
+		const repository = new D1HouseholdSyncRepository(database);
+		const mealId = uuidv7();
+		await repository.commit({
+			householdId,
+			actorUserId: bobId,
+			deviceId,
+			mutation: mealMutation(mealId, uuidv7(), timestamp),
+			mode: 'live',
+			receivedAt: timestamp
+		});
+		await repository.prune({
+			now: '2027-08-22T12:00:00.000Z',
+			changeCutoff: '2027-08-22T12:00:00.000Z'
+		});
+
+		const snapshot = await repository.bootstrap(householdId);
+		expect(snapshot.aggregates).toHaveLength(1);
+		expect(snapshot.aggregates[0]).toMatchObject({
+			actorUserId: bobId,
+			entityKind: 'meal',
+			entityId: mealId,
+			aggregate: { title: 'Family soup' }
+		});
 	});
 });

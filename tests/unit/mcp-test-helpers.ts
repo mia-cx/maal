@@ -34,7 +34,8 @@ export const createMcpTestDatabase = async (): Promise<{
 		'drizzle/0000_quick_hitman.sql',
 		'drizzle/0001_long_mysterio.sql',
 		'drizzle/0002_naive_the_liberteens.sql',
-		'drizzle/0003_glossy_leader.sql'
+		'drizzle/0003_glossy_leader.sql',
+		'drizzle/0004_right_sway.sql'
 	]) {
 		const source = await readFile(migration, 'utf8');
 		for (const statement of source

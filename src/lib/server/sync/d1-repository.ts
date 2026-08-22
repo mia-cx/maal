@@ -60,6 +60,8 @@ interface VersionRow {
 	winning_occurred_at: string;
 	winning_origin_device_id: string;
 	winning_mutation_id: string;
+	winning_actor_user_id: string | null;
+	winning_received_at: string | null;
 }
 
 interface StoredChangePayload {
@@ -519,7 +521,7 @@ const readVersions = async (
 		await database
 			.prepare(
 				`SELECT conflict_group, revision, last_sequence, winning_occurred_at,
-	        winning_origin_device_id, winning_mutation_id
+	        winning_origin_device_id, winning_mutation_id, winning_actor_user_id, winning_received_at
 	 FROM sync_entity_versions
 	 WHERE audience_kind = 'user' AND audience_id = ? AND entity_kind = ? AND entity_id = ?`
 			)
@@ -643,7 +645,7 @@ const syntheticChange = async (
 		operation: record.deletedAt ? 'delete' : 'upsert',
 		resultingRevision: Math.max(...versions.map(({ revision }) => revision)),
 		occurredAt: winner.winning_occurred_at as `${string}Z`,
-		receivedAt: winner.winning_occurred_at as `${string}Z`,
+		receivedAt: (winner.winning_received_at ?? winner.winning_occurred_at) as `${string}Z`,
 		aggregate,
 		tombstoneExpiresAt: null
 	};
@@ -903,15 +905,18 @@ export class D1UserSyncRepository implements UserSyncRepository {
 				this.database
 					.prepare(
 						`INSERT INTO sync_entity_versions
-				 (audience_kind, audience_id, entity_kind, entity_id, conflict_group, revision,
-				  last_sequence, winning_occurred_at, winning_origin_device_id, winning_mutation_id)
-				 VALUES ('user', ?, ?, ?, ?, ?,
-				  (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?, ?, ?)
-				 ON CONFLICT(audience_kind, audience_id, entity_kind, entity_id, conflict_group)
-				 DO UPDATE SET revision = excluded.revision, last_sequence = excluded.last_sequence,
-				  winning_occurred_at = excluded.winning_occurred_at,
-				  winning_origin_device_id = excluded.winning_origin_device_id,
-				  winning_mutation_id = excluded.winning_mutation_id`
+					 (audience_kind, audience_id, entity_kind, entity_id, conflict_group, revision,
+				  last_sequence, winning_occurred_at, winning_origin_device_id, winning_mutation_id,
+				  winning_actor_user_id, winning_received_at)
+					 VALUES ('user', ?, ?, ?, ?, ?,
+				  (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?, ?, ?, ?, ?)
+					 ON CONFLICT(audience_kind, audience_id, entity_kind, entity_id, conflict_group)
+					 DO UPDATE SET revision = excluded.revision, last_sequence = excluded.last_sequence,
+					  winning_occurred_at = excluded.winning_occurred_at,
+					  winning_origin_device_id = excluded.winning_origin_device_id,
+					  winning_mutation_id = excluded.winning_mutation_id,
+					  winning_actor_user_id = excluded.winning_actor_user_id,
+					  winning_received_at = excluded.winning_received_at`
 					)
 					.bind(
 						input.actorUserId,
@@ -922,7 +927,9 @@ export class D1UserSyncRepository implements UserSyncRepository {
 						input.mutation.mutationId,
 						input.mutation.occurredAt,
 						input.mutation.originDeviceId,
-						input.mutation.mutationId
+						input.mutation.mutationId,
+						input.actorUserId,
+						input.receivedAt
 					)
 			);
 		}

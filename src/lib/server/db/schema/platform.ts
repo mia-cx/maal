@@ -274,7 +274,9 @@ export const syncEntityVersions = sqliteTable(
 		lastSequence: integer('last_sequence').notNull(),
 		winningOccurredAt: text('winning_occurred_at').notNull(),
 		winningOriginDeviceId: text('winning_origin_device_id').notNull(),
-		winningMutationId: text('winning_mutation_id').notNull()
+		winningMutationId: text('winning_mutation_id').notNull(),
+		winningActorUserId: text('winning_actor_user_id'),
+		winningReceivedAt: text('winning_received_at')
 	},
 	(table) => [
 		primaryKey({

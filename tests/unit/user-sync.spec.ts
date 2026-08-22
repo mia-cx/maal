@@ -9,6 +9,7 @@ import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.
 import { acquireSyncLease, renewSyncLease } from '$lib/client/local/leases.js';
 import {
 	createUserSyncCoordinator,
+	applyUserBootstrap,
 	type UserSyncEnvironment,
 	type UserSyncTransport
 } from '$lib/client/sync/index.js';
@@ -169,6 +170,55 @@ describe('versioned user sync contracts', () => {
 });
 
 describe('foreground user coordinator', () => {
+	test('applies entity-key bootstrap pages whose commit sequences are not monotonic', async () => {
+		const database = await openDatabase();
+		const [firstId, secondId] = [uuidv7(), uuidv7()].toSorted();
+		const first = userUnit({ id: firstId, canonicalLabel: 'first spoon' });
+		const second = userUnit({ id: secondId, canonicalLabel: 'second spoon' });
+
+		await applyUserBootstrap(database, userId, {
+			protocolVersion: 1,
+			aggregates: [
+				{
+					sequence: 2,
+					mutationId: uuidv7(),
+					originDeviceId: uuidv7(),
+					entityKind: 'unitUserEntry',
+					entityId: firstId,
+					conflictGroups: ['row'],
+					operation: 'upsert',
+					resultingRevision: 1,
+					occurredAt: timestamp,
+					receivedAt: timestamp,
+					aggregate: first,
+					tombstoneExpiresAt: null
+				},
+				{
+					sequence: 1,
+					mutationId: uuidv7(),
+					originDeviceId: uuidv7(),
+					entityKind: 'unitUserEntry',
+					entityId: secondId,
+					conflictGroups: ['row'],
+					operation: 'upsert',
+					resultingRevision: 1,
+					occurredAt: timestamp,
+					receivedAt: timestamp,
+					aggregate: second,
+					tombstoneExpiresAt: null
+				}
+			],
+			instructions: [],
+			throughSequence: 2,
+			retainedFloor: 0,
+			bootstrapGeneration: 1,
+			hasMore: false,
+			nextEntityKey: null
+		});
+
+		expect(await database.unitUserEntries.bulkGet([firstId, secondId])).toEqual([first, second]);
+	});
+
 	test('proves routine free use generates zero sync Worker or D1 transport requests', async () => {
 		const database = await openDatabase();
 		const row = userUnit();
