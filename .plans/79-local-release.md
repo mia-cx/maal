@@ -18,7 +18,7 @@ export, and routine free content use without Worker or D1 requests.
 ## TODOs
 
 - [x] Add the D1 migration-chain command to CI and prove the CI command boundary.
-- [ ] Prove the two-tab service-worker update protocol through real browser pages and a real worker.
+- [x] Prove the two-tab service-worker update protocol through real browser pages and a real worker.
 - [ ] Prove quota-abort atomicity and recovery export through the browser UI.
 - [ ] Record a final free-use content trace that distinguishes Worker/D1 routes from shell assets.
 - [ ] Run the focused gates, then run the full gate only after the integration test slot is granted.
@@ -30,3 +30,5 @@ export, and routine free content use without Worker or D1 requests.
 - Preserve the approved prototype UI and the existing PWA coordinator protocol.
 - Current Cloudflare D1 guidance applies migration files in sequential order and records them in the
   configured migrations table. The existing `pnpm test:d1-schema` command exercises that chain locally.
+- The two-tab Chromium proof records the public BroadcastChannel phases in order, confirms both tabs move
+  to the waiting worker, and reloads the recipe commit from Dexie. No coordinator runtime change was needed.
