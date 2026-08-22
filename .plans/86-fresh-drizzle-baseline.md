@@ -6,11 +6,11 @@ Replace the rewrite's incremental migration history with one baseline generated 
 
 ## Acceptance criteria
 
-- [ ] Drizzle generates one fresh baseline with no prototype bridge or legacy migration files.
-- [ ] The fresh baseline matches the old chain's normalized empty-D1 schema fingerprint.
-- [ ] Applying the baseline to a populated prototype schema fails closed.
-- [ ] The cutover runbook bookmarks, confirms, resets, verifies empty, applies, and verifies the existing environment D1.
-- [ ] Focused D1 tests, staging contracts, and full validation pass without a remote operation.
+- [x] Drizzle generates one fresh baseline with no prototype bridge or legacy migration files.
+- [x] The fresh baseline matches the old chain's normalized empty-D1 schema fingerprint.
+- [x] Applying the baseline to a populated prototype schema fails closed.
+- [x] The cutover runbook bookmarks, confirms, resets, verifies empty, applies, and verifies the existing environment D1.
+- [x] Focused D1 tests, staging contracts, and full validation pass without a remote operation.
 
 ## TODOs
 
@@ -19,7 +19,7 @@ Replace the rewrite's incremental migration history with one baseline generated 
 - [x] Add the populated-prototype fail-closed contract and update migration consumers.
 - [x] Generate a deterministic post-baseline D1 taxonomy seed from the canonical TypeScript seed.
 - [x] Rewrite staging and production reset-first cutover instructions.
-- [ ] Run focused and full validation and record exact evidence.
+- [x] Run focused and full validation and record exact evidence.
 
 ## Notes
 
@@ -36,3 +36,7 @@ Replace the rewrite's incremental migration history with one baseline generated 
 - `pnpm test:d1-schema` proves both files apply once, leave no pending migrations, and fail closed over populated prototype tables.
 - `scripts/generate-d1-reset-sql.mjs` turns a private schema-only export into a private reset file without touching D1.
 - The runbook requires a Time Travel bookmark, traffic pause, exact environment phrase, zero application objects, both applied migration names, and golden taxonomy counts.
+- `pnpm test:d1-schema` passed after the final changes.
+- `pnpm proof:staging contracts` passed 17 files and 126 tests plus the D1 schema runner; sanitized evidence is `/tmp/maal-staging-proof/contracts-1787407130374.json`.
+- `pnpm validate` passed 62 unit files and 327 tests, the production build, the 187,204 / 256,000-byte initial SPA budget, and 22 browser tests.
+- Validation performed no remote D1, deployment, or provider operation.
