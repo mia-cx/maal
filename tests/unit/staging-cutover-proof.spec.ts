@@ -8,6 +8,7 @@ import {
 	assertPassingAuthProof,
 	assertPassingBillingProof,
 	assertPassingBooleanProof,
+	classifyPermittedFreeUseCall,
 	summarizeAuthEvidence,
 	summarizeBillingEvidence,
 	summarizeBooleanProof,
@@ -22,6 +23,8 @@ const liveEnvironment = (configPath: string) => ({
 	MAAL_STAGING_DATABASE_NAME: 'maal-v1-staging',
 	MAAL_STAGING_WRANGLER_CONFIG: configPath,
 	MAAL_STAGING_FIXTURE_FILE: join(tmpdir(), 'maal-proof-private-fixtures.json'),
+	MAAL_STAGING_EVIDENCE_FILE: join(tmpdir(), 'maal-proof-private-evidence.json'),
+	MAAL_STAGING_FREE_D1_OPEN_COUNT: '0',
 	WORKOS_API_KEY: 'sk_test_workos_secret',
 	WORKOS_CLIENT_ID: 'client_staging',
 	WORKOS_COOKIE_PASSWORD: 'a'.repeat(32),
@@ -31,6 +34,29 @@ const liveEnvironment = (configPath: string) => ({
 	BILLING_MAINTENANCE_SECRET: 'private-maintenance-secret'
 });
 
+const stagingWrangler = {
+	assets: { binding: 'ASSETS', directory: '.svelte-kit/cloudflare' },
+	observability: {
+		enabled: true,
+		logs: { head_sampling_rate: 1 },
+		traces: { enabled: true, head_sampling_rate: 0.01 }
+	},
+	env: {
+		staging: {
+			name: 'maal-v1-staging',
+			triggers: { crons: ['17 3 * * *'] },
+			d1_databases: [
+				{
+					binding: 'DB',
+					database_name: 'maal-v1-staging',
+					database_id: '123e4567-e89b-42d3-a456-426614174000',
+					migrations_dir: 'drizzle'
+				}
+			]
+		}
+	}
+};
+
 describe('staging cutover proof safety', () => {
 	test('fails with every missing live operator input and refuses production providers', async () => {
 		await expect(validateLiveEnvironment({}, '/tmp')).rejects.toThrow(
@@ -38,7 +64,7 @@ describe('staging cutover proof safety', () => {
 		);
 		const directory = await mkdtemp(join(tmpdir(), 'maal-staging-proof-'));
 		const configPath = join(directory, 'wrangler.jsonc');
-		await writeFile(configPath, '{}');
+		await writeFile(configPath, JSON.stringify(stagingWrangler));
 		await expect(
 			validateLiveEnvironment(
 				{ ...liveEnvironment(configPath), STRIPE_SECRET_KEY: 'sk_live_forbidden' },
@@ -56,15 +82,70 @@ describe('staging cutover proof safety', () => {
 	test('returns only safe deployment facts from a complete staging environment', async () => {
 		const directory = await mkdtemp(join(tmpdir(), 'maal-staging-proof-'));
 		const configPath = join(directory, 'wrangler.jsonc');
-		await writeFile(configPath, '{}');
+		await writeFile(configPath, JSON.stringify(stagingWrangler));
 		await expect(validateLiveEnvironment(liveEnvironment(configPath), directory)).resolves.toEqual({
 			baseUrl: 'https://staging.maal.test',
+			authCallbackUrl: 'https://staging.maal.test/api/auth/callback',
 			deploymentLabel: 'staging-candidate-abc123',
 			databaseName: 'maal-v1-staging',
 			wranglerConfigPath: configPath,
 			fixturePath: join(tmpdir(), 'maal-proof-private-fixtures.json'),
+			evidencePath: join(tmpdir(), 'maal-proof-private-evidence.json'),
 			providerModes: { workos: 'staging', stripe: 'test', cloudflare: 'staging' }
 		});
+	});
+
+	test('rejects unsafe origins and malformed staging Wrangler contracts', async () => {
+		const directory = await mkdtemp(join(tmpdir(), 'maal-staging-proof-'));
+		const configPath = join(directory, 'wrangler.jsonc');
+		await writeFile(configPath, JSON.stringify(stagingWrangler));
+		await expect(
+			validateLiveEnvironment(
+				{ ...liveEnvironment(configPath), MAAL_STAGING_BASE_URL: 'https://staging.maal.test/app' },
+				directory
+			)
+		).rejects.toThrow('clean HTTPS staging origin');
+
+		for (const invalid of [
+			{ ...stagingWrangler, env: { staging: { ...stagingWrangler.env.staging, name: 'wrong' } } },
+			{
+				...stagingWrangler,
+				env: {
+					staging: {
+						...stagingWrangler.env.staging,
+						d1_databases: [
+							{
+								...stagingWrangler.env.staging.d1_databases[0],
+								database_id: '00000000-0000-0000-0000-000000000000'
+							}
+						]
+					}
+				}
+			},
+			{
+				...stagingWrangler,
+				env: { staging: { ...stagingWrangler.env.staging, triggers: { crons: ['* * * * *'] } } }
+			},
+			{ ...stagingWrangler, assets: { binding: 'WRONG', directory: 'public' } },
+			{ ...stagingWrangler, observability: { enabled: false } }
+		]) {
+			await writeFile(configPath, JSON.stringify(invalid));
+			await expect(
+				validateLiveEnvironment(liveEnvironment(configPath), directory)
+			).rejects.toThrow();
+		}
+	});
+
+	test('allowlists only explicit free-use auth, billing, and admin calls', () => {
+		expect(classifyPermittedFreeUseCall('GET', '/api/auth-slots/slot/')).toBe('auth');
+		expect(classifyPermittedFreeUseCall('POST', '/api/auth-slots/slot/refresh')).toBe('auth');
+		expect(classifyPermittedFreeUseCall('GET', '/api/auth-slots/slot/billing/status')).toBe(
+			'billing'
+		);
+		expect(classifyPermittedFreeUseCall('GET', '/api/auth-slots/slot/households/hh')).toBe('admin');
+		expect(classifyPermittedFreeUseCall('POST', '/api/auth-slots/slot/sync/pull')).toBeNull();
+		expect(classifyPermittedFreeUseCall('POST', '/mcp')).toBeNull();
+		expect(classifyPermittedFreeUseCall('POST', '/api/billing/webhook')).toBeNull();
 	});
 
 	test('allowlists provider evidence and writes a new private file', async () => {

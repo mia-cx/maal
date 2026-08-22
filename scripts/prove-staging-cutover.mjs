@@ -57,14 +57,15 @@ switch (command) {
 				startedAt,
 				finishedAt
 			}),
-			gates: [
-				'retained-auth-slots',
-				'billing-lifecycle-and-disorder',
-				'paid-sync-convergence-and-lapse',
-				'mcp-scopes-and-revocation',
-				'sync-retention-and-household-purge',
-				'free-use-zero-content-transport'
-			]
+			gates: {
+				retainedAuthSlotContracts: 'passed',
+				billingContracts: 'passed',
+				paidSyncContracts: 'passed',
+				statelessMcpContracts: 'passed',
+				retentionAndPurgeContracts: 'passed',
+				freeUseTransportContracts: 'passed',
+				freeUseBrowserTrace: 'not-run-live-required'
+			}
 		});
 		process.stdout.write(`Sanitized contract evidence: ${path}\n`);
 		break;
@@ -73,11 +74,11 @@ switch (command) {
 		const config = await validateLiveEnvironment(process.env, root);
 		await assertIgnored(config.wranglerConfigPath);
 		const startedAt = new Date().toISOString();
-		const output =
-			process.env.MAAL_STAGING_EVIDENCE_FILE ?? `/tmp/maal-staging-proof/live-${Date.now()}.json`;
+		const output = config.evidencePath;
 		const providerEnvironment = {
 			...process.env,
 			AUTH_SLOT_PROOF_BASE_URL: config.baseUrl,
+			AUTH_SLOT_PROOF_REDIRECT_URI: config.authCallbackUrl,
 			AUTH_SLOT_PROOF_DEPLOYMENT_LABEL: config.deploymentLabel,
 			AUTH_SLOT_PROOF_GIT_COMMIT: await gitCommit()
 		};

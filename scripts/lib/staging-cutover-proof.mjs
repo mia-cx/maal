@@ -1,4 +1,4 @@
-import { mkdir, open, stat, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 export const STAGING_CONFIRMATION = 'create-and-remove-disposable-staging-fixtures';
@@ -9,6 +9,8 @@ const requiredLiveSettings = [
 	'MAAL_STAGING_DATABASE_NAME',
 	'MAAL_STAGING_WRANGLER_CONFIG',
 	'MAAL_STAGING_FIXTURE_FILE',
+	'MAAL_STAGING_EVIDENCE_FILE',
+	'MAAL_STAGING_FREE_D1_OPEN_COUNT',
 	'WORKOS_API_KEY',
 	'WORKOS_CLIENT_ID',
 	'WORKOS_COOKIE_PASSWORD',
@@ -40,13 +42,28 @@ export const contractProofFiles = [
 export const validateStagingOrigin = (value) => {
 	if (!value?.trim()) throw new Error('MAAL_STAGING_BASE_URL is required.');
 	const url = new URL(value);
-	if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+	if (
+		url.protocol !== 'https:' ||
+		url.username ||
+		url.password ||
+		url.search ||
+		url.hash ||
+		url.pathname !== '/'
+	) {
 		throw new Error('MAAL_STAGING_BASE_URL must be a clean HTTPS staging origin.');
 	}
 	if (url.hostname === 'maal.mia.cx') {
 		throw new Error('Staging proof refuses the production Maal hostname.');
 	}
 	return url.origin;
+};
+
+export const stableAuthCallback = (baseUrl) => {
+	const callback = new URL('/api/auth/callback', validateStagingOrigin(baseUrl));
+	if (/auth-slots|slot/i.test(callback.pathname)) {
+		throw new Error('The WorkOS redirect URI must not encode an auth slot.');
+	}
+	return callback.href;
 };
 
 export const validateLiveEnvironment = async (environment, repositoryRoot) => {
@@ -73,6 +90,9 @@ export const validateLiveEnvironment = async (environment, repositoryRoot) => {
 	if (environment.MAAL_STAGING_DATABASE_NAME !== 'maal-v1-staging') {
 		throw new Error('Staging proof only accepts MAAL_STAGING_DATABASE_NAME=maal-v1-staging.');
 	}
+	if (environment.MAAL_STAGING_FREE_D1_OPEN_COUNT !== '0') {
+		throw new Error('MAAL_STAGING_FREE_D1_OPEN_COUNT must be operator-confirmed as exactly 0.');
+	}
 
 	const baseUrl = validateStagingOrigin(environment.MAAL_STAGING_BASE_URL);
 	if (!/^[-a-zA-Z0-9_.]{1,80}$/.test(environment.MAAL_STAGING_DEPLOYMENT_LABEL)) {
@@ -84,23 +104,113 @@ export const validateLiveEnvironment = async (environment, repositoryRoot) => {
 	if (!configStats?.isFile()) {
 		throw new Error('MAAL_STAGING_WRANGLER_CONFIG must name an existing ignored Wrangler file.');
 	}
-	if (!isAbsolute(environment.MAAL_STAGING_FIXTURE_FILE)) {
-		throw new Error('MAAL_STAGING_FIXTURE_FILE must be an absolute private temporary path.');
-	}
-	const fixturePath = resolve(environment.MAAL_STAGING_FIXTURE_FILE);
-	const fixtureRelative = relative(repositoryRoot, fixturePath);
-	if (!fixtureRelative.startsWith('..') || fixtureRelative === '') {
-		throw new Error('MAAL_STAGING_FIXTURE_FILE must stay outside the repository.');
+	await validateWranglerStagingConfig(configPath);
+	const fixturePath = privatePath(
+		environment.MAAL_STAGING_FIXTURE_FILE,
+		repositoryRoot,
+		'MAAL_STAGING_FIXTURE_FILE'
+	);
+	const evidencePath = privatePath(
+		environment.MAAL_STAGING_EVIDENCE_FILE,
+		repositoryRoot,
+		'MAAL_STAGING_EVIDENCE_FILE'
+	);
+	if (fixturePath === evidencePath) {
+		throw new Error('Fixture and sanitized evidence files must use different private paths.');
 	}
 	return {
 		baseUrl,
+		authCallbackUrl: stableAuthCallback(baseUrl),
 		deploymentLabel: environment.MAAL_STAGING_DEPLOYMENT_LABEL,
 		databaseName: environment.MAAL_STAGING_DATABASE_NAME,
 		wranglerConfigPath: configPath,
 		fixturePath,
+		evidencePath,
 		providerModes: { workos: 'staging', stripe: 'test', cloudflare: 'staging' }
 	};
 };
+
+const validateWranglerStagingConfig = async (path) => {
+	let configuration;
+	try {
+		configuration = JSON.parse(await readFile(path, 'utf8'));
+	} catch {
+		throw new Error('MAAL_STAGING_WRANGLER_CONFIG must contain valid JSON-compatible JSONC.');
+	}
+	const staging = configuration?.env?.staging;
+	if (staging?.name !== 'maal-v1-staging') {
+		throw new Error('Wrangler staging Worker name must be maal-v1-staging.');
+	}
+	const databases = staging.d1_databases;
+	const database =
+		Array.isArray(databases) && databases.length === 1 && databases[0]?.binding === 'DB'
+			? databases[0]
+			: null;
+	if (
+		database?.database_name !== 'maal-v1-staging' ||
+		database.migrations_dir !== 'drizzle' ||
+		!validInfrastructureUuid(database.database_id)
+	) {
+		throw new Error(
+			'Wrangler staging DB binding must name the provisioned maal-v1-staging D1 database.'
+		);
+	}
+	if (
+		!Array.isArray(staging.triggers?.crons) ||
+		staging.triggers.crons.length !== 1 ||
+		staging.triggers.crons[0] !== '17 3 * * *'
+	) {
+		throw new Error('Wrangler staging cron must be exactly 17 3 * * *.');
+	}
+	const assets = staging.assets ?? configuration.assets;
+	if (assets?.binding !== 'ASSETS' || assets.directory !== '.svelte-kit/cloudflare') {
+		throw new Error('Wrangler staging assets binding is invalid.');
+	}
+	const observability = staging.observability ?? configuration.observability;
+	if (
+		observability?.enabled !== true ||
+		observability.logs?.head_sampling_rate !== 1 ||
+		observability.traces?.enabled !== true ||
+		observability.traces?.head_sampling_rate !== 0.01
+	) {
+		throw new Error('Wrangler staging observability settings are invalid.');
+	}
+};
+
+const validInfrastructureUuid = (value) =>
+	typeof value === 'string' &&
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) &&
+	value !== '00000000-0000-0000-0000-000000000000';
+
+const privatePath = (value, repositoryRoot, name) => {
+	if (!isAbsolute(value)) throw new Error(`${name} must be an absolute private temporary path.`);
+	const path = resolve(value);
+	const repositoryRelative = relative(repositoryRoot, path);
+	if (!repositoryRelative.startsWith('..') || repositoryRelative === '') {
+		throw new Error(`${name} must stay outside the repository.`);
+	}
+	return path;
+};
+
+const permittedFreeUseCalls = [
+	{ method: 'GET', pattern: /^\/api\/auth-slots\/[^/]+\/$/, routeClass: 'auth' },
+	{ method: 'POST', pattern: /^\/api\/auth-slots\/[^/]+\/refresh$/, routeClass: 'auth' },
+	{
+		method: 'GET',
+		pattern: /^\/api\/auth-slots\/[^/]+\/households\/[^/]+$/,
+		routeClass: 'admin'
+	},
+	{
+		method: 'GET',
+		pattern: /^\/api\/auth-slots\/[^/]+\/billing\/status$/,
+		routeClass: 'billing'
+	}
+];
+
+export const classifyPermittedFreeUseCall = (method, pathname) =>
+	permittedFreeUseCalls.find(
+		(candidate) => candidate.method === method.toUpperCase() && candidate.pattern.test(pathname)
+	)?.routeClass ?? null;
 
 export const summarizeAuthEvidence = (value) => ({
 	result: value?.result === 'passed' ? 'passed' : 'failed',
