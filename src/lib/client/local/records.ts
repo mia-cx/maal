@@ -68,7 +68,18 @@ export type BillingCapabilityRecord = BillingCapability;
 
 export interface McpKeySummaryRecord extends LocalStoreRecord {
 	ownerUserId: string;
+	label: string;
+	preset: 'read_only_planner' | 'meal_planner' | 'full_access' | null;
+	grantMode: 'all' | 'selected';
+	scopes: readonly string[];
+	selectedHouseholdIds: readonly string[];
+	householdScope:
+		| { readonly kind: 'all' }
+		| { readonly kind: 'households'; readonly householdIds: readonly string[] };
+	createdAt: UtcInstant;
+	expiresAt: UtcInstant | null;
 	revokedAt: UtcInstant | null;
+	lastUsedAt: UtcInstant | null;
 }
 
 export type OutboxStatus = 'pending' | 'sending' | 'quarantined' | 'acknowledged' | 'rejected';

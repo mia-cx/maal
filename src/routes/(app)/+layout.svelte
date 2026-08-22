@@ -7,6 +7,7 @@
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import { activeNavItemForPath } from '$lib/components/dashboard/active-nav.js';
 	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
+	import LocalSettingsDialog from '$lib/components/local-settings-dialog.svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 
 	const minSidebarWidth = 208;
@@ -99,6 +100,7 @@
 			style="--sidebar-width: {sidebarWidth}px;"
 			data-testid="shared-app-shell"
 		>
+			<LocalSettingsDialog {database} />
 			<DashboardSidebar {database} {activeNav} />
 			{#if sidebarOpen}
 				<button

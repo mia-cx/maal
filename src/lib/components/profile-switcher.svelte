@@ -8,6 +8,7 @@
 	import PackageOpenIcon from '@lucide/svelte/icons/package-open';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
+	import Settings2Icon from '@lucide/svelte/icons/settings-2';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 
 	import { createAuthSlotId, MAX_AUTHENTICATED_SLOTS } from '$lib/auth-slots/contracts.js';
@@ -422,6 +423,13 @@
 						<span>Eight signed-in profiles are already retained. Remove one to add another.</span>
 					</DropdownMenu.Item>
 				{/if}
+				<DropdownMenu.Separator />
+				<DropdownMenu.Item>
+					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+					<a class="flex w-full items-center gap-2" href="/settings/account">
+						<Settings2Icon /> Settings
+					</a>
+				</DropdownMenu.Item>
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>
 	</Sidebar.MenuItem>
