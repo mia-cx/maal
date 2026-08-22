@@ -5,6 +5,9 @@ Status on 2026-08-22: the local contract and WorkOS staging checks pass in Chrom
 ## Proven behavior
 
 - Each profile uses an independent, host-only, path-scoped sealed-session cookie.
+- Every authorization uses the one registered `/api/auth/callback` URI. The retained slot never appears in WorkOS's redirect URI.
+- Encrypted state binds the slot, purpose, expected user, safe return path, nonce, issue time, and ten-minute expiry.
+- A short-lived HTTP-only nonce marker makes the callback one-use without merging concurrent Alice and Bob flows.
 - The callback's actual `Set-Cookie` line stays below 4,096 bytes and includes `Secure`, `HttpOnly`, `SameSite=Lax`, and the exact slot path.
 - Alice remains valid after Bob signs in. Bob remains valid after Alice refreshes, signs out, reauthenticates, and leaves the device.
 - The route proof uses `context.request`, which shares the browser context's cookie jar.
@@ -18,7 +21,7 @@ The direct WorkOS SDK proof measured 2,226-byte Alice and Bob cookies. Hosted Au
 Run the local contract checks:
 
 ```sh
-pnpm exec vitest run tests/unit/auth-slots.spec.ts tests/unit/auth-slot-proof-evidence.spec.ts
+pnpm exec vitest run tests/unit/auth-slots.spec.ts tests/unit/auth-authorize-route.spec.ts tests/unit/auth-callback-route.spec.ts tests/unit/auth-slot-proof-evidence.spec.ts
 pnpm exec playwright test tests/e2e/auth-slot-cookies.e2e.ts
 ```
 
@@ -35,6 +38,8 @@ Run the deployed route proof with `AUTH_SLOT_PROOF_BASE_URL`, `WORKOS_API_KEY`, 
 ```sh
 pnpm test:proof:auth-slots
 ```
+
+Register exactly `<deployed origin>/api/auth/callback` in the WorkOS application. Set `AUTH_SLOT_PROOF_REDIRECT_URI` to that same URI for the direct Hosted AuthKit proof.
 
 Every Playwright project starts with `supplemental-`. Linux WebKit and device descriptors are engine checks only. They do not satisfy issue #70. Traces, screenshots, and videos stay disabled because they can retain credentials and cookies.
 
@@ -63,7 +68,7 @@ Alice: 00112233445566778899aabbccddeeff
 Bob:   ffeeddccbbaa99887766554433221100
 ```
 
-Open `/api/auth-slots/<slot>/authorize?purpose=add-profile&loginHint=<email>&returnTo=/` for each initial login. Use `purpose=reauthenticate` for Alice's second login. Invoke refresh, sign-out, and removal from the staging-origin console with `fetch` requests to the matching slot route. Never paste credentials or response headers into the console.
+Open `/api/auth-slots/<slot>/authorize?purpose=add-profile&loginHint=<email>&returnTo=/` for each initial login. Use `purpose=reauthenticate` for Alice's second login. Confirm each WorkOS navigation returns through `/api/auth/callback`, never a slot-specific callback path. Invoke refresh, sign-out, and removal from the staging-origin console with `fetch` requests to the matching slot route. Never paste credentials, callback state, authorization codes, or response headers into the console.
 
 Use these console calls in sequence, checking Bob's returned `workosUserId` after each Alice operation:
 
@@ -112,7 +117,7 @@ pnpm proof:auth-slots:evidence validate-matrix \
   /tmp/maal-android-chrome.json
 ```
 
-The validator rejects incomplete checks, cookie-policy failures, missing cleanup, template placeholders, and fields that could hold credentials or raw authentication material.
+The validator rejects incomplete checks, cookie-policy failures, missing cleanup, template placeholders, and fields that could hold credentials, callback state, nonces, or raw authentication material.
 
 ## Remaining external action
 

@@ -24,7 +24,7 @@ Route every retained-profile authorization through one registered callback URI. 
 - [x] Implement encrypted, expiring state and one-use nonce marker cookies.
 - [x] Specify stable callback success and rejection behavior with failing HTTP tests.
 - [x] Implement the stable callback while preserving targeted revocation and retained-cookie isolation.
-- [ ] Update browser and live proof contracts for concurrent flows and sanitized evidence.
+- [x] Update browser and live proof contracts for concurrent flows and sanitized evidence.
 - [ ] Run focused checks and the serialized full validation gate.
 
 ## Notes
@@ -35,3 +35,5 @@ Route every retained-profile authorization through one registered callback URI. 
 - `pnpm exec vitest run tests/unit/auth-slots.spec.ts`: 10 passed after the first red-to-green slice.
 - `pnpm exec vitest run tests/unit/auth-callback-route.spec.ts tests/unit/auth-authorize-route.spec.ts tests/unit/auth-slots.spec.ts`: 16 passed.
 - `pnpm check`: 0 errors and 0 warnings.
+- Focused auth/proof unit suite: 20 passed.
+- `pnpm exec playwright test tests/e2e/auth-slot-cookies.e2e.ts`: 2 passed, including concurrent callback marker routing.

@@ -63,7 +63,7 @@ export async function openAuthFlow(
 
 	try {
 		const plaintext = await crypto.subtle.decrypt(
-		{
+			{
 				name: 'AES-GCM',
 				iv: decodeBase64Url(encodedIv),
 				additionalData: AUTH_FLOW_AAD

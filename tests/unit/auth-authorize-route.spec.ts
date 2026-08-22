@@ -6,8 +6,9 @@ const BOB_SLOT = 'ffeeddccbbaa99887766554433221100';
 const COOKIE_PASSWORD = 'a'.repeat(32);
 
 const workos = vi.hoisted(() => ({
-	authorizationUrl: vi.fn(({ state }: { readonly state: string }) =>
-		`https://authkit.test/authorize?state=${encodeURIComponent(state)}`
+	authorizationUrl: vi.fn(
+		({ state }: { readonly state: string }) =>
+			`https://authkit.test/authorize?state=${encodeURIComponent(state)}`
 	),
 	openSlotIdentity: vi.fn()
 }));
@@ -40,9 +41,9 @@ describe('retained profile authorization HTTP seam', () => {
 		await expectRedirect(GET(alice.event), 'https://authkit.test/authorize');
 		await expectRedirect(GET(bob.event), 'https://authkit.test/authorize');
 
-		const [aliceRequest, bobRequest] = workos.authorizationUrl.mock.calls.slice(-2).map(([input]) =>
-			input as { readonly redirectUri: string; readonly state: string }
-		);
+		const [aliceRequest, bobRequest] = workos.authorizationUrl.mock.calls
+			.slice(-2)
+			.map(([input]) => input as { readonly redirectUri: string; readonly state: string });
 		expect(aliceRequest.redirectUri).toBe('https://maal.test/api/auth/callback');
 		expect(bobRequest.redirectUri).toBe(aliceRequest.redirectUri);
 		expect(aliceRequest.state).not.toBe(bobRequest.state);

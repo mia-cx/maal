@@ -47,11 +47,7 @@ export const GET: RequestHandler = async (event) => {
 			},
 			config.cookiePassword
 		);
-		event.cookies.set(
-			authFlowCookieName(nonce),
-			AUTH_FLOW_MARKER_VALUE,
-			authFlowCookieOptions()
-		);
+		event.cookies.set(authFlowCookieName(nonce), AUTH_FLOW_MARKER_VALUE, authFlowCookieOptions());
 
 		const authorizationUrl = adapter.authorizationUrl({
 			redirectUri: callbackUrl(event.url.origin),

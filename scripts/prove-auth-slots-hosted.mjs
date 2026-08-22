@@ -6,7 +6,7 @@ const apiKey = process.env.WORKOS_API_KEY ?? '';
 const clientId = process.env.WORKOS_CLIENT_ID ?? '';
 const cookiePassword = process.env.WORKOS_COOKIE_PASSWORD ?? '';
 const redirectUri =
-	process.env.AUTH_SLOT_PROOF_REDIRECT_URI ?? 'https://staging.maal.mia.cx/auth/callback';
+	process.env.AUTH_SLOT_PROOF_REDIRECT_URI ?? 'https://staging.maal.mia.cx/api/auth/callback';
 const browserName = process.env.AUTH_SLOT_PROOF_BROWSER ?? 'chromium';
 const browserType = { chromium, firefox, webkit, 'ios-webkit': webkit }[browserName];
 

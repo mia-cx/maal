@@ -53,6 +53,8 @@ export interface NativeAuthSlotEvidence {
 		readonly bobSlot: readonly string[];
 	};
 	readonly checks: {
+		readonly stableRegisteredCallback: true;
+		readonly opaqueOneUseFlowState: true;
 		readonly distinctIdentities: true;
 		readonly aliceSurvivedBobLogin: true;
 		readonly bobSurvivedAliceRefresh: true;
@@ -72,12 +74,15 @@ export interface NativeAuthSlotEvidence {
 const FORBIDDEN_KEYS = new Set([
 	'accessToken',
 	'authorizationCode',
+	'authorizationState',
 	'cookieHeader',
 	'cookieValue',
 	'password',
+	'nonce',
 	'rawHeader',
 	'refreshToken',
-	'sealedSession'
+	'sealedSession',
+	'state'
 ]);
 
 export function inspectSessionSetCookie(
@@ -178,6 +183,8 @@ export function createNativeEvidenceTemplate(target: NativeAuthSlotTarget): Nati
 		},
 		requestCookieNames: { appAsset: [], aliceSlot: [], bobSlot: [] },
 		checks: {
+			stableRegisteredCallback: true,
+			opaqueOneUseFlowState: true,
 			distinctIdentities: true,
 			aliceSurvivedBobLogin: true,
 			bobSurvivedAliceRefresh: true,
@@ -313,6 +320,8 @@ export function validateNativeEvidence(value: unknown): asserts value is NativeA
 
 	assertObject(value.checks, 'checks');
 	assertKeys(value.checks, 'checks', [
+		'stableRegisteredCallback',
+		'opaqueOneUseFlowState',
 		'distinctIdentities',
 		'aliceSurvivedBobLogin',
 		'bobSurvivedAliceRefresh',
@@ -321,6 +330,8 @@ export function validateNativeEvidence(value: unknown): asserts value is NativeA
 		'bobSurvivedAliceRemoval'
 	]);
 	for (const check of [
+		'stableRegisteredCallback',
+		'opaqueOneUseFlowState',
 		'distinctIdentities',
 		'aliceSurvivedBobLogin',
 		'bobSurvivedAliceRefresh',

@@ -56,6 +56,9 @@ describe('auth-slot proof evidence', () => {
 		const evidence = completeEvidence();
 		expect(() => validateNativeEvidence(evidence)).not.toThrow();
 		expect(() => validateNativeEvidence({ ...evidence, password: 'nope' })).toThrow(/forbidden/);
+		expect(() => validateNativeEvidence({ ...evidence, state: 'opaque-but-replayable' })).toThrow(
+			/forbidden/
+		);
 		expect(() =>
 			validateNativeEvidence({
 				...evidence,

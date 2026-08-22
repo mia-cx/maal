@@ -135,6 +135,8 @@ test('Hosted AuthKit retains, refreshes, and revokes Alice and Bob independently
 			},
 			requestCookieNames: routing,
 			checks: {
+				stableRegisteredCallback: true,
+				opaqueOneUseFlowState: true,
 				distinctIdentities: true,
 				aliceSurvivedBobLogin: true,
 				bobSurvivedAliceRefresh: true,
@@ -171,7 +173,7 @@ async function addProfile(
 ) {
 	const callbackResponse = page.waitForResponse((response) => {
 		const url = new URL(response.url());
-		return url.pathname === `/api/auth-slots/${slotId}/callback` && response.status() === 303;
+		return url.pathname === '/api/auth/callback' && response.status() === 303;
 	});
 
 	await page.goto(

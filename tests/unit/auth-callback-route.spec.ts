@@ -116,11 +116,7 @@ describe('stable retained-profile callback HTTP seam', () => {
 	});
 });
 
-async function stateFor(
-	authSlotId: string,
-	nonce: string,
-	overrides: Partial<AuthFlow> = {}
-) {
+async function stateFor(authSlotId: string, nonce: string, overrides: Partial<AuthFlow> = {}) {
 	return sealAuthFlow(
 		{
 			schemaVersion: 1,

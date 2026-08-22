@@ -138,7 +138,7 @@ describe('Hosted AuthKit contract', () => {
 		});
 		const url = new URL(
 			adapter.authorizationUrl({
-				redirectUri: 'https://maal.test/api/auth-slots/slot/callback',
+				redirectUri: 'https://maal.test/api/auth/callback',
 				state: 'state',
 				loginHint: 'bob@example.test'
 			})
