@@ -15,7 +15,13 @@ import {
 	assertPassingBillingProof,
 	assertPassingBooleanProof,
 	classifyPermittedFreeUseCall,
+	disposableStripeCustomers,
+	disposableStripeSubscriptions,
+	disposableWorkOSOrganizations,
+	disposableWorkOSUsers,
 	fixtureCleanupComplete,
+	mergeFixtureIds,
+	requireCleanupQuiescence,
 	stableAuthCallback,
 	summarizeAuthEvidence,
 	summarizeBillingEvidence,
@@ -42,6 +48,8 @@ const liveEnvironment = (configPath: string) => ({
 });
 
 const stagingWrangler = {
+	main: 'src/worker.ts',
+	compatibility_flags: ['nodejs_compat'],
 	assets: { binding: 'ASSETS', directory: '.svelte-kit/cloudflare' },
 	observability: {
 		enabled: true,
@@ -53,6 +61,13 @@ const stagingWrangler = {
 			name: 'maal-v1-staging',
 			vars: { MAAL_PROOF_TELEMETRY: 'staging-only' },
 			triggers: { crons: ['17 3 * * *'] },
+			ratelimits: [
+				{
+					name: 'RECIPE_URL_RATE_LIMIT',
+					namespace_id: '1002',
+					simple: { limit: 10, period: 60 }
+				}
+			],
 			d1_databases: [
 				{
 					binding: 'DB',
@@ -127,10 +142,26 @@ describe('staging cutover proof safety', () => {
 		).rejects.toThrow('must stay outside the repository');
 
 		for (const invalid of [
+			{ ...stagingWrangler, main: 'src/wrong.ts' },
+			{ ...stagingWrangler, compatibility_flags: [] },
 			{ ...stagingWrangler, env: { staging: { ...stagingWrangler.env.staging, name: 'wrong' } } },
 			{
 				...stagingWrangler,
 				env: { staging: { ...stagingWrangler.env.staging, vars: {} } }
+			},
+			{
+				...stagingWrangler,
+				env: {
+					staging: {
+						...stagingWrangler.env.staging,
+						vars: { ...stagingWrangler.env.staging.vars, PUBLIC_VALUE: 'sk_test_private' }
+					}
+				}
+			},
+			{ ...stagingWrangler, vars: { SAFE_LOOKING_NAME: 'whsec_private' } },
+			{
+				...stagingWrangler,
+				env: { staging: { ...stagingWrangler.env.staging, ratelimits: [] } }
 			},
 			{
 				...stagingWrangler,
@@ -183,6 +214,97 @@ describe('staging cutover proof safety', () => {
 		expect(fixtureCleanupComplete({ ...complete, d1RowsRemaining: null })).toBe(false);
 		expect(fixtureCleanupComplete({ ...complete, stripeObjectsDeleted: false })).toBe(false);
 		expect(fixtureCleanupComplete(complete, ['d1'])).toBe(false);
+	});
+
+	test('recovers fixture IDs after lost WorkOS and Stripe create responses', () => {
+		const marker = {
+			nonce: 'nonce-proof',
+			email: 'maal-cutover+nonce-proof@example.test',
+			organizationName: 'Disposable Maal proof nonce-proof'
+		};
+		const users = disposableWorkOSUsers(
+			[
+				{
+					id: 'user_recovered',
+					email: marker.email,
+					metadata: { proof: 'staging-cutover', nonce: marker.nonce }
+				},
+				{
+					id: 'user_other',
+					email: marker.email,
+					metadata: { proof: 'different', nonce: marker.nonce }
+				}
+			],
+			marker
+		);
+		const organizations = disposableWorkOSOrganizations(
+			[
+				{ id: 'org_recovered', name: marker.organizationName },
+				{ id: 'org_other', name: 'Unrelated household' }
+			],
+			marker
+		);
+		const customers = disposableStripeCustomers(
+			[
+				{
+					id: 'cus_recovered',
+					email: marker.email,
+					metadata: { householdId: 'org_recovered', workosUserId: 'user_recovered' }
+				},
+				{
+					id: 'cus_other',
+					email: marker.email,
+					metadata: { householdId: 'org_other', workosUserId: 'user_recovered' }
+				}
+			],
+			{
+				email: marker.email,
+				householdIds: organizations.map((item: { id: string }) => item.id),
+				userIds: users.map((item: { id: string }) => item.id)
+			}
+		);
+		const subscriptions = disposableStripeSubscriptions(
+			[
+				{
+					id: 'sub_recovered',
+					metadata: { householdId: 'org_recovered', workosUserId: 'user_recovered' }
+				},
+				{
+					id: 'sub_other',
+					metadata: { householdId: 'org_other', workosUserId: 'user_recovered' }
+				}
+			],
+			{
+				householdIds: organizations.map((item: { id: string }) => item.id),
+				userIds: users.map((item: { id: string }) => item.id),
+				subscriptionIds: []
+			}
+		);
+		expect(
+			mergeFixtureIds(
+				[],
+				users.map((item: { id: string }) => item.id)
+			)
+		).toEqual(['user_recovered']);
+		expect(organizations.map((item: { id: string }) => item.id)).toEqual(['org_recovered']);
+		expect(customers.map((item: { id: string }) => item.id)).toEqual(['cus_recovered']);
+		expect(subscriptions.map((item: { id: string }) => item.id)).toEqual(['sub_recovered']);
+	});
+
+	test('waits for two stable cleanup observations after a delayed Stripe event appears', async () => {
+		const fingerprints = ['evt_initial', 'evt_delayed', 'evt_delayed'];
+		const attempts: number[] = [];
+		await expect(
+			requireCleanupQuiescence({
+				cycle: async (attempt: number) => {
+					attempts.push(attempt);
+					return { complete: true, fingerprint: fingerprints[attempt] };
+				},
+				pause: async () => undefined,
+				maxAttempts: 4
+			})
+		).resolves.toEqual({ complete: true, fingerprint: 'evt_delayed' });
+		expect(attempts).toEqual([0, 1, 2]);
 	});
 
 	test('emits staging-only per-request D1-open telemetry without buffering the response', async () => {

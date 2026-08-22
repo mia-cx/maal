@@ -20,6 +20,7 @@ const requiredLiveSettings = [
 ];
 
 export const contractProofFiles = [
+	'tests/unit/staging-cutover-proof.spec.ts',
 	'tests/unit/auth-slots.spec.ts',
 	'tests/unit/auth-slot-proof-evidence.spec.ts',
 	'tests/unit/billing-capability.spec.ts',
@@ -134,12 +135,20 @@ const validateWranglerStagingConfig = async (path) => {
 		throw new Error('MAAL_STAGING_WRANGLER_CONFIG must contain valid JSON-compatible JSONC.');
 	}
 	const staging = configuration?.env?.staging;
+	if (configuration?.main !== 'src/worker.ts') {
+		throw new Error('Wrangler main must be src/worker.ts.');
+	}
+	const compatibilityFlags = staging?.compatibility_flags ?? configuration?.compatibility_flags;
+	if (!Array.isArray(compatibilityFlags) || !compatibilityFlags.includes('nodejs_compat')) {
+		throw new Error('Wrangler staging requires the nodejs_compat compatibility flag.');
+	}
 	if (staging?.name !== 'maal-v1-staging') {
 		throw new Error('Wrangler staging Worker name must be maal-v1-staging.');
 	}
 	if (staging.vars?.MAAL_PROOF_TELEMETRY !== 'staging-only') {
 		throw new Error('Wrangler staging must enable staging-only proof telemetry.');
 	}
+	assertNoSecretVars(configuration);
 	const databases = staging.d1_databases;
 	const database =
 		Array.isArray(databases) && databases.length === 1 && databases[0]?.binding === 'DB'
@@ -153,6 +162,21 @@ const validateWranglerStagingConfig = async (path) => {
 		throw new Error(
 			'Wrangler staging DB binding must name the provisioned maal-v1-staging D1 database.'
 		);
+	}
+	const rateLimits = staging.ratelimits;
+	const rateLimit =
+		Array.isArray(rateLimits) &&
+		rateLimits.length === 1 &&
+		rateLimits[0]?.name === 'RECIPE_URL_RATE_LIMIT'
+			? rateLimits[0]
+			: null;
+	if (
+		!rateLimit ||
+		!/^\d*[1-9]\d*$/.test(rateLimit.namespace_id) ||
+		rateLimit.simple?.limit !== 10 ||
+		rateLimit.simple?.period !== 60
+	) {
+		throw new Error('Wrangler staging rate-limit binding is invalid.');
 	}
 	if (
 		!Array.isArray(staging.triggers?.crons) ||
@@ -173,6 +197,23 @@ const validateWranglerStagingConfig = async (path) => {
 		observability.traces?.head_sampling_rate !== 0.01
 	) {
 		throw new Error('Wrangler staging observability settings are invalid.');
+	}
+};
+
+const assertNoSecretVars = (configuration) => {
+	for (const [scope, vars] of [
+		['root', configuration?.vars],
+		...Object.entries(configuration?.env ?? {}).map(([name, value]) => [name, value?.vars])
+	]) {
+		if (!vars || typeof vars !== 'object' || Array.isArray(vars)) continue;
+		for (const [name, value] of Object.entries(vars)) {
+			if (
+				/(?:secret|password|api[_-]?key|client[_-]?id|product[_-]?id|webhook|token)/i.test(name) ||
+				(typeof value === 'string' && /^(?:sk_|whsec_|prod_|client_|mk_)/.test(value))
+			) {
+				throw new Error(`Wrangler ${scope} vars must not contain secret or provider values.`);
+			}
+		}
 	}
 };
 
@@ -218,6 +259,62 @@ export const fixtureCleanupComplete = (cleanup, failures = []) =>
 	typeof cleanup === 'object' &&
 	Object.values(cleanup).length > 0 &&
 	Object.values(cleanup).every((value) => value === true || value === 0);
+
+export const mergeFixtureIds = (current, discovered) =>
+	[...new Set([...(current ?? []), ...(discovered ?? [])])].sort();
+
+export const disposableWorkOSUsers = (users, marker) =>
+	(users ?? []).filter(
+		(user) =>
+			user?.email === marker.email &&
+			user.metadata?.proof === 'staging-cutover' &&
+			user.metadata?.nonce === marker.nonce
+	);
+
+export const disposableWorkOSOrganizations = (organizations, marker) =>
+	(organizations ?? []).filter((organization) => organization?.name === marker.organizationName);
+
+export const disposableStripeCustomers = (customers, marker) => {
+	const householdIds = new Set(marker.householdIds ?? []);
+	const userIds = new Set(marker.userIds ?? []);
+	return (customers ?? []).filter(
+		(customer) =>
+			customer?.email === marker.email &&
+			householdIds.has(customer.metadata?.householdId) &&
+			userIds.has(customer.metadata?.workosUserId)
+	);
+};
+
+export const disposableStripeSubscriptions = (subscriptions, marker) => {
+	const householdIds = new Set(marker.householdIds ?? []);
+	const userIds = new Set(marker.userIds ?? []);
+	const knownIds = new Set(marker.subscriptionIds ?? []);
+	return (subscriptions ?? []).filter(
+		(subscription) =>
+			knownIds.has(subscription?.id) ||
+			(householdIds.has(subscription?.metadata?.householdId) &&
+				userIds.has(subscription?.metadata?.workosUserId))
+	);
+};
+
+export const requireCleanupQuiescence = async ({ cycle, pause, maxAttempts = 8 }) => {
+	let previousFingerprint = null;
+	let stableObservations = 0;
+	for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+		const observation = await cycle(attempt);
+		if (observation.complete === true) {
+			stableObservations =
+				observation.fingerprint === previousFingerprint ? stableObservations + 1 : 1;
+			previousFingerprint = observation.fingerprint;
+			if (stableObservations >= 2) return observation;
+		} else {
+			previousFingerprint = null;
+			stableObservations = 0;
+		}
+		if (attempt + 1 < maxAttempts) await pause(attempt);
+	}
+	throw new Error('Disposable fixture cleanup did not reach two stable zero-remnant observations.');
+};
 
 export const summarizeAuthEvidence = (value) => ({
 	result: value?.result === 'passed' ? 'passed' : 'failed',
