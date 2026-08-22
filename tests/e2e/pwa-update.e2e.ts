@@ -90,6 +90,7 @@ test('two tabs drain and acknowledge before a worker update reloads a saved loca
 		.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)))
 		.toBe(true);
 	await page.evaluate(seedLocalProfile, databaseName);
+	protocol.length = 0;
 	await page.reload();
 
 	await page.getByRole('button', { name: 'Add recipe' }).click();
