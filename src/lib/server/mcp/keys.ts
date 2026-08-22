@@ -29,6 +29,28 @@ interface McpKeyRow {
 }
 
 const scopeSet = new Set<string>(MAAL_API_SCOPES);
+export const MCP_ACTIVE_KEY_LIMIT = 8;
+export const MCP_KEY_CREATION_DAILY_LIMIT = 20;
+const DAY_MILLISECONDS = 24 * 60 * 60 * 1_000;
+
+export class McpKeyLimitError extends Error {
+	readonly _tag = 'McpKeyLimitError';
+	constructor(readonly reason: 'active_key_limit' | 'key_creation_rate_limit') {
+		super('The MCP key limit has been reached.');
+	}
+}
+
+export const canonicalMcpKeyExpiry = (value: string, now: string): string => {
+	const expiry = new Date(value);
+	if (
+		Number.isNaN(expiry.getTime()) ||
+		expiry.toISOString() !== value ||
+		expiry.getTime() <= Date.parse(now)
+	) {
+		throw new TypeError('invalid_expiry');
+	}
+	return expiry.toISOString();
+};
 
 const bytesToBase64Url = (bytes: Uint8Array): string => {
 	let binary = '';
@@ -121,6 +143,8 @@ export class McpKeyRepository {
 		}
 		const rawKey = randomKey();
 		const now = input.now ?? new Date().toISOString();
+		const expiresAt = input.expiresAt ? canonicalMcpKeyExpiry(input.expiresAt, now) : null;
+		const creationCutoff = new Date(Date.parse(now) - DAY_MILLISECONDS).toISOString();
 		const id = uuidv7();
 		await this.database.batch([
 			this.database
@@ -128,7 +152,12 @@ export class McpKeyRepository {
 					`INSERT INTO mcp_keys
 					 (id, owner_user_id, key_hash, label, preset, grant_mode, scopes, created_at,
 					  expires_at, revoked_at, last_used_at)
-					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`
+					 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL
+					 WHERE (SELECT COUNT(*) FROM mcp_keys
+					        WHERE owner_user_id = ? AND revoked_at IS NULL
+					        AND (expires_at IS NULL OR expires_at > ?)) < ?
+					   AND (SELECT COUNT(*) FROM mcp_keys
+					        WHERE owner_user_id = ? AND created_at >= ?) < ?`
 				)
 				.bind(
 					id,
@@ -139,16 +168,30 @@ export class McpKeyRepository {
 					input.grantMode,
 					Effect.runSync(encodeMcpScopes(scopes)),
 					now,
-					input.expiresAt ?? null
+					expiresAt,
+					input.ownerUserId,
+					now,
+					MCP_ACTIVE_KEY_LIMIT,
+					input.ownerUserId,
+					creationCutoff,
+					MCP_KEY_CREATION_DAILY_LIMIT
 				),
 			...householdIds.map((householdId) =>
 				this.database
-					.prepare('INSERT INTO mcp_key_households (key_id, household_id) VALUES (?, ?)')
-					.bind(id, householdId)
+					.prepare(
+						`INSERT INTO mcp_key_households (key_id, household_id)
+						 SELECT ?, ? WHERE EXISTS (SELECT 1 FROM mcp_keys WHERE id = ?)`
+					)
+					.bind(id, householdId, id)
 			)
 		]);
 		const record = await this.byId(input.ownerUserId, id);
-		if (!record) throw new TypeError('The created MCP key could not be read.');
+		if (!record) {
+			const limits = await this.keyLimitState(input.ownerUserId, now);
+			throw new McpKeyLimitError(
+				limits.active >= MCP_ACTIVE_KEY_LIMIT ? 'active_key_limit' : 'key_creation_rate_limit'
+			);
+		}
 		return { key: rawKey, record: publicRecord(record) };
 	}
 
@@ -204,6 +247,7 @@ export class McpKeyRepository {
 	): Promise<CreatedMcpKey | null> {
 		const rawKey = randomKey();
 		const nextId = uuidv7();
+		const creationCutoff = new Date(Date.parse(now) - DAY_MILLISECONDS).toISOString();
 		await this.database.batch([
 			this.database
 				.prepare(
@@ -213,9 +257,20 @@ export class McpKeyRepository {
 					 SELECT ?, owner_user_id, ?, label, preset, grant_mode, scopes, ?,
 					        expires_at, NULL, NULL
 					 FROM mcp_keys
-					 WHERE id = ? AND owner_user_id = ? AND revoked_at IS NULL`
+					 WHERE id = ? AND owner_user_id = ? AND revoked_at IS NULL
+					 AND (SELECT COUNT(*) FROM mcp_keys
+					      WHERE owner_user_id = ? AND created_at >= ?) < ?`
 				)
-				.bind(nextId, await hashMcpKey(rawKey), now, id, ownerUserId),
+				.bind(
+					nextId,
+					await hashMcpKey(rawKey),
+					now,
+					id,
+					ownerUserId,
+					ownerUserId,
+					creationCutoff,
+					MCP_KEY_CREATION_DAILY_LIMIT
+				),
 			this.database
 				.prepare(
 					`INSERT INTO mcp_key_households (key_id, household_id)
@@ -232,7 +287,32 @@ export class McpKeyRepository {
 				.bind(now, id, ownerUserId, nextId)
 		]);
 		const record = await this.byId(ownerUserId, nextId);
-		if (!record) return null;
+		if (!record) {
+			const source = await this.byId(ownerUserId, id);
+			if (source?.revokedAt === null) throw new McpKeyLimitError('key_creation_rate_limit');
+			return null;
+		}
 		return { key: rawKey, record: publicRecord(record) };
+	}
+
+	private async keyLimitState(
+		ownerUserId: string,
+		now: string
+	): Promise<{
+		active: number;
+		recent: number;
+	}> {
+		const creationCutoff = new Date(Date.parse(now) - DAY_MILLISECONDS).toISOString();
+		return (
+			(await this.database
+				.prepare(
+					`SELECT
+					 (SELECT COUNT(*) FROM mcp_keys WHERE owner_user_id = ? AND revoked_at IS NULL
+					  AND (expires_at IS NULL OR expires_at > ?)) AS active,
+					 (SELECT COUNT(*) FROM mcp_keys WHERE owner_user_id = ? AND created_at >= ?) AS recent`
+				)
+				.bind(ownerUserId, now, ownerUserId, creationCutoff)
+				.first<{ active: number; recent: number }>()) ?? { active: 0, recent: 0 }
+		);
 	}
 }

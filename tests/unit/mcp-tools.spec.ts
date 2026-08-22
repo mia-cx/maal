@@ -229,6 +229,23 @@ describe('MCP tool adapters', () => {
 		expect(overridden.calls).not.toContain('writeHouseholdMeal');
 	});
 
+	test('recipe propagation skips paid households without live and projected meals write access', async () => {
+		const domain = new SpyDomain();
+		const definition = tools.find(({ name }) => name === 'update_user_recipe')!;
+		await definition.handler(
+			contextFor(domain, {
+				principal: {
+					...principal,
+					effectiveHouseholds: [
+						{ ...principal.effectiveHouseholds[0], permissions: ['recipes:write'] }
+					]
+				}
+			}),
+			{ recipeId: existingRecipe.id, patch: { title: 'Private update' } }
+		);
+		expect(domain.calls).toEqual(['getUserRecipe', 'writeUserRecipe']);
+	});
+
 	test('URL meal import consumes the limiter, parses once, then writes recipe and meal through the port', async () => {
 		const domain = new SpyDomain();
 		const order: string[] = [];

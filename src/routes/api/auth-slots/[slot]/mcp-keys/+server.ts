@@ -5,6 +5,8 @@ import {
 	MAAL_API_SCOPES,
 	MCP_KEY_PRESETS,
 	McpKeyRepository,
+	assertMcpKeyManagementCapability,
+	canonicalMcpKeyExpiry,
 	type MaalApiScope,
 	type McpKeyPreset
 } from '$lib/server/mcp/index.js';
@@ -58,17 +60,24 @@ const assertSelectedHouseholds = async (input: {
 
 const keyErrorResponse = (cause: unknown): Response => {
 	const tag = cause && typeof cause === 'object' && '_tag' in cause ? cause._tag : null;
-	const code = cause instanceof TypeError ? cause.message : tag;
+	const code =
+		cause instanceof TypeError
+			? cause.message
+			: cause && typeof cause === 'object' && 'code' in cause
+				? cause.code
+				: tag;
 	const status =
 		tag === 'SyncUnauthenticated'
 			? 401
-			: code === 'household_forbidden'
+			: code === 'household_forbidden' || code === 'no_remote_service'
 				? 403
-				: code === 'not_found'
-					? 404
-					: cause instanceof TypeError || tag === 'ParseError'
-						? 400
-						: 503;
+				: tag === 'McpKeyLimitError'
+					? 429
+					: code === 'not_found'
+						? 404
+						: cause instanceof TypeError || tag === 'ParseError'
+							? 400
+							: 503;
 	return Response.json(
 		{ error: status === 503 ? 'mcp_key_storage_unavailable' : (code ?? 'invalid_request') },
 		{ status, headers: noStore }
@@ -97,6 +106,13 @@ export const POST: RequestHandler = async (event) => {
 			authenticateSyncSlot(event),
 			readJson(event.request, CreateKeySchema)
 		]);
+		const now = new Date().toISOString();
+		await assertMcpKeyManagementCapability({
+			database: environment.DB,
+			ownerUserId: actor.workosUserId,
+			liveMemberships: actor.activeMemberships,
+			now
+		});
 		const selectedHouseholdIds = [...new Set(body.selectedHouseholdIds ?? [])];
 		if (body.grantMode === 'selected') {
 			await assertSelectedHouseholds({
@@ -108,12 +124,10 @@ export const POST: RequestHandler = async (event) => {
 		} else if (selectedHouseholdIds.length > 0) {
 			throw new TypeError('all_grant_cannot_select_households');
 		}
-		if (body.expiresAt !== undefined && body.expiresAt !== null) {
-			const expiry = new Date(body.expiresAt);
-			if (Number.isNaN(expiry.getTime()) || expiry.toISOString() <= new Date().toISOString()) {
-				throw new TypeError('invalid_expiry');
-			}
-		}
+		const expiresAt =
+			body.expiresAt === undefined || body.expiresAt === null
+				? null
+				: canonicalMcpKeyExpiry(body.expiresAt, now);
 		const created = await new McpKeyRepository(environment.DB).create({
 			ownerUserId: actor.workosUserId,
 			label: body.label,
@@ -121,7 +135,8 @@ export const POST: RequestHandler = async (event) => {
 			grantMode: body.grantMode,
 			scopes: body.scopes as readonly MaalApiScope[],
 			selectedHouseholdIds,
-			expiresAt: body.expiresAt ?? null
+			expiresAt,
+			now
 		});
 		return Response.json(created, { status: 201, headers: noStore });
 	} catch (cause) {
@@ -137,9 +152,17 @@ export const PUT: RequestHandler = async (event) => {
 			authenticateSyncSlot(event),
 			readJson(event.request, KeyIdSchema)
 		]);
+		const now = new Date().toISOString();
+		await assertMcpKeyManagementCapability({
+			database: environment.DB,
+			ownerUserId: actor.workosUserId,
+			liveMemberships: actor.activeMemberships,
+			now
+		});
 		const created = await new McpKeyRepository(environment.DB).reroll(
 			actor.workosUserId,
-			body.keyId
+			body.keyId,
+			now
 		);
 		if (!created) throw new TypeError('not_found');
 		return Response.json(created, { headers: noStore });

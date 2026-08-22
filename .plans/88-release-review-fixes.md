@@ -24,7 +24,7 @@ Drizzle baseline or canonical taxonomy seed.
 - [x] Enforce paid-period deadlines and protect the current billing owner in all membership mutations.
 - [x] Reconcile stale trial resources and purge check-in recovery rows in scheduled maintenance.
 - [x] Restart portable-import backfill and preserve authoritative deletion intent for natural-key replacements.
-- [ ] Harden MCP key management, paid authorization, expiry, recovered households, and recipe propagation.
+- [x] Harden MCP key management, paid authorization, expiry, recovered households, and recipe propagation.
 - [ ] Add authorized household administration, check-in read, and food-profile MCP tools.
 - [ ] Run one bounded final validation and prove the migrations and seed remain byte-identical.
 
@@ -46,3 +46,7 @@ Drizzle baseline or canonical taxonomy seed.
 - Portability slice: 1 file / 8 tests passed. Import clears affected backfill checkpoints and wakes the
   matching device sync manager. Replacing an acknowledged natural-key row enqueues its deletion snapshot
   before writing the imported identity. Svelte check passed with 0 errors and 0 warnings.
+- MCP boundary slice: 3 files / 41 tests passed. Create and reroll now require current paid service. Key
+  storage caps eight live keys and twenty creations per rolling day. Expiry accepts canonical future UTC
+  instants only. Recovered households require a new subscription identity, and recipe propagation requires
+  `meals:write` in the effective household intersection.

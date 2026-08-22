@@ -289,7 +289,9 @@ export const tools: readonly ToolDefinition[] = [
 			await propagateRecipeUpdateToLinkedMeals({
 				domain: context.domain,
 				actorUserId: context.principal.ownerUserId,
-				householdIds: context.principal.effectiveHouseholds.map(({ householdId }) => householdId),
+				householdIds: context.principal.effectiveHouseholds
+					.filter(({ permissions }) => permissions.includes('meals:write'))
+					.map(({ householdId }) => householdId),
 				previous: current,
 				next: recipe
 			});

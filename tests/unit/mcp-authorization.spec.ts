@@ -4,8 +4,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import type { LiveWorkOSMembership } from '$lib/server/auth-slots/adapter.js';
 import {
 	MAAL_API_SCOPES,
+	MCP_ACTIVE_KEY_LIMIT,
+	MCP_KEY_CREATION_DAILY_LIMIT,
 	McpKeyRepository,
 	authorizeMcpRequest,
+	assertMcpKeyManagementCapability,
+	canonicalMcpKeyExpiry,
 	hashMcpKey,
 	mcpAuthorizationResponse,
 	presetScopes
@@ -142,6 +146,30 @@ describe('MCP key lifecycle', () => {
 		]);
 		expect(presetScopes('full_access')).toEqual(MAAL_API_SCOPES);
 	});
+
+	test('enforces canonical UTC expiry, active-key count, and daily creation limits', async () => {
+		expect(() => canonicalMcpKeyExpiry('2026-08-23T14:00:00+02:00', MCP_TEST_NOW)).toThrow(
+			'invalid_expiry'
+		);
+		const canonicalExpiry = '2026-08-23T12:00:00.000Z';
+		const first = await createKey({ expiresAt: canonicalExpiry });
+		expect(first.record.expiresAt).toBe(canonicalExpiry);
+		for (let index = 1; index < MCP_ACTIVE_KEY_LIMIT; index += 1) await createKey();
+		await expect(createKey()).rejects.toMatchObject({
+			_tag: 'McpKeyLimitError',
+			reason: 'active_key_limit'
+		});
+
+		await database.prepare('DELETE FROM mcp_keys').run();
+		for (let index = 0; index < MCP_KEY_CREATION_DAILY_LIMIT; index += 1) {
+			const created = await createKey();
+			await repository.revoke(MCP_TEST_USER, created.record.id, MCP_TEST_NOW);
+		}
+		await expect(createKey()).rejects.toMatchObject({
+			_tag: 'McpKeyLimitError',
+			reason: 'key_creation_rate_limit'
+		});
+	});
 });
 
 describe('MCP request authorization', () => {
@@ -190,7 +218,11 @@ describe('MCP request authorization', () => {
 			_tag: 'McpAuthenticationError'
 		});
 
-		const expired = await createKey({ expiresAt: '2026-08-22T11:59:59.000Z' });
+		const expired = await createKey({ expiresAt: '2026-08-23T11:59:59.000Z' });
+		await database
+			.prepare('UPDATE mcp_keys SET expires_at = ? WHERE id = ?')
+			.bind('2026-08-22T11:59:59.000Z', expired.record.id)
+			.run();
 		await expect(authorize(expired.key)).rejects.toMatchObject({
 			_tag: 'McpAuthenticationError'
 		});
@@ -244,6 +276,23 @@ describe('MCP request authorization', () => {
 		}
 	});
 
+	test('expires active service at the paid period and applies the same gate to key management', async () => {
+		await database
+			.prepare('UPDATE billing_subscriptions SET current_period_end = ?')
+			.bind(MCP_TEST_NOW)
+			.run();
+		const created = await createKey();
+		await expect(authorize(created.key)).rejects.toMatchObject({ _tag: 'McpAuthorizationError' });
+		await expect(
+			assertMcpKeyManagementCapability({
+				database,
+				ownerUserId: MCP_TEST_USER,
+				liveMemberships: [membership()],
+				now: MCP_TEST_NOW
+			})
+		).rejects.toMatchObject({ _tag: 'McpAuthorizationError' });
+	});
+
 	test('rechecks WorkOS, D1 role, key grant, revocation, plan, and deletion on the next request', async () => {
 		const created = await createKey({
 			grantMode: 'selected',
@@ -281,6 +330,17 @@ describe('MCP request authorization', () => {
 			.bind(MCP_TEST_HOUSEHOLD, MCP_TEST_USER, MCP_TEST_NOW)
 			.run();
 		await expect(authorize(created.key)).rejects.toMatchObject({ _tag: 'McpAuthorizationError' });
+		await database
+			.prepare(
+				`UPDATE household_deletion_requests SET state = 'recovered',
+				 stripe_cancellation_id = (SELECT stripe_subscription_id FROM billing_subscriptions)`
+			)
+			.run();
+		await expect(authorize(created.key)).rejects.toMatchObject({ _tag: 'McpAuthorizationError' });
+		await database
+			.prepare("UPDATE billing_subscriptions SET stripe_subscription_id = 'sub_restarted'")
+			.run();
+		await expect(authorize(created.key)).resolves.toBeDefined();
 		await database.prepare('DELETE FROM household_deletion_requests').run();
 
 		await repository.revoke(MCP_TEST_USER, created.record.id, MCP_TEST_NOW);
