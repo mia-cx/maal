@@ -20,8 +20,9 @@ live Stripe object, or production provider key.
 - The output evidence is allowlisted. It contains pass/fail facts, counts, UTC times, and a non-secret
   deployment label—never cookies, sessions, tokens, passwords, emails, provider IDs, database IDs, or raw
   provider errors.
-- `proof:staging live` creates and removes disposable objects. `preflight`, `contracts`, build, dry-run deploy,
-  migration list, D1 info, and read-only queries do not.
+- `proof:staging live` creates and removes disposable objects. The rewrite-launch D1 reset is a separate,
+  destructive operator action. `preflight`, `contracts`, build, dry-run deploy, migration list, D1 info,
+  export, and read-only queries do not mutate remote state.
 
 ## Stable WorkOS callback contract
 
@@ -67,31 +68,57 @@ git check-ignore --quiet .wrangler/staging-proof.jsonc
 pnpm exec wrangler deploy --dry-run --config .wrangler/staging-proof.jsonc --env staging
 ```
 
-Run the local schema contract, inspect unapplied remote migrations, and record the current Time Travel
-bookmark in the private change record:
+Run the local schema contract. Inspect unapplied remote migrations. Export the current schema and record the
+current Time Travel bookmark in the private change record. The export and generated reset file must use fresh,
+absolute paths outside the repository:
 
 ```sh
 pnpm test:d1-schema
-pnpm exec wrangler d1 info maal-staging --config .wrangler/staging-proof.jsonc --env staging
 pnpm exec wrangler d1 migrations list maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging
 pnpm exec wrangler d1 time-travel info maal-staging --config .wrangler/staging-proof.jsonc --env staging
+pnpm exec wrangler d1 export maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging --no-data --output=/absolute/private/path/maal-staging-before-rewrite.sql
+node scripts/generate-d1-reset-sql.mjs /absolute/private/path/maal-staging-before-rewrite.sql /absolute/private/path/maal-staging-reset.sql
 ```
 
-Apply migrations only after all four commands identify staging:
+Review both private SQL files. The generated file must drop every exported application table, view, and
+`d1_migrations`, while leaving `sqlite_*` and `_cf_*` internal objects alone. Stop staging traffic and Stripe
+webhook delivery before the reset. Then require the operator to type the database-specific phrase exactly:
+
+```sh
+printf '%s\n' 'Type exactly: RESET maal-staging FOR REWRITE LAUNCH'
+read -r MAAL_RESET_CONFIRMATION
+test "$MAAL_RESET_CONFIRMATION" = 'RESET maal-staging FOR REWRITE LAUNCH' || { unset MAAL_RESET_CONFIRMATION; printf '%s\n' 'Reset cancelled.' >&2; exit 1; }
+unset MAAL_RESET_CONFIRMATION
+```
+
+Do not continue if that check exits nonzero. Execute the reviewed reset file only after the bookmark, export,
+traffic pause, and confirmation are recorded:
+
+```sh
+pnpm exec wrangler d1 execute maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging --file=/absolute/private/path/maal-staging-reset.sql
+pnpm exec wrangler d1 execute maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging --command "SELECT COUNT(*) AS application_objects FROM sqlite_schema WHERE type IN ('table', 'view', 'trigger') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'" --json
+```
+
+`application_objects` must equal `0`. A missing table, stale `d1_migrations` row, or any other nonzero result
+blocks the launch. Apply the two-file fresh chain only to that verified empty database:
 
 ```sh
 pnpm exec wrangler d1 migrations apply maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging
 pnpm exec wrangler d1 migrations list maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging
-pnpm exec wrangler d1 execute maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging --command "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name" --json
+pnpm exec wrangler d1 execute maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging --command "SELECT name FROM d1_migrations ORDER BY id; SELECT (SELECT COUNT(*) FROM units) AS units, (SELECT COUNT(*) FROM unit_aliases) AS unit_aliases, (SELECT COUNT(*) FROM foods) AS foods, (SELECT COUNT(*) FROM food_aliases) AS food_aliases" --json
 ```
 
-The migration list must be empty afterward. Review the table names locally; do not attach raw D1 output to a
-public issue because later checks can contain infrastructure metadata. D1 records applied files in
-`d1_migrations`. See [D1 migrations](https://developers.cloudflare.com/d1/reference/migrations/) and
-[D1 Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/).
+The migration list must be empty afterward. `d1_migrations` must contain only
+`0000_rewrite_baseline.sql` and `0001_global_taxonomy_seed.sql`. The seed counts must be `40` units, `184`
+unit aliases, and the intentionally empty current global food sets at `0` and `0`. Do not attach raw D1 output
+to a public issue because it can contain infrastructure metadata. D1 records applied files in
+`d1_migrations`. See [D1 migrations](https://developers.cloudflare.com/d1/reference/migrations/),
+[D1 Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/), and
+[D1 foreign keys](https://developers.cloudflare.com/d1/sql-api/foreign-keys/).
 
-Every later application and schema version repeats this inspection and forward-migration process against
-`maal-staging`. Never create a versioned replacement D1 or copy the complete database for a release.
+This destructive reset happens once for the rewrite launch. Every later schema version uses generated,
+forward-only migrations against `maal-staging` in place. Never reset it for a routine release, create a
+versioned replacement D1, or copy the complete database for an application version.
 
 ## 2. Configure WorkOS staging
 
@@ -310,13 +337,36 @@ Production keeps separate provider objects from staging and uses the existing `m
 1. Confirm #83's stable WorkOS callback is deployed and obtain a fully passing sanitized staging proof.
 2. Copy the tracked config to an ignored production cutover file. Confirm it resolves Worker `maal` and D1
    `maal-prod`. Keep raw resource IDs only in the private operations record.
-3. Inspect the database and capture its Time Travel bookmark before applying the committed migration chain:
+3. Stop production traffic, scheduled work, and Stripe webhook delivery. Inspect the database, capture its
+   Time Travel bookmark, export its schema, and generate the private reset file:
 
    ```sh
    pnpm exec wrangler d1 info maal-prod --config .wrangler/production-cutover.jsonc --env production
    pnpm exec wrangler d1 migrations list maal-prod --remote --config .wrangler/production-cutover.jsonc --env production
    pnpm exec wrangler d1 time-travel info maal-prod --config .wrangler/production-cutover.jsonc --env production
+   pnpm exec wrangler d1 export maal-prod --remote --config .wrangler/production-cutover.jsonc --env production --no-data --output=/absolute/private/path/maal-prod-before-rewrite.sql
+   node scripts/generate-d1-reset-sql.mjs /absolute/private/path/maal-prod-before-rewrite.sql /absolute/private/path/maal-prod-reset.sql
+   ```
+
+   Review both SQL files and record the bookmark. Require the production-specific confirmation before the
+   one-time rewrite reset:
+
+   ```sh
+   printf '%s\n' 'Type exactly: RESET maal-prod FOR REWRITE LAUNCH'
+   read -r MAAL_RESET_CONFIRMATION
+   test "$MAAL_RESET_CONFIRMATION" = 'RESET maal-prod FOR REWRITE LAUNCH' || { unset MAAL_RESET_CONFIRMATION; printf '%s\n' 'Reset cancelled.' >&2; exit 1; }
+   unset MAAL_RESET_CONFIRMATION
+   pnpm exec wrangler d1 execute maal-prod --remote --config .wrangler/production-cutover.jsonc --env production --file=/absolute/private/path/maal-prod-reset.sql
+   pnpm exec wrangler d1 execute maal-prod --remote --config .wrangler/production-cutover.jsonc --env production --command "SELECT COUNT(*) AS application_objects FROM sqlite_schema WHERE type IN ('table', 'view', 'trigger') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'" --json
+   ```
+
+   Stop if the explicit confirmation fails or `application_objects` is not `0`. Apply and verify the fresh
+   chain only after the empty check:
+
+   ```sh
    pnpm exec wrangler d1 migrations apply maal-prod --remote --config .wrangler/production-cutover.jsonc --env production
+   pnpm exec wrangler d1 migrations list maal-prod --remote --config .wrangler/production-cutover.jsonc --env production
+   pnpm exec wrangler d1 execute maal-prod --remote --config .wrangler/production-cutover.jsonc --env production --command "SELECT name FROM d1_migrations ORDER BY id; SELECT (SELECT COUNT(*) FROM units) AS units, (SELECT COUNT(*) FROM unit_aliases) AS unit_aliases, (SELECT COUNT(*) FROM foods) AS foods, (SELECT COUNT(*) FROM food_aliases) AS food_aliases" --json
    ```
 
 4. Confirm the WorkOS application redirects, roles/permissions, branding, production API key, and Client ID.
@@ -328,8 +378,9 @@ Production keeps separate provider objects from staging and uses the existing `m
 8. Attach the sanitized staging evidence and the #70 native-browser evidence to the release decision. Keep
    infrastructure IDs and provider object IDs only in the private operations record.
 
-Future production versions follow the same inspection, bookmark, and migration sequence against `maal-prod`.
-They never create a replacement D1 or a versioned production Worker.
+The reset is exclusive to the rewrite launch. Future production versions inspect, bookmark, and apply
+forward-only generated migrations against the same `maal-prod`. They never reset routine releases, create a
+replacement D1, or create a versioned production Worker.
 
 Cut over traffic only when the callback blocker is closed, every staging gate passes, cleanup is verified,
 scheduled maintenance is observable, and an operator has rehearsed rollback-forward.

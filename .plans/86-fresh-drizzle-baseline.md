@@ -18,7 +18,7 @@ Replace the rewrite's incremental migration history with one baseline generated 
 - [x] Generate and commit the fresh Drizzle baseline from the current schema.
 - [x] Add the populated-prototype fail-closed contract and update migration consumers.
 - [x] Generate a deterministic post-baseline D1 taxonomy seed from the canonical TypeScript seed.
-- [ ] Rewrite staging and production reset-first cutover instructions.
+- [x] Rewrite staging and production reset-first cutover instructions.
 - [ ] Run focused and full validation and record exact evidence.
 
 ## Notes
@@ -34,3 +34,5 @@ Replace the rewrite's incremental migration history with one baseline generated 
 - `pnpm db:generate:seed` renders that migration from the canonical TypeScript seed.
 - D1 and TypeScript match at 40 units, 184 unit aliases, zero intentionally empty global food rows, affine conversions, and EN/NL plural aliases.
 - `pnpm test:d1-schema` proves both files apply once, leave no pending migrations, and fail closed over populated prototype tables.
+- `scripts/generate-d1-reset-sql.mjs` turns a private schema-only export into a private reset file without touching D1.
+- The runbook requires a Time Travel bookmark, traffic pause, exact environment phrase, zero application objects, both applied migration names, and golden taxonomy counts.

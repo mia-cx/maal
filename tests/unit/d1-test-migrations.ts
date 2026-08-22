@@ -67,7 +67,10 @@ const splitTopLevel = (value: string): readonly string[] => {
 const normalizeSchemaSql = (sql: string | null): string | null => {
 	const normalized =
 		sql
-			?.replace(/[\x60"\[\]]/g, '')
+			?.replaceAll('`', '')
+			.replaceAll('"', '')
+			.replaceAll('[', '')
+			.replaceAll(']', '')
 			.replace(/__new_/g, '')
 			.replace(/__meal_check_ins_repaired/g, 'meal_check_ins')
 			.replace(/\s+/g, ' ')
@@ -82,7 +85,12 @@ const normalizeSchemaSql = (sql: string | null): string | null => {
 
 export const schemaFingerprint = async (
 	database: D1Database
-): Promise<{ readonly objects: number; readonly tables: number; readonly indexes: number; readonly sha256: string }> => {
+): Promise<{
+	readonly objects: number;
+	readonly tables: number;
+	readonly indexes: number;
+	readonly sha256: string;
+}> => {
 	const { results } = await database
 		.prepare(
 			`SELECT type, name, tbl_name, sql
