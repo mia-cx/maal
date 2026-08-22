@@ -80,7 +80,7 @@ const normalizeSchemaSql = (sql: string | null): string | null => {
 	const bodyStart = normalized.indexOf('(');
 	if (bodyStart === -1 || !normalized.endsWith(')')) return normalized;
 	const body = normalized.slice(bodyStart + 1, -1);
-	return `${normalized.slice(0, bodyStart + 1)}${splitTopLevel(body).sort().join(',')})`;
+	return `${normalized.slice(0, bodyStart + 1)}${splitTopLevel(body).toSorted().join(',')})`;
 };
 
 export const schemaFingerprint = async (

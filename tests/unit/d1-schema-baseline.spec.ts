@@ -64,9 +64,7 @@ describe('rewrite D1 migration baseline', () => {
 		const database = await createDatabase();
 		await applyD1Migrations(database, await readD1MigrationFiles());
 		const units = await database
-			.prepare(
-				'SELECT id, base_unit_id, to_base_factor, to_base_offset FROM units ORDER BY id'
-			)
+			.prepare('SELECT id, base_unit_id, to_base_factor, to_base_offset FROM units ORDER BY id')
 			.all();
 		const aliases = await database
 			.prepare(
@@ -143,16 +141,14 @@ describe('rewrite D1 migration baseline', () => {
 
 		const [baseline] = await readD1MigrationFiles();
 		await expect(applyD1Migration(database, baseline!)).rejects.toThrow();
+		await expect(database.prepare('SELECT workos_user_id FROM users').all()).resolves.toMatchObject(
+			{ results: [{ workos_user_id: 'user_prototype' }] }
+		);
+		await expect(database.prepare('SELECT id FROM user_recipes').all()).resolves.toMatchObject({
+			results: [{ id: 'recipe_prototype' }]
+		});
 		await expect(
-			database.prepare('SELECT workos_user_id FROM users').all()
-		).resolves.toMatchObject({ results: [{ workos_user_id: 'user_prototype' }] });
-		await expect(
-			database.prepare('SELECT id FROM user_recipes').all()
-		).resolves.toMatchObject({ results: [{ id: 'recipe_prototype' }] });
-		await expect(
-			database
-				.prepare("SELECT name FROM sqlite_schema WHERE name = 'household_appliances'")
-				.first()
+			database.prepare("SELECT name FROM sqlite_schema WHERE name = 'household_appliances'").first()
 		).resolves.toBeNull();
 	});
 });

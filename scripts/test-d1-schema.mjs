@@ -11,11 +11,10 @@ const databaseName = 'maal-local';
 const expectedMigrations = ['0000_rewrite_baseline.sql', '0001_global_taxonomy_seed.sql'];
 
 const run = (persistenceDirectory, args, expectedSuccess = true) => {
-	const result = spawnSync(
-		'pnpm',
-		[...wrangler, ...args, '--persist-to', persistenceDirectory],
-		{ encoding: 'utf8', stdio: 'pipe' }
-	);
+	const result = spawnSync('pnpm', [...wrangler, ...args, '--persist-to', persistenceDirectory], {
+		encoding: 'utf8',
+		stdio: 'pipe'
+	});
 	if ((result.status === 0) !== expectedSuccess) {
 		throw new Error(
 			`D1 schema proof failed (${args.join(' ')}):\n${result.stdout ?? ''}\n${result.stderr ?? ''}`
@@ -52,12 +51,7 @@ try {
 	);
 
 	run(emptyPersistenceDirectory, ['migrations', 'apply', databaseName, '--local']);
-	const pending = run(emptyPersistenceDirectory, [
-		'migrations',
-		'list',
-		databaseName,
-		'--local'
-	]);
+	const pending = run(emptyPersistenceDirectory, ['migrations', 'list', databaseName, '--local']);
 	assert.match(pending.stdout, /No migrations to apply/);
 	assert.deepEqual(
 		query(emptyPersistenceDirectory, 'SELECT name FROM d1_migrations ORDER BY id'),
@@ -154,11 +148,7 @@ try {
 		 INSERT INTO user_recipes VALUES ('recipe_prototype', 'user_prototype', 'Soup');
 		 INSERT INTO household_meals VALUES ('meal_prototype', 'org_prototype', 'Soup night');`
 	);
-	run(
-		prototypePersistenceDirectory,
-		['migrations', 'apply', databaseName, '--local'],
-		false
-	);
+	run(prototypePersistenceDirectory, ['migrations', 'apply', databaseName, '--local'], false);
 	assert.deepEqual(
 		query(
 			prototypePersistenceDirectory,
