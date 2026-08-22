@@ -9,6 +9,8 @@ import {
 	assertPassingBillingProof,
 	assertPassingBooleanProof,
 	classifyPermittedFreeUseCall,
+	fixtureCleanupComplete,
+	stableAuthCallback,
 	summarizeAuthEvidence,
 	summarizeBillingEvidence,
 	summarizeBooleanProof,
@@ -105,6 +107,18 @@ describe('staging cutover proof safety', () => {
 				directory
 			)
 		).rejects.toThrow('clean HTTPS staging origin');
+		expect(stableAuthCallback('https://staging.maal.test')).toBe(
+			'https://staging.maal.test/api/auth/callback'
+		);
+		await expect(
+			validateLiveEnvironment(
+				{
+					...liveEnvironment(configPath),
+					MAAL_STAGING_EVIDENCE_FILE: join(directory, 'evidence.json')
+				},
+				directory
+			)
+		).rejects.toThrow('must stay outside the repository');
 
 		for (const invalid of [
 			{ ...stagingWrangler, env: { staging: { ...stagingWrangler.env.staging, name: 'wrong' } } },
@@ -146,6 +160,19 @@ describe('staging cutover proof safety', () => {
 		expect(classifyPermittedFreeUseCall('POST', '/api/auth-slots/slot/sync/pull')).toBeNull();
 		expect(classifyPermittedFreeUseCall('POST', '/mcp')).toBeNull();
 		expect(classifyPermittedFreeUseCall('POST', '/api/billing/webhook')).toBeNull();
+	});
+
+	test('keeps the private cleanup ledger until every zero-remnant fact passes', () => {
+		const complete = {
+			workosUserDeleted: true,
+			workosOrganizationDeleted: true,
+			stripeObjectsDeleted: true,
+			d1RowsRemaining: 0
+		};
+		expect(fixtureCleanupComplete(complete)).toBe(true);
+		expect(fixtureCleanupComplete({ ...complete, d1RowsRemaining: null })).toBe(false);
+		expect(fixtureCleanupComplete({ ...complete, stripeObjectsDeleted: false })).toBe(false);
+		expect(fixtureCleanupComplete(complete, ['d1'])).toBe(false);
 	});
 
 	test('allowlists provider evidence and writes a new private file', async () => {

@@ -212,6 +212,14 @@ export const classifyPermittedFreeUseCall = (method, pathname) =>
 		(candidate) => candidate.method === method.toUpperCase() && candidate.pattern.test(pathname)
 	)?.routeClass ?? null;
 
+export const fixtureCleanupComplete = (cleanup, failures = []) =>
+	Array.isArray(failures) &&
+	failures.length === 0 &&
+	cleanup !== null &&
+	typeof cleanup === 'object' &&
+	Object.values(cleanup).length > 0 &&
+	Object.values(cleanup).every((value) => value === true || value === 0);
+
 export const summarizeAuthEvidence = (value) => ({
 	result: value?.result === 'passed' ? 'passed' : 'failed',
 	aliceCookieBytes: safeInteger(value?.aliceCookieBytes),

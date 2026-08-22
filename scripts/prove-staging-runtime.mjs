@@ -10,7 +10,7 @@ import { NotFoundException, WorkOS } from '@workos-inc/node';
 import Stripe from 'stripe';
 import { uuidv7 } from 'uuidv7';
 
-import { validateLiveEnvironment } from './lib/staging-cutover-proof.mjs';
+import { fixtureCleanupComplete, validateLiveEnvironment } from './lib/staging-cutover-proof.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const config = await validateLiveEnvironment(process.env, root);
@@ -20,7 +20,15 @@ let nonce = randomUUID();
 const password = `Maal-staging-${randomBytes(18).toString('base64url')}!9`;
 let email = `maal-cutover+${nonce}@example.test`;
 const slotId = randomBytes(16).toString('hex');
-const created = { user: null, householdId: null, stripeEventIds: [], customerIds: [] };
+const created = {
+	startedAtSeconds: Math.floor(Date.now() / 1_000) - 5,
+	user: null,
+	householdId: null,
+	stripeEventIds: [],
+	customerIds: [],
+	subscriptionIds: [],
+	refundIds: []
+};
 const checks = {};
 const cleanup = {
 	workosUserDeleted: false,
@@ -45,6 +53,10 @@ if (process.argv[2] === 'cleanup') {
 await createPrivateFixtureLedger();
 
 try {
+	stage = 'configured Maal catalog verification';
+	const catalog = await configuredMaalCatalog();
+	checks.configuredMaalProductAndPrices = true;
+
 	stage = 'WorkOS fixture creation';
 	created.user = await workos.userManagement.createUser({
 		email,
@@ -103,6 +115,8 @@ try {
 		(candidate) => candidate.metadata.householdId === created.householdId
 	);
 	assert(subscription, 'The trial did not create a Stripe subscription.');
+	created.subscriptionIds.push(subscription.id);
+	await updatePrivateFixtureLedger();
 
 	stage = 'webhook disorder and idempotency';
 	const createdSecond = Math.floor(Date.now() / 1_000) + 120;
@@ -143,6 +157,36 @@ try {
 	);
 	checks.webhookDisorderAndIdempotency = true;
 	checks.thirtyDayGraceProjected = true;
+
+	stage = 'paid subscription activation';
+	await stripe.paymentMethods.attach('pm_card_visa', { customer: created.customerIds[0] });
+	await stripe.customers.update(created.customerIds[0], {
+		invoice_settings: { default_payment_method: 'pm_card_visa' }
+	});
+	const paidSubscription = await stripe.subscriptions.update(subscription.id, {
+		default_payment_method: 'pm_card_visa',
+		trial_end: 'now',
+		proration_behavior: 'none',
+		payment_behavior: 'error_if_incomplete',
+		expand: ['latest_invoice']
+	});
+	assert(paidSubscription.status === 'active', 'The trial did not convert to a paid subscription.');
+	assert(
+		paidSubscription.items.data[0]?.price.id === catalog.monthlyPriceId,
+		'The paid subscription does not use the configured monthly Maal price.'
+	);
+	const activeEvent = stripeEvent(
+		'customer.subscription.updated',
+		paidSubscription,
+		createdSecond + 60
+	);
+	created.stripeEventIds.push(activeEvent.id);
+	await updatePrivateFixtureLedger();
+	assert(
+		(await postWebhook(activeEvent)).result === 'processed',
+		'Active event was not processed.'
+	);
+	checks.paidSubscriptionActivated = true;
 
 	stage = 'stateless MCP and paid sync convergence';
 	await setBillingState(created.householdId, 'active', null, null);
@@ -232,11 +276,31 @@ try {
 	checks.resubscriptionRestoredRemoteUse = true;
 
 	stage = 'deletion recovery and purge';
+	const expectedRefund = await computedProratedRefund(
+		await stripe.subscriptions.retrieve(paidSubscription.id, {
+			expand: ['latest_invoice', 'items.data.price']
+		})
+	);
+	assert(expectedRefund.amountMinor > 0, 'The paid subscription had no prorated cash refund.');
 	const deletion = await slotJson(slotId, session, 'billing/household-deletion', {
 		method: 'POST',
 		body: { householdId: created.householdId }
 	});
 	assert(deletion.state === 'recoverable', 'Deletion did not enter recovery.');
+	assert(
+		deletion.previewedAmountMinor === expectedRefund.amountMinor &&
+			deletion.refundedAmountMinor === expectedRefund.amountMinor,
+		'Deletion did not issue the computed prorated cash refund.'
+	);
+	assertSafeId(deletion.stripeRefundId, 'prorated refund');
+	created.refundIds.push(deletion.stripeRefundId);
+	await updatePrivateFixtureLedger();
+	const providerRefund = await stripe.refunds.retrieve(deletion.stripeRefundId);
+	assert(
+		providerRefund.amount === expectedRefund.amountMinor && providerRefund.status === 'succeeded',
+		'Stripe did not confirm the computed prorated cash refund.'
+	);
+	checks.computedProratedCashRefund = true;
 	await slotJson(slotId, session, 'billing/household-deletion', {
 		method: 'PATCH',
 		body: { householdId: created.householdId }
@@ -260,10 +324,7 @@ try {
 	failed = cause instanceof Error ? cause.name : 'UnknownError';
 	failedStage = stage;
 } finally {
-	await cleanupD1().catch(() => cleanupFailures.push('d1'));
-	await cleanupStripe().catch(() => cleanupFailures.push('stripe'));
-	await cleanupWorkOS().catch(() => cleanupFailures.push('workos'));
-	if (cleanupFailures.length === 0) await unlink(config.fixturePath).catch(() => undefined);
+	await runCleanup();
 }
 
 if (failed) {
@@ -427,6 +488,78 @@ async function setBillingState(householdId, status, interruptionStartedAt, grace
 	);
 }
 
+async function configuredMaalCatalog() {
+	const product = await stripe.products.retrieve(process.env.STRIPE_PRODUCT_ID);
+	assert(
+		!product.deleted && product.active && product.name === 'Maal',
+		'Configured product is not active Maal.'
+	);
+	const page = await stripe.prices.list({ product: product.id, active: true, limit: 100 });
+	const expected = new Map([
+		['maal_weekly_v1', 'week'],
+		['maal_monthly_v1', 'month'],
+		['maal_yearly_v1', 'year']
+	]);
+	assert(
+		page.data.length === expected.size,
+		'Configured Maal must expose exactly three active prices.'
+	);
+	for (const price of page.data) {
+		assert(
+			price.lookup_key &&
+				expected.get(price.lookup_key) === price.recurring?.interval &&
+				price.recurring.interval_count === 1 &&
+				price.recurring.usage_type === 'licensed' &&
+				price.billing_scheme === 'per_unit' &&
+				(price.unit_amount ?? 0) > 0,
+			'Configured Maal price lookup or recurrence is invalid.'
+		);
+		expected.delete(price.lookup_key);
+	}
+	assert(expected.size === 0, 'Configured Maal price lookup keys are incomplete.');
+	return {
+		monthlyPriceId: page.data.find(({ lookup_key }) => lookup_key === 'maal_monthly_v1').id
+	};
+}
+
+async function computedProratedRefund(subscription) {
+	const item = subscription.items.data[0];
+	const invoiceId = objectId(subscription.latest_invoice);
+	assert(item && invoiceId, 'Paid subscription lacks a current item or invoice.');
+	const invoice = await stripe.invoices.retrieve(invoiceId);
+	const payments = await stripe.invoicePayments.list({
+		invoice: invoiceId,
+		status: 'paid',
+		limit: 10
+	});
+	const payment = payments.data.find(({ amount_paid }) => (amount_paid ?? 0) > 0);
+	assert(payment && invoice.amount_paid > 0, 'Paid invoice has no settled payment.');
+	let chargeId = objectId(payment.payment.charge ?? null);
+	if (!chargeId) {
+		const paymentIntentId = objectId(payment.payment.payment_intent);
+		assert(paymentIntentId, 'Paid invoice has no payment intent or charge.');
+		chargeId = objectId((await stripe.paymentIntents.retrieve(paymentIntentId)).latest_charge);
+	}
+	assert(chargeId, 'Paid invoice has no refundable charge.');
+	const charge = await stripe.charges.retrieve(chargeId);
+	const refundableMinor = Math.max(0, charge.amount - charge.amount_refunded);
+	const periodLength = Math.max(1, item.current_period_end - item.current_period_start);
+	const remaining = Math.max(0, item.current_period_end - Math.floor(Date.now() / 1_000));
+	return {
+		amountMinor: Math.max(
+			0,
+			Math.min(
+				Math.floor(invoice.amount_paid * Math.min(1, remaining / periodLength)),
+				refundableMinor
+			)
+		)
+	};
+}
+
+function objectId(value) {
+	return typeof value === 'string' ? value : (value?.id ?? null);
+}
+
 async function slotJson(authSlotId, sealedSession, route, options = {}) {
 	const response = await slotFetch(authSlotId, sealedSession, route, options);
 	const value = await response.json().catch(() => null);
@@ -506,18 +639,126 @@ async function d1Execute(command) {
 }
 
 async function cleanupD1() {
-	if (!created.user) return;
-	for (const eventId of created.stripeEventIds) {
-		await d1Execute(`DELETE FROM stripe_events WHERE stripe_event_id = ${sql(eventId)}`);
-	}
-	if (created.householdId) {
-		await d1Execute(
-			`DELETE FROM billing_audit_events WHERE household_id = ${sql(created.householdId)}; DELETE FROM household_deletion_requests WHERE household_id = ${sql(created.householdId)}; DELETE FROM billing_trial_claims WHERE household_id = ${sql(created.householdId)}; DELETE FROM households WHERE household_id = ${sql(created.householdId)}`
-		);
-	}
-	await d1Execute(`DELETE FROM users WHERE workos_user_id = ${sql(created.user.id)}`);
+	const userId = created.user?.id ?? null;
+	const householdId = created.householdId;
+	const audienceCondition =
+		[
+			userId ? `(audience_kind = 'user' AND audience_id = ${sql(userId)})` : null,
+			householdId ? `(audience_kind = 'household' AND audience_id = ${sql(householdId)})` : null
+		]
+			.filter(Boolean)
+			.join(' OR ') || '0';
+	const eventCondition = created.stripeEventIds.length
+		? `stripe_event_id IN (${created.stripeEventIds.map(sql).join(', ')})`
+		: '0';
+	const customerCondition = created.customerIds.length
+		? `stripe_customer_id IN (${created.customerIds.map(sql).join(', ')})`
+		: '0';
+	const subscriptionCondition = created.subscriptionIds.length
+		? `stripe_subscription_id IN (${created.subscriptionIds.map(sql).join(', ')})`
+		: '0';
+
+	await d1Execute(
+		[
+			`DELETE FROM stripe_events WHERE ${eventCondition}`,
+			`DELETE FROM sync_mutation_receipts WHERE ${audienceCondition}`,
+			`DELETE FROM sync_tombstones WHERE ${audienceCondition}`,
+			`DELETE FROM sync_entity_versions WHERE ${audienceCondition}`,
+			`DELETE FROM sync_scope_state WHERE ${audienceCondition}`,
+			`DELETE FROM sync_changes WHERE ${audienceCondition}${userId ? ` OR actor_user_id = ${sql(userId)}` : ''}`,
+			userId ? `DELETE FROM sync_devices WHERE workos_user_id = ${sql(userId)}` : null,
+			householdId
+				? `DELETE FROM billing_audit_events WHERE household_id = ${sql(householdId)}`
+				: null,
+			userId ? `DELETE FROM billing_audit_events WHERE actor_user_id = ${sql(userId)}` : null,
+			householdId
+				? `DELETE FROM household_deletion_requests WHERE household_id = ${sql(householdId)}`
+				: null,
+			userId || householdId
+				? `DELETE FROM billing_trial_claims WHERE ${[
+						userId ? `workos_user_id = ${sql(userId)}` : null,
+						householdId ? `household_id = ${sql(householdId)}` : null,
+						customerCondition,
+						subscriptionCondition
+					]
+						.filter(Boolean)
+						.join(' OR ')}`
+				: null,
+			householdId ? `DELETE FROM households WHERE household_id = ${sql(householdId)}` : null,
+			userId ? `DELETE FROM users WHERE workos_user_id = ${sql(userId)}` : null
+		]
+			.filter(Boolean)
+			.join('; ')
+	);
 	const result = await d1Execute(
-		`SELECT (SELECT COUNT(*) FROM users WHERE workos_user_id = ${sql(created.user.id)}) + (SELECT COUNT(*) FROM billing_trial_claims WHERE workos_user_id = ${sql(created.user.id)}) AS count`
+		`SELECT SUM(count) AS count FROM (` +
+			[
+				`SELECT COUNT(*) AS count FROM stripe_events WHERE ${eventCondition}`,
+				`SELECT COUNT(*) AS count FROM sync_mutation_receipts WHERE ${audienceCondition}`,
+				`SELECT COUNT(*) AS count FROM sync_tombstones WHERE ${audienceCondition}`,
+				`SELECT COUNT(*) AS count FROM sync_entity_versions WHERE ${audienceCondition}`,
+				`SELECT COUNT(*) AS count FROM sync_scope_state WHERE ${audienceCondition}`,
+				`SELECT COUNT(*) AS count FROM sync_changes WHERE ${audienceCondition}${userId ? ` OR actor_user_id = ${sql(userId)}` : ''}`,
+				`SELECT COUNT(*) AS count FROM sync_devices WHERE ${userId ? `workos_user_id = ${sql(userId)}` : '0'}`,
+				`SELECT COUNT(*) AS count FROM billing_trial_claims WHERE ${
+					[
+						userId ? `workos_user_id = ${sql(userId)}` : null,
+						householdId ? `household_id = ${sql(householdId)}` : null,
+						customerCondition,
+						subscriptionCondition
+					]
+						.filter(Boolean)
+						.join(' OR ') || '0'
+				}`,
+				`SELECT COUNT(*) AS count FROM billing_audit_events WHERE ${
+					[
+						userId ? `actor_user_id = ${sql(userId)}` : null,
+						householdId ? `household_id = ${sql(householdId)}` : null
+					]
+						.filter(Boolean)
+						.join(' OR ') || '0'
+				}`,
+				`SELECT COUNT(*) AS count FROM billing_subscriptions WHERE ${
+					[
+						householdId ? `household_id = ${sql(householdId)}` : null,
+						customerCondition,
+						subscriptionCondition
+					]
+						.filter(Boolean)
+						.join(' OR ') || '0'
+				}`,
+				`SELECT COUNT(*) AS count FROM household_deletion_requests WHERE ${householdId ? `household_id = ${sql(householdId)}` : '0'}`,
+				`SELECT COUNT(*) AS count FROM household_memberships WHERE ${
+					[
+						householdId ? `household_id = ${sql(householdId)}` : null,
+						userId ? `workos_user_id = ${sql(userId)}` : null
+					]
+						.filter(Boolean)
+						.join(' OR ') || '0'
+				}`,
+				`SELECT COUNT(*) AS count FROM mcp_key_households WHERE ${householdId ? `household_id = ${sql(householdId)}` : '0'}`,
+				`SELECT COUNT(*) AS count FROM mcp_keys WHERE ${userId ? `owner_user_id = ${sql(userId)}` : '0'}`,
+				`SELECT COUNT(*) AS count FROM meals WHERE ${householdId ? `household_id = ${sql(householdId)}` : '0'}`,
+				`SELECT COUNT(*) AS count FROM meal_check_ins WHERE ${
+					[
+						householdId ? `household_id = ${sql(householdId)}` : null,
+						userId ? `reporter_user_id = ${sql(userId)}` : null
+					]
+						.filter(Boolean)
+						.join(' OR ') || '0'
+				}`,
+				`SELECT COUNT(*) AS count FROM recipes WHERE ${
+					[
+						userId ? `owner_user_id = ${sql(userId)}` : null,
+						householdId ? `saved_from_household_id = ${sql(householdId)}` : null
+					]
+						.filter(Boolean)
+						.join(' OR ') || '0'
+				}`,
+				`SELECT COUNT(*) AS count FROM households WHERE ${householdId ? `household_id = ${sql(householdId)}` : '0'}`,
+				`SELECT COUNT(*) AS count FROM users WHERE ${userId ? `workos_user_id = ${sql(userId)}` : '0'}`
+			].join(' UNION ALL ') +
+			`)`
 	);
 	cleanup.d1RowsRemaining = result?.[0]?.results?.[0]?.count ?? null;
 }
@@ -542,11 +783,26 @@ async function cleanupStripe() {
 		}
 		await stripe.customers.del(customer.id);
 	}
+	const customerFacts = await Promise.all(
+		created.customerIds.map(async (id) => (await stripe.customers.retrieve(id)).deleted === true)
+	);
+	const subscriptionFacts = await Promise.all(
+		created.subscriptionIds.map(async (id) =>
+			['canceled', 'incomplete_expired'].includes((await stripe.subscriptions.retrieve(id)).status)
+		)
+	);
+	const refundFacts = await Promise.all(
+		created.refundIds.map(async (id) => (await stripe.refunds.retrieve(id)).status === 'succeeded')
+	);
 	cleanup.stripeObjectsDeleted =
+		customerFacts.every(Boolean) &&
+		subscriptionFacts.every(Boolean) &&
+		refundFacts.every(Boolean) &&
 		(await stripe.customers.list({ email, limit: 100 })).data.length === 0;
 }
 
 async function cleanupWorkOS() {
+	if (!created.householdId) cleanup.workosOrganizationDeleted = true;
 	if (created.householdId) {
 		try {
 			await workos.organizations.deleteOrganization(created.householdId);
@@ -560,6 +816,7 @@ async function cleanupWorkOS() {
 			else throw cause;
 		}
 	}
+	if (!created.user) cleanup.workosUserDeleted = true;
 	if (created.user) {
 		try {
 			await workos.userManagement.deleteUser(created.user.id);
@@ -573,6 +830,56 @@ async function cleanupWorkOS() {
 			else throw cause;
 		}
 	}
+}
+
+async function captureStripeEventIds() {
+	let startingAfter;
+	for (let pageNumber = 0; pageNumber < 10; pageNumber += 1) {
+		const page = await stripe.events.list({
+			created: { gte: created.startedAtSeconds },
+			limit: 100,
+			...(startingAfter ? { starting_after: startingAfter } : {})
+		});
+		for (const event of page.data) {
+			if (stripeEventBelongsToFixture(event)) created.stripeEventIds.push(event.id);
+		}
+		if (!page.has_more || page.data.length === 0) break;
+		startingAfter = page.data.at(-1).id;
+	}
+	created.stripeEventIds = [...new Set(created.stripeEventIds)];
+	await updatePrivateFixtureLedger();
+}
+
+function stripeEventBelongsToFixture(event) {
+	const object = event.data?.object ?? {};
+	const ids = new Set([...created.customerIds, ...created.subscriptionIds, ...created.refundIds]);
+	return [
+		object.id,
+		object.customer,
+		object.subscription,
+		object.metadata?.householdId,
+		object.metadata?.workosUserId,
+		object.parent?.subscription_details?.subscription
+	].some(
+		(value) =>
+			ids.has(objectId(value)) || value === created.householdId || value === created.user?.id
+	);
+}
+
+async function runCleanup() {
+	cleanupFailures.length = 0;
+	await cleanupStripe().catch(() => cleanupFailures.push('stripe'));
+	await new Promise((resolvePromise) => setTimeout(resolvePromise, 750));
+	await captureStripeEventIds().catch(() => cleanupFailures.push('stripe-events'));
+	await cleanupD1().catch(() => cleanupFailures.push('d1'));
+	await cleanupWorkOS().catch(() => cleanupFailures.push('workos'));
+	if (cleanupComplete()) {
+		await unlink(config.fixturePath);
+	}
+}
+
+function cleanupComplete() {
+	return fixtureCleanupComplete(cleanup, cleanupFailures);
 }
 
 function sql(value) {
@@ -605,21 +912,24 @@ function updatePrivateFixtureLedger() {
 
 function privateFixtureLedger() {
 	return {
-		schemaVersion: 1,
+		schemaVersion: 2,
 		environment: 'staging',
+		startedAtSeconds: created.startedAtSeconds,
 		nonce,
 		email,
 		userId: created.user?.id ?? null,
 		householdId: created.householdId,
 		stripeEventIds: created.stripeEventIds,
-		customerIds: created.customerIds
+		customerIds: created.customerIds,
+		subscriptionIds: created.subscriptionIds,
+		refundIds: created.refundIds
 	};
 }
 
 async function loadPrivateFixtureLedger() {
 	const value = JSON.parse(await readFile(config.fixturePath, 'utf8'));
 	assert(
-		value?.schemaVersion === 1 && value.environment === 'staging',
+		(value?.schemaVersion === 1 || value?.schemaVersion === 2) && value.environment === 'staging',
 		'Fixture ledger is invalid.'
 	);
 	assert(
@@ -629,26 +939,27 @@ async function loadPrivateFixtureLedger() {
 	nonce = value.nonce;
 	email = value.email;
 	created.user = value.userId ? { id: value.userId } : null;
+	created.startedAtSeconds = Number.isSafeInteger(value.startedAtSeconds)
+		? value.startedAtSeconds
+		: Math.floor(Date.now() / 1_000) - 86_400;
 	created.householdId = value.householdId ?? null;
 	created.stripeEventIds = Array.isArray(value.stripeEventIds) ? value.stripeEventIds : [];
 	created.customerIds = Array.isArray(value.customerIds) ? value.customerIds : [];
+	created.subscriptionIds = Array.isArray(value.subscriptionIds) ? value.subscriptionIds : [];
+	created.refundIds = Array.isArray(value.refundIds) ? value.refundIds : [];
 	for (const id of [
 		created.user?.id,
 		created.householdId,
 		...created.stripeEventIds,
-		...created.customerIds
+		...created.customerIds,
+		...created.subscriptionIds,
+		...created.refundIds
 	].filter(Boolean)) {
 		assertSafeId(id, 'private fixture identifier');
 	}
 }
 
 async function retryCleanup() {
-	await cleanupD1();
-	await cleanupStripe();
-	await cleanupWorkOS();
-	assert(
-		Object.values(cleanup).every((value) => value === true || value === 0),
-		'Disposable fixture cleanup was incomplete.'
-	);
-	await unlink(config.fixturePath);
+	await runCleanup();
+	assert(cleanupComplete(), 'Disposable fixture cleanup was incomplete.');
 }
