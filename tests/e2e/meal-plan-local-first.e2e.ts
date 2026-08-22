@@ -190,20 +190,9 @@ const seed = async (page: Page) => {
 	await expect(page.getByText('Gingery chicken rice bowls').first()).toBeVisible();
 };
 
-test('plans while offline and reloads from Dexie without content API requests', async ({
-	context,
-	page
-}) => {
-	const apiRequests: string[] = [];
-	page.on('request', (request) => {
-		if (new URL(request.url()).pathname.startsWith('/api/')) apiRequests.push(request.url());
-	});
-	await page.setViewportSize({ width: 1280, height: 820 });
-	await seed(page);
-
-	await context.setOffline(true);
+const planRecipeOn = async (page: Page, date: string) => {
 	const recipeCard = page.getByRole('button', { name: 'Open Gingery chicken rice bowls' }).first();
-	const targetDay = page.locator('[data-meal-drop-date="2026-08-23"]').first();
+	const targetDay = page.locator(`[data-meal-drop-date="${date}"]`).first();
 	const [recipeBox, targetBox] = await Promise.all([
 		recipeCard.boundingBox(),
 		targetDay.boundingBox()
@@ -221,6 +210,45 @@ test('plans while offline and reloads from Dexie without content API requests', 
 	await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + 120, { steps: 8 });
 	await page.mouse.up();
 	await expect(targetDay).toContainText('Gingery chicken rice bowls');
+	return { recipeCard, targetDay };
+};
+
+const moveStoredMealToDate = async (page: Page, date: string) => {
+	await page.evaluate(async (nextDate) => {
+		const database = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open('maal-v1:production');
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve(request.result);
+		});
+		const transaction = database.transaction('meals', 'readwrite');
+		const store = transaction.objectStore('meals');
+		const meal = await new Promise<Record<string, unknown>>((resolve, reject) => {
+			const request = store.getAll();
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve(request.result[0] as Record<string, unknown>);
+		});
+		store.put({ ...meal, date: nextDate });
+		await new Promise<void>((resolve, reject) => {
+			transaction.oncomplete = () => resolve();
+			transaction.onerror = () => reject(transaction.error);
+		});
+		database.close();
+	}, date);
+};
+
+test('plans while offline and reloads from Dexie without content API requests', async ({
+	context,
+	page
+}) => {
+	const apiRequests: string[] = [];
+	page.on('request', (request) => {
+		if (new URL(request.url()).pathname.startsWith('/api/')) apiRequests.push(request.url());
+	});
+	await page.setViewportSize({ width: 1280, height: 820 });
+	await seed(page);
+
+	await context.setOffline(true);
+	const { recipeCard, targetDay } = await planRecipeOn(page, '2026-08-23');
 	await expect(recipeCard).toBeVisible();
 	await expect
 		.poll(() =>
@@ -246,6 +274,52 @@ test('plans while offline and reloads from Dexie without content API requests', 
 		'Gingery chicken rice bowls'
 	);
 	expect(apiRequests).toEqual([]);
+});
+
+test('reacts to indexed range writes and preserves keyboard modes and focused check-ins', async ({
+	page
+}) => {
+	await page.clock.setFixedTime(new Date('2026-08-24T12:00:00.000Z'));
+	await page.setViewportSize({ width: 1280, height: 820 });
+	await seed(page);
+	const { targetDay } = await planRecipeOn(page, '2026-08-23');
+
+	await moveStoredMealToDate(page, '2010-01-01');
+	await expect(targetDay).not.toContainText('Gingery chicken rice bowls');
+	await moveStoredMealToDate(page, '2026-08-23');
+	await expect(targetDay).toContainText('Gingery chicken rice bowls');
+
+	await page.keyboard.press('m');
+	await expect(page.getByRole('region', { name: 'Monthly schedule' })).toBeVisible();
+	await page.getByRole('button', { name: 'Check in' }).first().click();
+	await expect(page.getByRole('dialog', { name: 'Meal check-in' })).toBeVisible();
+	await page.getByRole('button', { name: 'Never again' }).click();
+	await page.getByLabel('Notes').fill('Too much washing up.');
+	await page.getByRole('button', { name: 'Save check-in' }).click();
+	await expect(page.getByRole('button', { name: 'Edit check-in' }).first()).toBeVisible();
+
+	await page.keyboard.press('d');
+	await expect(page.locator('[data-daily-scroller]')).toBeVisible();
+	await page.keyboard.press('w');
+	await expect(page.getByRole('region', { name: 'Multi-day schedule' })).toBeVisible();
+	await expect
+		.poll(() =>
+			page.evaluate(async () => {
+				const database = await new Promise<IDBDatabase>((resolve, reject) => {
+					const request = indexedDB.open('maal-v1:production');
+					request.onerror = () => reject(request.error);
+					request.onsuccess = () => resolve(request.result);
+				});
+				const count = await new Promise<number>((resolve, reject) => {
+					const request = database.transaction('mealCheckIns').objectStore('mealCheckIns').count();
+					request.onerror = () => reject(request.error);
+					request.onsuccess = () => resolve(request.result);
+				});
+				database.close();
+				return count;
+			})
+		)
+		.toBe(1);
 });
 
 test('preserves the schedule composition at desktop and phone widths', async ({ page }) => {
