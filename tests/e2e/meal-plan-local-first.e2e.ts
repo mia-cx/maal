@@ -239,10 +239,19 @@ const moveStoredMealToDate = async (page: Page, date: string) => {
 test('plans while offline and reloads from Dexie without content API requests', async ({
 	context,
 	page
-}) => {
-	const apiRequests: string[] = [];
+}, testInfo) => {
+	const sameOriginRequests: Array<{ method: string; path: string; resourceType: string }> = [];
+	const d1CapableRequests: string[] = [];
+	const appOrigin = new URL(String(testInfo.project.use.baseURL)).origin;
 	page.on('request', (request) => {
-		if (new URL(request.url()).pathname.startsWith('/api/')) apiRequests.push(request.url());
+		const url = new URL(request.url());
+		if (url.origin !== appOrigin) return;
+		sameOriginRequests.push({
+			method: request.method(),
+			path: url.pathname,
+			resourceType: request.resourceType()
+		});
+		if (/^\/(?:api|mcp)(?:\/|$)/.test(url.pathname)) d1CapableRequests.push(request.url());
 	});
 	await page.setViewportSize({ width: 1280, height: 820 });
 	await seed(page);
@@ -273,7 +282,11 @@ test('plans while offline and reloads from Dexie without content API requests', 
 	await expect(page.locator('[data-meal-drop-date="2026-08-23"]').first()).toContainText(
 		'Gingery chicken rice bowls'
 	);
-	expect(apiRequests).toEqual([]);
+	await testInfo.attach('free-meal-network-trace', {
+		body: Buffer.from(JSON.stringify({ sameOriginRequests, d1CapableRequests }, null, 2)),
+		contentType: 'application/json'
+	});
+	expect(d1CapableRequests).toEqual([]);
 });
 
 test('reacts to indexed range writes and preserves keyboard modes and focused check-ins', async ({

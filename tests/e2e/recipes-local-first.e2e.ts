@@ -1,9 +1,21 @@
 import { expect, test } from '@playwright/test';
 
-test('creates and reloads a recipe without content API requests', async ({ context, page }) => {
-	const apiRequests: string[] = [];
+test('creates and reloads a recipe without content API requests', async ({
+	context,
+	page
+}, testInfo) => {
+	const sameOriginRequests: Array<{ method: string; path: string; resourceType: string }> = [];
+	const d1CapableRequests: string[] = [];
+	const appOrigin = new URL(String(testInfo.project.use.baseURL)).origin;
 	page.on('request', (request) => {
-		if (new URL(request.url()).pathname.startsWith('/api/')) apiRequests.push(request.url());
+		const url = new URL(request.url());
+		if (url.origin !== appOrigin) return;
+		sameOriginRequests.push({
+			method: request.method(),
+			path: url.pathname,
+			resourceType: request.resourceType()
+		});
+		if (/^\/(?:api|mcp)(?:\/|$)/.test(url.pathname)) d1CapableRequests.push(request.url());
 	});
 
 	await page.goto('/menu');
@@ -64,5 +76,9 @@ test('creates and reloads a recipe without content API requests', async ({ conte
 
 	await page.reload();
 	await expect(page.getByRole('button', { name: 'Open Offline tomato soup' })).toBeVisible();
-	expect(apiRequests).toEqual([]);
+	await testInfo.attach('free-recipe-network-trace', {
+		body: Buffer.from(JSON.stringify({ sameOriginRequests, d1CapableRequests }, null, 2)),
+		contentType: 'application/json'
+	});
+	expect(d1CapableRequests).toEqual([]);
 });
