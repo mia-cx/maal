@@ -3,15 +3,17 @@ import { createAuthSlotId } from '$lib/auth-slots';
 import {
 	authFlowCookieName,
 	authFlowCookieOptions,
+	AUTH_FLOW_LIFETIME_MS,
+	AUTH_FLOW_MARKER_VALUE,
 	authIdentityCookieName,
 	authSlotAdapterFor,
-	callbackPath,
-	encodeAuthFlow,
+	callbackUrl,
 	expectedUserForFlow,
 	openSlotIdentity,
 	readAuthSlotConfig,
 	routeSlotId,
 	safeReturnTo,
+	sealAuthFlow,
 	taggedErrorResponse,
 	type AuthFlowPurpose
 } from '$lib/server/auth-slots';
@@ -29,22 +31,30 @@ export const GET: RequestHandler = async (event) => {
 		);
 		const expectedUserId = expectedUserForFlow(purpose, boundUserId);
 
-		const state = createAuthSlotId();
+		const nonce = createAuthSlotId();
+		const issuedAt = new Date();
 		const returnTo = safeReturnTo(event.url.searchParams.get('returnTo'));
-		event.cookies.set(
-			authFlowCookieName(slotId),
-			encodeAuthFlow({
-				state,
+		const state = await sealAuthFlow(
+			{
+				schemaVersion: 1,
+				authSlotId: slotId,
 				purpose,
 				expectedUserId,
 				returnTo,
-				createdAt: new Date().toISOString()
-			}),
-			authFlowCookieOptions(slotId)
+				nonce,
+				issuedAt: issuedAt.toISOString(),
+				expiresAt: new Date(issuedAt.getTime() + AUTH_FLOW_LIFETIME_MS).toISOString()
+			},
+			config.cookiePassword
+		);
+		event.cookies.set(
+			authFlowCookieName(nonce),
+			AUTH_FLOW_MARKER_VALUE,
+			authFlowCookieOptions()
 		);
 
 		const authorizationUrl = adapter.authorizationUrl({
-			redirectUri: callbackPath(event.url.origin, slotId),
+			redirectUri: callbackUrl(event.url.origin),
 			state,
 			...(event.url.searchParams.get('loginHint')
 				? { loginHint: event.url.searchParams.get('loginHint')! }

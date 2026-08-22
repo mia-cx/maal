@@ -1,5 +1,6 @@
 import { Data } from 'effect';
 import type { AuthSlotId } from '$lib/auth-slots';
+import { AUTH_CALLBACK_PATH } from './flow';
 
 interface CookieSerializeOptions {
 	readonly path?: string;
@@ -12,6 +13,7 @@ interface CookieSerializeOptions {
 export const AUTH_SLOT_COOKIE_LIMIT_BYTES = 4096 as const;
 export const AUTH_SLOT_COOKIE_PREFIX = '__Secure-maal_session_';
 export const AUTH_FLOW_COOKIE_PREFIX = '__Secure-maal_auth_flow_';
+export const AUTH_FLOW_MARKER_VALUE = 'pending' as const;
 export const AUTH_IDENTITY_COOKIE_PREFIX = '__Secure-maal_identity_';
 const RETAINED_COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
 
@@ -28,8 +30,8 @@ export function authSlotCookieName(slotId: AuthSlotId) {
 	return `${AUTH_SLOT_COOKIE_PREFIX}${slotId}` as const;
 }
 
-export function authFlowCookieName(slotId: AuthSlotId) {
-	return `${AUTH_FLOW_COOKIE_PREFIX}${slotId}` as const;
+export function authFlowCookieName(nonce: string) {
+	return `${AUTH_FLOW_COOKIE_PREFIX}${nonce}` as const;
 }
 
 export function authIdentityCookieName(slotId: AuthSlotId) {
@@ -46,11 +48,12 @@ export function authCookieOptions(slotId: AuthSlotId): CookieSerializeOptions & 
 	};
 }
 
-export function authFlowCookieOptions(
-	slotId: AuthSlotId
-): CookieSerializeOptions & { path: string } {
+export function authFlowCookieOptions(): CookieSerializeOptions & { path: string } {
 	return {
-		...authCookieOptions(slotId),
+		path: AUTH_CALLBACK_PATH,
+		httpOnly: true,
+		secure: true,
+		sameSite: 'lax',
 		maxAge: 10 * 60
 	};
 }

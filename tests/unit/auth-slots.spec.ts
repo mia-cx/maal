@@ -14,6 +14,8 @@ import {
 	assertAuthSlotCookieFits,
 	AUTH_CALLBACK_PATH,
 	authCookieOptions,
+	authFlowCookieName,
+	authFlowCookieOptions,
 	authSlotCookieName,
 	authSlotPath,
 	AuthSlotCookieTooLarge,
@@ -91,6 +93,18 @@ describe('auth-slot cookies', () => {
 			httpOnly: true,
 			secure: true,
 			sameSite: 'lax'
+		});
+	});
+
+	it('uses an independent one-use marker on the stable callback path', () => {
+		const nonce = 'abcdefabcdefabcdefabcdefabcdefab';
+		expect(authFlowCookieName(nonce)).toBe(`__Secure-maal_auth_flow_${nonce}`);
+		expect(authFlowCookieOptions()).toMatchObject({
+			path: AUTH_CALLBACK_PATH,
+			httpOnly: true,
+			secure: true,
+			sameSite: 'lax',
+			maxAge: 600
 		});
 	});
 
