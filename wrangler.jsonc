@@ -1,0 +1,75 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "maal-local",
+	"compatibility_date": "2026-07-15",
+	"compatibility_flags": ["nodejs_compat"],
+	"main": "src/worker.ts",
+	"assets": {
+		"binding": "ASSETS",
+		"directory": ".svelte-kit/cloudflare"
+	},
+	"workers_dev": true,
+	"preview_urls": true,
+	"triggers": { "crons": ["17 3 * * *"] },
+	"observability": {
+		"enabled": true,
+		"logs": { "head_sampling_rate": 1 },
+		"traces": { "enabled": true, "head_sampling_rate": 0.01 }
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "maal-local",
+			"database_id": "local",
+			"migrations_dir": "drizzle"
+		}
+	],
+	"ratelimits": [
+		{
+			"name": "RECIPE_URL_RATE_LIMIT",
+			"namespace_id": "1001",
+			"simple": { "limit": 10, "period": 60 }
+		}
+	],
+	"env": {
+		"staging": {
+			"name": "maal-staging",
+			"vars": { "MAAL_PROOF_TELEMETRY": "staging-only" },
+			"triggers": { "crons": ["17 3 * * *"] },
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "maal-staging",
+					"database_id": "c843aee2-d94c-4f9f-b26c-02deea38b86a",
+					"migrations_dir": "drizzle"
+				}
+			],
+			"ratelimits": [
+				{
+					"name": "RECIPE_URL_RATE_LIMIT",
+					"namespace_id": "1002",
+					"simple": { "limit": 10, "period": 60 }
+				}
+			]
+		},
+		"production": {
+			"name": "maal",
+			"triggers": { "crons": ["17 3 * * *"] },
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "maal-prod",
+					"database_id": "d498dfad-9b1f-4f35-9327-441f85a97741",
+					"migrations_dir": "drizzle"
+				}
+			],
+			"ratelimits": [
+				{
+					"name": "RECIPE_URL_RATE_LIMIT",
+					"namespace_id": "1003",
+					"simple": { "limit": 10, "period": 60 }
+				}
+			]
+		}
+	}
+}
