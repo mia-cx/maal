@@ -35,7 +35,7 @@ export const readD1ServerNow = async (database: D1Database): Promise<string> => 
 
 const deleteRows = async (
 	database: D1Database,
-	table: 'sync_changes' | 'sync_mutation_receipts' | 'sync_tombstones',
+	table: 'sync_mutation_receipts' | 'sync_tombstones',
 	rowIds: readonly number[]
 ): Promise<number> => {
 	if (rowIds.length === 0) return 0;
@@ -45,6 +45,50 @@ const deleteRows = async (
 		.bind(...rowIds)
 		.run();
 	return result.meta.changes;
+};
+
+const deleteChangesAndAdvanceFloors = async (
+	database: D1Database,
+	input: {
+		readonly audienceKind: SyncAudienceKind;
+		readonly now: string;
+		readonly changes: readonly ChangeRetentionRow[];
+	}
+): Promise<number> => {
+	if (input.changes.length === 0) return 0;
+	const placeholders = input.changes.map(() => '?').join(', ');
+	const affectedScopes = [...new Set(input.changes.map(({ audience_id }) => audience_id))];
+	const results = await database.batch([
+		database
+			.prepare(`DELETE FROM sync_changes WHERE rowid IN (${placeholders})`)
+			.bind(...input.changes.map(({ seq }) => seq)),
+		...affectedScopes.map((audienceId) =>
+			database
+				.prepare(
+					`UPDATE sync_scope_state SET
+					 bootstrap_generation = bootstrap_generation + CASE
+					  WHEN earliest_retained_sequence != COALESCE(
+					   (SELECT MIN(seq) FROM sync_changes
+					    WHERE audience_kind = ? AND audience_id = ?), latest_sequence)
+					  THEN 1 ELSE 0 END,
+					 earliest_retained_sequence = COALESCE(
+					  (SELECT MIN(seq) FROM sync_changes WHERE audience_kind = ? AND audience_id = ?),
+					  latest_sequence),
+					 updated_at = ?
+					 WHERE audience_kind = ? AND audience_id = ?`
+				)
+				.bind(
+					input.audienceKind,
+					audienceId,
+					input.audienceKind,
+					audienceId,
+					input.now,
+					input.audienceKind,
+					audienceId
+				)
+		)
+	]);
+	return results[0]?.meta.changes ?? 0;
 };
 
 export const pruneSyncRetentionBatch = async (
@@ -69,39 +113,12 @@ export const pruneSyncRetentionBatch = async (
 			.bind(input.audienceKind, input.changeCutoff, input.now, batchSize)
 			.all<ChangeRetentionRow>()
 	).results;
-	const changesDeleted = await deleteRows(
-		database,
-		'sync_changes',
-		changes.map(({ seq }) => seq)
-	);
-
 	const affectedScopes = [...new Set(changes.map(({ audience_id }) => audience_id))];
-	for (const audienceId of affectedScopes) {
-		await database
-			.prepare(
-				`UPDATE sync_scope_state SET
-				 bootstrap_generation = bootstrap_generation + CASE
-				  WHEN earliest_retained_sequence != COALESCE(
-				   (SELECT MIN(seq) FROM sync_changes
-				    WHERE audience_kind = ? AND audience_id = ?), latest_sequence)
-				  THEN 1 ELSE 0 END,
-				 earliest_retained_sequence = COALESCE(
-				  (SELECT MIN(seq) FROM sync_changes WHERE audience_kind = ? AND audience_id = ?),
-				  latest_sequence),
-				 updated_at = ?
-				 WHERE audience_kind = ? AND audience_id = ?`
-			)
-			.bind(
-				input.audienceKind,
-				audienceId,
-				input.audienceKind,
-				audienceId,
-				input.now,
-				input.audienceKind,
-				audienceId
-			)
-			.run();
-	}
+	const changesDeleted = await deleteChangesAndAdvanceFloors(database, {
+		audienceKind: input.audienceKind,
+		now: input.now,
+		changes
+	});
 
 	const receiptRows = (
 		await database
