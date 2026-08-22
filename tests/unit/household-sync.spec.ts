@@ -9,7 +9,10 @@ import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.
 import {
 	HOUSEHOLD_BACKFILL_INTERVAL_MS,
 	HOUSEHOLD_BACKFILL_MAX_BYTES,
+	HOUSEHOLD_BACKFILL_SINGLE_RECORD_MAX_BYTES,
 	applyHouseholdBootstrap,
+	applyHouseholdMutationReceipts,
+	applyHouseholdPullPage,
 	createHouseholdSyncCoordinator,
 	type HouseholdSyncTransport,
 	type UserSyncEnvironment
@@ -83,6 +86,56 @@ describe('household server request validation', () => {
 						aggregate: { bad: true }
 					} as unknown as HouseholdSyncMutation
 				]
+			})
+		).rejects.toMatchObject({ _tag: 'SyncMalformedRequest' });
+		expect(commit).not.toHaveBeenCalled();
+	});
+
+	test.each([
+		[
+			'unknown conflict group',
+			(mutation: HouseholdSyncMutation) => ({
+				...mutation,
+				conflictGroups: ['surprise'] as [string, ...string[]]
+			})
+		],
+		[
+			'operation/deletion mismatch',
+			(mutation: HouseholdSyncMutation) => ({
+				...mutation,
+				operation: 'delete' as const
+			})
+		]
+	])('rejects an %s before the first household repository write', async (_label, invalidate) => {
+		const commit = vi.fn();
+		const repository = {
+			readScopeState: async () => ({ retainedFloor: 0, latestSequence: 0, bootstrapGeneration: 1 }),
+			pull: vi.fn(),
+			bootstrap: vi.fn(),
+			commit,
+			prune: vi.fn()
+		} satisfies HouseholdSyncRepository;
+		const originDeviceId = uuidv7();
+		const aggregate = meal(uuidv7(), uuidv7(), originDeviceId);
+		const mutation: HouseholdSyncMutation = {
+			schemaVersion: 1,
+			mutationId: uuidv7(),
+			originDeviceId,
+			entityKind: 'meal',
+			entityId: aggregate.id,
+			conflictGroups: ['schedule'],
+			operation: 'upsert',
+			occurredAt: timestamp,
+			aggregate
+		};
+
+		await expect(
+			pushHouseholdSync(repository, householdId, 'user_alice', {
+				protocolVersion: 1,
+				deviceId: originDeviceId,
+				audience: { kind: 'household', id: householdId },
+				baseCursor: null,
+				mutations: [mutation, invalidate({ ...mutation, mutationId: uuidv7() })]
 			})
 		).rejects.toMatchObject({ _tag: 'SyncMalformedRequest' });
 		expect(commit).not.toHaveBeenCalled();
@@ -399,6 +452,36 @@ describe('foreground household coordinator', () => {
 		expect(spies.map(({ mock }) => mock.calls.length)).toEqual([0, 0, 0, 0]);
 	});
 
+	test('stops an active cached capability at validUntil without content traffic', async () => {
+		const database = await openDatabase('expired-capability');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: true
+		});
+		await database.billingCapabilities.update(householdId, { validUntil: timestamp });
+		const transport = new MemoryHouseholdServer().transport('user_alice');
+		const requests = [
+			vi.spyOn(transport, 'pull'),
+			vi.spyOn(transport, 'push'),
+			vi.spyOn(transport, 'bootstrap'),
+			vi.spyOn(transport, 'backfill')
+		];
+		const coordinator = createHouseholdSyncCoordinator({
+			database,
+			authSlotId: 'slot_alice',
+			workosUserId: 'user_alice',
+			householdId,
+			transport,
+			environment: environment(),
+			now: () => new Date(timestamp)
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('disabled');
+		expect(requests.map(({ mock }) => mock.calls.length)).toEqual([0, 0, 0, 0]);
+	});
+
 	test('pulls, reapplies local intent, pushes under its retained auth slot, then converges two devices', async () => {
 		const server = new MemoryHouseholdServer();
 		const alice = await openDatabase('alice');
@@ -460,6 +543,160 @@ describe('foreground household coordinator', () => {
 		await aliceCoordinator.syncNow();
 		expect(await alice.meals.get(mealId)).toMatchObject({ date: '2026-08-24' });
 		expect(await bob.meals.get(mealId)).toMatchObject({ date: '2026-08-24' });
+	});
+
+	test('reveals a masked authoritative meal when the pending mutation is rejected', async () => {
+		const database = await openDatabase('rejected-masked-pull');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: true
+		});
+		const mealId = uuidv7();
+		const mutationId = uuidv7();
+		const deviceId = String((await database.meta.get('deviceId'))!.value);
+		await addLocalMealIntent(database, {
+			mealId,
+			mutationId,
+			authSlotId: 'slot_alice',
+			originDeviceId: deviceId,
+			date: '2026-08-24'
+		});
+		const remoteMutationId = uuidv7();
+		const remote = meal(mealId, remoteMutationId, uuidv7(), {
+			date: '2026-08-23',
+			revision: 2
+		});
+		const transport = new MemoryHouseholdServer().transport('user_alice');
+		transport.pull = async (_slot, request) =>
+			request.after === 0
+				? {
+						protocolVersion: 1,
+						changes: [
+							{
+								sequence: 1,
+								mutationId: remoteMutationId,
+								originDeviceId: remote.conflictClocks.schedule!.originDeviceId,
+								actorUserId: 'user_bob',
+								entityKind: 'meal',
+								entityId: mealId,
+								conflictGroups: ['schedule'],
+								operation: 'upsert',
+								resultingRevision: 2,
+								occurredAt: timestamp,
+								receivedAt: timestamp,
+								aggregate: remote,
+								tombstoneExpiresAt: null
+							}
+						],
+						throughSequence: 1,
+						retainedFloor: 0,
+						bootstrapGeneration: 1,
+						hasMore: false
+					}
+				: {
+						protocolVersion: 1,
+						changes: [],
+						throughSequence: request.after,
+						retainedFloor: 0,
+						bootstrapGeneration: 1,
+						hasMore: false
+					};
+		transport.push = async () => ({
+			protocolVersion: 1,
+			receipts: [
+				{
+					mutationId,
+					status: 'rejected',
+					sequence: null,
+					resultingRevision: null,
+					errorCode: 'historical_loser'
+				}
+			],
+			committedThrough: 1
+		});
+		const coordinator = createHouseholdSyncCoordinator({
+			database,
+			authSlotId: 'slot_alice',
+			workosUserId: 'user_alice',
+			householdId,
+			transport,
+			environment: environment()
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+		await expect(database.outbox.get(mutationId)).resolves.toMatchObject({
+			status: 'rejected',
+			rejectionCode: 'historical_loser'
+		});
+		await expect(database.meals.get(mealId)).resolves.toEqual(remote);
+	});
+
+	test('keeps a newer pending meal until every mutation masking the remote meal is rejected', async () => {
+		const database = await openDatabase('multiple-rejected-masked-pull');
+		const mealId = uuidv7();
+		const firstMutationId = uuidv7();
+		const secondMutationId = uuidv7();
+		const deviceId = uuidv7();
+		const local = meal(mealId, secondMutationId, deviceId, { date: '2026-08-24' });
+		const remote = meal(mealId, uuidv7(), uuidv7(), { date: '2026-08-23', revision: 2 });
+		await database.meals.put(local);
+		await database.outbox.bulkPut(
+			[firstMutationId, secondMutationId].map((mutationId) => ({
+				mutationId,
+				authSlotId: 'slot_alice',
+				scopeKind: 'household' as const,
+				scopeId: householdId,
+				status: 'pending' as const,
+				occurredAt: timestamp,
+				aggregateId: mealId,
+				entityKind: 'meal',
+				conflictGroup: 'schedule',
+				operation: 'upsert' as const,
+				originDeviceId: deviceId,
+				payload: {},
+				nextAttemptAt: timestamp,
+				attempts: 0
+			}))
+		);
+		await applyHouseholdPullPage(database, householdId, {
+			protocolVersion: 1,
+			changes: [
+				{
+					sequence: 1,
+					mutationId: uuidv7(),
+					originDeviceId: uuidv7(),
+					actorUserId: 'user_bob',
+					entityKind: 'meal',
+					entityId: mealId,
+					conflictGroups: ['schedule'],
+					operation: 'upsert',
+					resultingRevision: 2,
+					occurredAt: timestamp,
+					receivedAt: timestamp,
+					aggregate: remote,
+					tombstoneExpiresAt: null
+				}
+			],
+			throughSequence: 1,
+			retainedFloor: 0,
+			bootstrapGeneration: 1,
+			hasMore: false
+		});
+
+		const rejected = (mutationId: string) => ({
+			mutationId,
+			status: 'rejected' as const,
+			sequence: null,
+			resultingRevision: null,
+			errorCode: 'historical_loser'
+		});
+		await applyHouseholdMutationReceipts(database, householdId, [rejected(secondMutationId)]);
+		await expect(database.meals.get(mealId)).resolves.toEqual(local);
+
+		await applyHouseholdMutationReceipts(database, householdId, [rejected(firstMutationId)]);
+		await expect(database.meals.get(mealId)).resolves.toEqual(remote);
 	});
 
 	test('keeps lapse changes local, then reconciles them after resubscription', async () => {
@@ -609,6 +846,53 @@ describe('foreground household coordinator', () => {
 		expect(new TextEncoder().encode(JSON.stringify(request)).byteLength).toBeLessThanOrEqual(
 			HOUSEHOLD_BACKFILL_MAX_BYTES
 		);
+	});
+
+	test('persists an oversized backfill result and uploads the later meal', async () => {
+		const database = await openDatabase('oversized-backfill');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: true
+		});
+		const deviceId = String((await database.meta.get('deviceId'))!.value);
+		const oversizedId = uuidv7();
+		const laterId = uuidv7();
+		await database.meals.bulkPut([
+			meal(oversizedId, uuidv7(), deviceId, {
+				date: '2026-08-22',
+				notes: 'x'.repeat(HOUSEHOLD_BACKFILL_SINGLE_RECORD_MAX_BYTES + 1_024)
+			}),
+			meal(laterId, uuidv7(), deviceId, { date: '2026-08-23' })
+		]);
+		const transport = new MemoryHouseholdServer().transport('user_alice');
+		const backfill = vi.spyOn(transport, 'backfill');
+		const coordinator = createHouseholdSyncCoordinator({
+			database,
+			authSlotId: 'slot_alice',
+			workosUserId: 'user_alice',
+			householdId,
+			transport,
+			environment: environment({ saveData: false }),
+			now: () => new Date(timestamp)
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+		expect(backfill).toHaveBeenCalledTimes(1);
+		expect(backfill.mock.calls[0]?.[1].mutations.map(({ entityId }) => entityId)).toEqual([
+			laterId
+		]);
+		expect(
+			(await database.outbox.toArray()).find(({ aggregateId }) => aggregateId === oversizedId)
+		).toMatchObject({
+			status: 'rejected',
+			rejectionCode: 'backfill_payload_too_large',
+			backfill: true
+		});
+		await expect(
+			database.backfillCheckpoints.get(['household', householdId, 'meal'])
+		).resolves.toMatchObject({ lastAggregateId: laterId, processedCount: 2 });
 	});
 
 	test('continues a started backfill after the 30-second interval', async () => {

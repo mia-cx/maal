@@ -13,7 +13,8 @@ import type {
 } from '$lib/sync/household-contracts.js';
 import {
 	assertHouseholdMutationActor,
-	decodeHouseholdSyncAggregate
+	decodeHouseholdSyncAggregate,
+	isAllowedHouseholdConflictGroup
 } from '$lib/sync/household-entities.js';
 
 import { ServerSyncBootstrapRequired, ServerSyncMalformedRequest } from './errors.js';
@@ -36,6 +37,16 @@ const assertMutation = (
 			mutation.aggregate
 		);
 		assertHouseholdMutationActor(mutation.entityKind, actorUserId, decoded.aggregate);
+		if (
+			mutation.conflictGroups.some(
+				(group) => !isAllowedHouseholdConflictGroup(mutation.entityKind, group)
+			)
+		) {
+			throw new Error('conflict group mismatch');
+		}
+		if ((mutation.operation === 'delete') !== (decoded.aggregate.deletedAt !== null)) {
+			throw new Error('deletion operation mismatch');
+		}
 	} catch {
 		throw new ServerSyncMalformedRequest({
 			code: 'invalid_household_aggregate',

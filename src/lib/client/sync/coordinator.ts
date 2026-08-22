@@ -22,7 +22,6 @@ import {
 	SyncUnauthenticated,
 	UserSyncEntityKindSchema,
 	type BackfillCheckpoint,
-	type MutationReceipt,
 	type SyncMutation,
 	type UserSyncEntityKind
 } from '$lib/sync/contracts.js';
@@ -32,13 +31,19 @@ import {
 	USER_SYNC_ENTITY_DESCRIPTORS
 } from '$lib/sync/user-entities.js';
 
-import { applyUserBootstrap, applyUserPullPage, buildUserSnapshotManifest } from './apply.js';
+import {
+	applyUserBootstrap,
+	applyUserMutationReceipts,
+	applyUserPullPage,
+	buildUserSnapshotManifest
+} from './apply.js';
 import { resolveLocalUserSyncCapability, type LocalUserSyncCapability } from './capability.js';
 import type { UserSyncTransport } from './transport.js';
 
 const PUSH_BATCH_SIZE = 50;
 export const BACKFILL_BATCH_SIZE = 25;
 export const BACKFILL_MAX_BYTES = 256 * 1024;
+export const BACKFILL_SINGLE_RECORD_MAX_BYTES = 1024 * 1024;
 export const BACKFILL_INTERVAL_MS = 30_000;
 const LEASE_TTL_MS = 20_000;
 const PULL_PAGE_SIZE = 100;
@@ -176,32 +181,6 @@ const hydrateMutation = async (
 	};
 };
 
-const updateOutboxFromReceipts = async (
-	database: MaalDatabase,
-	receipts: readonly MutationReceipt[],
-	now: Date
-): Promise<void> => {
-	await database.transaction('rw', database.outbox, async () => {
-		for (const receipt of receipts) {
-			const row = await database.outbox.get(receipt.mutationId);
-			if (!row) continue;
-			if (receipt.status === 'accepted' || receipt.status === 'duplicate') {
-				await database.outbox.update(receipt.mutationId, {
-					status: 'acknowledged',
-					acknowledgedSequence: receipt.sequence,
-					acknowledgedAt: utc(now)
-				});
-			} else if ('errorCode' in receipt) {
-				await database.outbox.update(receipt.mutationId, {
-					status: 'rejected',
-					rejectionCode: receipt.errorCode,
-					acknowledgedAt: utc(now)
-				});
-			}
-		}
-	});
-};
-
 const requeue = async (
 	database: MaalDatabase,
 	rows: readonly OutboxRecord[],
@@ -314,7 +293,13 @@ const prepareBackfill = async (
 		}
 
 		const rows: OutboxRecord[] = [];
-		let byteCount = 0;
+		const terminalRows: OutboxRecord[] = [];
+		const mutations: SyncMutation[] = [];
+		let requestCheckpoint: BackfillCheckpoint = {
+			entityKind,
+			lastAggregateId: checkpoint?.lastAggregateId ?? null,
+			processedCount: checkpoint?.processedCount ?? 0
+		};
 		for (const record of records) {
 			const decoded = decodeUserSyncAggregate(entityKind, String(record.id), workosUserId, record);
 			const mutationId = uuidv7();
@@ -325,7 +310,9 @@ const prepareBackfill = async (
 					? Object.keys(decoded.aggregate.conflictClocks)
 					: [];
 			const backfillConflictGroups =
-				clockGroups.length > 0 ? clockGroups : [entityKind === 'recipe' ? 'aggregate' : 'row'];
+				clockGroups.length > 0
+					? clockGroups
+					: [...USER_SYNC_ENTITY_DESCRIPTORS[entityKind].conflictGroups];
 			const mutation: SyncMutation = {
 				schemaVersion: CURRENT_SCHEMA_VERSION,
 				mutationId,
@@ -337,14 +324,53 @@ const prepareBackfill = async (
 				occurredAt: decoded.aggregate.updatedAt as `${string}Z`,
 				aggregate: decoded.aggregate
 			};
-			const bytes = new TextEncoder().encode(JSON.stringify(mutation)).byteLength;
+			const requestBytes = new TextEncoder().encode(
+				JSON.stringify({
+					protocolVersion: CURRENT_PROTOCOL_VERSION,
+					deviceId,
+					audience: { kind: 'user', id: workosUserId },
+					checkpoint: requestCheckpoint,
+					mutations: [...mutations, mutation]
+				})
+			).byteLength;
+			if (requestBytes > BACKFILL_SINGLE_RECORD_MAX_BYTES) {
+				if (rows.length > 0) break;
+				terminalRows.push({
+					mutationId,
+					authSlotId,
+					scopeKind: 'user',
+					scopeId: workosUserId,
+					status: 'rejected',
+					occurredAt: mutation.occurredAt,
+					aggregateId: mutation.entityId,
+					entityKind,
+					conflictGroup: mutation.conflictGroups[0],
+					operation: mutation.operation,
+					originDeviceId: deviceId,
+					payload: null,
+					nextAttemptAt: utc(now),
+					attempts: 0,
+					backfill: true,
+					rejectionCode: 'backfill_payload_too_large',
+					acknowledgedAt: utc(now),
+					backfillConflictGroups,
+					backfillPreviousId: requestCheckpoint.lastAggregateId,
+					backfillProcessedCount: requestCheckpoint.processedCount
+				});
+				requestCheckpoint = {
+					...requestCheckpoint,
+					lastAggregateId: mutation.entityId,
+					processedCount: requestCheckpoint.processedCount + 1
+				};
+				continue;
+			}
 			if (
 				rows.length > 0 &&
-				(rows.length >= BACKFILL_BATCH_SIZE || byteCount + bytes > BACKFILL_MAX_BYTES)
-			)
+				(rows.length >= BACKFILL_BATCH_SIZE || requestBytes > BACKFILL_MAX_BYTES)
+			) {
 				break;
-			if (bytes > BACKFILL_MAX_BYTES) continue;
-			byteCount += bytes;
+			}
+			mutations.push(mutation);
 			rows.push({
 				mutationId,
 				authSlotId,
@@ -363,31 +389,43 @@ const prepareBackfill = async (
 				backfill: true,
 				snapshot: decoded.aggregate,
 				backfillConflictGroups,
-				backfillPreviousId: checkpoint?.lastAggregateId ?? null,
-				backfillProcessedCount: checkpoint?.processedCount ?? 0
+				backfillPreviousId: requestCheckpoint.lastAggregateId,
+				backfillProcessedCount: requestCheckpoint.processedCount
 			});
 		}
-		if (rows.length === 0) return null;
+		if (rows.length === 0 && terminalRows.length === 0) return null;
+		if (rows.length === 0) {
+			await database.transaction('rw', database.outbox, database.backfillCheckpoints, async () => {
+				await database.outbox.bulkAdd(terminalRows);
+				await database.backfillCheckpoints.put({
+					scopeKind: 'user',
+					scopeId: workosUserId,
+					entityKind,
+					priorityBoundary: null,
+					lastAggregateId: requestCheckpoint.lastAggregateId,
+					processedCount: requestCheckpoint.processedCount,
+					state: 'complete',
+					lastAttemptAt: utc(now)
+				});
+			});
+			continue;
+		}
 		await database.transaction('rw', database.outbox, database.backfillCheckpoints, async () => {
-			await database.outbox.bulkAdd(rows);
+			await database.outbox.bulkAdd([...terminalRows, ...rows]);
 			await database.backfillCheckpoints.put({
 				scopeKind: 'user',
 				scopeId: workosUserId,
 				entityKind,
 				priorityBoundary: null,
-				lastAggregateId: checkpoint?.lastAggregateId ?? null,
-				processedCount: checkpoint?.processedCount ?? 0,
+				lastAggregateId: requestCheckpoint.lastAggregateId,
+				processedCount: requestCheckpoint.processedCount,
 				state: 'running',
 				lastAttemptAt: utc(now)
 			});
 		});
 		return {
 			rows,
-			checkpoint: {
-				entityKind,
-				lastAggregateId: checkpoint?.lastAggregateId ?? null,
-				processedCount: checkpoint?.processedCount ?? 0
-			}
+			checkpoint: requestCheckpoint
 		};
 	}
 	return null;
@@ -480,7 +518,12 @@ export const createUserSyncCoordinator = (
 				baseCursor: scope?.cursor ?? null,
 				mutations
 			});
-			await updateOutboxFromReceipts(options.database, response.receipts, now());
+			await applyUserMutationReceipts(
+				options.database,
+				options.workosUserId,
+				response.receipts,
+				now()
+			);
 			return response.committedThrough;
 		} catch (error) {
 			await requeue(options.database, rows, now());
@@ -510,7 +553,12 @@ export const createUserSyncCoordinator = (
 				checkpoint: prepared.checkpoint,
 				mutations
 			});
-			await updateOutboxFromReceipts(options.database, response.receipts, now());
+			await applyUserMutationReceipts(
+				options.database,
+				options.workosUserId,
+				response.receipts,
+				now()
+			);
 			const last = prepared.rows.at(-1)!;
 			await options.database.backfillCheckpoints.put({
 				scopeKind: 'user',

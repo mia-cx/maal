@@ -100,6 +100,7 @@ export interface OutboxRecord {
 	payload: unknown;
 	nextAttemptAt: UtcInstant;
 	attempts: number;
+	authoritativeSnapshot?: unknown;
 }
 
 export type SyncScopeState = 'idle' | 'syncing' | 'blocked' | 'bootstrapRequired';

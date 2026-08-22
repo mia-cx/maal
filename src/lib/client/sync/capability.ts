@@ -1,4 +1,5 @@
 import type { MaalDatabase } from '$lib/client/local/database.js';
+import { billingCapabilityIsEnabledAt } from '$lib/domain/billing/capability.js';
 
 export interface LocalUserSyncCapability {
 	readonly enabled: boolean;
@@ -19,13 +20,7 @@ export const resolveLocalUserSyncCapability = async (
 	for (const membership of memberships) {
 		if (!membership.permissions.includes('recipes:read')) continue;
 		const capability = await database.billingCapabilities.get(membership.householdId);
-		if (!capability || capability.state === 'disabled') continue;
-		if (
-			capability.state === 'grace' &&
-			(capability.validUntil === null || Date.parse(capability.validUntil) < now.getTime())
-		) {
-			continue;
-		}
+		if (!capability || !billingCapabilityIsEnabledAt(capability, now.getTime())) continue;
 		return {
 			enabled: true,
 			stale: capability.stale,

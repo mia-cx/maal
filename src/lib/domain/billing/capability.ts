@@ -14,6 +14,19 @@ export interface BillingProjectionInput {
 	readonly graceUntil: string | null;
 }
 
+export const billingCapabilityWasPreviouslyPaid = (capability: BillingCapability): boolean =>
+	capability.stripeStatus !== null ||
+	capability.subscriberUserId !== null ||
+	capability.stripePriceId !== null ||
+	capability.currentPeriodEnd !== null ||
+	capability.interruptionStartedAt !== null ||
+	capability.graceUntil !== null;
+
+export const billingCapabilityIsEnabledAt = (capability: BillingCapability, now: number): boolean =>
+	capability.state !== 'disabled' &&
+	capability.validUntil !== null &&
+	now < Date.parse(capability.validUntil);
+
 const asUtc = (milliseconds: number): `${string}Z` =>
 	new Date(milliseconds).toISOString() as `${string}Z`;
 

@@ -1,4 +1,5 @@
 import type { MaalDatabase } from '$lib/client/local/database.js';
+import { billingCapabilityIsEnabledAt } from '$lib/domain/billing/capability.js';
 import type { HouseholdPermission } from '$lib/domain/household/contracts.js';
 
 export interface LocalHouseholdSyncCapability {
@@ -26,21 +27,10 @@ export const resolveLocalHouseholdSyncCapability = async (
 		return { enabled: false, stale: false, membershipActive: false, permissions: [] };
 	}
 	const capability = await database.billingCapabilities.get(householdId);
-	if (!capability || capability.state === 'disabled') {
+	if (!capability || !billingCapabilityIsEnabledAt(capability, now.getTime())) {
 		return {
 			enabled: false,
 			stale: capability?.stale ?? false,
-			membershipActive: true,
-			permissions: membership.permissions
-		};
-	}
-	if (
-		capability.state === 'grace' &&
-		(capability.validUntil === null || Date.parse(capability.validUntil) < now.getTime())
-	) {
-		return {
-			enabled: false,
-			stale: capability.stale,
 			membershipActive: true,
 			permissions: membership.permissions
 		};

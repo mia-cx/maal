@@ -6,6 +6,7 @@ import { uuidv7 } from 'uuidv7';
 
 import {
 	applyBillingProjection,
+	refreshBillingProjectionsOnLaunch,
 	refreshBillingProjection,
 	shouldRefreshBillingOnLaunch
 } from '$lib/client/billing.js';
@@ -57,6 +58,113 @@ describe('local billing projection', () => {
 	it('defaults a free household to no remote request', async () => {
 		database = await openMaalDatabase(`billing-free-${crypto.randomUUID()}`);
 		await expect(shouldRefreshBillingOnLaunch(database, 'org_free')).resolves.toBe(false);
+		await database.billingCapabilities.put({
+			householdId: 'org_free',
+			state: 'disabled',
+			stripeStatus: null,
+			subscriberUserId: null,
+			stripePriceId: null,
+			currentPeriodEnd: null,
+			interruptionStartedAt: null,
+			graceUntil: null,
+			validUntil: null,
+			cancelAtPeriodEnd: false,
+			stale: true,
+			source: 'stripe-d1'
+		});
+		await expect(shouldRefreshBillingOnLaunch(database, 'org_free')).resolves.toBe(false);
+	});
+
+	it('refreshes only stale or expired previously-paid projections on launch', async () => {
+		database = await openMaalDatabase(`billing-launch-${crypto.randomUUID()}`);
+		const profileId = uuidv7();
+		await database.profiles.put({
+			profileId,
+			workosUserId: 'user_alice',
+			displayName: 'Alice',
+			email: 'alice@example.test',
+			profilePictureUrl: null,
+			locale: 'en-NL',
+			timezone: 'Europe/Amsterdam',
+			pinSalt: null,
+			pinVerifier: null,
+			lockPolicy: 'none',
+			lastUsedAt: '2026-08-21T12:00:00.000Z',
+			authState: 'authenticated'
+		});
+		await database.authSlots.put({
+			authSlotId: '0123456789abcdef0123456789abcdef',
+			profileId,
+			workosUserId: 'user_alice',
+			sessionState: 'authenticated',
+			lastRefreshedAt: null,
+			lastVerifiedAt: null,
+			nextRetryAt: null,
+			retryCount: 0
+		});
+		for (const householdId of ['org_kitchen', 'org_current', 'org_lapsed', 'org_free']) {
+			await database.memberships.put({
+				membershipId: `membership_${householdId}`,
+				householdId,
+				workosUserId: 'user_alice',
+				roleSlug: 'admin',
+				permissions: ['meals:read'],
+				status: 'active',
+				directoryManaged: false,
+				workosCreatedAt: '2026-08-21T12:00:00.000Z',
+				lastVerifiedAt: '2026-08-21T12:00:00.000Z',
+				updatedAt: '2026-08-21T12:00:00.000Z',
+				source: 'workos',
+				detachedAt: null,
+				denialCode: null
+			});
+		}
+		await database.billingCapabilities.bulkPut([
+			{ ...projection().capability, validUntil: '2026-08-21T11:59:59.000Z' },
+			{ ...projection().capability, householdId: 'org_current' },
+			{
+				...projection().capability,
+				householdId: 'org_lapsed',
+				state: 'disabled',
+				stripeStatus: 'canceled',
+				validUntil: null
+			},
+			{
+				householdId: 'org_free',
+				state: 'disabled',
+				stripeStatus: null,
+				subscriberUserId: null,
+				stripePriceId: null,
+				currentPeriodEnd: null,
+				interruptionStartedAt: null,
+				graceUntil: null,
+				validUntil: null,
+				cancelAtPeriodEnd: false,
+				stale: true,
+				source: 'stripe-d1'
+			}
+		]);
+		await database.remoteProjectionMeta.bulkPut([
+			{
+				key: 'billing:org_current',
+				refreshedAt: '2026-08-01T12:00:00.000Z',
+				decodeVersion: 1,
+				value: {}
+			},
+			{
+				key: 'billing:org_lapsed',
+				refreshedAt: '2026-08-01T12:00:00.000Z',
+				decodeVersion: 1,
+				value: {}
+			}
+		]);
+		const fetcher: typeof globalThis.fetch = vi.fn(async () => Response.json(projection()));
+
+		await expect(
+			refreshBillingProjectionsOnLaunch(database, fetcher, Date.parse('2026-08-21T12:00:00.000Z'))
+		).resolves.toEqual({ attempted: 1, refreshed: 1 });
+		expect(fetcher).toHaveBeenCalledOnce();
+		expect(String(vi.mocked(fetcher).mock.calls[0]?.[0])).toContain('householdId=org_kitchen');
 	});
 
 	it('commits capability and projection metadata in Dexie', async () => {

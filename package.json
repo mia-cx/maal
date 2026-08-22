@@ -7,11 +7,6 @@
 	"engines": {
 		"node": ">=24.0.0"
 	},
-	"pnpm": {
-		"overrides": {
-			"cookie@<0.7.0": "0.7.2"
-		}
-	},
 	"scripts": {
 		"dev": "vite dev",
 		"build": "pnpm gen && pnpm i18n:compile && vite build",

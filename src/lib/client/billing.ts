@@ -2,6 +2,10 @@ import { Schema } from 'effect';
 
 import type { MaalDatabase } from '$lib/client/local/database.js';
 import {
+	billingCapabilityIsEnabledAt,
+	billingCapabilityWasPreviouslyPaid
+} from '$lib/domain/billing/capability.js';
+import {
 	BillingProjectionEnvelopeSchema,
 	type BillingProjectionEnvelope
 } from '$lib/domain/billing/contracts.js';
@@ -89,12 +93,50 @@ export const shouldRefreshBillingOnLaunch = async (
 ): Promise<boolean> => {
 	const capability = await database.billingCapabilities.get(householdId);
 	if (!capability) return false;
+	if (!billingCapabilityWasPreviouslyPaid(capability)) return false;
 	if (capability.stale) return true;
-	if (capability.state === 'disabled') return false;
-	const projection = await database.remoteProjectionMeta.get(`billing:${householdId}`);
-	return (
-		!projection?.refreshedAt || now - Date.parse(projection.refreshedAt) > 24 * 60 * 60 * 1_000
-	);
+	return capability.state !== 'disabled' && !billingCapabilityIsEnabledAt(capability, now);
+};
+
+export const refreshBillingProjectionsOnLaunch = async (
+	database: MaalDatabase,
+	fetcher: Fetch = globalThis.fetch,
+	now = Date.now()
+): Promise<{ attempted: number; refreshed: number }> => {
+	const [capabilities, memberships, slots] = await Promise.all([
+		database.billingCapabilities.toArray(),
+		database.memberships
+			.toArray()
+			.then((records) => records.filter(({ status }) => status === 'active')),
+		database.authSlots.where('sessionState').equals('authenticated').toArray()
+	]);
+	const profileByUserId = new Map(slots.map((slot) => [slot.workosUserId, slot.profileId]));
+	const profileByHouseholdId = new Map<string, string>();
+	for (const membership of memberships) {
+		const profileId = profileByUserId.get(membership.workosUserId);
+		if (profileId && !profileByHouseholdId.has(membership.householdId)) {
+			profileByHouseholdId.set(membership.householdId, profileId);
+		}
+	}
+	let attempted = 0;
+	let refreshed = 0;
+	for (const capability of capabilities) {
+		const profileId = profileByHouseholdId.get(capability.householdId);
+		if (
+			!profileId ||
+			!(await shouldRefreshBillingOnLaunch(database, capability.householdId, now))
+		) {
+			continue;
+		}
+		attempted += 1;
+		try {
+			await refreshBillingProjection(database, profileId, capability.householdId, fetcher);
+			refreshed += 1;
+		} catch {
+			// The cached expiry still blocks content sync. A later launch or explicit billing action retries.
+		}
+	}
+	return { attempted, refreshed };
 };
 
 export const beginCheckout = (
