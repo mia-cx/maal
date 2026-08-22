@@ -18,8 +18,8 @@ Automate what this Linux host can execute and record native or missing-runtime g
 
 ## TODOs
 
-- [~] Add a deterministic product-proof fixture and dedicated Playwright project.
-- [ ] Add automated accessibility and visible keyboard-focus coverage in light and dark modes.
+- [x] Add a deterministic product-proof fixture and dedicated Playwright project.
+- [~] Add automated accessibility and visible keyboard-focus coverage in light and dark modes.
 - [ ] Add local-first browser smoke and measured performance-budget coverage.
 - [ ] Add responsive prototype comparison evidence and interaction preservation checks.
 - [ ] Run focused proof, document measured results and external gates, then run the serialized full validation.
@@ -32,3 +32,4 @@ Automate what this Linux host can execute and record native or missing-runtime g
 - T3 collaborative preview is available. Chrome DevTools performance MCP is absent, so this slice cannot claim a
   DevTools trace. Reproducible Playwright browser metrics cover the committed budgets instead.
 - Native Safari, iOS, and Android evidence remains issue #70.
+- The first fixture-backed Chromium proof passes against the production Worker build.

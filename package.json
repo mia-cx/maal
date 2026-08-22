@@ -32,6 +32,9 @@
 		"test:proof:auth-slots:hosted": "node scripts/prove-auth-slots-hosted.mjs",
 		"proof:auth-slots:evidence": "node scripts/auth-slot-native-evidence.mjs",
 		"test:proof:billing": "node scripts/prove-billing-services.mjs",
+		"test:proof:product": "playwright test --config playwright.product-proof.config.ts --project=chromium",
+		"test:proof:product:browsers": "playwright test --config playwright.product-proof.config.ts --grep @browser-smoke",
+		"proof:prototype-ui": "node scripts/check-prototype-ui.mjs",
 		"perf:budget": "node scripts/check-build-budget.mjs",
 		"gen": "wrangler types",
 		"i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --silent",
@@ -43,6 +46,7 @@
 		"validate": "pnpm lint && pnpm check && pnpm test:unit && pnpm build && pnpm perf:budget && pnpm test:e2e"
 	},
 	"devDependencies": {
+		"@axe-core/playwright": "^4.13.0",
 		"@cloudflare/vitest-pool-workers": "^0.18.4",
 		"@eslint/js": "^10.0.1",
 		"@fontsource-variable/inter": "^5.2.8",
