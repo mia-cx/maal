@@ -289,6 +289,40 @@ describe('D1 household sync', () => {
 				now: timestamp
 			})
 		).rejects.toMatchObject({ _tag: 'SyncCapabilityDenied' });
+
+		await database
+			.prepare(
+				`UPDATE household_deletion_requests
+				 SET state = 'recovered', stripe_cancellation_id = 'sub_test' WHERE household_id = ?`
+			)
+			.bind(householdId)
+			.run();
+		await expect(
+			d1HouseholdSyncCapabilityAuthorizer.authorize({
+				database,
+				workosUserId: aliceId,
+				householdId,
+				activeWorkOSMemberships: [liveMembership()],
+				permission: 'meals:read',
+				now: timestamp
+			})
+		).rejects.toMatchObject({ _tag: 'SyncCapabilityDenied' });
+		await database
+			.prepare(
+				"UPDATE billing_subscriptions SET stripe_subscription_id = 'sub_restarted' WHERE household_id = ?"
+			)
+			.bind(householdId)
+			.run();
+		await expect(
+			d1HouseholdSyncCapabilityAuthorizer.authorize({
+				database,
+				workosUserId: aliceId,
+				householdId,
+				activeWorkOSMemberships: [liveMembership()],
+				permission: 'meals:read',
+				now: timestamp
+			})
+		).resolves.toMatchObject({ householdId });
 	});
 
 	test('uses D1 commit order live and original event time only for historical backfill', async () => {
@@ -331,6 +365,91 @@ describe('D1 household sync', () => {
 		expect(stale).toMatchObject({ status: 'rejected', errorCode: 'historical_loser' });
 		page = await repository.pull(householdId, 0, 10);
 		expect(page.changes.at(-1)?.aggregate).toMatchObject({ date: '2026-08-24' });
+	});
+
+	test('lands a check-in and status-only meal update after the old planned cook leaves', async () => {
+		const repository = new D1HouseholdSyncRepository(database);
+		const mealId = uuidv7();
+		await expect(
+			repository.commit({
+				householdId,
+				actorUserId: aliceId,
+				deviceId,
+				mutation: mealMutation(mealId, uuidv7(), timestamp, {
+					plannedCookUserId: bobId
+				}),
+				mode: 'live',
+				receivedAt: timestamp
+			})
+		).resolves.toMatchObject({ status: 'accepted' });
+		await database
+			.prepare("UPDATE household_memberships SET status = 'revoked' WHERE workos_user_id = ?")
+			.bind(bobId)
+			.run();
+
+		const checkInMutationId = uuidv7();
+		const checkInId = uuidv7();
+		const statusMutationId = uuidv7();
+		const checkIn = Schema.decodeUnknownSync(MealCheckInSchema)({
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+			deletedAt: null,
+			conflictClocks: {
+				response: { occurredAt: timestamp, originDeviceId: deviceId, mutationId: checkInMutationId }
+			},
+			id: checkInId,
+			reporterUserId: aliceId,
+			mealId,
+			cookTimeMinutes: 30,
+			verdict: 'repeat',
+			reason: null
+		});
+		const result = await pushHouseholdSync(repository, householdId, aliceId, {
+			protocolVersion: 1,
+			deviceId,
+			audience: { kind: 'household', id: householdId },
+			baseCursor: null,
+			mutations: [
+				{
+					schemaVersion: 1,
+					mutationId: checkInMutationId,
+					originDeviceId: deviceId,
+					entityKind: 'meal_check_in',
+					entityId: checkInId,
+					conflictGroups: ['response'],
+					operation: 'upsert',
+					occurredAt: timestamp,
+					aggregate: checkIn
+				},
+				{
+					...mealMutation(mealId, statusMutationId, timestamp, {
+						plannedCookUserId: bobId,
+						status: 'cooked',
+						conflictClocks: {
+							status: {
+								occurredAt: timestamp,
+								originDeviceId: deviceId,
+								mutationId: statusMutationId
+							}
+						}
+					}),
+					conflictGroups: ['status']
+				}
+			]
+		});
+
+		expect(result.receipts).toEqual([
+			expect.objectContaining({ status: 'accepted' }),
+			expect.objectContaining({ status: 'accepted' })
+		]);
+		await expect(
+			database.prepare('SELECT status FROM meals WHERE id = ?').bind(mealId).first()
+		).resolves.toEqual({ status: 'cooked' });
+		await expect(
+			database.prepare('SELECT id FROM meal_check_ins WHERE id = ?').bind(checkInId).first()
+		).resolves.toEqual({ id: checkInId });
 	});
 
 	test('is idempotent, rejects cross-profile check-ins, and keeps meal tombstones authoritative', async () => {

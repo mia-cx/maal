@@ -77,8 +77,8 @@ export const pushHouseholdSync = async (
 	now: () => Date = () => new Date()
 ): Promise<HouseholdPushResponse> => {
 	const receipts: MutationReceipt[] = [];
+	for (const mutation of request.mutations) assertMutation(householdId, actorUserId, mutation);
 	for (const mutation of request.mutations) {
-		assertMutation(householdId, actorUserId, mutation);
 		receipts.push(
 			await repository.commit({
 				householdId,
@@ -143,8 +143,8 @@ export const backfillHouseholdSync = async (
 	now: () => Date = () => new Date()
 ): Promise<HouseholdBackfillResponse> => {
 	const receipts: MutationReceipt[] = [];
+	for (const mutation of request.mutations) assertMutation(householdId, actorUserId, mutation);
 	for (const mutation of request.mutations) {
-		assertMutation(householdId, actorUserId, mutation);
 		receipts.push(
 			await repository.commit({
 				householdId,

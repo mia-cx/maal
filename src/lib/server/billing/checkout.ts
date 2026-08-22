@@ -5,6 +5,7 @@ import { projectBillingCapability } from '$lib/domain/billing/capability.js';
 import { BillingConflictError } from './errors.js';
 import { requireMaalPrice } from './pricing.js';
 import type { BillingRepository } from './repository.js';
+import { deletionAllowsProjectedSubscription } from './subscription-identity.js';
 
 export const createMaalCheckout = async (input: {
 	stripe: Stripe;
@@ -19,8 +20,14 @@ export const createMaalCheckout = async (input: {
 	now: string;
 }): Promise<{ url: string }> => {
 	await requireMaalPrice(input.stripe, input.productId, input.priceId);
-	const existing = await input.repository.subscription(input.householdId);
-	if (existing) {
+	const [existing, deletion] = await Promise.all([
+		input.repository.subscription(input.householdId),
+		input.repository.deletionRequest(input.householdId)
+	]);
+	if (deletion !== null && deletion.state !== 'recovered') {
+		throw new BillingConflictError('household_deletion_pending');
+	}
+	if (existing && deletionAllowsProjectedSubscription(deletion, existing)) {
 		const capability = projectBillingCapability(
 			{
 				householdId: input.householdId,

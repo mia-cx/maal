@@ -23,6 +23,7 @@ import type {
 	HouseholdSyncChange,
 	HouseholdSyncMutation
 } from '$lib/sync/household-contracts.js';
+import { pushHouseholdSync, type HouseholdSyncRepository } from '$lib/server/sync/index.js';
 
 const householdId = 'org_family';
 const timestamp = '2026-08-21T12:00:00.000Z' as const;
@@ -41,6 +42,51 @@ afterEach(async () => {
 		await Dexie.delete(name);
 	}
 	databases.length = 0;
+});
+
+describe('household server request validation', () => {
+	test('prevalidates every mutation before the repository writes the first one', async () => {
+		const commit = vi.fn();
+		const repository = {
+			readScopeState: async () => ({ retainedFloor: 0, latestSequence: 0, bootstrapGeneration: 1 }),
+			pull: vi.fn(),
+			bootstrap: vi.fn(),
+			commit,
+			prune: vi.fn()
+		} satisfies HouseholdSyncRepository;
+		const originDeviceId = uuidv7();
+		const validAggregate = meal(uuidv7(), uuidv7(), originDeviceId);
+		const validMutation: HouseholdSyncMutation = {
+			schemaVersion: 1,
+			mutationId: uuidv7(),
+			originDeviceId,
+			entityKind: 'meal',
+			entityId: validAggregate.id,
+			conflictGroups: ['schedule'],
+			operation: 'upsert',
+			occurredAt: timestamp,
+			aggregate: validAggregate
+		};
+
+		await expect(
+			pushHouseholdSync(repository, householdId, 'user_alice', {
+				protocolVersion: 1,
+				deviceId: originDeviceId,
+				audience: { kind: 'household', id: householdId },
+				baseCursor: null,
+				mutations: [
+					validMutation,
+					{
+						...validMutation,
+						mutationId: uuidv7(),
+						entityId: uuidv7(),
+						aggregate: { bad: true }
+					} as unknown as HouseholdSyncMutation
+				]
+			})
+		).rejects.toMatchObject({ _tag: 'SyncMalformedRequest' });
+		expect(commit).not.toHaveBeenCalled();
+	});
 });
 
 const environment = (

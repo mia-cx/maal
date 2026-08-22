@@ -13,6 +13,7 @@ import {
 	type Membership
 } from '$lib/domain/household/contracts.js';
 import type { HouseholdDiscoveryEntry } from '$lib/domain/household/administration.js';
+import { deletionAllowsProjectedSubscription } from '$lib/server/billing/subscription-identity.js';
 
 import type { LiveWorkOSMembership } from './adapter.js';
 
@@ -31,6 +32,7 @@ interface DiscoveryRow {
 	updated_at: string;
 	deleted_at: string | null;
 	billing_status: string | null;
+	stripe_subscription_id: string | null;
 	subscriber_user_id: string | null;
 	stripe_price_id: string | null;
 	current_period_end: string | null;
@@ -38,6 +40,7 @@ interface DiscoveryRow {
 	interruption_started_at: string | null;
 	grace_until: string | null;
 	deletion_state: string | null;
+	stripe_cancellation_id: string | null;
 }
 
 const supportedPermissions = (permissions: readonly string[]): readonly HouseholdPermission[] =>
@@ -71,7 +74,14 @@ const capabilityFor = (row: DiscoveryRow, now: string): BillingCapability => {
 		},
 		now
 	);
-	return row.deletion_state === null || row.deletion_state === 'recovered'
+	return deletionAllowsProjectedSubscription(
+		row.deletion_state === null
+			? null
+			: { state: row.deletion_state, stripeCancellationId: row.stripe_cancellation_id },
+		row.stripe_subscription_id === null
+			? null
+			: { stripeSubscriptionId: row.stripe_subscription_id }
+	)
 		? projected
 		: { ...projected, state: 'disabled', validUntil: null };
 };
@@ -139,9 +149,9 @@ export const discoverActiveHouseholds = async (input: {
 			const row = await input.database
 				.prepare(
 					`SELECT h.*,
-					 bs.status AS billing_status, bs.subscriber_user_id, bs.stripe_price_id,
+						 bs.status AS billing_status, bs.stripe_subscription_id, bs.subscriber_user_id,
 					 bs.current_period_end, bs.cancel_at_period_end, bs.interruption_started_at,
-					 bs.grace_until, hdr.state AS deletion_state
+						 bs.grace_until, hdr.state AS deletion_state, hdr.stripe_cancellation_id
 					 FROM households h
 					 LEFT JOIN billing_subscriptions bs ON bs.household_id = h.household_id
 					 LEFT JOIN household_deletion_requests hdr ON hdr.household_id = h.household_id

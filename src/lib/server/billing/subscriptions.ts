@@ -13,6 +13,7 @@ import type {
 	BillingSubscriptionRow,
 	SubscriptionProjectionWrite
 } from './repository.js';
+import { deletionAllowsProjectedSubscription } from './subscription-identity.js';
 
 const utcFromSeconds = (seconds: number): `${string}Z` =>
 	new Date(seconds * 1_000).toISOString() as `${string}Z`;
@@ -104,7 +105,7 @@ export const loadBillingProjection = async (input: {
 		input.now
 	);
 	const deletion = await input.repository.deletionRequest(input.householdId);
-	if (deletion && deletion.state !== 'recovered' && deletion.state !== 'purged') {
+	if (!deletionAllowsProjectedSubscription(deletion, subscription)) {
 		capability = { ...capability, state: 'disabled', validUntil: null };
 	}
 	const alreadySubscribed = capability.state !== 'disabled';

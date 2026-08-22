@@ -7,6 +7,7 @@ export * from './pricing.js';
 export * from './repository.js';
 export * from './stripe.js';
 export * from './subscriptions.js';
+export * from './subscription-identity.js';
 export * from './transfer.js';
 export * from './trials.js';
 export * from './webhook.js';

@@ -95,14 +95,23 @@ describe('authenticated household discovery', () => {
 		});
 	});
 
-	test('disables a paid capability while any deletion lifecycle state is pending', async () => {
+	test('requires a distinct post-recovery subscription before rediscovering paid capability', async () => {
 		await database.prepare("INSERT INTO users (workos_user_id) VALUES ('user_alice')").run();
 		await database.prepare("INSERT INTO households (household_id) VALUES ('org_family')").run();
 		await database
 			.prepare(
+				`INSERT INTO billing_subscriptions
+				 (household_id, stripe_customer_id, stripe_subscription_id, stripe_price_id, status,
+				  current_period_end)
+				 VALUES ('org_family', 'cus_family', 'sub_cancelled', 'price_monthly', 'active',
+				         '2026-09-22T09:00:00.000Z')`
+			)
+			.run();
+		await database
+			.prepare(
 				`INSERT INTO household_deletion_requests
-				 (household_id, requester_user_id, state, requested_at)
-				 VALUES ('org_family', 'user_alice', 'recoverable', ?)`
+				 (household_id, requester_user_id, state, stripe_cancellation_id, requested_at)
+				 VALUES ('org_family', 'user_alice', 'recovered', 'sub_cancelled', ?)`
 			)
 			.bind(now)
 			.run();
@@ -123,8 +132,29 @@ describe('authenticated household discovery', () => {
 		});
 
 		expect(entry).toMatchObject({
-			household: { deletionState: 'recoverable' },
+			household: { deletionState: 'active' },
 			capability: { state: 'disabled' }
 		});
+
+		await database
+			.prepare(
+				"UPDATE billing_subscriptions SET stripe_subscription_id = 'sub_restarted' WHERE household_id = 'org_family'"
+			)
+			.run();
+		const [restarted] = await discoverActiveHouseholds({
+			database,
+			workosUserId: 'user_alice',
+			liveMemberships: [
+				{
+					membershipId: 'membership_alice',
+					householdId: 'org_family',
+					householdName: 'Family',
+					roleSlug: 'member',
+					permissions: ['meals:read']
+				}
+			],
+			now
+		});
+		expect(restarted?.capability.state).toBe('enabled');
 	});
 });

@@ -839,7 +839,10 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 				if (!ownedMeal) return this.reject({ ...input, code: 'meal_household_mismatch' });
 			}
 		}
-		if (input.mutation.entityKind === 'meal') {
+		if (
+			input.mutation.entityKind === 'meal' &&
+			input.mutation.conflictGroups.includes('schedule')
+		) {
 			const plannedCookUserId = decodedIncoming.aggregate.plannedCookUserId;
 			if (typeof plannedCookUserId === 'string') {
 				const currentMember = await this.database

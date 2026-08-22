@@ -81,8 +81,8 @@ export const pushUserSync = async (
 ): Promise<PushResponse> => {
 	assertUserAudience(workosUserId, request.audience);
 	const receipts = [];
+	for (const mutation of request.mutations) assertMutationOwner(workosUserId, mutation);
 	for (const mutation of request.mutations) {
-		assertMutationOwner(workosUserId, mutation);
 		receipts.push(
 			await repository.commit({
 				actorUserId: workosUserId,
@@ -146,8 +146,8 @@ export const backfillUserSync = async (
 ): Promise<BackfillResponse> => {
 	assertUserAudience(workosUserId, request.audience);
 	const receipts = [];
+	for (const mutation of request.mutations) assertMutationOwner(workosUserId, mutation);
 	for (const mutation of request.mutations) {
-		assertMutationOwner(workosUserId, mutation);
 		receipts.push(
 			await repository.commit({
 				actorUserId: workosUserId,

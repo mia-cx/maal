@@ -5,6 +5,7 @@ import { proratedRefundMinor } from '$lib/server/billing/deletion.js';
 import { decodeMaalPrice, MAAL_PRICE_LOOKUP_KEYS } from '$lib/server/billing/pricing.js';
 import {
 	effectiveStripeStatus,
+	loadBillingProjection,
 	projectionFromStripeSubscription
 } from '$lib/server/billing/subscriptions.js';
 
@@ -77,6 +78,62 @@ describe('Maal Stripe catalog', () => {
 });
 
 describe('Stripe subscription projection', () => {
+	it('keeps a recovered household disabled until Stripe projects a distinct restarted subscription', async () => {
+		let stripeSubscriptionId = 'sub_cancelled';
+		const repository = {
+			subscription: async () => ({
+				householdId: 'org_kitchen',
+				stripeCustomerId: 'cus_household',
+				stripeSubscriptionId,
+				stripePriceId: 'price_monthly',
+				subscriberUserId: 'user_alice',
+				status: 'active' as const,
+				currentPeriodEnd: '2026-09-21T12:00:00.000Z',
+				cancelAtPeriodEnd: false,
+				interruptionStartedAt: null,
+				graceUntil: null,
+				lastSuccessfulPaymentAt: null,
+				lastStripeEventCreatedAt: null,
+				lastStripeEventId: null,
+				createdAt: '2026-08-01T12:00:00.000Z',
+				updatedAt: '2026-08-01T12:00:00.000Z'
+			}),
+			trialClaimAvailability: async () => 'household_already_claimed' as const,
+			deletionRequest: async () => ({
+				householdId: 'org_kitchen',
+				requesterUserId: 'user_alice',
+				state: 'recovered' as const,
+				stripeCancellationId: 'sub_cancelled',
+				stripeChargeId: null,
+				stripeRefundId: null,
+				previewedAmountMinor: null,
+				refundedAmountMinor: null,
+				currency: null,
+				requestedAt: '2026-08-01T12:00:00.000Z',
+				recoverableUntil: null,
+				purgedAt: null,
+				safeErrorCode: null,
+				updatedAt: '2026-08-02T12:00:00.000Z'
+			})
+		};
+		const stripe = {
+			prices: { list: async () => ({ data: [price()] }) }
+		} as unknown as Stripe;
+		const load = () =>
+			loadBillingProjection({
+				repository: repository as never,
+				stripe,
+				productId: 'prod_maal',
+				householdId: 'org_kitchen',
+				workosUserId: 'user_alice',
+				now: '2026-08-22T12:00:00.000Z'
+			});
+
+		await expect(load()).resolves.toMatchObject({ capability: { state: 'disabled' } });
+		stripeSubscriptionId = 'sub_restarted';
+		await expect(load()).resolves.toMatchObject({ capability: { state: 'enabled' } });
+	});
+
 	it('treats intentional collection pause as the same grace status as paused', () => {
 		const paused = subscription({ pause_collection: { behavior: 'void', resumes_at: null } });
 		expect(effectiveStripeStatus(paused)).toBe('paused');

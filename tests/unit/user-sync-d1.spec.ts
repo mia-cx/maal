@@ -225,6 +225,38 @@ describe('D1 user sync repository', () => {
 				now: '2026-09-01T00:00:00.000Z'
 			})
 		).rejects.toMatchObject({ _tag: 'SyncCapabilityDenied' });
+
+		await database
+			.prepare(
+				`INSERT INTO household_deletion_requests
+				 (household_id, requester_user_id, state, stripe_cancellation_id, requested_at)
+				 VALUES ('org_paid', ?, 'recovered', 'sub_test', ?)`
+			)
+			.bind(userId, timestamp)
+			.run();
+		await expect(
+			d1UserSyncCapabilityAuthorizer.authorize({
+				database,
+				workosUserId: userId,
+				activeWorkOSMemberships: [liveMembership()],
+				permission: 'recipes:read',
+				now: timestamp
+			})
+		).rejects.toMatchObject({ _tag: 'SyncCapabilityDenied' });
+		await database
+			.prepare(
+				"UPDATE billing_subscriptions SET stripe_subscription_id = 'sub_restarted' WHERE household_id = 'org_paid'"
+			)
+			.run();
+		await expect(
+			d1UserSyncCapabilityAuthorizer.authorize({
+				database,
+				workosUserId: userId,
+				activeWorkOSMemberships: [liveMembership()],
+				permission: 'recipes:read',
+				now: timestamp
+			})
+		).resolves.toMatchObject({ householdId: 'org_paid' });
 	});
 
 	test('commits normalized state, idempotency receipt, version, change, and scope sequence atomically', async () => {

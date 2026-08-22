@@ -47,6 +47,8 @@ interface CapabilityRow {
 	status: string;
 	grace_until: string | null;
 	deletion_state: string | null;
+	stripe_subscription_id: string | null;
+	stripe_cancellation_id: string | null;
 }
 
 const permissionsFor = (encoded: string): readonly string[] => {
@@ -72,14 +74,21 @@ export const d1UserSyncCapabilityAuthorizer: UserSyncCapabilityAuthorizer = {
 		const statement = input.database
 			.prepare(
 				`SELECT hm.household_id, hm.membership_id, hm.role_slug, hm.permissions,
-				        bs.status, bs.grace_until, hdr.state AS deletion_state
+				        bs.status, bs.grace_until, bs.stripe_subscription_id,
+				        hdr.state AS deletion_state, hdr.stripe_cancellation_id
 				 FROM household_memberships hm
 				 JOIN billing_subscriptions bs ON bs.household_id = hm.household_id
 				 LEFT JOIN household_deletion_requests hdr ON hdr.household_id = hm.household_id
 				 WHERE hm.workos_user_id = ?
 				   AND hm.status = 'active'
 				   AND hm.household_id IN (${placeholders})
-				   AND (hdr.state IS NULL OR hdr.state = 'recovered')
+				   AND (
+				     hdr.state IS NULL OR (
+				       hdr.state = 'recovered'
+				       AND hdr.stripe_cancellation_id IS NOT NULL
+				       AND bs.stripe_subscription_id <> hdr.stripe_cancellation_id
+				     )
+				   )
 				   AND (
 				     bs.status IN ('active', 'trialing')
 				     OR (bs.status IN ('past_due', 'paused') AND bs.grace_until IS NOT NULL AND bs.grace_until >= ?)
@@ -132,7 +141,8 @@ export const d1HouseholdSyncCapabilityAuthorizer: HouseholdSyncCapabilityAuthori
 		const row = await input.database
 			.prepare(
 				`SELECT hm.household_id, hm.membership_id, hm.role_slug, hm.permissions,
-				        bs.status, bs.grace_until, hdr.state AS deletion_state
+				        bs.status, bs.grace_until, bs.stripe_subscription_id,
+				        hdr.state AS deletion_state, hdr.stripe_cancellation_id
 				 FROM household_memberships hm
 				 LEFT JOIN billing_subscriptions bs ON bs.household_id = hm.household_id
 				 LEFT JOIN household_deletion_requests hdr ON hdr.household_id = hm.household_id
@@ -146,7 +156,12 @@ export const d1HouseholdSyncCapabilityAuthorizer: HouseholdSyncCapabilityAuthori
 				message: 'The current D1 membership projection denies this household.'
 			});
 		}
-		if (row.deletion_state !== null && row.deletion_state !== 'recovered') {
+		if (
+			row.deletion_state !== null &&
+			(row.deletion_state !== 'recovered' ||
+				row.stripe_cancellation_id === null ||
+				row.stripe_subscription_id === row.stripe_cancellation_id)
+		) {
 			throw new ServerSyncCapabilityDenied({
 				code: 'household_deletion_pending',
 				message: 'Synchronization is disabled while household deletion is in progress.'

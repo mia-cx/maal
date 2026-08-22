@@ -25,6 +25,7 @@ import {
 	type BootstrapRequest,
 	type BootstrapResponse,
 	type PullRequest,
+	type PushRequest,
 	type SyncChange
 } from '$lib/sync/contracts.js';
 import {
@@ -34,6 +35,7 @@ import {
 import {
 	bootstrapUserSync,
 	pullUserSync,
+	pushUserSync,
 	reconciliationInstructions,
 	syncEntityKey,
 	type UserSyncRepository
@@ -644,6 +646,44 @@ describe('foreground user coordinator', () => {
 });
 
 describe('server ordering and bootstrap rules', () => {
+	test('prevalidates every user mutation before the repository writes the first one', async () => {
+		const commit = vi.fn();
+		const repository = {
+			readScopeState: async () => ({ retainedFloor: 0, latestSequence: 0, bootstrapGeneration: 1 }),
+			pull: vi.fn(),
+			bootstrap: vi.fn(),
+			commit,
+			prune: vi.fn()
+		} satisfies UserSyncRepository;
+		const validAggregate = userUnit();
+		const validMutation = {
+			schemaVersion: 1 as const,
+			mutationId: uuidv7(),
+			originDeviceId: uuidv7(),
+			entityKind: 'unitUserEntry' as const,
+			entityId: validAggregate.id,
+			conflictGroups: ['row'] as [string, ...string[]],
+			operation: 'upsert' as const,
+			occurredAt: timestamp,
+			aggregate: validAggregate
+		};
+		const request = {
+			protocolVersion: 1,
+			deviceId: uuidv7(),
+			audience: { kind: 'user', id: userId },
+			baseCursor: null,
+			mutations: [
+				validMutation,
+				{ ...validMutation, mutationId: uuidv7(), entityId: uuidv7(), aggregate: { bad: true } }
+			]
+		} as unknown as PushRequest;
+
+		await expect(pushUserSync(repository, userId, request)).rejects.toMatchObject({
+			_tag: 'SyncMalformedRequest'
+		});
+		expect(commit).not.toHaveBeenCalled();
+	});
+
 	test('uses original UTC edit time only beyond the one-hour backfill threshold', () => {
 		const current = { occurredAt: timestamp, originDeviceId: uuidv7(), mutationId: uuidv7() };
 		expect(
