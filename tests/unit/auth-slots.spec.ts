@@ -12,16 +12,18 @@ import {
 } from '$lib/auth-slots';
 import {
 	assertAuthSlotCookieFits,
+	AUTH_CALLBACK_PATH,
 	authCookieOptions,
 	authSlotCookieName,
 	authSlotPath,
 	AuthSlotCookieTooLarge,
+	callbackUrl,
 	createWorkOSAuthSlotAdapter,
-	decodeAuthFlow,
-	encodeAuthFlow,
 	expectedUserForFlow,
+	openAuthFlow,
 	openSlotIdentity,
 	safeReturnTo,
+	sealAuthFlow,
 	sealSlotIdentity,
 	serializedCookieBytes
 } from '$lib/server/auth-slots';
@@ -134,15 +136,36 @@ describe('Hosted AuthKit contract', () => {
 		expect(url.searchParams.get('login_hint')).toBe('bob@example.test');
 	});
 
-	it('round-trips Unicode flow state and rejects unsafe return paths', () => {
+	it('uses one registered callback URI and encrypts every flow binding into expiring state', async () => {
 		const flow = {
-			state: 'state',
+			schemaVersion: 1 as const,
+			authSlotId: ALICE_SLOT,
 			purpose: 'reauthenticate' as const,
 			expectedUserId: 'user_alice',
 			returnTo: '/på/profile',
-			createdAt: '2026-08-21T12:00:00Z'
+			nonce: '0123456789abcdef0123456789abcdef',
+			issuedAt: '2026-08-21T12:00:00.000Z',
+			expiresAt: '2026-08-21T12:10:00.000Z'
 		};
-		expect(decodeAuthFlow(encodeAuthFlow(flow))).toEqual(flow);
+		const state = await sealAuthFlow(flow, 'a'.repeat(32), (bytes) => bytes.fill(0xab));
+
+		expect(AUTH_CALLBACK_PATH).toBe('/api/auth/callback');
+		expect(callbackUrl('https://maal.test/ignored')).toBe('https://maal.test/api/auth/callback');
+		expect(state).not.toContain(ALICE_SLOT);
+		expect(state).not.toContain('user_alice');
+		expect(state).not.toContain(encodeURIComponent(flow.returnTo));
+		await expect(
+			openAuthFlow(state, 'a'.repeat(32), new Date('2026-08-21T12:09:59.999Z'))
+		).resolves.toEqual(flow);
+		await expect(
+			openAuthFlow(`${state}tampered`, 'a'.repeat(32), new Date('2026-08-21T12:05:00.000Z'))
+		).resolves.toBeNull();
+		await expect(
+			openAuthFlow(state, 'a'.repeat(32), new Date('2026-08-21T12:10:00.000Z'))
+		).resolves.toBeNull();
+		await expect(
+			openAuthFlow(state, 'b'.repeat(32), new Date('2026-08-21T12:05:00.000Z'))
+		).resolves.toBeNull();
 		expect(safeReturnTo('//evil.example/path')).toBe('/');
 		expect(safeReturnTo('/profiles')).toBe('/profiles');
 	});

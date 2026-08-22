@@ -20,7 +20,7 @@ Route every retained-profile authorization through one registered callback URI. 
 
 ## TODOs
 
-- [ ] Specify the stable redirect and encrypted flow-state contract with failing unit tests.
+- [x] Specify the stable redirect and encrypted flow-state contract with failing unit tests.
 - [ ] Implement encrypted, expiring state and one-use nonce marker cookies.
 - [ ] Specify stable callback success and rejection behavior with failing HTTP tests.
 - [ ] Implement the stable callback while preserving targeted revocation and retained-cookie isolation.
@@ -32,3 +32,4 @@ Route every retained-profile authorization through one registered callback URI. 
 - WorkOS requires an exact registered redirect URI. Slot IDs belong in sealed state, never in the redirect path.
 - The flow-state secret reuses `WORKOS_COOKIE_PASSWORD`; no new deploy secret is required.
 - A consumed browser nonce marker prevents ordinary callback replay. WorkOS authorization codes remain the authoritative one-use exchange in concurrent requests.
+- `pnpm exec vitest run tests/unit/auth-slots.spec.ts`: 10 passed after the first red-to-green slice.
