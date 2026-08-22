@@ -9,6 +9,8 @@ import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.
 import { acquireSyncLease, renewSyncLease } from '$lib/client/local/leases.js';
 import {
 	BACKFILL_SINGLE_RECORD_MAX_BYTES,
+	applyUserMutationReceipts,
+	applyUserPullPage,
 	createUserSyncCoordinator,
 	applyUserBootstrap,
 	type UserSyncEnvironment,
@@ -467,6 +469,67 @@ describe('foreground user coordinator', () => {
 			status: 'rejected',
 			rejectionCode: 'historical_loser'
 		});
+		await expect(database.unitUserEntries.get(entityId)).resolves.toEqual(remote);
+	});
+
+	test('keeps a newer pending intent until every mutation masking the remote aggregate is rejected', async () => {
+		const database = await openDatabase();
+		const entityId = uuidv7();
+		const firstMutationId = uuidv7();
+		const secondMutationId = uuidv7();
+		const originDeviceId = uuidv7();
+		const local = userUnit({ id: entityId, canonicalLabel: 'latest local spoon' });
+		const remote = userUnit({ id: entityId, canonicalLabel: 'remote spoon', revision: 2 });
+		await database.unitUserEntries.put(local);
+		await database.outbox.bulkPut(
+			[firstMutationId, secondMutationId].map((mutationId) => ({
+				mutationId,
+				authSlotId,
+				scopeKind: 'user' as const,
+				scopeId: userId,
+				status: 'pending' as const,
+				occurredAt: timestamp,
+				aggregateId: entityId,
+				entityKind: 'unitUserEntry',
+				conflictGroup: 'row',
+				operation: 'upsert' as const,
+				originDeviceId,
+				payload: {},
+				nextAttemptAt: timestamp,
+				attempts: 0
+			}))
+		);
+		await applyUserPullPage(database, userId, {
+			...emptyPull(1),
+			changes: [
+				{
+					sequence: 1,
+					mutationId: uuidv7(),
+					originDeviceId: uuidv7(),
+					entityKind: 'unitUserEntry',
+					entityId,
+					conflictGroups: ['row'],
+					operation: 'upsert',
+					resultingRevision: 2,
+					occurredAt: timestamp,
+					receivedAt: timestamp,
+					aggregate: remote,
+					tombstoneExpiresAt: null
+				}
+			]
+		});
+
+		const rejected = (mutationId: string) => ({
+			mutationId,
+			status: 'rejected' as const,
+			sequence: null,
+			resultingRevision: null,
+			errorCode: 'historical_loser'
+		});
+		await applyUserMutationReceipts(database, userId, [rejected(secondMutationId)]);
+		await expect(database.unitUserEntries.get(entityId)).resolves.toEqual(local);
+
+		await applyUserMutationReceipts(database, userId, [rejected(firstMutationId)]);
 		await expect(database.unitUserEntries.get(entityId)).resolves.toEqual(remote);
 	});
 

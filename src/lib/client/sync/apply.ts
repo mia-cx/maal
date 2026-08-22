@@ -111,7 +111,9 @@ export const applyUserMutationReceipts = async (
 ): Promise<void> => {
 	const resolved = await Promise.all(
 		receipts.map(async (receipt) => {
-			const row = await database.outbox.get(receipt.mutationId);
+			const stored = await database.outbox.get(receipt.mutationId);
+			const row =
+				stored?.scopeKind === 'user' && stored.scopeId === workosUserId ? stored : undefined;
 			const authoritative =
 				row && receipt.status === 'rejected' && row.authoritativeSnapshot !== undefined
 					? decodeUserSyncAggregate(
@@ -128,6 +130,7 @@ export const applyUserMutationReceipts = async (
 		authoritative ? [database.table(authoritative.store)] : []
 	);
 	await database.transaction('rw', [...new Set(tables), database.outbox], async () => {
+		const restorations = new Map<string, NonNullable<(typeof resolved)[number]['authoritative']>>();
 		for (const { receipt, row, authoritative } of resolved) {
 			if (!row) continue;
 			if (receipt.status === 'accepted' || receipt.status === 'duplicate') {
@@ -144,7 +147,16 @@ export const applyUserMutationReceipts = async (
 				rejectionCode: receipt.errorCode,
 				acknowledgedAt: now.toISOString()
 			});
-			if (authoritative) {
+			if (authoritative)
+				restorations.set(keyFor(authoritative.entityKind, authoritative.entityId), authoritative);
+		}
+		const unresolvedKeys = new Set(
+			(await pendingUserOutbox(database, workosUserId)).map((row) =>
+				keyFor(row.entityKind, row.aggregateId)
+			)
+		);
+		for (const [key, authoritative] of restorations) {
+			if (!unresolvedKeys.has(key)) {
 				await database.table(authoritative.store).put(authoritative.aggregate);
 			}
 		}

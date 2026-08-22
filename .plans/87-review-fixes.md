@@ -42,3 +42,5 @@ Tests exercise those interfaces without reaching into private helpers.
 - pnpm override slice: 1 file / 2 tests passed. `pnpm install --lockfile-only` retained the cookie override without the ignored-package-field warning.
 - Final gates: the fresh D1 schema and seed chain passed; 6 focused files / 54 tests passed; check and lint passed; `pnpm validate` passed with 63 unit files / 342 tests, a 189,361-byte initial gzip entry, and 22 Playwright tests.
 - The fresh Drizzle baseline, taxonomy seed migration, and TypeScript taxonomy seed have no diff from the ticket base.
+- Merger audit fixed two follow-up gaps. A rejected shadow waits for every same-aggregate pending mutation, independent of receipt order. Launch refresh now skips current paid and settled disabled households instead of polling them by projection age.
+- Merger validation: 3 focused files / 41 tests passed; focused Prettier and ESLint passed; Svelte check found 0 errors and 0 warnings; the fresh D1 schema and seed chain passed; Drizzle migrations and the canonical TypeScript seed remain byte-identical to the ticket base.

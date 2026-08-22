@@ -102,7 +102,7 @@ describe('local billing projection', () => {
 			nextRetryAt: null,
 			retryCount: 0
 		});
-		for (const householdId of ['org_kitchen', 'org_free']) {
+		for (const householdId of ['org_kitchen', 'org_current', 'org_lapsed', 'org_free']) {
 			await database.memberships.put({
 				membershipId: `membership_${householdId}`,
 				householdId,
@@ -121,6 +121,14 @@ describe('local billing projection', () => {
 		}
 		await database.billingCapabilities.bulkPut([
 			{ ...projection().capability, validUntil: '2026-08-21T11:59:59.000Z' },
+			{ ...projection().capability, householdId: 'org_current' },
+			{
+				...projection().capability,
+				householdId: 'org_lapsed',
+				state: 'disabled',
+				stripeStatus: 'canceled',
+				validUntil: null
+			},
 			{
 				householdId: 'org_free',
 				state: 'disabled',
@@ -134,6 +142,20 @@ describe('local billing projection', () => {
 				cancelAtPeriodEnd: false,
 				stale: true,
 				source: 'stripe-d1'
+			}
+		]);
+		await database.remoteProjectionMeta.bulkPut([
+			{
+				key: 'billing:org_current',
+				refreshedAt: '2026-08-01T12:00:00.000Z',
+				decodeVersion: 1,
+				value: {}
+			},
+			{
+				key: 'billing:org_lapsed',
+				refreshedAt: '2026-08-01T12:00:00.000Z',
+				decodeVersion: 1,
+				value: {}
 			}
 		]);
 		const fetcher: typeof globalThis.fetch = vi.fn(async () => Response.json(projection()));

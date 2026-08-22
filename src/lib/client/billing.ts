@@ -95,12 +95,7 @@ export const shouldRefreshBillingOnLaunch = async (
 	if (!capability) return false;
 	if (!billingCapabilityWasPreviouslyPaid(capability)) return false;
 	if (capability.stale) return true;
-	if (capability.state !== 'disabled' && !billingCapabilityIsEnabledAt(capability, now))
-		return true;
-	const projection = await database.remoteProjectionMeta.get(`billing:${householdId}`);
-	return (
-		!projection?.refreshedAt || now - Date.parse(projection.refreshedAt) > 24 * 60 * 60 * 1_000
-	);
+	return capability.state !== 'disabled' && !billingCapabilityIsEnabledAt(capability, now);
 };
 
 export const refreshBillingProjectionsOnLaunch = async (

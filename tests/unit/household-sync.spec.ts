@@ -11,6 +11,8 @@ import {
 	HOUSEHOLD_BACKFILL_MAX_BYTES,
 	HOUSEHOLD_BACKFILL_SINGLE_RECORD_MAX_BYTES,
 	applyHouseholdBootstrap,
+	applyHouseholdMutationReceipts,
+	applyHouseholdPullPage,
 	createHouseholdSyncCoordinator,
 	type HouseholdSyncTransport,
 	type UserSyncEnvironment
@@ -628,6 +630,72 @@ describe('foreground household coordinator', () => {
 			status: 'rejected',
 			rejectionCode: 'historical_loser'
 		});
+		await expect(database.meals.get(mealId)).resolves.toEqual(remote);
+	});
+
+	test('keeps a newer pending meal until every mutation masking the remote meal is rejected', async () => {
+		const database = await openDatabase('multiple-rejected-masked-pull');
+		const mealId = uuidv7();
+		const firstMutationId = uuidv7();
+		const secondMutationId = uuidv7();
+		const deviceId = uuidv7();
+		const local = meal(mealId, secondMutationId, deviceId, { date: '2026-08-24' });
+		const remote = meal(mealId, uuidv7(), uuidv7(), { date: '2026-08-23', revision: 2 });
+		await database.meals.put(local);
+		await database.outbox.bulkPut(
+			[firstMutationId, secondMutationId].map((mutationId) => ({
+				mutationId,
+				authSlotId: 'slot_alice',
+				scopeKind: 'household' as const,
+				scopeId: householdId,
+				status: 'pending' as const,
+				occurredAt: timestamp,
+				aggregateId: mealId,
+				entityKind: 'meal',
+				conflictGroup: 'schedule',
+				operation: 'upsert' as const,
+				originDeviceId: deviceId,
+				payload: {},
+				nextAttemptAt: timestamp,
+				attempts: 0
+			}))
+		);
+		await applyHouseholdPullPage(database, householdId, {
+			protocolVersion: 1,
+			changes: [
+				{
+					sequence: 1,
+					mutationId: uuidv7(),
+					originDeviceId: uuidv7(),
+					actorUserId: 'user_bob',
+					entityKind: 'meal',
+					entityId: mealId,
+					conflictGroups: ['schedule'],
+					operation: 'upsert',
+					resultingRevision: 2,
+					occurredAt: timestamp,
+					receivedAt: timestamp,
+					aggregate: remote,
+					tombstoneExpiresAt: null
+				}
+			],
+			throughSequence: 1,
+			retainedFloor: 0,
+			bootstrapGeneration: 1,
+			hasMore: false
+		});
+
+		const rejected = (mutationId: string) => ({
+			mutationId,
+			status: 'rejected' as const,
+			sequence: null,
+			resultingRevision: null,
+			errorCode: 'historical_loser'
+		});
+		await applyHouseholdMutationReceipts(database, householdId, [rejected(secondMutationId)]);
+		await expect(database.meals.get(mealId)).resolves.toEqual(local);
+
+		await applyHouseholdMutationReceipts(database, householdId, [rejected(firstMutationId)]);
 		await expect(database.meals.get(mealId)).resolves.toEqual(remote);
 	});
 

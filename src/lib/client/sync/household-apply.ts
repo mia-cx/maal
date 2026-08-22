@@ -130,7 +130,9 @@ export const applyHouseholdMutationReceipts = async (
 ): Promise<void> => {
 	const resolved = await Promise.all(
 		receipts.map(async (receipt) => {
-			const row = await database.outbox.get(receipt.mutationId);
+			const stored = await database.outbox.get(receipt.mutationId);
+			const row =
+				stored?.scopeKind === 'household' && stored.scopeId === householdId ? stored : undefined;
 			const authoritative =
 				row && receipt.status === 'rejected' && row.authoritativeSnapshot !== undefined
 					? decodeHouseholdSyncAggregate(
@@ -150,6 +152,10 @@ export const applyHouseholdMutationReceipts = async (
 		'rw',
 		[...new Set(tables), database.mealCheckIns, database.outbox],
 		async () => {
+			const restorations = new Map<
+				string,
+				NonNullable<(typeof resolved)[number]['authoritative']>
+			>();
 			for (const { receipt, row, authoritative } of resolved) {
 				if (!row) continue;
 				if (receipt.status === 'accepted' || receipt.status === 'duplicate') {
@@ -166,7 +172,16 @@ export const applyHouseholdMutationReceipts = async (
 					rejectionCode: receipt.errorCode,
 					acknowledgedAt: now.toISOString()
 				});
-				if (!authoritative) continue;
+				if (authoritative)
+					restorations.set(keyFor(authoritative.entityKind, authoritative.entityId), authoritative);
+			}
+			const unresolvedKeys = new Set(
+				(await pendingHouseholdOutbox(database, householdId)).map((row) =>
+					keyFor(row.entityKind, row.aggregateId)
+				)
+			);
+			for (const [key, authoritative] of restorations) {
+				if (unresolvedKeys.has(key)) continue;
 				await database.table(authoritative.store).put(authoritative.aggregate);
 				if (authoritative.entityKind === 'meal' && authoritative.aggregate.deletedAt !== null) {
 					await detachMealCheckIns(database, authoritative.entityId);
