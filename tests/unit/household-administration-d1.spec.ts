@@ -449,6 +449,58 @@ describe('household administration Worker service', () => {
 		).rejects.toMatchObject({ code: 'last_admin' });
 	});
 
+	test('blocks another admin from demoting or removing the current billing owner', async () => {
+		const { alice, bob } = await bootstrapHousehold();
+		await service().updateMemberRole({
+			actor: actor(aliceId, ['org_family']),
+			householdId: 'org_family',
+			membershipId: bob.id,
+			roleSlug: 'admin'
+		});
+		await database
+			.prepare(
+				`INSERT INTO billing_subscriptions
+				 (household_id, stripe_customer_id, stripe_subscription_id, stripe_price_id,
+				  subscriber_user_id, status, current_period_end)
+				 VALUES ('org_family', 'cus_test', 'sub_test', 'price_test', ?, 'past_due', ?)`
+			)
+			.bind(bobId, '2026-09-22T08:00:00.000Z')
+			.run();
+
+		await expect(
+			service().updateMemberRole({
+				actor: actor(aliceId, ['org_family']),
+				householdId: 'org_family',
+				membershipId: bob.id,
+				roleSlug: 'member'
+			})
+		).rejects.toMatchObject({ code: 'billing_owner_required' });
+		await expect(
+			service().removeMember({
+				actor: actor(aliceId, ['org_family']),
+				householdId: 'org_family',
+				membershipId: bob.id
+			})
+		).rejects.toMatchObject({ code: 'billing_owner_required' });
+
+		await database
+			.prepare(
+				"UPDATE billing_subscriptions SET status = 'canceled' WHERE household_id = 'org_family'"
+			)
+			.run();
+		await expect(
+			service().removeMember({
+				actor: actor(aliceId, ['org_family']),
+				householdId: 'org_family',
+				membershipId: bob.id
+			})
+		).resolves.toBeUndefined();
+		await expect(repository.membership('org_family', aliceId)).resolves.toMatchObject({
+			membershipId: alice.id,
+			status: 'active'
+		});
+	});
+
 	test('refreshes safe member identities and revokes only missing household projections', async () => {
 		const { bob } = await bootstrapHousehold();
 		identity.memberships.delete(bob.id);

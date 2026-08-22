@@ -266,6 +266,12 @@ export class HouseholdAdministrationService {
 			if (target.workosUserId === input.actor.workosUserId && input.roleSlug !== 'admin') {
 				throw new HouseholdAdministrationError({ code: 'permission_denied' });
 			}
+			if (
+				input.roleSlug !== 'admin' &&
+				(await this.repository.activeBillingOwner(input.householdId)) === target.workosUserId
+			) {
+				throw new HouseholdAdministrationError({ code: 'billing_owner_required' });
+			}
 			if (isAdmin(target) && input.roleSlug !== 'admin' && members.filter(isAdmin).length <= 1) {
 				throw new HouseholdAdministrationError({ code: 'last_admin' });
 			}
@@ -314,6 +320,9 @@ export class HouseholdAdministrationService {
 			}
 			if (target.workosUserId === input.actor.workosUserId) {
 				throw new HouseholdAdministrationError({ code: 'permission_denied' });
+			}
+			if ((await this.repository.activeBillingOwner(input.householdId)) === target.workosUserId) {
+				throw new HouseholdAdministrationError({ code: 'billing_owner_required' });
 			}
 			this.assertRemovable(target, members);
 			await this.deleteMembershipWithCompensation(target);

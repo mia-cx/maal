@@ -255,6 +255,21 @@ describe('D1 user sync repository', () => {
 				now: timestamp
 			})
 		).resolves.toMatchObject({ householdId: 'org_paid' });
+		await database
+			.prepare(
+				"UPDATE billing_subscriptions SET status = 'active', current_period_end = ? WHERE household_id = 'org_paid'"
+			)
+			.bind(timestamp)
+			.run();
+		await expect(
+			d1UserSyncCapabilityAuthorizer.authorize({
+				database,
+				workosUserId: userId,
+				activeWorkOSMemberships: [liveMembership()],
+				permission: 'recipes:read',
+				now: timestamp
+			})
+		).rejects.toMatchObject({ _tag: 'SyncCapabilityDenied' });
 	});
 
 	test('commits normalized state, idempotency receipt, version, change, and scope sequence atomically', async () => {

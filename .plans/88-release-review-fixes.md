@@ -21,7 +21,7 @@ Drizzle baseline or canonical taxonomy seed.
 ## TODOs
 
 - [x] Make the refund/deletion saga and canonical webhook projection fail closed and resumable.
-- [ ] Enforce paid-period deadlines and protect the current billing owner in all membership mutations.
+- [x] Enforce paid-period deadlines and protect the current billing owner in all membership mutations.
 - [ ] Reconcile stale trial resources and purge check-in recovery rows in scheduled maintenance.
 - [ ] Restart portable-import backfill and preserve authoritative deletion intent for natural-key replacements.
 - [ ] Harden MCP key management, paid authorization, expiry, recovered households, and recipe propagation.
@@ -37,3 +37,6 @@ Drizzle baseline or canonical taxonomy seed.
 - Refund/deletion slice: 1 file / 4 tests passed. Pending and action-required refunds stay outside
   recovery until canonical Stripe status succeeds; failed refunds stay failed. Webhooks fetch canonical
   refund/subscription state before projection.
+- Paid-boundary slice: 3 files / 20 tests passed. Active and trialing server capability now stops at
+  `current_period_end`; grace uses an exclusive deadline. Other admins cannot demote or remove the current
+  billing owner while billing remains live.
