@@ -38,9 +38,11 @@ const subscription = (status: Stripe.Subscription.Status = 'active'): Stripe.Sub
 			has_more: false,
 			url: '/v1/subscription_items'
 		}
-	}) as Stripe.Subscription;
+	}) as unknown as Stripe.Subscription;
 
-const refund = (status: Stripe.Refund.Status): Stripe.Refund =>
+const refund = (
+	status: 'pending' | 'requires_action' | 'succeeded' | 'failed' | 'canceled'
+): Stripe.Refund =>
 	({
 		id: 're_maal',
 		object: 'refund',
@@ -48,7 +50,7 @@ const refund = (status: Stripe.Refund.Status): Stripe.Refund =>
 		currency: 'eur',
 		status,
 		metadata: { householdId: 'org_family' }
-	}) as Stripe.Refund;
+	}) as unknown as Stripe.Refund;
 
 const event = (input: {
 	id: string;

@@ -104,6 +104,14 @@ describe('scheduled household purge', () => {
 		await expect(repository.deletionRequest('org_cancelling')).resolves.toMatchObject({
 			state: 'cancelling'
 		});
+		await database
+			.prepare(
+				`INSERT INTO meal_check_in_recovery
+				 (id, household_id, reporter_user_id, verdict, created_at, updated_at, recovery_reason)
+				 VALUES ('recovery_due', 'org_due', 'user_alice', 'repeat', ?, ?, 'household_unresolved')`
+			)
+			.bind('2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z')
+			.run();
 
 		const second = await purgeExpiredHouseholds({
 			repository,
@@ -114,7 +122,7 @@ describe('scheduled household purge', () => {
 			}
 		});
 		expect(second).toMatchObject({ purged: ['org_due'], pending: [] });
-		expect(second.rowsDeleted).toBe(3);
+		expect(second.rowsDeleted).toBe(4);
 		expect(deletedOrganizations).toEqual(['org_due', 'org_due']);
 		await expect(
 			database.prepare("SELECT * FROM households WHERE household_id = 'org_due'").first()
@@ -127,6 +135,9 @@ describe('scheduled household purge', () => {
 		await expect(
 			database.prepare("SELECT id FROM billing_trial_claims WHERE id = 'trial_due'").first()
 		).resolves.toEqual({ id: 'trial_due' });
+		await expect(
+			database.prepare("SELECT id FROM meal_check_in_recovery WHERE id = 'recovery_due'").first()
+		).resolves.toBeNull();
 		await expect(
 			database
 				.prepare(

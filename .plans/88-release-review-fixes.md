@@ -22,7 +22,7 @@ Drizzle baseline or canonical taxonomy seed.
 
 - [x] Make the refund/deletion saga and canonical webhook projection fail closed and resumable.
 - [x] Enforce paid-period deadlines and protect the current billing owner in all membership mutations.
-- [ ] Reconcile stale trial resources and purge check-in recovery rows in scheduled maintenance.
+- [x] Reconcile stale trial resources and purge check-in recovery rows in scheduled maintenance.
 - [ ] Restart portable-import backfill and preserve authoritative deletion intent for natural-key replacements.
 - [ ] Harden MCP key management, paid authorization, expiry, recovered households, and recipe propagation.
 - [ ] Add authorized household administration, check-in read, and food-profile MCP tools.
@@ -40,3 +40,6 @@ Drizzle baseline or canonical taxonomy seed.
 - Paid-boundary slice: 3 files / 20 tests passed. Active and trialing server capability now stops at
   `current_period_end`; grace uses an exclusive deadline. Other admins cannot demote or remove the current
   billing owner while billing remains live.
+- Maintenance slice: 2 files / 5 tests passed. Empty one-hour reservations release safely. Cleaned
+  rollback claims become consumed claims, so cleanup stops without reopening either trial allowance. Final
+  household purge now removes matching check-in recovery rows. Svelte check passed with 0 errors and 0 warnings.

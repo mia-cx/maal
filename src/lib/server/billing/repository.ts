@@ -11,6 +11,7 @@ import {
 } from '$lib/server/db/schema/index.js';
 
 export type BillingSubscriptionRow = typeof billingSubscriptions.$inferSelect;
+export type BillingTrialClaimRow = typeof billingTrialClaims.$inferSelect;
 export type HouseholdDeletionRow = typeof householdDeletionRequests.$inferSelect;
 
 export interface SubscriptionProjectionWrite {
@@ -57,6 +58,10 @@ const HOUSEHOLD_PURGE_STATEMENTS = [
 		WHERE check_in.household_id = ?1 OR check_in.meal_id IN (
 			SELECT id FROM meals WHERE household_id = ?1
 		) ORDER BY check_in.rowid LIMIT ?2
+	)`,
+	`DELETE FROM meal_check_in_recovery WHERE rowid IN (
+		SELECT rowid FROM meal_check_in_recovery
+		WHERE household_id = ?1 ORDER BY rowid LIMIT ?2
 	)`,
 	...[
 		'meals',
@@ -167,6 +172,51 @@ export class BillingRepository {
 		await getDb(this.database)
 			.delete(billingTrialClaims)
 			.where(and(eq(billingTrialClaims.id, id), eq(billingTrialClaims.state, 'reserved')));
+	}
+
+	async staleTrialClaims(
+		staleBefore: string,
+		limit = 25
+	): Promise<readonly BillingTrialClaimRow[]> {
+		const size = boundedSize(limit);
+		return (
+			await this.database
+				.prepare(
+					`SELECT id, workos_user_id AS workosUserId, household_id AS householdId, state,
+					 stripe_customer_id AS stripeCustomerId,
+					 stripe_subscription_id AS stripeSubscriptionId, reserved_at AS reservedAt,
+					 started_at AS startedAt, updated_at AS updatedAt
+					 FROM billing_trial_claims
+					 WHERE state IN ('reserved', 'rollback_pending') AND updated_at <= ?
+					 ORDER BY updated_at, id LIMIT ?`
+				)
+				.bind(staleBefore, size)
+				.all<BillingTrialClaimRow>()
+		).results;
+	}
+
+	async releaseStaleTrialReservation(id: string, staleBefore: string): Promise<boolean> {
+		const result = await this.database
+			.prepare(
+				`DELETE FROM billing_trial_claims
+				 WHERE id = ? AND state = 'reserved' AND stripe_customer_id IS NULL
+				 AND stripe_subscription_id IS NULL AND updated_at <= ?`
+			)
+			.bind(id, staleBefore)
+			.run();
+		return result.meta.changes > 0;
+	}
+
+	async completeTrialRollback(id: string, resolvedAt: string): Promise<boolean> {
+		const result = await this.database
+			.prepare(
+				`UPDATE billing_trial_claims
+				 SET state = 'started', started_at = COALESCE(started_at, reserved_at), updated_at = ?
+				 WHERE id = ? AND state = 'rollback_pending'`
+			)
+			.bind(resolvedAt, id)
+			.run();
+		return result.meta.changes > 0;
 	}
 
 	async markTrialRollbackPending(input: {
