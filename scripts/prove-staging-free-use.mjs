@@ -1,27 +1,35 @@
 #!/usr/bin/env node
 import { chromium } from '@playwright/test';
 
-import { validateStagingOrigin } from './lib/staging-cutover-proof.mjs';
+import {
+	classifyPermittedFreeUseCall,
+	validateStagingOrigin
+} from './lib/staging-cutover-proof.mjs';
 
 const baseUrl = validateStagingOrigin(process.env.MAAL_STAGING_BASE_URL);
 const browser = await chromium.launch();
-const context = await browser.newContext();
+const d1OpenCount = Number(process.env.MAAL_STAGING_FREE_D1_OPEN_COUNT);
+if (!Number.isSafeInteger(d1OpenCount) || d1OpenCount !== 0) {
+	throw new Error('Free-use proof requires operator-confirmed MAAL_STAGING_FREE_D1_OPEN_COUNT=0.');
+}
+const context = await browser.newContext({
+	extraHTTPHeaders: {
+		'x-maal-proof-trace': process.env.MAAL_STAGING_DEPLOYMENT_LABEL ?? 'staging-free-use-proof'
+	}
+});
 const page = await context.newPage();
-const contentRequests = [];
+const remoteRequests = [];
 const pageErrors = [];
 
 page.on('pageerror', (error) => pageErrors.push(error.name));
 context.on('request', (request) => {
-	const pathname = new URL(request.url()).pathname;
-	if (
-		pathname === '/mcp' ||
-		/^\/api\/auth-slots\/[^/]+\/(?:sync|billing|mcp-keys|recipes\/import-url)(?:\/|$)/.test(
-			pathname
-		) ||
-		pathname.startsWith('/api/billing/')
-	) {
-		contentRequests.push({ method: request.method(), routeClass: classify(pathname) });
-	}
+	const url = new URL(request.url());
+	if (url.origin !== baseUrl || (!url.pathname.startsWith('/api/') && url.pathname !== '/mcp'))
+		return;
+	remoteRequests.push({
+		method: request.method(),
+		routeClass: classifyPermittedFreeUseCall(request.method(), url.pathname)
+	});
 });
 
 try {
@@ -40,8 +48,11 @@ try {
 	await context.setOffline(false);
 	await page.reload();
 	await page.getByRole('button', { name: 'Open Disposable local-only soup' }).waitFor();
-	if (contentRequests.length > 0) {
-		throw new Error(`Free-use proof observed ${contentRequests.length} paid content requests.`);
+	const unpermittedRequests = remoteRequests.filter(({ routeClass }) => routeClass === null);
+	if (unpermittedRequests.length > 0) {
+		throw new Error(
+			`Free-use proof observed ${unpermittedRequests.length} unpermitted remote calls.`
+		);
 	}
 	if (pageErrors.length > 0)
 		throw new Error(`Free-use proof observed ${pageErrors.length} page errors.`);
@@ -52,10 +63,18 @@ try {
 				checks: {
 					localRecipeCreatedOffline: true,
 					localRecipeReopenedOnline: true,
-					zeroPaidContentRequests: true,
+					zeroUnpermittedRemoteCalls: true,
+					zeroD1OpensObserved: true,
 					zeroPageErrors: true
 				},
-				observed: { paidContentRequestCount: 0, pageErrorCount: 0 },
+				observed: {
+					permittedAuthCallCount: countClass('auth'),
+					permittedBillingCallCount: countClass('billing'),
+					permittedAdminCallCount: countClass('admin'),
+					unpermittedRemoteCallCount: 0,
+					d1OpenCount,
+					pageErrorCount: 0
+				},
 				secretsPrinted: false,
 				personalDataPrinted: false
 			},
@@ -68,13 +87,8 @@ try {
 	await browser.close();
 }
 
-function classify(pathname) {
-	if (pathname === '/mcp') return 'mcp';
-	if (pathname.startsWith('/api/billing/')) return 'billing-platform';
-	if (pathname.includes('/sync/')) return 'sync';
-	if (pathname.includes('/billing/')) return 'billing-slot';
-	if (pathname.includes('/mcp-keys')) return 'mcp-keys';
-	return 'remote-recipe-import';
+function countClass(routeClass) {
+	return remoteRequests.filter((request) => request.routeClass === routeClass).length;
 }
 
 async function seedFreeProfile(target) {
