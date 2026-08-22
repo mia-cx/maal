@@ -3,7 +3,11 @@ import { Schema } from 'effect';
 import type { AggregateStoreName } from '$lib/client/local/commands.js';
 import { LocalDecodeError } from '$lib/domain/contracts/errors.js';
 import { HouseholdApplianceSchema, HouseholdSchema } from '$lib/domain/household/contracts.js';
-import { MealCheckInSchema, StoredMealSchema } from '$lib/domain/meals/schema.js';
+import {
+	MEAL_CONFLICT_GROUPS,
+	MealCheckInSchema,
+	StoredMealSchema
+} from '$lib/domain/meals/schema.js';
 import {
 	FoodHouseholdAliasSchema,
 	FoodHouseholdEntrySchema,
@@ -18,24 +22,47 @@ import type { HouseholdSyncEntityKind } from './household-contracts.js';
 export interface HouseholdSyncEntityDescriptor {
 	readonly store: AggregateStoreName;
 	readonly schema: Schema.Schema.AnyNoContext;
+	readonly conflictGroups: readonly string[];
 }
 
 export const HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS = {
-	household: { store: 'households', schema: HouseholdSchema },
-	meal: { store: 'meals', schema: StoredMealSchema },
-	meal_check_in: { store: 'mealCheckIns', schema: MealCheckInSchema },
-	householdAppliance: { store: 'householdAppliances', schema: HouseholdApplianceSchema },
-	foodHouseholdAlias: { store: 'foodHouseholdAliases', schema: FoodHouseholdAliasSchema },
-	foodHouseholdEntry: { store: 'foodHouseholdEntries', schema: FoodHouseholdEntrySchema },
-	unitHouseholdAlias: { store: 'unitHouseholdAliases', schema: UnitHouseholdAliasSchema },
-	unitHouseholdEntry: { store: 'unitHouseholdEntries', schema: UnitHouseholdEntrySchema },
+	household: { store: 'households', schema: HouseholdSchema, conflictGroups: ['settings'] },
+	meal: { store: 'meals', schema: StoredMealSchema, conflictGroups: MEAL_CONFLICT_GROUPS },
+	meal_check_in: { store: 'mealCheckIns', schema: MealCheckInSchema, conflictGroups: ['response'] },
+	householdAppliance: {
+		store: 'householdAppliances',
+		schema: HouseholdApplianceSchema,
+		conflictGroups: ['row']
+	},
+	foodHouseholdAlias: {
+		store: 'foodHouseholdAliases',
+		schema: FoodHouseholdAliasSchema,
+		conflictGroups: ['row']
+	},
+	foodHouseholdEntry: {
+		store: 'foodHouseholdEntries',
+		schema: FoodHouseholdEntrySchema,
+		conflictGroups: ['row']
+	},
+	unitHouseholdAlias: {
+		store: 'unitHouseholdAliases',
+		schema: UnitHouseholdAliasSchema,
+		conflictGroups: ['row']
+	},
+	unitHouseholdEntry: {
+		store: 'unitHouseholdEntries',
+		schema: UnitHouseholdEntrySchema,
+		conflictGroups: ['row']
+	},
 	householdFoodDisplayPreference: {
 		store: 'householdFoodDisplayPreferences',
-		schema: HouseholdFoodDisplayPreferenceSchema
+		schema: HouseholdFoodDisplayPreferenceSchema,
+		conflictGroups: ['row']
 	},
 	householdUnitDisplayPreference: {
 		store: 'householdUnitDisplayPreferences',
-		schema: HouseholdUnitDisplayPreferenceSchema
+		schema: HouseholdUnitDisplayPreferenceSchema,
+		conflictGroups: ['row']
 	}
 } as const satisfies Record<HouseholdSyncEntityKind, HouseholdSyncEntityDescriptor>;
 
@@ -79,6 +106,11 @@ export const decodeHouseholdSyncAggregate = (
 		});
 	}
 };
+
+export const isAllowedHouseholdConflictGroup = (
+	entityKind: HouseholdSyncEntityKind,
+	group: string
+): boolean => HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS[entityKind].conflictGroups.includes(group);
 
 export const assertHouseholdMutationActor = (
 	entityKind: HouseholdSyncEntityKind,

@@ -816,6 +816,55 @@ describe('server ordering and bootstrap rules', () => {
 		expect(commit).not.toHaveBeenCalled();
 	});
 
+	test.each([
+		[
+			'unknown conflict group',
+			(mutation: PushRequest['mutations'][number]) => ({
+				...mutation,
+				conflictGroups: ['surprise'] as [string, ...string[]]
+			})
+		],
+		[
+			'operation/deletion mismatch',
+			(mutation: PushRequest['mutations'][number]) => ({
+				...mutation,
+				operation: 'delete' as const
+			})
+		]
+	])('rejects an %s before the first user repository write', async (_label, invalidate) => {
+		const commit = vi.fn();
+		const repository = {
+			readScopeState: async () => ({ retainedFloor: 0, latestSequence: 0, bootstrapGeneration: 1 }),
+			pull: vi.fn(),
+			bootstrap: vi.fn(),
+			commit,
+			prune: vi.fn()
+		} satisfies UserSyncRepository;
+		const aggregate = userUnit();
+		const mutation: PushRequest['mutations'][number] = {
+			schemaVersion: 1,
+			mutationId: uuidv7(),
+			originDeviceId: uuidv7(),
+			entityKind: 'unitUserEntry',
+			entityId: aggregate.id,
+			conflictGroups: ['row'],
+			operation: 'upsert',
+			occurredAt: timestamp,
+			aggregate
+		};
+
+		await expect(
+			pushUserSync(repository, userId, {
+				protocolVersion: 1,
+				deviceId: uuidv7(),
+				audience: { kind: 'user', id: userId },
+				baseCursor: null,
+				mutations: [mutation, invalidate({ ...mutation, mutationId: uuidv7() })]
+			})
+		).rejects.toMatchObject({ _tag: 'SyncMalformedRequest' });
+		expect(commit).not.toHaveBeenCalled();
+	});
+
 	test('uses original UTC edit time only beyond the one-hour backfill threshold', () => {
 		const current = { occurredAt: timestamp, originDeviceId: uuidv7(), mutationId: uuidv7() };
 		expect(

@@ -88,6 +88,56 @@ describe('household server request validation', () => {
 		).rejects.toMatchObject({ _tag: 'SyncMalformedRequest' });
 		expect(commit).not.toHaveBeenCalled();
 	});
+
+	test.each([
+		[
+			'unknown conflict group',
+			(mutation: HouseholdSyncMutation) => ({
+				...mutation,
+				conflictGroups: ['surprise'] as [string, ...string[]]
+			})
+		],
+		[
+			'operation/deletion mismatch',
+			(mutation: HouseholdSyncMutation) => ({
+				...mutation,
+				operation: 'delete' as const
+			})
+		]
+	])('rejects an %s before the first household repository write', async (_label, invalidate) => {
+		const commit = vi.fn();
+		const repository = {
+			readScopeState: async () => ({ retainedFloor: 0, latestSequence: 0, bootstrapGeneration: 1 }),
+			pull: vi.fn(),
+			bootstrap: vi.fn(),
+			commit,
+			prune: vi.fn()
+		} satisfies HouseholdSyncRepository;
+		const originDeviceId = uuidv7();
+		const aggregate = meal(uuidv7(), uuidv7(), originDeviceId);
+		const mutation: HouseholdSyncMutation = {
+			schemaVersion: 1,
+			mutationId: uuidv7(),
+			originDeviceId,
+			entityKind: 'meal',
+			entityId: aggregate.id,
+			conflictGroups: ['schedule'],
+			operation: 'upsert',
+			occurredAt: timestamp,
+			aggregate
+		};
+
+		await expect(
+			pushHouseholdSync(repository, householdId, 'user_alice', {
+				protocolVersion: 1,
+				deviceId: originDeviceId,
+				audience: { kind: 'household', id: householdId },
+				baseCursor: null,
+				mutations: [mutation, invalidate({ ...mutation, mutationId: uuidv7() })]
+			})
+		).rejects.toMatchObject({ _tag: 'SyncMalformedRequest' });
+		expect(commit).not.toHaveBeenCalled();
+	});
 });
 
 const environment = (

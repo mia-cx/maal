@@ -367,7 +367,10 @@ const prepareBackfill = async (
 				typeof clocks === 'object' && clocks !== null && !Array.isArray(clocks)
 					? Object.keys(clocks)
 					: [];
-			const groups = conflictGroups.length > 0 ? conflictGroups : ['aggregate'];
+			const groups =
+				conflictGroups.length > 0
+					? conflictGroups
+					: [...HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS[entityKind].conflictGroups];
 			const mutation: HouseholdSyncMutation = {
 				schemaVersion: CURRENT_SCHEMA_VERSION,
 				mutationId,

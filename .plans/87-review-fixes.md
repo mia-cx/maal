@@ -24,7 +24,7 @@ Tests exercise those interfaces without reaching into private helpers.
 
 - [x] Reconcile authoritative user and household state after rejected masked mutations.
 - [x] Persist oversized backfill outcomes and let later user and household records progress.
-- [ ] Validate user and household mutation conflict and deletion semantics before repository writes.
+- [x] Validate user and household mutation conflict and deletion semantics before repository writes.
 - [ ] Expire cached capabilities locally and restrict launch refresh to previously paid projections.
 - [ ] Move the cookie override into pnpm's workspace configuration.
 - [ ] Run focused D1/schema gates, check, lint, and one bounded full validation.
@@ -37,3 +37,4 @@ Tests exercise those interfaces without reaching into private helpers.
 - Vitest and Playwright stay at four workers or fewer. Test suites never overlap.
 - Rejected-receipt slice: 2 files / 27 tests passed. Masked remote snapshots and receipt state now commit atomically.
 - Oversized-backfill slice: 2 files / 29 tests passed. A single request may use the Worker's 1 MiB bound; larger records get a persisted rejection and advance the checkpoint.
+- Server-validation slice: 2 files / 33 tests passed. Every batch validates entity conflict groups and operation/deletedAt agreement before its first commit.

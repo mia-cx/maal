@@ -310,7 +310,9 @@ const prepareBackfill = async (
 					? Object.keys(decoded.aggregate.conflictClocks)
 					: [];
 			const backfillConflictGroups =
-				clockGroups.length > 0 ? clockGroups : [entityKind === 'recipe' ? 'aggregate' : 'row'];
+				clockGroups.length > 0
+					? clockGroups
+					: [...USER_SYNC_ENTITY_DESCRIPTORS[entityKind].conflictGroups];
 			const mutation: SyncMutation = {
 				schemaVersion: CURRENT_SCHEMA_VERSION,
 				mutationId,

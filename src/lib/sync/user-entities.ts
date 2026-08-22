@@ -3,6 +3,7 @@ import { Schema } from 'effect';
 import type { AggregateStoreName } from '$lib/client/local/commands.js';
 import { LocalDecodeError } from '$lib/domain/contracts/errors.js';
 import { StoredRecipeSchema } from '$lib/domain/recipes/schema.js';
+import { RECIPE_CONFLICT_GROUPS } from '$lib/domain/recipes/schema.js';
 import {
 	FoodUserAliasSchema,
 	FoodUserEntrySchema,
@@ -18,22 +19,29 @@ import type { UserSyncEntityKind } from './contracts.js';
 export interface UserSyncEntityDescriptor {
 	readonly store: AggregateStoreName;
 	readonly schema: Schema.Schema.AnyNoContext;
+	readonly conflictGroups: readonly string[];
 }
 
 export const USER_SYNC_ENTITY_DESCRIPTORS = {
-	recipe: { store: 'recipes', schema: StoredRecipeSchema },
-	foodUserAlias: { store: 'foodUserAliases', schema: FoodUserAliasSchema },
-	foodUserEntry: { store: 'foodUserEntries', schema: FoodUserEntrySchema },
-	unitUserAlias: { store: 'unitUserAliases', schema: UnitUserAliasSchema },
-	unitUserEntry: { store: 'unitUserEntries', schema: UnitUserEntrySchema },
-	userFoodPreference: { store: 'userFoodPreferences', schema: UserFoodPreferenceSchema },
+	recipe: { store: 'recipes', schema: StoredRecipeSchema, conflictGroups: RECIPE_CONFLICT_GROUPS },
+	foodUserAlias: { store: 'foodUserAliases', schema: FoodUserAliasSchema, conflictGroups: ['row'] },
+	foodUserEntry: { store: 'foodUserEntries', schema: FoodUserEntrySchema, conflictGroups: ['row'] },
+	unitUserAlias: { store: 'unitUserAliases', schema: UnitUserAliasSchema, conflictGroups: ['row'] },
+	unitUserEntry: { store: 'unitUserEntries', schema: UnitUserEntrySchema, conflictGroups: ['row'] },
+	userFoodPreference: {
+		store: 'userFoodPreferences',
+		schema: UserFoodPreferenceSchema,
+		conflictGroups: ['row']
+	},
 	userFoodDisplayPreference: {
 		store: 'userFoodDisplayPreferences',
-		schema: UserFoodDisplayPreferenceSchema
+		schema: UserFoodDisplayPreferenceSchema,
+		conflictGroups: ['row']
 	},
 	userUnitDisplayPreference: {
 		store: 'userUnitDisplayPreferences',
-		schema: UserUnitDisplayPreferenceSchema
+		schema: UserUnitDisplayPreferenceSchema,
+		conflictGroups: ['row']
 	}
 } as const satisfies Record<UserSyncEntityKind, UserSyncEntityDescriptor>;
 
@@ -75,6 +83,11 @@ export const decodeUserSyncAggregate = (
 		});
 	}
 };
+
+export const isAllowedUserConflictGroup = (
+	entityKind: UserSyncEntityKind,
+	group: string
+): boolean => USER_SYNC_ENTITY_DESCRIPTORS[entityKind].conflictGroups.includes(group);
 
 export const readConflictGroupsForMutation = (
 	aggregate: Record<string, unknown>,

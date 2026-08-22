@@ -9,7 +9,7 @@ import type {
 	PushRequest,
 	PushResponse
 } from '$lib/sync/contracts.js';
-import { decodeUserSyncAggregate } from '$lib/sync/user-entities.js';
+import { decodeUserSyncAggregate, isAllowedUserConflictGroup } from '$lib/sync/user-entities.js';
 
 import {
 	ServerSyncBootstrapRequired,
@@ -33,12 +33,22 @@ const assertMutationOwner = (
 	mutation: PushRequest['mutations'][number]
 ): void => {
 	try {
-		decodeUserSyncAggregate(
+		const decoded = decodeUserSyncAggregate(
 			mutation.entityKind,
 			mutation.entityId,
 			workosUserId,
 			mutation.aggregate
 		);
+		if (
+			mutation.conflictGroups.some(
+				(group) => !isAllowedUserConflictGroup(mutation.entityKind, group)
+			)
+		) {
+			throw new Error('conflict group mismatch');
+		}
+		if ((mutation.operation === 'delete') !== (decoded.aggregate.deletedAt !== null)) {
+			throw new Error('deletion operation mismatch');
+		}
 	} catch {
 		throw new ServerSyncMalformedRequest({
 			code: 'invalid_complete_aggregate',
