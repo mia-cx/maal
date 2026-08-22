@@ -3,10 +3,21 @@ import { uuidv7 } from 'uuidv7';
 import { runTrackedLocalCommit } from '$lib/client/local/commit-activity.js';
 import type { LocalStoreName, MaalDatabase } from '$lib/client/local/database.js';
 import { activeHouseholdKey } from '$lib/client/local/profiles.js';
+import { requestLocalSync, type SyncRequestedScope } from '$lib/client/sync/requests.js';
 import { PortableArchiveError } from '$lib/domain/contracts/errors.js';
 import { MEAL_CONFLICT_GROUPS } from '$lib/domain/meals/schema.js';
 import type { PortableArchive } from '$lib/domain/portability/schema.js';
 import { RECIPE_CONFLICT_GROUPS } from '$lib/domain/recipes/schema.js';
+import {
+	HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS,
+	type HouseholdSyncEntityDescriptor
+} from '$lib/sync/household-entities.js';
+import type { HouseholdSyncEntityKind } from '$lib/sync/household-contracts.js';
+import {
+	USER_SYNC_ENTITY_DESCRIPTORS,
+	type UserSyncEntityDescriptor
+} from '$lib/sync/user-entities.js';
+import type { UserSyncEntityKind } from '$lib/sync/contracts.js';
 
 export type ImportResolution = 'keep-local' | 'replace' | 'import-as-copy';
 
@@ -832,6 +843,42 @@ const aggregateStores = new Set<PortableImportStore>([
 	'householdUnitDisplayPreferences'
 ]);
 
+type PortableSyncDescriptor = {
+	readonly entityKind: UserSyncEntityKind | HouseholdSyncEntityKind;
+	readonly scopeKind: 'user' | 'household';
+	readonly store: PortableImportStore;
+	readonly conflictGroups: readonly string[];
+};
+
+const portableSyncDescriptors: readonly PortableSyncDescriptor[] = [
+	...(
+		Object.entries(USER_SYNC_ENTITY_DESCRIPTORS) as [UserSyncEntityKind, UserSyncEntityDescriptor][]
+	).map(([entityKind, descriptor]) => ({
+		entityKind,
+		scopeKind: 'user' as const,
+		store: descriptor.store as PortableImportStore,
+		conflictGroups: descriptor.conflictGroups
+	})),
+	...(
+		Object.entries(HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS) as [
+			HouseholdSyncEntityKind,
+			HouseholdSyncEntityDescriptor
+		][]
+	).map(([entityKind, descriptor]) => ({
+		entityKind,
+		scopeKind: 'household' as const,
+		store: descriptor.store as PortableImportStore,
+		conflictGroups: descriptor.conflictGroups
+	}))
+];
+
+const descriptorByStore = new Map(
+	portableSyncDescriptors.map((descriptor) => [descriptor.store, descriptor])
+);
+
+const syncScopeKey = (scope: SyncRequestedScope): string =>
+	`${scope.scopeKind}\u0000${scope.scopeId}`;
+
 const importedAggregate = (
 	store: PortableImportStore,
 	record: Record<string, unknown>,
@@ -875,10 +922,63 @@ export const commitPortableImport = async (
 		);
 	}
 	const importedAt = new Date().toISOString() as `${string}Z`;
+	const requestedScopes = new Map<string, SyncRequestedScope>();
 	try {
 		await runTrackedLocalCommit(database.name, 'commit archive import', () =>
 			database.transaction('rw', database.tables, async () => {
-				for (const [store, ids] of plan.deletes) await database.table(store).bulkDelete([...ids]);
+				for (const [store, ids] of plan.deletes) {
+					const descriptor = descriptorByStore.get(store);
+					for (const id of ids) {
+						const current = (await database.table(store).get(id)) as
+							Record<string, unknown> | undefined;
+						if (!descriptor || !current) continue;
+						const acknowledged = (await database.outbox.toArray()).find(
+							(row) =>
+								row.aggregateId === id &&
+								row.entityKind === descriptor.entityKind &&
+								row.status === 'acknowledged'
+						);
+						if (!acknowledged) continue;
+						const mutationId = uuidv7();
+						const conflictGroup = descriptor.conflictGroups[0]!;
+						const clock = { occurredAt: importedAt, originDeviceId, mutationId };
+						await database.outbox.add({
+							mutationId,
+							authSlotId: acknowledged.authSlotId,
+							scopeKind: acknowledged.scopeKind,
+							scopeId: acknowledged.scopeId,
+							status: 'pending',
+							occurredAt: importedAt,
+							aggregateId: id,
+							entityKind: descriptor.entityKind,
+							conflictGroup,
+							operation: 'delete',
+							originDeviceId,
+							payload: { source: 'portable-import-natural-key-replacement' },
+							nextAttemptAt: importedAt,
+							attempts: 0,
+							backfillConflictGroups: [conflictGroup],
+							snapshot: {
+								...current,
+								revision: Number(current.revision ?? 0) + 1,
+								updatedAt: importedAt,
+								deletedAt: importedAt,
+								conflictClocks: {
+									...(typeof current.conflictClocks === 'object' && current.conflictClocks !== null
+										? current.conflictClocks
+										: {}),
+									[conflictGroup]: clock
+								}
+							}
+						});
+						const scope = {
+							scopeKind: acknowledged.scopeKind,
+							scopeId: acknowledged.scopeId
+						};
+						requestedScopes.set(syncScopeKey(scope), scope);
+					}
+					await database.table(store).bulkDelete([...ids]);
+				}
 				for (const [store, rows] of plan.writes) {
 					const prepared = aggregateStores.has(store)
 						? rows.map((row) => importedAggregate(store, row, importedAt, originDeviceId))
@@ -893,6 +993,30 @@ export const commitPortableImport = async (
 								value: { state: 'neverAcknowledged', importedAt }
 							}))
 						);
+					}
+					const descriptor = descriptorByStore.get(store);
+					if (!descriptor) continue;
+					for (const row of prepared) {
+						let scopeId =
+							descriptor.scopeKind === 'user'
+								? plan.importerWorkosUserId
+								: text(row.householdId ?? row.householdId);
+						if (descriptor.entityKind === 'household') scopeId = text(row.householdId);
+						if (descriptor.entityKind === 'meal_check_in' && typeof row.mealId === 'string') {
+							scopeId = (await database.meals.get(row.mealId))?.householdId ?? '';
+						}
+						if (!scopeId) continue;
+						if (descriptor.scopeKind === 'household') {
+							const household = await database.households.get(scopeId);
+							if (household?.localOnly) continue;
+						}
+						await database.backfillCheckpoints.delete([
+							descriptor.scopeKind,
+							scopeId,
+							descriptor.entityKind
+						]);
+						const scope = { scopeKind: descriptor.scopeKind, scopeId };
+						requestedScopes.set(syncScopeKey(scope), scope);
 					}
 				}
 				const currentActiveHousehold = await database.uiState.get(
@@ -909,6 +1033,9 @@ export const commitPortableImport = async (
 				}
 			})
 		);
+		if (requestedScopes.size > 0) {
+			requestLocalSync({ databaseName: database.name, scopes: [...requestedScopes.values()] });
+		}
 	} catch (error) {
 		if (error instanceof PortableArchiveError) throw error;
 		throw archiveError(

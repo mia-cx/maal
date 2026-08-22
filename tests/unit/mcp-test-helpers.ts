@@ -5,16 +5,11 @@ export const MCP_TEST_NOW = '2026-08-22T12:00:00.000Z';
 export const MCP_TEST_USER = 'user_alice';
 export const MCP_TEST_HOUSEHOLD = 'org_family';
 export const MCP_TEST_PERMISSIONS = [
-	'households:read',
 	'households:write',
 	'recipes:read',
 	'recipes:write',
 	'meals:read',
-	'meals:write',
-	'check_ins:read',
-	'check_ins:write',
-	'food_profile:read',
-	'food_profile:write'
+	'meals:write'
 ] as const;
 
 export const createMcpTestDatabase = async (): Promise<{

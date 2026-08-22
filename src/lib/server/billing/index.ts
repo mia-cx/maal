@@ -10,4 +10,5 @@ export * from './subscriptions.js';
 export * from './subscription-identity.js';
 export * from './transfer.js';
 export * from './trials.js';
+export * from './trial-maintenance.js';
 export * from './webhook.js';

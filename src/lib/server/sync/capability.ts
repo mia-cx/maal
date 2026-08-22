@@ -46,6 +46,7 @@ interface CapabilityRow {
 	permissions: string;
 	status: string;
 	grace_until: string | null;
+	current_period_end: string | null;
 	deletion_state: string | null;
 	stripe_subscription_id: string | null;
 	stripe_cancellation_id: string | null;
@@ -74,7 +75,7 @@ export const d1UserSyncCapabilityAuthorizer: UserSyncCapabilityAuthorizer = {
 		const statement = input.database
 			.prepare(
 				`SELECT hm.household_id, hm.membership_id, hm.role_slug, hm.permissions,
-				        bs.status, bs.grace_until, bs.stripe_subscription_id,
+				        bs.status, bs.current_period_end, bs.grace_until, bs.stripe_subscription_id,
 				        hdr.state AS deletion_state, hdr.stripe_cancellation_id
 				 FROM household_memberships hm
 				 JOIN billing_subscriptions bs ON bs.household_id = hm.household_id
@@ -93,13 +94,14 @@ export const d1UserSyncCapabilityAuthorizer: UserSyncCapabilityAuthorizer = {
 				     )
 				   )
 				   AND (
-				     bs.status IN ('active', 'trialing')
-				     OR (bs.status IN ('past_due', 'paused') AND bs.grace_until IS NOT NULL AND bs.grace_until >= ?)
+				     (bs.status IN ('active', 'trialing') AND bs.current_period_end > ?)
+				     OR (bs.status IN ('past_due', 'paused') AND bs.grace_until IS NOT NULL AND bs.grace_until > ?)
 				   )`
 			)
 			.bind(
 				input.workosUserId,
 				...input.activeWorkOSMemberships.map(({ householdId }) => householdId),
+				input.now,
 				input.now
 			);
 		const result = await statement.all<CapabilityRow>();
@@ -144,7 +146,7 @@ export const d1HouseholdSyncCapabilityAuthorizer: HouseholdSyncCapabilityAuthori
 		const row = await input.database
 			.prepare(
 				`SELECT hm.household_id, hm.membership_id, hm.role_slug, hm.permissions,
-				        bs.status, bs.grace_until, bs.stripe_subscription_id,
+				        bs.status, bs.current_period_end, bs.grace_until, bs.stripe_subscription_id,
 				        hdr.state AS deletion_state, hdr.stripe_cancellation_id
 				 FROM household_memberships hm
 				 LEFT JOIN billing_subscriptions bs ON bs.household_id = hm.household_id
@@ -183,11 +185,12 @@ export const d1HouseholdSyncCapabilityAuthorizer: HouseholdSyncCapabilityAuthori
 			});
 		}
 		const enabled =
-			row.status === 'active' ||
-			row.status === 'trialing' ||
+			((row.status === 'active' || row.status === 'trialing') &&
+				row.current_period_end !== null &&
+				row.current_period_end > input.now) ||
 			((row.status === 'past_due' || row.status === 'paused') &&
 				row.grace_until !== null &&
-				row.grace_until >= input.now);
+				row.grace_until > input.now);
 		if (!enabled) {
 			throw new ServerSyncCapabilityDenied({
 				code: 'maal_plan_required',

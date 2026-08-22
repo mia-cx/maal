@@ -16,6 +16,22 @@ import {
 	type RecipeAggregate,
 	type RecipeImportedCandidate
 } from '$lib/domain/recipes/schema.js';
+import {
+	FoodUserAliasSchema,
+	FoodUserEntrySchema,
+	UnitUserAliasSchema,
+	UnitUserEntrySchema,
+	UserFoodDisplayPreferenceSchema,
+	UserFoodPreferenceSchema,
+	UserUnitDisplayPreferenceSchema,
+	type FoodUserAlias,
+	type FoodUserEntry,
+	type UnitUserAlias,
+	type UnitUserEntry,
+	type UserFoodDisplayPreference,
+	type UserFoodPreference,
+	type UserUnitDisplayPreference
+} from '$lib/domain/taxonomy/schema.js';
 import { D1HouseholdSyncRepository } from '$lib/server/sync/household-d1-repository.js';
 import { D1UserSyncRepository } from '$lib/server/sync/d1-repository.js';
 
@@ -24,6 +40,16 @@ export interface RemoteHouseholdSummary {
 	readonly name: string;
 	readonly locale: string;
 	readonly timezone: string | null;
+}
+
+export interface RemoteFoodProfile {
+	readonly foodUserAliases: readonly FoodUserAlias[];
+	readonly foodUserEntries: readonly FoodUserEntry[];
+	readonly unitUserAliases: readonly UnitUserAlias[];
+	readonly unitUserEntries: readonly UnitUserEntry[];
+	readonly userFoodPreferences: readonly UserFoodPreference[];
+	readonly userFoodDisplayPreferences: readonly UserFoodDisplayPreference[];
+	readonly userUnitDisplayPreferences: readonly UserUnitDisplayPreference[];
 }
 
 export interface RemoteDomainPort {
@@ -50,11 +76,17 @@ export interface RemoteDomainPort {
 		mealId: string,
 		reporterUserId: string
 	): Promise<MealCheckIn | null>;
+	listMealCheckIns(householdId: string, mealId?: string): Promise<readonly MealCheckIn[]>;
 	writeMealCheckIn(input: {
 		actorUserId: string;
 		householdId: string;
 		aggregate: MealCheckIn;
 	}): Promise<MealCheckIn>;
+	getUserFoodProfile(ownerUserId: string): Promise<RemoteFoodProfile>;
+	writeUserFoodPreference(input: {
+		actorUserId: string;
+		aggregate: UserFoodPreference;
+	}): Promise<UserFoodPreference>;
 }
 
 const decode = <A, I>(schema: Schema.Schema<A, I>, value: unknown, name: string): A => {
@@ -233,6 +265,23 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		return null;
 	}
 
+	async listMealCheckIns(householdId: string, mealId?: string): Promise<readonly MealCheckIn[]> {
+		const snapshot = await this.households.bootstrap(householdId);
+		return snapshot.aggregates
+			.filter(({ entityKind }) => entityKind === 'meal_check_in')
+			.map(({ aggregate }) => {
+				try {
+					return Schema.decodeUnknownSync(MealCheckInSchema)(aggregate);
+				} catch {
+					return null;
+				}
+			})
+			.filter(
+				(row): row is MealCheckIn =>
+					row !== null && row.deletedAt === null && (!mealId || row.mealId === mealId)
+			);
+	}
+
 	async writeMealCheckIn(input: {
 		actorUserId: string;
 		householdId: string;
@@ -266,6 +315,118 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 			input.actorUserId
 		);
 		if (!result) throw new RemoteDomainError('not_found', 'The written check-in was not found.');
+		return result;
+	}
+
+	async getUserFoodProfile(ownerUserId: string): Promise<RemoteFoodProfile> {
+		const profile: {
+			foodUserAliases: FoodUserAlias[];
+			foodUserEntries: FoodUserEntry[];
+			unitUserAliases: UnitUserAlias[];
+			unitUserEntries: UnitUserEntry[];
+			userFoodPreferences: UserFoodPreference[];
+			userFoodDisplayPreferences: UserFoodDisplayPreference[];
+			userUnitDisplayPreferences: UserUnitDisplayPreference[];
+		} = {
+			foodUserAliases: [],
+			foodUserEntries: [],
+			unitUserAliases: [],
+			unitUserEntries: [],
+			userFoodPreferences: [],
+			userFoodDisplayPreferences: [],
+			userUnitDisplayPreferences: []
+		};
+		const snapshot = await this.users.bootstrap(ownerUserId);
+		for (const change of snapshot.aggregates) {
+			try {
+				switch (change.entityKind) {
+					case 'foodUserAlias':
+						profile.foodUserAliases.push(
+							Schema.decodeUnknownSync(FoodUserAliasSchema)(change.aggregate)
+						);
+						break;
+					case 'foodUserEntry':
+						profile.foodUserEntries.push(
+							Schema.decodeUnknownSync(FoodUserEntrySchema)(change.aggregate)
+						);
+						break;
+					case 'unitUserAlias':
+						profile.unitUserAliases.push(
+							Schema.decodeUnknownSync(UnitUserAliasSchema)(change.aggregate)
+						);
+						break;
+					case 'unitUserEntry':
+						profile.unitUserEntries.push(
+							Schema.decodeUnknownSync(UnitUserEntrySchema)(change.aggregate)
+						);
+						break;
+					case 'userFoodPreference':
+						profile.userFoodPreferences.push(
+							Schema.decodeUnknownSync(UserFoodPreferenceSchema)(change.aggregate)
+						);
+						break;
+					case 'userFoodDisplayPreference':
+						profile.userFoodDisplayPreferences.push(
+							Schema.decodeUnknownSync(UserFoodDisplayPreferenceSchema)(change.aggregate)
+						);
+						break;
+					case 'userUnitDisplayPreference':
+						profile.userUnitDisplayPreferences.push(
+							Schema.decodeUnknownSync(UserUnitDisplayPreferenceSchema)(change.aggregate)
+						);
+						break;
+				}
+			} catch {
+				// Corrupt unrelated rows cannot appear in the public profile.
+			}
+		}
+		return {
+			foodUserAliases: profile.foodUserAliases.filter(({ deletedAt }) => deletedAt === null),
+			foodUserEntries: profile.foodUserEntries.filter(({ deletedAt }) => deletedAt === null),
+			unitUserAliases: profile.unitUserAliases.filter(({ deletedAt }) => deletedAt === null),
+			unitUserEntries: profile.unitUserEntries.filter(({ deletedAt }) => deletedAt === null),
+			userFoodPreferences: profile.userFoodPreferences.filter(
+				({ deletedAt }) => deletedAt === null
+			),
+			userFoodDisplayPreferences: profile.userFoodDisplayPreferences.filter(
+				({ deletedAt }) => deletedAt === null
+			),
+			userUnitDisplayPreferences: profile.userUnitDisplayPreferences.filter(
+				({ deletedAt }) => deletedAt === null
+			)
+		};
+	}
+
+	async writeUserFoodPreference(input: {
+		actorUserId: string;
+		aggregate: UserFoodPreference;
+	}): Promise<UserFoodPreference> {
+		const now = new Date().toISOString() as `${string}Z`;
+		const receipt = await this.users.commit({
+			actorUserId: input.actorUserId,
+			deviceId: uuidv7(),
+			mutation: {
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				mutationId: uuidv7(),
+				originDeviceId: uuidv7(),
+				entityKind: 'userFoodPreference',
+				entityId: input.aggregate.id,
+				conflictGroups: ['row'],
+				operation: 'upsert',
+				occurredAt: now,
+				aggregate: input.aggregate
+			},
+			mode: 'live',
+			receivedAt: now
+		});
+		if (receipt.status === 'rejected') {
+			throw new RemoteDomainError('write_rejected', 'The food preference command was rejected.');
+		}
+		const result = (await this.getUserFoodProfile(input.actorUserId)).userFoodPreferences.find(
+			({ id }) => id === input.aggregate.id
+		);
+		if (!result)
+			throw new RemoteDomainError('not_found', 'The written food preference was not found.');
 		return result;
 	}
 }

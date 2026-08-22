@@ -8,7 +8,7 @@ import {
 	cloneRecipeAsMeal,
 	createRecipeAggregate
 } from '$lib/server/domain/remote-port.js';
-import { candidateFromToolRecipe } from '$lib/server/mcp/builders.js';
+import { candidateFromToolRecipe, makeCheckIn } from '$lib/server/mcp/builders.js';
 import { D1HouseholdSyncRepository } from '$lib/server/sync/household-d1-repository.js';
 import { D1UserSyncRepository } from '$lib/server/sync/d1-repository.js';
 
@@ -86,6 +86,51 @@ describe('shared remote D1 domain port', () => {
 				})
 			])
 		);
+
+		const checkIn = makeCheckIn({
+			existing: null,
+			mealId: writtenMeal.id,
+			reporterUserId: MCP_TEST_USER,
+			verdict: 'repeat',
+			cookTimeMinutes: 25,
+			reason: 'Easy weeknight dinner'
+		});
+		await port.writeMealCheckIn({
+			actorUserId: MCP_TEST_USER,
+			householdId: MCP_TEST_HOUSEHOLD,
+			aggregate: checkIn
+		});
+		await expect(port.listMealCheckIns(MCP_TEST_HOUSEHOLD, writtenMeal.id)).resolves.toEqual([
+			expect.objectContaining({ id: checkIn.id, verdict: 'repeat' })
+		]);
+
+		const now = '2026-08-22T12:00:00.000Z';
+		const foodId = '0198d3bc-e600-7000-8000-000000000000';
+		await database
+			.prepare(
+				'INSERT INTO foods (id, default_measure_unit_id, default_measure_base_unit_id) VALUES (?, ?, ?)'
+			)
+			.bind(foodId, 'each', 'each')
+			.run();
+		const preference = await port.writeUserFoodPreference({
+			actorUserId: MCP_TEST_USER,
+			aggregate: {
+				id: '0198d3bc-e600-7000-8000-000000000001',
+				workosUserId: MCP_TEST_USER,
+				foodId,
+				preference: 'like',
+				reason: null,
+				schemaVersion: 1,
+				revision: 0,
+				createdAt: now,
+				updatedAt: now,
+				deletedAt: null,
+				conflictClocks: {}
+			}
+		});
+		await expect(port.getUserFoodProfile(MCP_TEST_USER)).resolves.toMatchObject({
+			userFoodPreferences: [expect.objectContaining({ id: preference.id, foodId })]
+		});
 	});
 
 	test('reads only active normalized households', async () => {

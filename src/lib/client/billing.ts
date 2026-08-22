@@ -193,13 +193,23 @@ export const requestHouseholdDeletion = async (
 	profileId: string,
 	householdId: string,
 	fetcher?: Fetch
-): Promise<void> => {
-	await post(database, profileId, 'household-deletion', { householdId }, 'POST', fetcher);
+): Promise<'recoverable' | 'pending'> => {
+	const deletion = await post<{ state: string }>(
+		database,
+		profileId,
+		'household-deletion',
+		{ householdId },
+		'POST',
+		fetcher
+	);
+	const state = deletion.state === 'recoverable' ? 'recoverable' : 'pending';
 	await database.transaction(
 		'rw',
 		[database.households, database.billingCapabilities],
 		async () => {
-			await database.households.update(householdId, { deletionState: 'recoverable' });
+			await database.households.update(householdId, {
+				deletionState: state === 'recoverable' ? 'recoverable' : 'deletionPending'
+			});
 			const capability = await database.billingCapabilities.get(householdId);
 			if (capability) {
 				await database.billingCapabilities.put({
@@ -211,6 +221,7 @@ export const requestHouseholdDeletion = async (
 			}
 		}
 	);
+	return state;
 };
 
 export const recoverHousehold = async (

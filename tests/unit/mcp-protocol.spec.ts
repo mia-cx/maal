@@ -4,7 +4,12 @@ import { describe, expect, test } from 'vitest';
 
 import type { MealAggregate, MealCheckIn } from '$lib/domain/meals/schema.js';
 import type { RecipeAggregate } from '$lib/domain/recipes/schema.js';
-import type { RemoteDomainPort, RemoteHouseholdSummary } from '$lib/server/domain/remote-port.js';
+import type { UserFoodPreference } from '$lib/domain/taxonomy/schema.js';
+import type {
+	RemoteDomainPort,
+	RemoteFoodProfile,
+	RemoteHouseholdSummary
+} from '$lib/server/domain/remote-port.js';
 import { MAAL_API_SCOPES, createMaalMcpHandler, tools } from '$lib/server/mcp/index.js';
 
 const householdId = 'org_family';
@@ -41,6 +46,25 @@ class ProtocolDomain implements RemoteDomainPort {
 	async writeMealCheckIn(input: { aggregate: MealCheckIn }): Promise<MealCheckIn> {
 		return input.aggregate;
 	}
+	async listMealCheckIns(): Promise<readonly MealCheckIn[]> {
+		return [];
+	}
+	async getUserFoodProfile(): Promise<RemoteFoodProfile> {
+		return {
+			foodUserAliases: [],
+			foodUserEntries: [],
+			unitUserAliases: [],
+			unitUserEntries: [],
+			userFoodPreferences: [],
+			userFoodDisplayPreferences: [],
+			userUnitDisplayPreferences: []
+		};
+	}
+	async writeUserFoodPreference(input: {
+		aggregate: UserFoodPreference;
+	}): Promise<UserFoodPreference> {
+		return input.aggregate;
+	}
 }
 
 const principal = {
@@ -69,6 +93,12 @@ const runClient = async (mode: 'modern' | 'legacy') => {
 		principal,
 		domain,
 		limiter: { limit: async () => ({ success: true }) },
+		administration: {
+			createInvite: async () => ({ code: 'INVITECODE12', invite: {} as never }),
+			revokeInvite: async () => ({}) as never,
+			updateMemberRole: async () => ({}) as never,
+			removeMember: async () => undefined
+		},
 		onServerCreated: (server, era) => {
 			servers.push(server);
 			eras.push(era);

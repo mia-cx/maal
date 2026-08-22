@@ -1,6 +1,13 @@
 import { NotFoundException, WorkOS } from '@workos-inc/node';
+import type Stripe from 'stripe';
 
-import { BillingRepository, purgeExpiredHouseholds } from '$lib/server/billing/index.js';
+import {
+	BillingRepository,
+	createStripeClient,
+	purgeExpiredHouseholds,
+	reconcileOutstandingHouseholdDeletionRefunds,
+	reconcileStaleTrialClaims
+} from '$lib/server/billing/index.js';
 
 import { runScheduledSyncRetention } from './sync-retention.js';
 
@@ -17,11 +24,17 @@ export interface ScheduledMaintenanceResult {
 	readonly householdsPurged: number;
 	readonly householdsPending: number;
 	readonly householdRowsDeleted: number;
+	readonly trialReservationsReleased: number;
+	readonly trialRollbacksCompleted: number;
+	readonly trialRollbacksPending: number;
+	readonly deletionRefundsReconciled: number;
+	readonly deletionRefundsPending: number;
 }
 
 export const runScheduledMaintenance = async (
 	database: D1Database,
-	deleteWorkOSOrganization: (householdId: string) => Promise<void>
+	deleteWorkOSOrganization: (householdId: string) => Promise<void>,
+	stripe: Stripe
 ): Promise<ScheduledMaintenanceResult> => {
 	const retention = await runScheduledSyncRetention(database);
 	const syncResult = retention.reduce(
@@ -45,11 +58,26 @@ export const runScheduledMaintenance = async (
 		now: serverNow,
 		deleteWorkOSOrganization
 	});
+	const trialResult = await reconcileStaleTrialClaims({
+		repository: new BillingRepository(database),
+		stripe,
+		now: serverNow
+	});
+	const deletionRefundResult = await reconcileOutstandingHouseholdDeletionRefunds({
+		repository: new BillingRepository(database),
+		stripe,
+		now: serverNow
+	});
 	return {
 		...syncResult,
 		householdsPurged: householdResult.purged.length,
 		householdsPending: householdResult.pending.length,
-		householdRowsDeleted: householdResult.rowsDeleted
+		householdRowsDeleted: householdResult.rowsDeleted,
+		trialReservationsReleased: trialResult.reservationsReleased,
+		trialRollbacksCompleted: trialResult.rollbacksCompleted,
+		trialRollbacksPending: trialResult.pending,
+		deletionRefundsReconciled: deletionRefundResult.reconciled,
+		deletionRefundsPending: deletionRefundResult.pending
 	};
 };
 
@@ -60,13 +88,17 @@ export const handleScheduledMaintenance = async (env: MaintenanceEnvironment): P
 		const workos = new WorkOS(env.WORKOS_API_KEY, {
 			...(env.WORKOS_CLIENT_ID ? { clientId: env.WORKOS_CLIENT_ID } : {})
 		});
-		const result = await runScheduledMaintenance(env.DB, async (householdId) => {
-			try {
-				await workos.organizations.deleteOrganization(householdId);
-			} catch (cause) {
-				if (!(cause instanceof NotFoundException)) throw cause;
-			}
-		});
+		const result = await runScheduledMaintenance(
+			env.DB,
+			async (householdId) => {
+				try {
+					await workos.organizations.deleteOrganization(householdId);
+				} catch (cause) {
+					if (!(cause instanceof NotFoundException)) throw cause;
+				}
+			},
+			createStripeClient(env)
+		);
 		console.log(
 			JSON.stringify({
 				event: 'maintenance_completed',

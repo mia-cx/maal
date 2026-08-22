@@ -13,6 +13,90 @@ const safeCode = (cause: unknown): string =>
 		? cause._tag.slice(0, 80)
 		: 'household_deletion_failed';
 
+const recoveryDeadline = (now: string): string =>
+	new Date(Date.parse(now) + RECOVERY_MILLISECONDS).toISOString();
+
+export const reconcileHouseholdDeletionRefund = async (input: {
+	repository: BillingRepository;
+	refund: Stripe.Refund;
+	now: string;
+}): Promise<HouseholdDeletionRow | null> => {
+	const request = await input.repository.deletionRequestByRefundId(input.refund.id);
+	if (
+		!request ||
+		request.state === 'recoverable' ||
+		request.state === 'purged' ||
+		request.state === 'recovered'
+	) {
+		return request;
+	}
+	const requiredAmount = request.previewedAmountMinor ?? 0;
+	const refundMatches =
+		input.refund.amount >= requiredAmount &&
+		(request.currency === null || input.refund.currency === request.currency);
+	const succeeded = input.refund.status === 'succeeded' && refundMatches;
+	const recoverableUntil = succeeded ? recoveryDeadline(input.now) : null;
+	const state = succeeded
+		? 'recoverable'
+		: input.refund.status === 'failed' || input.refund.status === 'canceled'
+			? 'failed'
+			: 'refunding';
+	const safeErrorCode = succeeded
+		? null
+		: !refundMatches
+			? 'refund_mismatch'
+			: `refund_${input.refund.status ?? 'pending'}`;
+	await input.repository.upsertDeletionRequest({
+		...request,
+		state,
+		refundedAmountMinor: input.refund.amount,
+		recoverableUntil,
+		safeErrorCode,
+		updatedAt: input.now
+	});
+	if (succeeded) {
+		await input.repository.audit({
+			idempotencyKey: `household:${request.householdId}:deletion-requested`,
+			householdId: request.householdId,
+			actorUserId: request.requesterUserId,
+			eventType: 'household_deletion_recoverable',
+			occurredAt: input.now,
+			safeDetails: {
+				refundedAmountMinor: input.refund.amount,
+				currency: input.refund.currency,
+				recoverableUntil
+			}
+		});
+	}
+	return input.repository.deletionRequest(request.householdId);
+};
+
+export const reconcileOutstandingHouseholdDeletionRefunds = async (input: {
+	repository: BillingRepository;
+	stripe: Stripe;
+	now: string;
+	limit?: number;
+}): Promise<{ reconciled: number; pending: number }> => {
+	const requests = await input.repository.outstandingDeletionRefunds(input.limit);
+	let reconciled = 0;
+	let pending = 0;
+	for (const request of requests) {
+		try {
+			const refund = await input.stripe.refunds.retrieve(request.stripeRefundId!);
+			const next = await reconcileHouseholdDeletionRefund({
+				repository: input.repository,
+				refund,
+				now: input.now
+			});
+			if (next?.state === 'recoverable') reconciled += 1;
+			else pending += 1;
+		} catch {
+			pending += 1;
+		}
+	}
+	return { reconciled, pending };
+};
+
 export const proratedRefundMinor = (input: {
 	amountPaidMinor: number;
 	refundableMinor: number;
@@ -149,8 +233,9 @@ export const deleteHouseholdAfterRefund = async (input: {
 
 		let refundId = request?.stripeRefundId ?? null;
 		let refundedAmountMinor = request?.refundedAmountMinor ?? 0;
+		let refund: Stripe.Refund | null = null;
 		if (refundPreview && refundPreview.amountMinor > 0 && !refundId) {
-			const refund = await input.stripe.refunds.create(
+			refund = await input.stripe.refunds.create(
 				{
 					charge: refundPreview.chargeId,
 					amount: refundPreview.amountMinor,
@@ -160,12 +245,29 @@ export const deleteHouseholdAfterRefund = async (input: {
 			);
 			refundId = refund.id;
 			refundedAmountMinor = refund.amount;
+		} else if (refundId) {
+			refund = await input.stripe.refunds.retrieve(refundId);
+			if (refundPreview && (refund.status === 'failed' || refund.status === 'canceled')) {
+				const failedRefundId = refund.id;
+				refund = await input.stripe.refunds.create(
+					{
+						charge: refundPreview.chargeId,
+						amount: refundPreview.amountMinor,
+						metadata: {
+							householdId: input.householdId,
+							reason: 'prorated_household_deletion_retry'
+						}
+					},
+					{ idempotencyKey: `maal-delete-refund:${input.householdId}:after:${failedRefundId}` }
+				);
+				refundId = refund.id;
+				refundedAmountMinor = refund.amount;
+			}
 		}
-		const recoverableUntil = new Date(Date.parse(input.now) + RECOVERY_MILLISECONDS).toISOString();
 		await input.repository.upsertDeletionRequest({
 			householdId: input.householdId,
 			requesterUserId: input.requesterUserId,
-			state: 'recoverable',
+			state: refund ? 'refunding' : 'recoverable',
 			stripeCancellationId: cancellationId,
 			stripeChargeId: refundPreview?.chargeId ?? null,
 			stripeRefundId: refundId,
@@ -173,11 +275,21 @@ export const deleteHouseholdAfterRefund = async (input: {
 			refundedAmountMinor,
 			currency: refundPreview?.currency ?? null,
 			requestedAt: request?.requestedAt ?? input.now,
-			recoverableUntil,
+			recoverableUntil: refund ? null : recoveryDeadline(input.now),
 			purgedAt: null,
 			safeErrorCode: null,
 			updatedAt: input.now
 		});
+		if (refund) {
+			return (
+				(await reconcileHouseholdDeletionRefund({
+					repository: input.repository,
+					refund,
+					now: input.now
+				})) ?? (await input.repository.deletionRequest(input.householdId))!
+			);
+		}
+		const recoverableUntil = recoveryDeadline(input.now);
 		await input.repository.audit({
 			idempotencyKey: `household:${input.householdId}:deletion-requested`,
 			householdId: input.householdId,

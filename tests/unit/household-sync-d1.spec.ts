@@ -325,6 +325,20 @@ describe('D1 household sync', () => {
 				now: timestamp
 			})
 		).resolves.toMatchObject({ householdId });
+		await database
+			.prepare('UPDATE billing_subscriptions SET current_period_end = ? WHERE household_id = ?')
+			.bind(timestamp, householdId)
+			.run();
+		await expect(
+			d1HouseholdSyncCapabilityAuthorizer.authorize({
+				database,
+				workosUserId: aliceId,
+				householdId,
+				activeWorkOSMemberships: [liveMembership()],
+				permission: 'meals:read',
+				now: timestamp
+			})
+		).rejects.toMatchObject({ _tag: 'SyncCapabilityDenied' });
 	});
 
 	test('uses D1 commit order live and original event time only for historical backfill', async () => {

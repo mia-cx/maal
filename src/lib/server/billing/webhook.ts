@@ -1,5 +1,6 @@
 import Stripe from 'stripe';
 
+import { reconcileHouseholdDeletionRefund } from './deletion.js';
 import type { BillingRepository } from './repository.js';
 import { projectionFromStripeSubscription } from './subscriptions.js';
 
@@ -14,7 +15,9 @@ const subscriptionForEvent = async (
 	event: Stripe.Event
 ): Promise<Stripe.Subscription | null> => {
 	const object = event.data.object;
-	if (object.object === 'subscription') return object;
+	if (object.object === 'subscription') {
+		return stripe.subscriptions.retrieve(object.id, { expand: ['items.data.price'] });
+	}
 	if (object.object === 'checkout.session') {
 		const id = expandedId(object.subscription);
 		return id ? stripe.subscriptions.retrieve(id, { expand: ['items.data.price'] }) : null;
@@ -26,6 +29,14 @@ const subscriptionForEvent = async (
 	return null;
 };
 
+const refundForEvent = async (
+	stripe: Stripe,
+	event: Stripe.Event
+): Promise<Stripe.Refund | null> => {
+	const object = event.data.object;
+	return object.object === 'refund' ? stripe.refunds.retrieve(object.id) : null;
+};
+
 const supportedEventTypes = new Set([
 	'checkout.session.completed',
 	'customer.subscription.created',
@@ -33,7 +44,10 @@ const supportedEventTypes = new Set([
 	'customer.subscription.deleted',
 	'invoice.paid',
 	'invoice.payment_succeeded',
-	'invoice.payment_failed'
+	'invoice.payment_failed',
+	'refund.created',
+	'refund.updated',
+	'refund.failed'
 ]);
 
 export const processStripeWebhook = async (input: {
@@ -52,6 +66,16 @@ export const processStripeWebhook = async (input: {
 		if (!supportedEventTypes.has(input.event.type)) {
 			await input.repository.finishStripeEventWithoutProjection(input.event.id, input.receivedAt);
 			return 'ignored';
+		}
+		const refund = await refundForEvent(input.stripe, input.event);
+		if (refund) {
+			await reconcileHouseholdDeletionRefund({
+				repository: input.repository,
+				refund,
+				now: input.receivedAt
+			});
+			await input.repository.finishStripeEventWithoutProjection(input.event.id, input.receivedAt);
+			return 'processed';
 		}
 		const subscription = await subscriptionForEvent(input.stripe, input.event);
 		if (!subscription) {
