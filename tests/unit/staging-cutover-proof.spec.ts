@@ -21,6 +21,7 @@ import {
 	disposableWorkOSUsers,
 	fixtureCleanupComplete,
 	mergeFixtureIds,
+	mergeStripeEventDeliveries,
 	requireCleanupQuiescence,
 	stableAuthCallback,
 	summarizeAuthEvidence,
@@ -305,6 +306,35 @@ describe('staging cutover proof safety', () => {
 			})
 		).resolves.toEqual({ complete: true, fingerprint: 'evt_delayed' });
 		expect(attempts).toEqual([0, 1, 2]);
+	});
+
+	test('does not unlink while the same Stripe event still has a pending webhook', async () => {
+		const pendingWebhooks = [1, 0, 0];
+		const observations: Array<{ complete: boolean; fingerprint: string }> = [];
+		let deliveries: Array<{ id: string; pendingWebhooks: number | null }> = [];
+		await requireCleanupQuiescence({
+			cycle: async (attempt: number) => {
+				deliveries = mergeStripeEventDeliveries(deliveries, [
+					{ id: 'evt_cancellation', pending_webhooks: pendingWebhooks[attempt] }
+				]);
+				const observation = {
+					complete: deliveries.every((event) => event.pendingWebhooks === 0),
+					fingerprint: JSON.stringify(deliveries)
+				};
+				observations.push(observation);
+				return observation;
+			},
+			pause: async () => undefined,
+			maxAttempts: 4
+		});
+		const ledgerUnlinkedAfterObservation = observations.length;
+
+		expect(observations[0]).toEqual({
+			complete: false,
+			fingerprint: '[{"id":"evt_cancellation","pendingWebhooks":1}]'
+		});
+		expect(observations).toHaveLength(3);
+		expect(ledgerUnlinkedAfterObservation).toBe(3);
 	});
 
 	test('emits staging-only per-request D1-open telemetry without buffering the response', async () => {

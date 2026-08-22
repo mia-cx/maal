@@ -17,6 +17,7 @@ import {
 	disposableWorkOSUsers,
 	fixtureCleanupComplete,
 	mergeFixtureIds,
+	mergeStripeEventDeliveries,
 	requireCleanupQuiescence,
 	validateLiveEnvironment
 } from './lib/staging-cutover-proof.mjs';
@@ -38,6 +39,7 @@ const created = {
 	userIds: [],
 	householdIds: [],
 	stripeEventIds: [],
+	stripeEventDeliveries: [],
 	customerIds: [],
 	subscriptionIds: [],
 	refundIds: []
@@ -931,14 +933,20 @@ async function captureStripeEventIds() {
 			limit: 100,
 			...(startingAfter ? { starting_after: startingAfter } : {})
 		});
+		const fixtureEvents = page.data.filter(stripeEventBelongsToFixture);
 		created.stripeEventIds = mergeFixtureIds(
 			created.stripeEventIds,
-			page.data.filter(stripeEventBelongsToFixture).map(({ id }) => id)
+			fixtureEvents.map(({ id }) => id)
+		);
+		created.stripeEventDeliveries = mergeStripeEventDeliveries(
+			created.stripeEventDeliveries,
+			fixtureEvents
 		);
 		await updatePrivateFixtureLedger();
 		if (!page.has_more || page.data.length === 0) break;
 		startingAfter = page.data.at(-1).id;
 	}
+	return created.stripeEventDeliveries.every(({ pendingWebhooks }) => pendingWebhooks === 0);
 }
 
 function stripeEventBelongsToFixture(event) {
@@ -984,8 +992,16 @@ async function cleanupObservation() {
 	const observationFailures = [];
 	await cleanupStripe().catch(() => observationFailures.push('stripe'));
 	await cleanupWorkOS().catch(() => observationFailures.push('workos'));
-	await captureStripeEventIds().catch(() => observationFailures.push('stripe-events'));
-	await cleanupD1().catch(() => observationFailures.push('d1'));
+	let providerDeliveriesComplete = false;
+	await captureStripeEventIds()
+		.then((complete) => {
+			providerDeliveriesComplete = complete;
+			if (!complete) observationFailures.push('stripe-events-pending');
+		})
+		.catch(() => observationFailures.push('stripe-events'));
+	if (providerDeliveriesComplete) {
+		await cleanupD1().catch(() => observationFailures.push('d1'));
+	}
 	return {
 		complete: fixtureCleanupComplete(cleanup, observationFailures),
 		fingerprint: JSON.stringify({
@@ -995,6 +1011,7 @@ async function cleanupObservation() {
 			subscriptionIds: created.subscriptionIds,
 			refundIds: created.refundIds,
 			stripeEventIds: created.stripeEventIds,
+			stripeEventDeliveries: created.stripeEventDeliveries,
 			cleanup
 		})
 	};
@@ -1050,7 +1067,7 @@ function updatePrivateFixtureLedger() {
 
 function privateFixtureLedger() {
 	return {
-		schemaVersion: 3,
+		schemaVersion: 4,
 		environment: 'staging',
 		startedAtSeconds: created.startedAtSeconds,
 		nonce,
@@ -1062,6 +1079,7 @@ function privateFixtureLedger() {
 		userIds: created.userIds,
 		householdIds: created.householdIds,
 		stripeEventIds: created.stripeEventIds,
+		stripeEventDeliveries: created.stripeEventDeliveries,
 		customerIds: created.customerIds,
 		subscriptionIds: created.subscriptionIds,
 		refundIds: created.refundIds
@@ -1071,7 +1089,7 @@ function privateFixtureLedger() {
 async function loadPrivateFixtureLedger() {
 	const value = JSON.parse(await readFile(config.fixturePath, 'utf8'));
 	assert(
-		[1, 2, 3].includes(value?.schemaVersion) && value.environment === 'staging',
+		[1, 2, 3, 4].includes(value?.schemaVersion) && value.environment === 'staging',
 		'Fixture ledger is invalid.'
 	);
 	assert(
@@ -1093,6 +1111,9 @@ async function loadPrivateFixtureLedger() {
 		: Math.floor(Date.now() / 1_000) - 86_400;
 	created.householdId = created.householdIds[0] ?? null;
 	created.stripeEventIds = Array.isArray(value.stripeEventIds) ? value.stripeEventIds : [];
+	created.stripeEventDeliveries = Array.isArray(value.stripeEventDeliveries)
+		? value.stripeEventDeliveries
+		: [];
 	created.customerIds = Array.isArray(value.customerIds) ? value.customerIds : [];
 	created.subscriptionIds = Array.isArray(value.subscriptionIds) ? value.subscriptionIds : [];
 	created.refundIds = Array.isArray(value.refundIds) ? value.refundIds : [];
@@ -1100,11 +1121,18 @@ async function loadPrivateFixtureLedger() {
 		...created.userIds,
 		...created.householdIds,
 		...created.stripeEventIds,
+		...created.stripeEventDeliveries.map(({ id }) => id),
 		...created.customerIds,
 		...created.subscriptionIds,
 		...created.refundIds
 	].filter(Boolean)) {
 		assertSafeId(id, 'private fixture identifier');
+	}
+	for (const delivery of created.stripeEventDeliveries) {
+		assert(
+			Number.isSafeInteger(delivery.pendingWebhooks) && delivery.pendingWebhooks >= 0,
+			'Fixture ledger contains an invalid Stripe delivery state.'
+		);
 	}
 }
 

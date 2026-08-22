@@ -263,6 +263,20 @@ export const fixtureCleanupComplete = (cleanup, failures = []) =>
 export const mergeFixtureIds = (current, discovered) =>
 	[...new Set([...(current ?? []), ...(discovered ?? [])])].sort();
 
+export const mergeStripeEventDeliveries = (current, discovered) => {
+	const deliveries = new Map((current ?? []).map((event) => [event.id, event]));
+	for (const event of discovered ?? []) {
+		deliveries.set(event.id, {
+			id: event.id,
+			pendingWebhooks:
+				Number.isSafeInteger(event.pending_webhooks) && event.pending_webhooks >= 0
+					? event.pending_webhooks
+					: null
+		});
+	}
+	return [...deliveries.values()].sort((left, right) => left.id.localeCompare(right.id));
+};
+
 export const disposableWorkOSUsers = (users, marker) =>
 	(users ?? []).filter(
 		(user) =>

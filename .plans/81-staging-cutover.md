@@ -31,7 +31,7 @@ and Stripe proofs, run the full local contract matrix, and emit only sanitized e
 - Current primary references were checked on 2026-08-22: Cloudflare D1 migrations, Time Travel, Cron Triggers,
   Workers observability, WorkOS environments and redirect URIs, Stripe webhooks and test clocks, and MCP
   2026-07-28 Streamable HTTP.
-- Safety unit proof: `pnpm exec vitest run tests/unit/staging-cutover-proof.spec.ts` passed 10 tests.
+- Safety unit proof: `pnpm exec vitest run tests/unit/staging-cutover-proof.spec.ts` passed 11 tests.
 - Empty live preflight fails before network or provider access and lists all missing operator inputs.
 - Runtime proof cleanup is restartable from a mode-`0600` fixture ledger outside the repository. The ledger
   is removed only after WorkOS, Stripe, and D1 zero-remnant checks pass.
@@ -39,12 +39,12 @@ and Stripe proofs, run the full local contract matrix, and emit only sanitized e
 - WorkOS's documented redirect wildcard contract does not support the current random callback path. Issue #83
   tracks the stable-callback prerequisite; the runbook does not waive the blocked live gate.
 - Focused staging safety and MCP contract/authorization/protocol/tools validation passed 46 tests.
-- The complete contract command passed 17 files and 118 tests, then passed `test:d1-schema`; its sanitized
+- The complete contract command passed 17 files and 119 tests, then passed `test:d1-schema`; its sanitized
   evidence was created with mode `0600` outside the repository.
 - `pnpm build` and a staging Wrangler dry-run passed with the expected D1, rate-limit, and asset bindings.
 - Aggregate live evidence now rejects a provider's `passed` label if any required check or cleanup fact fails.
 - `pnpm validate` passed from a worktree-local frozen install: lint, zero-warning Svelte/type checks, 57 unit
-  files and 305 tests, production build, the 185,846/256,000-byte initial-entry budget, and 22 Playwright tests.
+  files and 306 tests, production build, the 185,847/256,000-byte initial-entry budget, and 22 Playwright tests.
 - The first E2E attempt exposed a worktree-only dependency symlink outside Vite's filesystem allowlist, which
   prevented font loading and changed one visual snapshot. A frozen local install restored the same dependency
   graph; the failed visual test and the complete validation then passed without tracked application changes.
