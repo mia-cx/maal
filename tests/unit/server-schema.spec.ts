@@ -33,6 +33,7 @@ const expectedTableNames = [
 	'mcp_key_households',
 	'mcp_keys',
 	'meal_appliance_requirements',
+	'meal_check_in_recovery',
 	'meal_check_ins',
 	'meal_classifications',
 	'meal_ingredients',
