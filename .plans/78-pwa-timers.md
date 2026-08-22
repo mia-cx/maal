@@ -17,7 +17,7 @@ stop, and restart without duplicate listeners or work.
 
 - [x] Add focused failing regressions for receiver-sensitive timers and coordinator lifecycle behavior.
 - [x] Implement receiver-safe timers and idempotent coordinator lifecycle cleanup.
-- [ ] Extend the real PWA startup browser proof and run the available browser matrix.
+- [x] Extend the real PWA startup browser proof and run the available browser matrix.
 - [ ] Run final focused validation and record exact results.
 
 ## Notes
@@ -27,3 +27,6 @@ stop, and restart without duplicate listeners or work.
 - The serialized full `pnpm validate` gate belongs to the integration test slot and is not run concurrently.
 - `pnpm exec vitest run tests/unit/pwa-update-coordinator.spec.ts --reporter=verbose` passes 3 tests.
 - `pnpm exec svelte-check --tsconfig ./tsconfig.json` reports 0 errors and 0 warnings.
+- Chromium passes 2 focused PWA tests. Firefox passes the same 2 tests.
+- WebKit is installed but cannot launch on this host because its GTK, AVIF, Manette, Enchant, Secret,
+  and WOFF2 runtime libraries are absent.

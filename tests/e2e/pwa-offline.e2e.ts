@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test';
 
 test('reopens the local shell offline without content API requests', async ({ context, page }) => {
 	const contentRequests: string[] = [];
+	const pageErrors: string[] = [];
+	page.on('pageerror', (error) => pageErrors.push(error.message));
 	page.on('request', (request) => {
 		if (
 			/\/api\/(?:sync|recipes\/import|billing|auth|auth-slots)|\/mcp(?:\/|$)/.test(request.url())
@@ -40,4 +42,17 @@ test('reopens the local shell offline without content API requests', async ({ co
 	await expect(page).toHaveTitle('Meal plan · Maal');
 	await expect(page.getByText(/Choose a local profile|Opening local Maal data/)).toBeVisible();
 	expect(contentRequests).toEqual([]);
+	expect(pageErrors).toEqual([]);
+});
+
+test('starts the PWA coordinator silently on the recovery route', async ({ page }) => {
+	const pageErrors: string[] = [];
+	page.on('pageerror', (error) => pageErrors.push(error.message));
+
+	await page.goto('/recovery');
+	await page.evaluate(async () => navigator.serviceWorker.ready.then(() => undefined));
+
+	await expect(page.getByText('Local data recovery', { exact: true })).toBeVisible();
+	await expect(page.getByText('Maal update ready')).toHaveCount(0);
+	expect(pageErrors).toEqual([]);
 });
