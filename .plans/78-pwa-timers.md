@@ -15,8 +15,8 @@ stop, and restart without duplicate listeners or work.
 
 ## TODOs
 
-- [ ] Add focused failing regressions for receiver-sensitive timers and coordinator lifecycle behavior.
-- [ ] Implement receiver-safe timers and idempotent coordinator lifecycle cleanup.
+- [x] Add focused failing regressions for receiver-sensitive timers and coordinator lifecycle behavior.
+- [x] Implement receiver-safe timers and idempotent coordinator lifecycle cleanup.
 - [ ] Extend the real PWA startup browser proof and run the available browser matrix.
 - [ ] Run final focused validation and record exact results.
 
@@ -25,3 +25,5 @@ stop, and restart without duplicate listeners or work.
 - Base integration commit: `eb922e591130519253c64caf2af23af4f8fb3949`.
 - Preserve the prototype UI and the existing cross-tab update protocol.
 - The serialized full `pnpm validate` gate belongs to the integration test slot and is not run concurrently.
+- `pnpm exec vitest run tests/unit/pwa-update-coordinator.spec.ts --reporter=verbose` passes 3 tests.
+- `pnpm exec svelte-check --tsconfig ./tsconfig.json` reports 0 errors and 0 warnings.
