@@ -4,6 +4,9 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+	assertPassingAuthProof,
+	assertPassingBillingProof,
+	assertPassingBooleanProof,
 	contractProofFiles,
 	safeCommandEvidence,
 	summarizeAuthEvidence,
@@ -100,15 +103,17 @@ switch (command) {
 		const freeUse = summarizeBooleanProof(
 			await runJson('pnpm', ['test:proof:staging:free-use'], providerEnvironment)
 		);
-		for (const [name, proof] of Object.entries({
-			authApi,
-			authHosted,
-			billing,
-			runtime,
-			freeUse
-		})) {
-			if (proof.result !== 'passed') throw new Error(`Staging proof ${name} did not pass.`);
-		}
+		assertPassingAuthProof('authApi', authApi, [
+			'bobSurvivedAliceRefresh',
+			'bobSurvivedAliceRevocation'
+		]);
+		assertPassingAuthProof('authHosted', authHosted, [
+			'aliceSurvivedBobLogin',
+			'bobSurvivedAliceRevocation'
+		]);
+		assertPassingBillingProof('billing', billing);
+		assertPassingBooleanProof('runtime', runtime);
+		assertPassingBooleanProof('freeUse', freeUse);
 		const path = await writeSanitizedEvidence(output, {
 			schemaVersion: 1,
 			result: 'passed',

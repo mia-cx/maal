@@ -5,6 +5,9 @@ import { describe, expect, test } from 'vitest';
 
 import {
 	STAGING_CONFIRMATION,
+	assertPassingAuthProof,
+	assertPassingBillingProof,
+	assertPassingBooleanProof,
 	summarizeAuthEvidence,
 	summarizeBillingEvidence,
 	summarizeBooleanProof,
@@ -104,6 +107,7 @@ describe('staging cutover proof safety', () => {
 				result: 'passed',
 				aliceCookieBytes: 2200,
 				bobCookieBytes: 2210,
+				aliceSurvivedBobLogin: null,
 				bobSurvivedAliceRefresh: true,
 				bobSurvivedAliceRevocation: true,
 				cleanup: {
@@ -134,5 +138,40 @@ describe('staging cutover proof safety', () => {
 			}
 		});
 		await expect(writeSanitizedEvidence(path, { result: 'overwrite' })).rejects.toThrow();
+	});
+
+	test('rejects passed labels when checks or cleanup are incomplete', () => {
+		const cleanProvider = {
+			failedCount: 0,
+			attempted: 2,
+			verifiedDeleted: 2,
+			remainingDisposableUsers: 0
+		};
+		expect(() =>
+			assertPassingAuthProof('auth', { result: 'passed', retained: true, cleanup: cleanProvider }, [
+				'retained'
+			])
+		).not.toThrow();
+		expect(() =>
+			assertPassingAuthProof(
+				'auth',
+				{ result: 'passed', retained: false, cleanup: cleanProvider },
+				['retained']
+			)
+		).toThrow('did not prove retained');
+		expect(() =>
+			assertPassingBillingProof('billing', {
+				result: 'passed',
+				checks: { lifecycle: true },
+				cleanup: { failedCount: 1 }
+			})
+		).toThrow('did not clean up');
+		expect(() =>
+			assertPassingBooleanProof('runtime', {
+				result: 'passed',
+				checks: { converged: true },
+				cleanup: { d1RowsRemaining: 1 }
+			})
+		).toThrow('did not clean up');
 	});
 });

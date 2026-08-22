@@ -106,10 +106,39 @@ export const summarizeAuthEvidence = (value) => ({
 	result: value?.result === 'passed' ? 'passed' : 'failed',
 	aliceCookieBytes: safeInteger(value?.aliceCookieBytes),
 	bobCookieBytes: safeInteger(value?.bobCookieBytes),
-	bobSurvivedAliceRefresh: value?.bobSurvivedAliceRefresh === true,
-	bobSurvivedAliceRevocation: value?.bobSurvivedAliceRevocation === true,
+	aliceSurvivedBobLogin: optionalCheck(value?.aliceSurvivedBobLogin),
+	bobSurvivedAliceRefresh: optionalCheck(value?.bobSurvivedAliceRefresh),
+	bobSurvivedAliceRevocation: optionalCheck(value?.bobSurvivedAliceRevocation),
 	cleanup: cleanupSummary(value?.cleanup)
 });
+
+export const assertPassingAuthProof = (name, value, requiredChecks) => {
+	if (value?.result !== 'passed') throw new Error(`Staging proof ${name} did not pass.`);
+	for (const check of requiredChecks) {
+		if (value[check] !== true) throw new Error(`Staging proof ${name} did not prove ${check}.`);
+	}
+	assertProviderCleanup(name, value.cleanup);
+};
+
+export const assertPassingBillingProof = (name, value) => {
+	if (value?.result !== 'passed' || !allChecksPassed(value.checks)) {
+		throw new Error(`Staging proof ${name} did not pass every check.`);
+	}
+	if (value.cleanup?.failedCount !== 0) {
+		throw new Error(`Staging proof ${name} did not clean up every fixture.`);
+	}
+};
+
+export const assertPassingBooleanProof = (name, value) => {
+	if (value?.result !== 'passed' || !allChecksPassed(value.checks)) {
+		throw new Error(`Staging proof ${name} did not pass every check.`);
+	}
+	for (const [field, item] of Object.entries(value.cleanup ?? {})) {
+		if ((typeof item === 'boolean' && !item) || (field.endsWith('Remaining') && item !== 0)) {
+			throw new Error(`Staging proof ${name} did not clean up every fixture.`);
+		}
+	}
+};
 
 export const summarizeBillingEvidence = (value) => ({
 	result: value?.result === 'passed' ? 'passed' : 'failed',
@@ -184,7 +213,24 @@ const booleanChecks = (value) =>
 			)
 		: {};
 
+const allChecksPassed = (value) => {
+	const checks = Object.values(value ?? {});
+	return checks.length > 0 && checks.every((check) => check === true);
+};
+
+const assertProviderCleanup = (name, value) => {
+	if (
+		value?.failedCount !== 0 ||
+		value?.remainingDisposableUsers !== 0 ||
+		value?.attempted !== value?.verifiedDeleted
+	) {
+		throw new Error(`Staging proof ${name} did not clean up every fixture.`);
+	}
+};
+
 const safeInteger = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : null);
+
+const optionalCheck = (value) => (typeof value === 'boolean' ? value : null);
 
 const utc = (value) => {
 	const parsed = new Date(value);

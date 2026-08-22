@@ -20,8 +20,8 @@ and Stripe proofs, run the full local contract matrix, and emit only sanitized e
 
 - [x] Add a fail-closed staging preflight, sanitized evidence writer, and focused contract matrix.
 - [x] Compose the existing provider proofs and live deployment checks behind one guarded command.
-- [~] Document provisioning, deployment, observation, cleanup, rollback-forward, and production handoff.
-- [ ] Test the proof tooling and record focused validation for the merger.
+- [x] Document provisioning, deployment, observation, cleanup, rollback-forward, and production handoff.
+- [~] Test the proof tooling and record focused validation for the merger.
 
 ## Notes
 
@@ -36,3 +36,10 @@ and Stripe proofs, run the full local contract matrix, and emit only sanitized e
 - Runtime proof cleanup is restartable from a mode-`0600` fixture ledger outside the repository. The ledger
   is removed only after WorkOS, Stripe, and D1 zero-remnant checks pass.
 - Composition syntax checks and the focused safety unit proof passed after adding the cleanup ledger.
+- WorkOS's documented redirect wildcard contract does not support the current random callback path. Issue #83
+  tracks the stable-callback prerequisite; the runbook does not waive the blocked live gate.
+- Focused staging safety and MCP contract/authorization/protocol/tools validation passed 46 tests.
+- The complete contract command passed 16 files and 107 tests, then passed `test:d1-schema`; its sanitized
+  evidence was created with mode `0600` outside the repository.
+- `pnpm build` and a staging Wrangler dry-run passed with the expected D1, rate-limit, and asset bindings.
+- Aggregate live evidence now rejects a provider's `passed` label if any required check or cleanup fact fails.
