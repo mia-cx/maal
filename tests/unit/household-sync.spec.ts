@@ -9,6 +9,7 @@ import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.
 import {
 	HOUSEHOLD_BACKFILL_INTERVAL_MS,
 	HOUSEHOLD_BACKFILL_MAX_BYTES,
+	HOUSEHOLD_BACKFILL_SINGLE_RECORD_MAX_BYTES,
 	applyHouseholdBootstrap,
 	createHouseholdSyncCoordinator,
 	type HouseholdSyncTransport,
@@ -689,6 +690,53 @@ describe('foreground household coordinator', () => {
 		expect(new TextEncoder().encode(JSON.stringify(request)).byteLength).toBeLessThanOrEqual(
 			HOUSEHOLD_BACKFILL_MAX_BYTES
 		);
+	});
+
+	test('persists an oversized backfill result and uploads the later meal', async () => {
+		const database = await openDatabase('oversized-backfill');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: true
+		});
+		const deviceId = String((await database.meta.get('deviceId'))!.value);
+		const oversizedId = uuidv7();
+		const laterId = uuidv7();
+		await database.meals.bulkPut([
+			meal(oversizedId, uuidv7(), deviceId, {
+				date: '2026-08-22',
+				notes: 'x'.repeat(HOUSEHOLD_BACKFILL_SINGLE_RECORD_MAX_BYTES + 1_024)
+			}),
+			meal(laterId, uuidv7(), deviceId, { date: '2026-08-23' })
+		]);
+		const transport = new MemoryHouseholdServer().transport('user_alice');
+		const backfill = vi.spyOn(transport, 'backfill');
+		const coordinator = createHouseholdSyncCoordinator({
+			database,
+			authSlotId: 'slot_alice',
+			workosUserId: 'user_alice',
+			householdId,
+			transport,
+			environment: environment({ saveData: false }),
+			now: () => new Date(timestamp)
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+		expect(backfill).toHaveBeenCalledTimes(1);
+		expect(backfill.mock.calls[0]?.[1].mutations.map(({ entityId }) => entityId)).toEqual([
+			laterId
+		]);
+		expect(
+			(await database.outbox.toArray()).find(({ aggregateId }) => aggregateId === oversizedId)
+		).toMatchObject({
+			status: 'rejected',
+			rejectionCode: 'backfill_payload_too_large',
+			backfill: true
+		});
+		await expect(
+			database.backfillCheckpoints.get(['household', householdId, 'meal'])
+		).resolves.toMatchObject({ lastAggregateId: laterId, processedCount: 2 });
 	});
 
 	test('continues a started backfill after the 30-second interval', async () => {

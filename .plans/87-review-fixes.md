@@ -23,7 +23,7 @@ Tests exercise those interfaces without reaching into private helpers.
 ## TODOs
 
 - [x] Reconcile authoritative user and household state after rejected masked mutations.
-- [ ] Persist oversized backfill outcomes and let later user and household records progress.
+- [x] Persist oversized backfill outcomes and let later user and household records progress.
 - [ ] Validate user and household mutation conflict and deletion semantics before repository writes.
 - [ ] Expire cached capabilities locally and restrict launch refresh to previously paid projections.
 - [ ] Move the cookie override into pnpm's workspace configuration.
@@ -36,3 +36,4 @@ Tests exercise those interfaces without reaching into private helpers.
 - No remote D1, WorkOS, Stripe, Cloudflare, deployment, issue, or PR mutation runs in this worktree.
 - Vitest and Playwright stay at four workers or fewer. Test suites never overlap.
 - Rejected-receipt slice: 2 files / 27 tests passed. Masked remote snapshots and receipt state now commit atomically.
+- Oversized-backfill slice: 2 files / 29 tests passed. A single request may use the Worker's 1 MiB bound; larger records get a persisted rejection and advance the checkpoint.

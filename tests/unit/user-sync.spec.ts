@@ -8,6 +8,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.js';
 import { acquireSyncLease, renewSyncLease } from '$lib/client/local/leases.js';
 import {
+	BACKFILL_SINGLE_RECORD_MAX_BYTES,
 	createUserSyncCoordinator,
 	applyUserBootstrap,
 	type UserSyncEnvironment,
@@ -723,6 +724,56 @@ describe('foreground user coordinator', () => {
 		const calls = vi.spyOn(transport, 'backfill');
 		await coordinator.syncNow();
 		expect(calls).not.toHaveBeenCalled();
+	});
+
+	test('persists an oversized backfill result and uploads the later record', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const [oversizedId, laterId] = [uuidv7(), uuidv7()].toSorted();
+		await database.unitUserEntries.bulkPut([
+			userUnit({
+				id: oversizedId,
+				canonicalLabel: 'x'.repeat(BACKFILL_SINGLE_RECORD_MAX_BYTES + 1_024)
+			}),
+			userUnit({ id: laterId, canonicalLabel: 'later spoon' })
+		]);
+		const transport = noOpTransport();
+		const backfill = vi.fn<UserSyncTransport['backfill']>(async (_slot, request) => ({
+			protocolVersion: 1,
+			receipts: request.mutations.map((mutation) => ({
+				mutationId: mutation.mutationId,
+				status: 'accepted' as const,
+				sequence: 1,
+				resultingRevision: 1
+			})),
+			committedThrough: 1,
+			checkpoint: request.checkpoint
+		}));
+		transport.backfill = backfill;
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport,
+			environment: environment({ saveData: false }),
+			now: () => new Date(timestamp)
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+		expect(backfill).toHaveBeenCalledTimes(1);
+		expect(backfill.mock.calls[0]?.[1].mutations.map(({ entityId }) => entityId)).toEqual([
+			laterId
+		]);
+		expect(
+			(await database.outbox.toArray()).find(({ aggregateId }) => aggregateId === oversizedId)
+		).toMatchObject({
+			status: 'rejected',
+			rejectionCode: 'backfill_payload_too_large',
+			backfill: true
+		});
+		await expect(
+			database.backfillCheckpoints.get(['user', userId, 'unitUserEntry'])
+		).resolves.toMatchObject({ lastAggregateId: laterId, processedCount: 2 });
 	});
 });
 

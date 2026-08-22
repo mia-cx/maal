@@ -50,6 +50,7 @@ import type { UserSyncEnvironment } from './coordinator.js';
 const PUSH_BATCH_SIZE = 50;
 export const HOUSEHOLD_BACKFILL_BATCH_SIZE = 25;
 export const HOUSEHOLD_BACKFILL_MAX_BYTES = 256 * 1024;
+export const HOUSEHOLD_BACKFILL_SINGLE_RECORD_MAX_BYTES = 1024 * 1024;
 export const HOUSEHOLD_BACKFILL_INTERVAL_MS = 30_000;
 const LEASE_TTL_MS = 60_000;
 const PULL_PAGE_SIZE = 100;
@@ -343,8 +344,9 @@ const prepareBackfill = async (
 		}
 
 		const rows: OutboxRecord[] = [];
+		const terminalRows: OutboxRecord[] = [];
 		const mutations: HouseholdSyncMutation[] = [];
-		const requestCheckpoint: HouseholdBackfillCheckpoint = {
+		let requestCheckpoint: HouseholdBackfillCheckpoint = {
 			entityKind,
 			lastAggregateId: checkpoint?.lastAggregateId ?? null,
 			processedCount: checkpoint?.processedCount ?? 0,
@@ -386,6 +388,40 @@ const prepareBackfill = async (
 					mutations: [...mutations, mutation]
 				})
 			).byteLength;
+			if (requestBytes > HOUSEHOLD_BACKFILL_SINGLE_RECORD_MAX_BYTES) {
+				if (rows.length > 0) break;
+				terminalRows.push({
+					mutationId,
+					authSlotId,
+					scopeKind: 'household',
+					scopeId: householdId,
+					status: 'rejected',
+					occurredAt: mutation.occurredAt,
+					aggregateId: mutation.entityId,
+					entityKind,
+					conflictGroup: groups[0]!,
+					operation: mutation.operation,
+					originDeviceId: deviceId,
+					payload: null,
+					nextAttemptAt: utc(now),
+					attempts: 0,
+					backfill: true,
+					rejectionCode: 'backfill_payload_too_large',
+					acknowledgedAt: utc(now),
+					backfillConflictGroups: groups,
+					backfillPriorityKey: priorityKey,
+					backfillPreviousPriority: requestCheckpoint.priorityBoundary,
+					backfillPreviousId: requestCheckpoint.lastAggregateId,
+					backfillProcessedCount: requestCheckpoint.processedCount
+				});
+				requestCheckpoint = {
+					...requestCheckpoint,
+					priorityBoundary: priorityKey,
+					lastAggregateId: mutation.entityId,
+					processedCount: requestCheckpoint.processedCount + 1
+				};
+				continue;
+			}
 			if (
 				rows.length > 0 &&
 				(rows.length >= HOUSEHOLD_BACKFILL_BATCH_SIZE ||
@@ -393,7 +429,6 @@ const prepareBackfill = async (
 			) {
 				break;
 			}
-			if (requestBytes > HOUSEHOLD_BACKFILL_MAX_BYTES) continue;
 			mutations.push(mutation);
 			rows.push({
 				mutationId,
@@ -414,21 +449,37 @@ const prepareBackfill = async (
 				snapshot: decoded.aggregate,
 				backfillConflictGroups: groups,
 				backfillPriorityKey: priorityKey,
-				backfillPreviousPriority: checkpoint?.priorityBoundary ?? null,
-				backfillPreviousId: checkpoint?.lastAggregateId ?? null,
-				backfillProcessedCount: checkpoint?.processedCount ?? 0
+				backfillPreviousPriority: requestCheckpoint.priorityBoundary,
+				backfillPreviousId: requestCheckpoint.lastAggregateId,
+				backfillProcessedCount: requestCheckpoint.processedCount
 			});
 		}
-		if (rows.length === 0) return null;
+		if (rows.length === 0 && terminalRows.length === 0) return null;
+		if (rows.length === 0) {
+			await database.transaction('rw', database.outbox, database.backfillCheckpoints, async () => {
+				await database.outbox.bulkAdd(terminalRows);
+				await database.backfillCheckpoints.put({
+					scopeKind: 'household',
+					scopeId: householdId,
+					entityKind,
+					priorityBoundary: requestCheckpoint.priorityBoundary,
+					lastAggregateId: requestCheckpoint.lastAggregateId,
+					processedCount: requestCheckpoint.processedCount,
+					state: 'complete',
+					lastAttemptAt: utc(now)
+				});
+			});
+			continue;
+		}
 		await database.transaction('rw', database.outbox, database.backfillCheckpoints, async () => {
-			await database.outbox.bulkAdd(rows);
+			await database.outbox.bulkAdd([...terminalRows, ...rows]);
 			await database.backfillCheckpoints.put({
 				scopeKind: 'household',
 				scopeId: householdId,
 				entityKind,
-				priorityBoundary: checkpoint?.priorityBoundary ?? null,
-				lastAggregateId: checkpoint?.lastAggregateId ?? null,
-				processedCount: checkpoint?.processedCount ?? 0,
+				priorityBoundary: requestCheckpoint.priorityBoundary,
+				lastAggregateId: requestCheckpoint.lastAggregateId,
+				processedCount: requestCheckpoint.processedCount,
 				state: 'running',
 				lastAttemptAt: utc(now)
 			});
