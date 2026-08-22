@@ -322,7 +322,7 @@ export const stubProductApis = async (page: Page): Promise<void> => {
 
 export const seedProduct = async (
 	page: Page,
-	{ recipeCount = 1 }: { recipeCount?: number } = {}
+	{ recipeCount = 1, targetPath = '/plan' }: { recipeCount?: number; targetPath?: string } = {}
 ): Promise<void> => {
 	await stubProductApis(page);
 	await page.goto('/');
@@ -336,6 +336,7 @@ export const seedProduct = async (
 			}, databaseName)
 		)
 		.toBe(50);
+	await page.goto('/manifest.webmanifest');
 	await page.evaluate(seedProductDatabase, {
 		name: databaseName,
 		profileId,
@@ -345,7 +346,7 @@ export const seedProduct = async (
 		timestamp: proofTimestamp,
 		recipeCount
 	});
-	await page.reload();
+	await page.goto(targetPath);
 	await expect(page.getByTestId('shared-app-shell')).toHaveCount(1);
 };
 

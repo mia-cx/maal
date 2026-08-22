@@ -11,7 +11,7 @@
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import MyMenuRecipeSheet from './recipe-edit-sheet.svelte';
 	import RecipeMenuCard from './recipe-menu-card.svelte';
-	import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
+	import { rankRecipeWindow } from '$lib/menu/recipe-ranking';
 	import { createDraftRecipe } from '$lib/menu/recipe-draft';
 	import { toggleMenuSelection } from '$lib/menu/menu-selection';
 	import type { RecipeMenuItem } from '$lib/menu/menu-types';
@@ -49,11 +49,19 @@
 	let permanentDeleteOpen = $state(false);
 	let recipeSearchQuery = $state('');
 	let selectedRecipeId = $state<string | null>(null);
+	let displayedRecipeLimit = $state(120);
+	let previousRecipeSearchQuery = '';
 
 	const selectedRecipe = $derived(
 		draftRecipe ?? recipes.find((recipe) => recipe.id === selectedRecipeId) ?? null
 	);
-	const displayedRecipes = $derived(rankRecipesByRelevance(recipes, recipeSearchQuery));
+	const rankedRecipeWindow = $derived(
+		rankRecipeWindow(recipes, recipeSearchQuery, displayedRecipeLimit)
+	);
+	const displayedRecipes = $derived(rankedRecipeWindow.recipes);
+	const hiddenRecipeCount = $derived(
+		Math.max(0, rankedRecipeWindow.total - displayedRecipes.length)
+	);
 	const selectedRecipes = $derived(
 		displayedRecipes.filter((recipe) => selectedRecipeIds.includes(recipe.id))
 	);
@@ -77,6 +85,12 @@
 
 	const idsMatch = (left: string[], right: string[]): boolean =>
 		left.length === right.length && left.every((id) => right.includes(id));
+
+	$effect(() => {
+		if (recipeSearchQuery === previousRecipeSearchQuery) return;
+		previousRecipeSearchQuery = recipeSearchQuery;
+		displayedRecipeLimit = 120;
+	});
 
 	$effect(() => {
 		const selectableRecipes = displayedRecipes;
@@ -321,6 +335,17 @@
 				/>
 			{/each}
 		</div>
+		{#if hiddenRecipeCount > 0}
+			<div class="flex justify-center py-4">
+				<Button
+					variant="outline"
+					onclick={() => (displayedRecipeLimit += 120)}
+					aria-label={`Show more recipes, ${hiddenRecipeCount} remaining`}
+				>
+					Show more recipes ({hiddenRecipeCount} remaining)
+				</Button>
+			</div>
+		{/if}
 		{#if recipeSearchQuery.trim() && displayedRecipes.length === 0}
 			<p class="py-8 text-center text-sm text-muted-foreground">
 				{m.menu_no_recipes_match_query({ query: recipeSearchQuery })}
