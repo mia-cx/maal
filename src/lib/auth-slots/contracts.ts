@@ -1,5 +1,7 @@
 import { Data, Schema } from 'effect';
 
+import { UtcInstantSchema } from '$lib/domain/contracts/primitives.js';
+
 export const MAX_AUTHENTICATED_SLOTS = 8 as const;
 export const AUTH_SLOT_ID_PATTERN = /^[0-9a-f]{32}$/;
 
@@ -12,6 +14,34 @@ export type AuthSlotId = typeof AuthSlotId.Type;
 
 export const AuthSlotStatus = Schema.Literal('authenticated', 'stale', 'reauthRequired');
 export type AuthSlotStatus = typeof AuthSlotStatus.Type;
+
+const AuthSlotMetadataBase = {
+	schemaVersion: Schema.Literal(1),
+	authSlotId: AuthSlotId
+} as const;
+
+export const AuthenticatedAuthSlotMetadata = Schema.Struct({
+	...AuthSlotMetadataBase,
+	status: Schema.Literal('authenticated'),
+	workosUserId: Schema.String,
+	email: Schema.String,
+	firstName: Schema.NullOr(Schema.String),
+	lastName: Schema.NullOr(Schema.String),
+	profilePictureUrl: Schema.NullOr(Schema.String),
+	verifiedAt: UtcInstantSchema
+});
+export type AuthenticatedAuthSlotMetadata = typeof AuthenticatedAuthSlotMetadata.Type;
+
+export const UnauthenticatedAuthSlotMetadata = Schema.Struct({
+	...AuthSlotMetadataBase,
+	status: Schema.Literal('stale', 'reauthRequired')
+});
+
+export const AuthSlotMetadata = Schema.Union(
+	AuthenticatedAuthSlotMetadata,
+	UnauthenticatedAuthSlotMetadata
+);
+export type AuthSlotMetadata = typeof AuthSlotMetadata.Type;
 
 export const AuthSlotProjection = Schema.Struct({
 	schemaVersion: Schema.Literal(1),

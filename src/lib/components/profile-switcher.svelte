@@ -357,7 +357,9 @@
 							<span class="truncate text-xs text-muted-foreground">
 								{view.profile.authState === 'reauthRequired'
 									? 'Reauthentication needed'
-									: (view.profile.email ?? 'Offline')}
+									: view.profile.authState === 'stale'
+										? 'Session check failed'
+										: (view.profile.email ?? 'Offline')}
 							</span>
 						</div>
 						{#if view.locked}<LockKeyholeIcon class="size-4 text-muted-foreground" />{/if}
@@ -383,7 +385,7 @@
 									<LockKeyholeIcon /> Lock profile
 								</DropdownMenu.Item>
 							{/if}
-							{#if view.profile.authState === 'reauthRequired' && reauthHref(view)}
+							{#if (view.profile.authState === 'reauthRequired' || view.profile.authState === 'stale') && reauthHref(view)}
 								<DropdownMenu.Item>
 									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
 									<a class="flex w-full items-center gap-2" href={reauthHref(view)!}

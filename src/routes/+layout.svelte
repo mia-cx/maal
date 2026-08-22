@@ -5,6 +5,7 @@
 	import { ModeWatcher } from 'mode-watcher';
 	import type { Snippet } from 'svelte';
 	import { locales, localizeHref } from '$lib/paraglide/runtime';
+	import AuthCallbackProjector from '$lib/components/auth-callback-projector.svelte';
 	import PwaUpdatePrompt from '$lib/components/pwa-update-prompt.svelte';
 	import './layout.css';
 
@@ -33,6 +34,7 @@
 	<meta name="apple-mobile-web-app-status-bar-style" content="default" />
 </svelte:head>
 <ModeWatcher />
+<AuthCallbackProjector />
 <PwaUpdatePrompt />
 
 {@render children()}

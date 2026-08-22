@@ -161,7 +161,7 @@ export function createWorkOSAuthSlotAdapter(config: AuthSlotServerConfig): AuthS
 	};
 }
 
-export function authStatusForReason(reason: string): AuthSlotStatus {
+export function authStatusForReason(reason: string): Exclude<AuthSlotStatus, 'authenticated'> {
 	return reason === 'invalid_grant' || reason === 'invalid_session_cookie'
 		? 'reauthRequired'
 		: 'stale';
