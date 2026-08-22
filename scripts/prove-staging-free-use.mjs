@@ -8,10 +8,6 @@ import {
 
 const baseUrl = validateStagingOrigin(process.env.MAAL_STAGING_BASE_URL);
 const browser = await chromium.launch();
-const d1OpenCount = Number(process.env.MAAL_STAGING_FREE_D1_OPEN_COUNT);
-if (!Number.isSafeInteger(d1OpenCount) || d1OpenCount !== 0) {
-	throw new Error('Free-use proof requires operator-confirmed MAAL_STAGING_FREE_D1_OPEN_COUNT=0.');
-}
 const context = await browser.newContext({
 	extraHTTPHeaders: {
 		'x-maal-proof-trace': process.env.MAAL_STAGING_DEPLOYMENT_LABEL ?? 'staging-free-use-proof'
@@ -26,10 +22,27 @@ context.on('request', (request) => {
 	const url = new URL(request.url());
 	if (url.origin !== baseUrl || (!url.pathname.startsWith('/api/') && url.pathname !== '/mcp'))
 		return;
+	let finishTelemetry;
+	const telemetry = new Promise((resolve) => (finishTelemetry = resolve));
 	remoteRequests.push({
+		request,
 		method: request.method(),
-		routeClass: classifyPermittedFreeUseCall(request.method(), url.pathname)
+		routeClass: classifyPermittedFreeUseCall(request.method(), url.pathname),
+		d1Opened: null,
+		telemetry,
+		finishTelemetry
 	});
+});
+context.on('response', (response) => {
+	const observed = remoteRequests.find(({ request }) => request === response.request());
+	if (!observed) return;
+	void response.headerValue('x-maal-proof-d1-opened').then((value) => {
+		observed.d1Opened = value === 'true' ? true : value === 'false' ? false : null;
+		observed.finishTelemetry();
+	});
+});
+context.on('requestfailed', (request) => {
+	remoteRequests.find(({ request: candidate }) => candidate === request)?.finishTelemetry();
 });
 
 try {
@@ -48,10 +61,25 @@ try {
 	await context.setOffline(false);
 	await page.reload();
 	await page.getByRole('button', { name: 'Open Disposable local-only soup' }).waitFor();
+	await Promise.all(remoteRequests.map(({ telemetry }) => telemetry));
 	const unpermittedRequests = remoteRequests.filter(({ routeClass }) => routeClass === null);
 	if (unpermittedRequests.length > 0) {
 		throw new Error(
 			`Free-use proof observed ${unpermittedRequests.length} unpermitted remote calls.`
+		);
+	}
+	const missingTelemetry = remoteRequests.filter(({ d1Opened }) => d1Opened === null);
+	if (missingTelemetry.length > 0) {
+		throw new Error(
+			`Free-use proof missed D1 telemetry on ${missingTelemetry.length} remote calls.`
+		);
+	}
+	const unpermittedD1Opens = remoteRequests.filter(
+		({ d1Opened, routeClass }) => d1Opened && routeClass !== 'billing' && routeClass !== 'admin'
+	);
+	if (unpermittedD1Opens.length > 0) {
+		throw new Error(
+			`Free-use proof observed ${unpermittedD1Opens.length} D1 opens outside permitted billing/admin calls.`
 		);
 	}
 	if (pageErrors.length > 0)
@@ -64,7 +92,8 @@ try {
 					localRecipeCreatedOffline: true,
 					localRecipeReopenedOnline: true,
 					zeroUnpermittedRemoteCalls: true,
-					zeroD1OpensObserved: true,
+					allRemoteCallsCarriedD1Telemetry: true,
+					zeroContentD1Opens: true,
 					zeroPageErrors: true
 				},
 				observed: {
@@ -72,7 +101,7 @@ try {
 					permittedBillingCallCount: countClass('billing'),
 					permittedAdminCallCount: countClass('admin'),
 					unpermittedRemoteCallCount: 0,
-					d1OpenCount,
+					d1OpenCount: remoteRequests.filter(({ d1Opened }) => d1Opened).length,
 					pageErrorCount: 0
 				},
 				secretsPrinted: false,

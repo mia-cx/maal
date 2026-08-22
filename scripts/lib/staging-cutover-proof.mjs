@@ -10,7 +10,6 @@ const requiredLiveSettings = [
 	'MAAL_STAGING_WRANGLER_CONFIG',
 	'MAAL_STAGING_FIXTURE_FILE',
 	'MAAL_STAGING_EVIDENCE_FILE',
-	'MAAL_STAGING_FREE_D1_OPEN_COUNT',
 	'WORKOS_API_KEY',
 	'WORKOS_CLIENT_ID',
 	'WORKOS_COOKIE_PASSWORD',
@@ -90,9 +89,6 @@ export const validateLiveEnvironment = async (environment, repositoryRoot) => {
 	if (environment.MAAL_STAGING_DATABASE_NAME !== 'maal-v1-staging') {
 		throw new Error('Staging proof only accepts MAAL_STAGING_DATABASE_NAME=maal-v1-staging.');
 	}
-	if (environment.MAAL_STAGING_FREE_D1_OPEN_COUNT !== '0') {
-		throw new Error('MAAL_STAGING_FREE_D1_OPEN_COUNT must be operator-confirmed as exactly 0.');
-	}
 
 	const baseUrl = validateStagingOrigin(environment.MAAL_STAGING_BASE_URL);
 	if (!/^[-a-zA-Z0-9_.]{1,80}$/.test(environment.MAAL_STAGING_DEPLOYMENT_LABEL)) {
@@ -140,6 +136,9 @@ const validateWranglerStagingConfig = async (path) => {
 	const staging = configuration?.env?.staging;
 	if (staging?.name !== 'maal-v1-staging') {
 		throw new Error('Wrangler staging Worker name must be maal-v1-staging.');
+	}
+	if (staging.vars?.MAAL_PROOF_TELEMETRY !== 'staging-only') {
+		throw new Error('Wrangler staging must enable staging-only proof telemetry.');
 	}
 	const databases = staging.d1_databases;
 	const database =

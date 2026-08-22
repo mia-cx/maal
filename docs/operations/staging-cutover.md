@@ -56,6 +56,7 @@ Copy `wrangler.jsonc` to `.wrangler/staging-proof.jsonc`. In that ignored copy o
 - cron: `17 3 * * *` (03:17 UTC)
 - assets directory: `.svelte-kit/cloudflare`
 - observability enabled, logs at `1`, traces at `0.01`
+- staging-only non-secret var: `MAAL_PROOF_TELEMETRY=staging-only` (omit it from production)
 
 Confirm the private file is ignored and inspect the resolved staging configuration without publishing it:
 
@@ -196,11 +197,12 @@ webhook deliveries/retries, and WorkOS API errors. Do not copy request headers, 
 or provider objects into evidence. Wrangler configuration is the source of truth for observability and
 triggers; see [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/).
 
-For the free-use gate, isolate the browser run by its `x-maal-proof-trace` deployment-label header and exact
-UTC window. In Workers Logs/traces, verify that every same-origin API call is one of the explicit auth,
-billing-status, or household-admin reads reported by the proof. In D1 analytics, verify the same trace window
-opened D1 zero times. Record only the integer `0` as `MAAL_STAGING_FREE_D1_OPEN_COUNT`; do not export raw logs,
-URLs, account IDs, database IDs, or request headers.
+For the free-use gate, the staging-only Worker probe marks every proof API response with whether its D1 binding
+was opened and emits `staging_proof_request` with only the deployment label and that boolean. The browser
+requires this telemetry on every same-origin API/MCP call. Only explicit billing-status and household-admin
+calls may open D1; auth calls must not, and any content call fails even if it did not open D1. Correlate the
+same label and UTC window in Workers Logs/traces. Do not export raw logs, URLs, account IDs, database IDs, or
+request headers. Production must not define `MAAL_PROOF_TELEMETRY`.
 
 ## 6. Run the guarded proof
 
@@ -216,7 +218,6 @@ MAAL_STAGING_DATABASE_NAME=maal-v1-staging
 MAAL_STAGING_WRANGLER_CONFIG=.wrangler/staging-proof.jsonc
 MAAL_STAGING_FIXTURE_FILE=/absolute/private/path/maal-staging-fixtures.json
 MAAL_STAGING_EVIDENCE_FILE=/absolute/private/path/maal-staging-evidence.json
-MAAL_STAGING_FREE_D1_OPEN_COUNT=0
 WORKOS_API_KEY=<WorkOS-staging-key>
 WORKOS_CLIENT_ID=<WorkOS-staging-client>
 WORKOS_COOKIE_PASSWORD=<staging-cookie-key>

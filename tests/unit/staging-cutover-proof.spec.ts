@@ -4,6 +4,12 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import {
+	readStagingProofD1Telemetry,
+	stagingProofTelemetry,
+	withStagingProofTelemetry
+} from '../../src/lib/server/observability/staging-proof.ts';
+
+import {
 	STAGING_CONFIRMATION,
 	assertPassingAuthProof,
 	assertPassingBillingProof,
@@ -26,7 +32,6 @@ const liveEnvironment = (configPath: string) => ({
 	MAAL_STAGING_WRANGLER_CONFIG: configPath,
 	MAAL_STAGING_FIXTURE_FILE: join(tmpdir(), 'maal-proof-private-fixtures.json'),
 	MAAL_STAGING_EVIDENCE_FILE: join(tmpdir(), 'maal-proof-private-evidence.json'),
-	MAAL_STAGING_FREE_D1_OPEN_COUNT: '0',
 	WORKOS_API_KEY: 'sk_test_workos_secret',
 	WORKOS_CLIENT_ID: 'client_staging',
 	WORKOS_COOKIE_PASSWORD: 'a'.repeat(32),
@@ -46,6 +51,7 @@ const stagingWrangler = {
 	env: {
 		staging: {
 			name: 'maal-v1-staging',
+			vars: { MAAL_PROOF_TELEMETRY: 'staging-only' },
 			triggers: { crons: ['17 3 * * *'] },
 			d1_databases: [
 				{
@@ -124,6 +130,10 @@ describe('staging cutover proof safety', () => {
 			{ ...stagingWrangler, env: { staging: { ...stagingWrangler.env.staging, name: 'wrong' } } },
 			{
 				...stagingWrangler,
+				env: { staging: { ...stagingWrangler.env.staging, vars: {} } }
+			},
+			{
+				...stagingWrangler,
 				env: {
 					staging: {
 						...stagingWrangler.env.staging,
@@ -175,6 +185,34 @@ describe('staging cutover proof safety', () => {
 		expect(fixtureCleanupComplete(complete, ['d1'])).toBe(false);
 	});
 
+	test('emits staging-only per-request D1-open telemetry without buffering the response', async () => {
+		const prepare = () => 'statement';
+		const environment = {
+			DB: { prepare },
+			MAAL_PROOF_TELEMETRY: 'staging-only'
+		} as unknown as Env & { MAAL_PROOF_TELEMETRY: string };
+		const telemetry = stagingProofTelemetry(
+			new Request('https://staging.maal.test/api/auth-slots/slot/', {
+				headers: { 'x-maal-proof-trace': 'candidate-abc' }
+			}),
+			environment
+		);
+		expect(telemetry?.evidence.d1Opened).toBe(false);
+		expect(telemetry?.environment.DB.prepare('SELECT 1')).toBe('statement');
+		expect(telemetry?.evidence.d1Opened).toBe(true);
+		const response = withStagingProofTelemetry(new Response('streamed'), telemetry!.evidence);
+		expect(readStagingProofD1Telemetry(response.headers)).toBe(true);
+		expect(await response.text()).toBe('streamed');
+		expect(
+			stagingProofTelemetry(
+				new Request('https://staging.maal.test/api/test', {
+					headers: { 'x-maal-proof-trace': 'candidate-abc' }
+				}),
+				{ ...environment, MAAL_PROOF_TELEMETRY: undefined }
+			)
+		).toBeNull();
+	});
+
 	test('allowlists provider evidence and writes a new private file', async () => {
 		const auth = summarizeAuthEvidence({
 			result: 'passed',
@@ -198,7 +236,7 @@ describe('staging cutover proof safety', () => {
 			result: 'passed',
 			checks: { paidSyncConverged: true },
 			cleanup: { d1RowsRemaining: 0, workosUserDeleted: true, rawId: 'org_private' },
-			observed: { paidContentRequestCount: 0, rawUrl: 'https://private.example' },
+			observed: { unpermittedRemoteCallCount: 0, rawUrl: 'https://private.example' },
 			secret: 'mk_private'
 		});
 		const directory = await mkdtemp(join(tmpdir(), 'maal-staging-proof-'));
@@ -242,7 +280,7 @@ describe('staging cutover proof safety', () => {
 				result: 'passed',
 				checks: { paidSyncConverged: true },
 				cleanup: { d1RowsRemaining: 0, workosUserDeleted: true },
-				observed: { paidContentRequestCount: 0 }
+				observed: { unpermittedRemoteCallCount: 0 }
 			}
 		});
 		await expect(writeSanitizedEvidence(path, { result: 'overwrite' })).rejects.toThrow();

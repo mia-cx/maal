@@ -34,6 +34,7 @@
 	"env": {
 		"staging": {
 			"name": "maal-v1-staging",
+			"vars": { "MAAL_PROOF_TELEMETRY": "staging-only" },
 			"triggers": { "crons": ["17 3 * * *"] },
 			"d1_databases": [
 				{
