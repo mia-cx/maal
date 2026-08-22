@@ -273,6 +273,7 @@
 
 	$effect(() => {
 		if (open || !lastSettingsUrlParam) return;
+		createdMcpKey = null;
 		const nextUrl = new URL(page.url);
 		nextUrl.searchParams.delete('settings');
 		lastSettingsUrlParam = null;

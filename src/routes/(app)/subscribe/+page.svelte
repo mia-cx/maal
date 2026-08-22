@@ -239,7 +239,9 @@
 					variant="outline"
 					onclick={() => {
 						requestedProjectionFor = null;
-						if (database) void refresh(database, view);
+						const local = database;
+						const currentView = view;
+						if (local && currentView) void refresh(local, currentView);
 					}}>Try again</Button
 				>
 			</div>

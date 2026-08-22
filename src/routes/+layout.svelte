@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Pathname } from '$app/types';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { ModeWatcher } from 'mode-watcher';
@@ -9,6 +10,7 @@
 	import './layout.css';
 
 	let { children }: { children: Snippet } = $props();
+	const resolvePathname = resolve as unknown as (pathname: Pathname) => string;
 
 	let faviconHref = $state('/favicon.svg');
 
@@ -40,6 +42,6 @@
 
 <div style="display:none">
 	{#each locales as locale (locale)}
-		<a href={resolve(localizeHref(page.url.pathname, { locale }) as '/')}>{locale}</a>
+		<a href={resolvePathname(localizeHref(page.url.pathname, { locale }) as Pathname)}>{locale}</a>
 	{/each}
 </div>

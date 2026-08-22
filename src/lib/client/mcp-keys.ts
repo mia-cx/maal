@@ -83,7 +83,9 @@ const summaryToUiKey = (record: McpKeySummaryRecord): McpKey => ({
 		record.householdScope.kind === 'all'
 			? { kind: 'all' }
 			: { kind: 'households', householdIds: [...record.householdScope.householdIds] },
-	scopes: Schema.decodeUnknownSync(Schema.Array(Schema.Literal(...MAAL_API_SCOPES)))(record.scopes),
+	scopes: [
+		...Schema.decodeUnknownSync(Schema.Array(Schema.Literal(...MAAL_API_SCOPES)))(record.scopes)
+	],
 	...(record.preset ? { preset: record.preset } : {}),
 	createdAt: record.createdAt,
 	expiresAt: record.expiresAt,
