@@ -19,17 +19,18 @@ Automate what this Linux host can execute and record native or missing-runtime g
 ## TODOs
 
 - [x] Add a deterministic product-proof fixture and dedicated Playwright project.
-- [~] Add automated accessibility and visible keyboard-focus coverage in light and dark modes.
-- [ ] Add local-first browser smoke and measured performance-budget coverage.
-- [ ] Add responsive prototype comparison evidence and interaction preservation checks.
-- [ ] Run focused proof, document measured results and external gates, then run the serialized full validation.
+- [x] Add automated accessibility and visible keyboard-focus coverage in light and dark modes.
+- [x] Add local-first browser smoke and measured performance-budget coverage.
+- [x] Add responsive prototype comparison evidence and interaction preservation checks.
+- [x] Run focused proof, document measured results and external gates, then run the serialized full validation.
 
 ## Notes
 
 - Base integration commit: `833843751463b8fcc02e911297cd1ec265895d31`.
 - Prototype authority: `main@74a12ec38f6c297d1a6adbf596234c45212bac11`.
 - This is a proof and confirmed-regression slice. It does not change the approved product design.
-- T3 collaborative preview is available. Chrome DevTools performance MCP is absent, so this slice cannot claim a
-  DevTools trace. Reproducible Playwright browser metrics cover the committed budgets instead.
+- Browser MCP and a live Chrome DevTools trace are intentionally outside this gate. Reproducible Playwright and
+  browser Performance API measurements cover the committed budgets instead.
 - Native Safari, iOS, and Android evidence remains issue #70.
-- The first fixture-backed Chromium proof passes against the production Worker build.
+- The focused Chromium proof, Firefox smoke, 33 responsive snapshots, and prototype-source check pass against the
+  production Worker build. WebKit cannot launch on this host because its system libraries are unavailable.
