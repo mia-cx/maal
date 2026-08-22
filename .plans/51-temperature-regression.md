@@ -8,17 +8,17 @@ display preferences, and a fresh database reopen.
 
 ## Acceptance criteria
 
-- [ ] Saving Fahrenheit stores the canonical unit for the Celsius family.
-- [ ] The live household editor updates to Fahrenheit after the local command.
-- [ ] Effective taxonomy preferences expose Fahrenheit and its display label.
-- [ ] A fresh database instance reloads the same Fahrenheit selection through locale fallback.
-- [ ] Focused tests and checks pass.
+- [x] Saving Fahrenheit stores the canonical unit for the Celsius family.
+- [x] The live household editor updates to Fahrenheit after the local command.
+- [x] Effective taxonomy preferences expose Fahrenheit and its display label.
+- [x] A fresh database instance reloads the same Fahrenheit selection through locale fallback.
+- [x] Focused tests and checks pass.
 
 ## TODOs
 
 - [x] Add the fallback-locale save, live-update, effective-preference, and reopen regression proof.
 - [x] Apply the smallest runtime fix only if the regression proof fails.
-- [ ] Run focused taxonomy validation and record the results.
+- [x] Run focused taxonomy validation and record the results.
 
 ## Notes
 
@@ -28,4 +28,7 @@ display preferences, and a fresh database reopen.
 - The regression passes on the rewrite without a runtime change. The existing command stores canonical
   `fahrenheit` and keeps the fallback alias reference.
 - `pnpm exec vitest run tests/unit/temperature-preference-regression.spec.ts --reporter=verbose` passes 1 test.
-- The serialized full `pnpm validate` gate belongs to the integration test slot.
+- The focused taxonomy suite passes 11 unit tests. The existing Chromium taxonomy component proof passes.
+- Focused ESLint, Prettier, and `pnpm check` pass with 0 errors and 0 warnings.
+- Serialized `pnpm validate` passes 51 test files / 280 tests, the production build, the 181,394 / 256,000-byte
+  gzip budget, and 19 Chromium E2E tests.
