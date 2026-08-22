@@ -2,6 +2,7 @@ import { uuidv7 } from 'uuidv7';
 
 import {
 	pauseAllLocalCommits,
+	resumeAllLocalCommits,
 	waitForLocalCommitsToDrain
 } from '$lib/client/local/commit-activity.js';
 import { subscribeLocalDatabaseEvents } from '$lib/client/local/database-events.js';
@@ -71,6 +72,7 @@ export interface PwaUpdateRuntime {
 	readonly now: () => number;
 	readonly timers: PwaUpdateTimers;
 	readonly pauseCommits: (reason: string) => void;
+	readonly resumeCommits: (reason: string) => void;
 	readonly drainCommits: () => Promise<void>;
 	readonly reload: () => void;
 }
@@ -95,6 +97,7 @@ const browserRuntime = (): PwaUpdateRuntime => ({
 	now: Date.now,
 	timers: browserTimers(),
 	pauseCommits: pauseAllLocalCommits,
+	resumeCommits: resumeAllLocalCommits,
 	drainCommits: waitForLocalCommitsToDrain,
 	reload: () => window.location.reload()
 });
@@ -107,6 +110,7 @@ export class PwaUpdateCoordinator {
 	#listeners = new Set<Listener>();
 	#peers = new Map<string, number>();
 	#readyTabs = new Set<string>();
+	#commitPauseReasons = new Set<string>();
 	#requestId: string | null = null;
 	#heartbeat: ReturnType<typeof setInterval> | null = null;
 	#activationTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -211,6 +215,8 @@ export class PwaUpdateCoordinator {
 		this.#requestId = null;
 		this.#readyTabs.clear();
 		this.#peers.clear();
+		for (const reason of this.#commitPauseReasons) this.#runtime.resumeCommits(reason);
+		this.#commitPauseReasons.clear();
 	}
 
 	async activate(): Promise<void> {
@@ -298,7 +304,11 @@ export class PwaUpdateCoordinator {
 		if (message.tabId !== this.tabId) {
 			this.#post({ type: 'UPDATE_PREPARING', tabId: this.tabId, requestId: message.requestId });
 		}
-		this.#runtime.pauseCommits(`service-worker-update:${message.requestId}`);
+		const pauseReason = `service-worker-update:${message.requestId}`;
+		if (!this.#commitPauseReasons.has(pauseReason)) {
+			this.#runtime.pauseCommits(pauseReason);
+			this.#commitPauseReasons.add(pauseReason);
+		}
 		this.#setState({
 			status: 'preparing',
 			version: message.version,

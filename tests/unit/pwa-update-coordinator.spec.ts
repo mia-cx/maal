@@ -151,6 +151,7 @@ const runtimeFor = (
 	now: Date.now,
 	timers,
 	pauseCommits: () => undefined,
+	resumeCommits: () => undefined,
 	drainCommits: async () => undefined,
 	reload: () => undefined,
 	...overrides
@@ -165,6 +166,7 @@ describe('PWA update coordination', () => {
 		const secondServiceWorkers = new FakeServiceWorkers(Promise.resolve(registration));
 		const secondDrain = deferred();
 		const paused: string[] = [];
+		const resumed: string[] = [];
 		const reload = vi.fn();
 		let nextId = 0;
 		const runtime = (
@@ -182,6 +184,7 @@ describe('PWA update coordination', () => {
 				clearTimeout
 			},
 			pauseCommits: (reason) => paused.push(reason),
+			resumeCommits: (reason) => resumed.push(reason),
 			drainCommits,
 			reload
 		});
@@ -213,6 +216,7 @@ describe('PWA update coordination', () => {
 
 		first.dispose();
 		second.dispose();
+		expect(resumed).toEqual(paused);
 	});
 
 	test('keeps receiver-sensitive timers attached and makes start and stop idempotent', async () => {
@@ -221,13 +225,17 @@ describe('PWA update coordination', () => {
 		const registration = new FakeRegistration(waiting);
 		const serviceWorkers = new FakeServiceWorkers(Promise.resolve(registration));
 		const timers = new ReceiverSensitiveTimers();
+		const paused: string[] = [];
+		const resumed: string[] = [];
 		let channelCreates = 0;
 		const coordinator = new PwaUpdateCoordinator(
 			runtimeFor(serviceWorkers, timers, {
 				createChannel: () => {
 					channelCreates += 1;
 					return hub.create();
-				}
+				},
+				pauseCommits: (reason) => paused.push(reason),
+				resumeCommits: (reason) => resumed.push(reason)
 			})
 		);
 
@@ -254,6 +262,7 @@ describe('PWA update coordination', () => {
 		expect(serviceWorkers.listenerCount('message')).toBe(0);
 		expect(serviceWorkers.listenerCount('controllerchange')).toBe(0);
 		expect(registration.listeners).toHaveLength(0);
+		expect(resumed).toEqual(paused);
 
 		await coordinator.start();
 		expect(channelCreates).toBe(2);
