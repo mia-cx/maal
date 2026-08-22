@@ -25,7 +25,7 @@ Route every retained-profile authorization through one registered callback URI. 
 - [x] Specify stable callback success and rejection behavior with failing HTTP tests.
 - [x] Implement the stable callback while preserving targeted revocation and retained-cookie isolation.
 - [x] Update browser and live proof contracts for concurrent flows and sanitized evidence.
-- [ ] Run focused checks and the serialized full validation gate.
+- [x] Run focused checks and the serialized full validation gate.
 
 ## Notes
 
@@ -38,3 +38,4 @@ Route every retained-profile authorization through one registered callback URI. 
 - Focused auth/proof unit suite: 20 passed.
 - `pnpm exec playwright test tests/e2e/auth-slot-cookies.e2e.ts`: 2 passed, including concurrent callback marker routing.
 - Final security review added a cross-field check: add-profile state cannot carry an expected user, and reauthentication state must carry one.
+- `pnpm validate`: lint, check, 294 unit tests, production build, bundle budgets, and 22 end-to-end tests passed.
