@@ -495,9 +495,13 @@ describe('sync leases and recovery', () => {
 			state: 'required',
 			code: 'recipe_decode_failed'
 		});
-		const recoveryExport = await exportDecodableRecoveryData(database, {
-			recipes: TestAggregateSchema
-		});
+		const recoveryExport = await exportDecodableRecoveryData(
+			database,
+			{
+				recipes: TestAggregateSchema
+			},
+			{ batchSize: 1 }
+		);
 		expect(recoveryExport.records.recipes).toHaveLength(1);
 		expect(recoveryExport.skipped.recipes).toBe(1);
 		await expect(resetRecoveredDatabase(database, 'RESET')).rejects.toMatchObject({

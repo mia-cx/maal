@@ -20,6 +20,12 @@ export interface RecoveryExport {
 
 export type RecoveryDecoders = Partial<Record<LocalStoreName, Schema.Schema.AnyNoContext>>;
 
+export interface RecoveryExportOptions {
+	readonly batchSize?: number;
+}
+
+export const RECOVERY_EXPORT_BATCH_SIZE = 250;
+
 const utcNow = (): `${string}Z` => new Date().toISOString() as `${string}Z`;
 
 export const markRecoveryRequired = async (database: MaalDatabase, code: string): Promise<void> => {
@@ -55,30 +61,41 @@ export const readRecoveryState = async (database: MaalDatabase): Promise<Recover
 
 export const exportDecodableRecoveryData = async (
 	database: Pick<MaalDatabase, 'name' | 'table'>,
-	decoders: RecoveryDecoders
+	decoders: RecoveryDecoders,
+	options: RecoveryExportOptions = {}
 ): Promise<RecoveryExport> => {
 	const records: RecoveryExport['records'] = {};
 	const skipped: RecoveryExport['skipped'] = {};
+	const batchSize = Math.max(1, Math.min(options.batchSize ?? RECOVERY_EXPORT_BATCH_SIZE, 1_000));
 
 	for (const [name, schema] of Object.entries(decoders) as [
 		LocalStoreName,
 		Schema.Schema.AnyNoContext
 	][]) {
-		let rawRecords: unknown[];
+		const decoded: unknown[] = [];
+		let skippedCount = 0;
 		try {
-			rawRecords = await database.table(name).toArray();
+			let offset = 0;
+			while (true) {
+				const rawRecords = await database
+					.table(name)
+					.toCollection()
+					.offset(offset)
+					.limit(batchSize)
+					.toArray();
+				for (const rawRecord of rawRecords) {
+					try {
+						decoded.push(Schema.decodeUnknownSync(schema)(rawRecord));
+					} catch {
+						skippedCount += 1;
+					}
+				}
+				offset += rawRecords.length;
+				if (rawRecords.length < batchSize) break;
+			}
 		} catch {
 			// Recovery mode may be opening an older schema that never had this table.
 			continue;
-		}
-		const decoded: unknown[] = [];
-		let skippedCount = 0;
-		for (const rawRecord of rawRecords) {
-			try {
-				decoded.push(Schema.decodeUnknownSync(schema)(rawRecord));
-			} catch {
-				skippedCount += 1;
-			}
 		}
 		records[name] = decoded;
 		if (skippedCount > 0) skipped[name] = skippedCount;

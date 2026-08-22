@@ -15,7 +15,7 @@ Keep the recovery route outside normal Dexie, sync, auth callback, and PWA start
 ## TODOs
 
 - [x] Gate client startup and root application helpers around recovery.
-- [ ] Bound salvage reads and cover them with focused unit tests.
+- [x] Bound salvage reads and cover them with focused unit tests.
 - [ ] Refine the existing recovery screen around export-first and explicit reset behavior.
 - [ ] Add the failed-schema browser proof and run focused validation.
 
@@ -25,3 +25,4 @@ Keep the recovery route outside normal Dexie, sync, auth callback, and PWA start
 - The export remains JSON so a damaged database never enters the normal archive pipeline.
 - Full `pnpm validate` waits for the serialized integration slot.
 - `pnpm check` passes after the startup gate.
+- `pnpm exec vitest run tests/unit/local-runtime.spec.ts` passes 13 tests, including one-row recovery batches.
