@@ -37,3 +37,4 @@ Route every retained-profile authorization through one registered callback URI. 
 - `pnpm check`: 0 errors and 0 warnings.
 - Focused auth/proof unit suite: 20 passed.
 - `pnpm exec playwright test tests/e2e/auth-slot-cookies.e2e.ts`: 2 passed, including concurrent callback marker routing.
+- Final security review added a cross-field check: add-profile state cannot carry an expected user, and reauthentication state must carry one.

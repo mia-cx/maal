@@ -180,6 +180,13 @@ describe('Hosted AuthKit contract', () => {
 		await expect(
 			openAuthFlow(state, 'b'.repeat(32), new Date('2026-08-21T12:05:00.000Z'))
 		).resolves.toBeNull();
+		const mismatchedPurpose = await sealAuthFlow(
+			{ ...flow, purpose: 'add-profile', expectedUserId: 'user_alice' },
+			'a'.repeat(32)
+		);
+		await expect(
+			openAuthFlow(mismatchedPurpose, 'a'.repeat(32), new Date('2026-08-21T12:05:00.000Z'))
+		).resolves.toBeNull();
 		expect(safeReturnTo('//evil.example/path')).toBe('/');
 		expect(safeReturnTo('/profiles')).toBe('/profiles');
 	});

@@ -93,7 +93,7 @@ function validAuthFlow(flow: Partial<AuthFlow>, now: Date): flow is AuthFlow {
 		typeof flow.authSlotId !== 'string' ||
 		!isAuthSlotId(flow.authSlotId) ||
 		(flow.purpose !== 'add-profile' && flow.purpose !== 'reauthenticate') ||
-		(flow.expectedUserId !== null && typeof flow.expectedUserId !== 'string') ||
+		!validExpectedUser(flow.purpose, flow.expectedUserId) ||
 		typeof flow.returnTo !== 'string' ||
 		safeReturnTo(flow.returnTo) !== flow.returnTo ||
 		typeof flow.nonce !== 'string' ||
@@ -114,6 +114,12 @@ function validAuthFlow(flow: Partial<AuthFlow>, now: Date): flow is AuthFlow {
 		now.getTime() >= issuedAt - 60_000 &&
 		now.getTime() < expiresAt
 	);
+}
+
+function validExpectedUser(purpose: AuthFlowPurpose, expectedUserId: unknown) {
+	return purpose === 'add-profile'
+		? expectedUserId === null
+		: typeof expectedUserId === 'string' && expectedUserId.length > 0;
 }
 
 async function flowKey(secret: string) {
