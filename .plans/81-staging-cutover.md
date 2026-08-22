@@ -21,7 +21,7 @@ and Stripe proofs, run the full local contract matrix, and emit only sanitized e
 - [x] Add a fail-closed staging preflight, sanitized evidence writer, and focused contract matrix.
 - [x] Compose the existing provider proofs and live deployment checks behind one guarded command.
 - [x] Document provisioning, deployment, observation, cleanup, rollback-forward, and production handoff.
-- [~] Test the proof tooling and record focused validation for the merger.
+- [x] Test the proof tooling and record focused validation for the merger.
 
 ## Notes
 
@@ -43,3 +43,8 @@ and Stripe proofs, run the full local contract matrix, and emit only sanitized e
   evidence was created with mode `0600` outside the repository.
 - `pnpm build` and a staging Wrangler dry-run passed with the expected D1, rate-limit, and asset bindings.
 - Aggregate live evidence now rejects a provider's `passed` label if any required check or cleanup fact fails.
+- `pnpm validate` passed from a worktree-local frozen install: lint, zero-warning Svelte/type checks, 54 unit
+  files and 291 tests, production build, the 185,809/256,000-byte initial-entry budget, and 19 Playwright tests.
+- The first E2E attempt exposed a worktree-only dependency symlink outside Vite's filesystem allowlist, which
+  prevented font loading and changed one visual snapshot. A frozen local install restored the same dependency
+  graph; the failed visual test and the complete validation then passed without tracked application changes.
