@@ -53,15 +53,20 @@ See `local-first-rewrite-spec.md` for the canonical architecture and field-compl
 
 ## Resource isolation
 
-The rewrite uses `maal-v1-*` names and never reuses prototype bindings. Local development binds
-`maal-v1-local`. Staging and production each use a distinct Worker and D1 database; an environment's D1 UUID
-is recorded in `wrangler.jsonc` only after provisioning.
+Cloudflare resources identify environments, not application releases. Local development uses Worker and D1
+name `maal-local`. Staging uses Worker and D1 name `maal-staging`. Production uses Worker `maal` and D1
+`maal-prod`. The tracked Wrangler configuration retains the existing staging and production D1 IDs.
+
+Each D1 database evolves through the committed forward-only migration chain. Releases, including a future v2,
+never create a replacement D1 database for an application or schema version. Inspect the target environment,
+record a recovery bookmark, and migrate that database in place.
 
 The one shared device database is `maal-v1:<environment>`. Profiles, domain records, outbox entries, and sync
 scopes retain explicit user/household ownership. Service-worker cache names use a distinct `maal-v1` namespace.
+Those browser-local version namespaces are independent of Cloudflare resource names.
 
 ## Release baseline
 
 The pinned pnpm version in `package.json` and `pnpm-lock.yaml` define dependency resolution. CI installs from
 that lockfile, lints, type-checks, runs unit and browser tests, builds the Cloudflare Worker, and enforces the
-initial JavaScript budget. Remote deployment does not require or reuse prototype data.
+initial JavaScript budget. Remote deployment updates the long-lived environment resources in place.

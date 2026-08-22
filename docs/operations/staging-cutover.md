@@ -4,15 +4,15 @@ Status: **the live run requires #83's stable callback contract to be in the cand
 staging candidate release-ready until that dependency is present and the live proof passes. Native Safari
 and Android retained-slot evidence remains tracked separately in #70.
 
-This runbook provisions an isolated Cloudflare staging Worker and D1 database, connects WorkOS staging and a
-Stripe test sandbox, runs disposable release proofs, and removes every proof fixture. It never requires a real
-user, live Stripe object, production WorkOS key, or committed infrastructure ID.
+This runbook updates the existing `maal-staging` Worker and D1 database, connects WorkOS staging and a Stripe
+test sandbox, runs disposable release proofs, and removes every proof fixture. It never requires a real user,
+live Stripe object, or production provider key.
 
 ## Safety contract
 
 - Run commands from a clean checkout of the candidate commit. Never substitute the production hostname,
   production D1 name, a WorkOS production key, or a Stripe live key.
-- Keep the real Wrangler configuration, operator environment, raw provider output, fixture ledger, and proof
+- Keep the temporary Wrangler copy, operator environment, raw provider output, fixture ledger, and proof
   evidence outside Git. The harness rejects the production Maal hostname, any Stripe key other than
   `sk_test_`, any WorkOS key other than `sk_test_`, and a Wrangler file tracked by Git.
 - Use a fresh private fixture-ledger path for every run. The runtime creates it once with mode `0600` and only
@@ -37,20 +37,22 @@ does not make arbitrary path segments configurable. Source:
 [WorkOS Get authorization URL — Redirect URI and Wildcards](https://workos.com/docs/reference/authkit/authentication/get-authorization-url).
 The hosted and deployed proofs assert the exact URI and fail if `auth-slots` or a slot appears in its path.
 
-## 1. Provision D1 and prepare the private Wrangler file
+## 1. Inspect D1 and prepare the private Wrangler file
 
-Authenticate Wrangler with the staging Cloudflare account, then create the database once:
+Authenticate Wrangler with the `mia.cx` Cloudflare account. Inspect the existing staging database before any
+mutation. Do not create another database:
 
 ```sh
 pnpm exec wrangler whoami
-pnpm exec wrangler d1 create maal-v1-staging
+pnpm exec wrangler d1 info maal-staging --config wrangler.jsonc --env staging
 ```
 
-Copy `wrangler.jsonc` to `.wrangler/staging-proof.jsonc`. In that ignored copy only, replace the staging
-`database_id` placeholder with the returned UUID. Keep these committed contracts unchanged:
+Keep the raw command output in the private change record. Do not attach its account or database ID to public
+evidence. Copy `wrangler.jsonc` to `.wrangler/staging-proof.jsonc` without changing the D1 binding or ID. Keep
+these committed contracts unchanged:
 
-- Worker/environment name: `maal-v1-staging`
-- D1 binding/name: `DB` / `maal-v1-staging`
+- Worker/environment name: `maal-staging`
+- D1 binding/name: `DB` / `maal-staging`
 - migration directory: `drizzle`
 - rate-limit binding: `RECIPE_URL_RATE_LIMIT`
 - cron: `17 3 * * *` (03:17 UTC)
@@ -70,23 +72,26 @@ bookmark in the private change record:
 
 ```sh
 pnpm test:d1-schema
-pnpm exec wrangler d1 info maal-v1-staging --config .wrangler/staging-proof.jsonc --env staging
-pnpm exec wrangler d1 migrations list maal-v1-staging --remote --config .wrangler/staging-proof.jsonc --env staging
-pnpm exec wrangler d1 time-travel info maal-v1-staging --config .wrangler/staging-proof.jsonc --env staging
+pnpm exec wrangler d1 info maal-staging --config .wrangler/staging-proof.jsonc --env staging
+pnpm exec wrangler d1 migrations list maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging
+pnpm exec wrangler d1 time-travel info maal-staging --config .wrangler/staging-proof.jsonc --env staging
 ```
 
 Apply migrations only after all four commands identify staging:
 
 ```sh
-pnpm exec wrangler d1 migrations apply maal-v1-staging --remote --config .wrangler/staging-proof.jsonc --env staging
-pnpm exec wrangler d1 migrations list maal-v1-staging --remote --config .wrangler/staging-proof.jsonc --env staging
-pnpm exec wrangler d1 execute maal-v1-staging --remote --config .wrangler/staging-proof.jsonc --env staging --command "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name" --json
+pnpm exec wrangler d1 migrations apply maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging
+pnpm exec wrangler d1 migrations list maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging
+pnpm exec wrangler d1 execute maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging --command "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name" --json
 ```
 
 The migration list must be empty afterward. Review the table names locally; do not attach raw D1 output to a
 public issue because later checks can contain infrastructure metadata. D1 records applied files in
 `d1_migrations`. See [D1 migrations](https://developers.cloudflare.com/d1/reference/migrations/) and
 [D1 Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/).
+
+Every later application and schema version repeats this inspection and forward-migration process against
+`maal-staging`. Never create a versioned replacement D1 or copy the complete database for a release.
 
 ## 2. Configure WorkOS staging
 
@@ -187,7 +192,7 @@ must show `17 3 * * *`; do not create a second dashboard-managed trigger. See
 Open a JSON log tail during smoke/proof traffic:
 
 ```sh
-pnpm exec wrangler tail maal-v1-staging --format json --config .wrangler/staging-proof.jsonc --env staging
+pnpm exec wrangler tail maal-staging --format json --config .wrangler/staging-proof.jsonc --env staging
 ```
 
 Expected maintenance records are `maintenance_completed` with non-negative counts. Any
@@ -214,7 +219,7 @@ run with shell tracing enabled.
 MAAL_STAGING_PROOF_CONFIRM=create-and-remove-disposable-staging-fixtures
 MAAL_STAGING_BASE_URL=https://<staging-origin>
 MAAL_STAGING_DEPLOYMENT_LABEL=<non-secret-candidate-label>
-MAAL_STAGING_DATABASE_NAME=maal-v1-staging
+MAAL_STAGING_DATABASE_NAME=maal-staging
 MAAL_STAGING_WRANGLER_CONFIG=.wrangler/staging-proof.jsonc
 MAAL_STAGING_FIXTURE_FILE=/absolute/private/path/maal-staging-fixtures.json
 MAAL_STAGING_EVIDENCE_FILE=/absolute/private/path/maal-staging-evidence.json
@@ -300,19 +305,31 @@ The restore command returns a bookmark that can undo the restore; retain both in
 
 ## 9. Production handoff
 
-Production is a fresh environment, not a promotion of staging objects:
+Production keeps separate provider objects from staging and uses the existing `maal` Worker and `maal-prod` D1:
 
 1. Confirm #83's stable WorkOS callback is deployed and obtain a fully passing sanitized staging proof.
-2. Create `maal-v1-production`, use a separate ignored Wrangler file with its real D1 ID, capture its Time
-   Travel bookmark, and apply the same committed migrations.
-3. Recreate the WorkOS application redirects, roles/permissions, branding, production API key, and Client ID.
-4. Recreate one live Stripe `Maal` Product, its three live Prices with the exact lookup keys, and a live webhook
-   endpoint subscribed only to the seven events above. Use its independent live signing secret.
-5. Generate independent production cookie and maintenance secrets. Never reuse staging values.
-6. Build, dry-run, deploy, observe, and run non-mutating smoke checks. The staging harness intentionally refuses
+2. Copy the tracked config to an ignored production cutover file. Confirm it resolves Worker `maal` and D1
+   `maal-prod`. Keep raw resource IDs only in the private operations record.
+3. Inspect the database and capture its Time Travel bookmark before applying the committed migration chain:
+
+   ```sh
+   pnpm exec wrangler d1 info maal-prod --config .wrangler/production-cutover.jsonc --env production
+   pnpm exec wrangler d1 migrations list maal-prod --remote --config .wrangler/production-cutover.jsonc --env production
+   pnpm exec wrangler d1 time-travel info maal-prod --config .wrangler/production-cutover.jsonc --env production
+   pnpm exec wrangler d1 migrations apply maal-prod --remote --config .wrangler/production-cutover.jsonc --env production
+   ```
+
+4. Confirm the WorkOS application redirects, roles/permissions, branding, production API key, and Client ID.
+5. Confirm one live Stripe `Maal` Product, its three live Prices with the exact lookup keys, and a live webhook
+   endpoint subscribed only to the seven events above. Keep its independent live signing secret.
+6. Generate independent production cookie and maintenance secrets. Never reuse staging values.
+7. Build, dry-run, deploy, observe, and run non-mutating smoke checks. The staging harness intentionally refuses
    production provider keys and must not be weakened or pointed at production.
-7. Attach the sanitized staging evidence and the #70 native-browser evidence to the release decision. Keep
+8. Attach the sanitized staging evidence and the #70 native-browser evidence to the release decision. Keep
    infrastructure IDs and provider object IDs only in the private operations record.
+
+Future production versions follow the same inspection, bookmark, and migration sequence against `maal-prod`.
+They never create a replacement D1 or a versioned production Worker.
 
 Cut over traffic only when the callback blocker is closed, every staging gate passes, cleanup is verified,
 scheduled maintenance is observable, and an operator has rehearsed rollback-forward.

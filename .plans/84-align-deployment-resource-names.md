@@ -26,7 +26,7 @@ current forward-only D1 migration chain instead of creating versioned replacemen
 
 - [x] Add failing resource-name contracts, then restore existing Worker and D1 bindings in Wrangler config.
 - [x] Add failing migration/preflight contracts, then align scripts and guarded staging validation.
-- [ ] Rewrite architecture and cutover guidance around inspecting and migrating long-lived D1 databases in place.
+- [x] Rewrite architecture and cutover guidance around inspecting and migrating long-lived D1 databases in place.
 - [ ] Run focused staging contracts, the D1 migration chain, and full validation.
 
 ## Notes
@@ -43,3 +43,7 @@ current forward-only D1 migration chain instead of creating versioned replacemen
   rejected `maal-staging`; the production migration contract still targeted `maal-v1-production`.
 - Green: 15 focused unit contracts pass and `pnpm test:d1-schema` applies the complete local chain through
   `maal-local`.
+- Red: the operator-document contract found versioned resource names, a staging D1 create command, and no
+  production in-place migration sequence.
+- Green: the architecture matrix and runbook identify all three long-lived environments. The staging and
+  production procedures inspect, bookmark, and migrate the existing D1 databases without publishing IDs.

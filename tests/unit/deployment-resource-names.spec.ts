@@ -5,6 +5,29 @@ import { describe, expect, test } from 'vitest';
 const readJson = async (path: string) => JSON.parse(await readFile(path, 'utf8'));
 
 describe('Cloudflare deployment resource names', () => {
+	test('documents inspection and in-place migration instead of versioned replacement D1 databases', async () => {
+		const [runbook, architecture, foundation] = await Promise.all([
+			readFile('docs/operations/staging-cutover.md', 'utf8'),
+			readFile('docs/architecture/local-first-rewrite-spec.md', 'utf8'),
+			readFile('docs/architecture/foundation.md', 'utf8')
+		]);
+
+		for (const document of [runbook, architecture, foundation]) {
+			expect(document).not.toMatch(/maal-v\d+-(?:local|staging|production)/);
+		}
+		expect(runbook).not.toMatch(/wrangler d1 create maal-/);
+		expect(runbook).toContain('wrangler d1 info maal-staging');
+		expect(runbook).toContain('wrangler d1 migrations apply maal-staging');
+		expect(runbook).toContain('wrangler d1 info maal-prod');
+		expect(runbook).toContain('wrangler d1 migrations apply maal-prod');
+		expect(architecture).toMatch(
+			/Future application and\s+schema versions migrate these databases in place/
+		);
+		expect(foundation).toMatch(
+			/never create a replacement D1 database for an application or schema version/
+		);
+	});
+
 	test('migrates each long-lived D1 database in place', async () => {
 		const packageJson = await readJson('package.json');
 

@@ -69,6 +69,22 @@ flowchart LR
 - Routine free content use performs no Worker or D1 requests. Explicit authentication, billing, and custom
   household-invite administration are permitted remote actions for free users.
 
+### 2.1 Cloudflare resource identity
+
+Cloudflare resource names describe the environment and never include an application or schema version:
+
+| Environment | Worker         | D1             |
+| ----------- | -------------- | -------------- |
+| Local       | `maal-local`   | `maal-local`   |
+| Staging     | `maal-staging` | `maal-staging` |
+| Production  | `maal`         | `maal-prod`    |
+
+The tracked Wrangler configuration retains the existing staging and production D1 IDs. Future application and
+schema versions migrate these databases in place through the committed forward-only migration chain. They do
+not create a replacement D1, copy all records to a release-named database, or rename the production Worker.
+The `maal-v1:<environment>` Dexie name and versioned service-worker cache names are browser-local schema/cache
+names. They do not identify Cloudflare resources.
+
 ## 3. Shared contract conventions
 
 Effect Schema is authoritative at Dexie, D1 mapping, HTTP, import/export, service-worker message, WorkOS,
