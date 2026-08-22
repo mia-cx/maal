@@ -5,7 +5,11 @@ import { Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
-import type { AuthSlotId } from '$lib/auth-slots/index.js';
+import {
+	AuthSlotCapacityExceeded,
+	MAX_AUTHENTICATED_SLOTS,
+	type AuthSlotId
+} from '$lib/auth-slots/index.js';
 import {
 	AuthSlotMetadataUnavailable,
 	projectAuthCallback,
@@ -220,6 +224,60 @@ describe('auth callback projection', () => {
 			profileId: bob.profileId,
 			sessionState: 'authenticated'
 		});
+	});
+
+	test('rejects a ninth authenticated profile without changing the existing projection', async () => {
+		const database = await openDatabase();
+		for (let index = 0; index < MAX_AUTHENTICATED_SLOTS; index += 1) {
+			const retained = profile(`user_${index}`, `Cook ${index}`);
+			await database.profiles.add(retained);
+			await addSlot(database, retained, index.toString(16).padStart(32, '0') as AuthSlotId);
+		}
+		await database.uiState.put({ key: 'activeProfileId', value: 'original-profile' });
+
+		await expect(
+			projectAuthCallback(
+				database,
+				{ authSlotId: BOB_SLOT, authStatus: 'authenticated' },
+				{ fetcher: async () => authenticatedResponse(BOB_SLOT, 'user_nine', 'Nine') }
+			)
+		).rejects.toBeInstanceOf(AuthSlotCapacityExceeded);
+
+		await expect(database.profiles.count()).resolves.toBe(MAX_AUTHENTICATED_SLOTS);
+		await expect(database.authSlots.count()).resolves.toBe(MAX_AUTHENTICATED_SLOTS);
+		await expect(database.profiles.where('workosUserId').equals('user_nine').count()).resolves.toBe(
+			0
+		);
+		await expect(database.userAttributions.get('user_nine')).resolves.toBeUndefined();
+		await expect(database.uiState.get('activeProfileId')).resolves.toMatchObject({
+			value: 'original-profile'
+		});
+	});
+
+	test('rolls back every projected store when the atomic write fails', async () => {
+		const database = await openDatabase();
+		await database.uiState.put({ key: 'activeProfileId', value: 'original-profile' });
+		vi.spyOn(database.userAttributions, 'put').mockRejectedValueOnce(
+			new Error('simulated attribution write failure')
+		);
+
+		await expect(
+			projectAuthCallback(
+				database,
+				{ authSlotId: BOB_SLOT, authStatus: 'authenticated' },
+				{ fetcher: async () => authenticatedResponse(BOB_SLOT, 'user_bob', 'Bob') }
+			)
+		).rejects.toThrow('simulated attribution write failure');
+
+		await expect(database.profiles.count()).resolves.toBe(0);
+		await expect(database.authSlots.count()).resolves.toBe(0);
+		await expect(database.userAttributions.count()).resolves.toBe(0);
+		await expect(database.uiState.get('activeProfileId')).resolves.toMatchObject({
+			value: 'original-profile'
+		});
+		await expect(
+			database.uiState.filter(({ key }) => key.startsWith('profileLock:')).count()
+		).resolves.toBe(0);
 	});
 
 	test.each([

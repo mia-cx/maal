@@ -2,8 +2,10 @@ import { Data, Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
 
 import {
+	AuthSlotCapacityExceeded,
 	AuthSlotMetadata,
 	isAuthSlotId,
+	MAX_AUTHENTICATED_SLOTS,
 	type AuthSlotId,
 	type AuthSlotMetadata as AuthSlotMetadataType,
 	type AuthSlotStatus
@@ -132,6 +134,17 @@ const upsertAuthenticatedSlot = async (
 
 			const profileForSlot = slot ? await database.profiles.get(slot.profileId) : null;
 			const existing = profileForSlot ?? profileForUser ?? null;
+			const existingCountsTowardCapacity =
+				existing?.authState === 'authenticated' || existing?.authState === 'stale';
+			if (!existingCountsTowardCapacity) {
+				const authenticatedProfileCount = await database.profiles
+					.where('authState')
+					.anyOf('authenticated', 'stale')
+					.count();
+				if (authenticatedProfileCount >= MAX_AUTHENTICATED_SLOTS) {
+					throw new AuthSlotCapacityExceeded({ maximum: MAX_AUTHENTICATED_SLOTS });
+				}
+			}
 			const profileId = existing?.profileId ?? uuidv7();
 			projectedProfileId = profileId;
 

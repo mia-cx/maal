@@ -25,5 +25,6 @@ Consume the retained-session callback marker once, fetch its safe server project
 - Prototype UI authority remains `main` at `74a12ec38f6c297d1a6adbf596234c45212bac11`.
 - Callback parameters contain only the opaque slot ID and status. Credentials remain in path-scoped HTTP-only cookies.
 - The selected-slot endpoint must remain slash-terminated. Its retained cookie does not match the slashless redirect target.
-- Focused validation: 26 server tests, 1 browser test, 3 Playwright tests, `pnpm check`, targeted ESLint, and `git diff --check` passed.
-- Full validation: lint, Svelte check (0 errors and warnings), 199 Vitest tests across 40 files, production build and performance budget, and 11 Playwright tests passed.
+- Focused integration validation: 28 server tests, 1 browser test, 3 Playwright tests, and `git diff --check` passed.
+- Full integration validation: lint, Svelte check (0 errors and warnings), 260 Vitest tests across 46 files, production build, 178,043 / 256,000-byte initial gzip budget, and 11 Playwright tests passed.
+- `pnpm test:d1-schema` passed. Integration also adds an in-transaction capacity guard and proves both ninth-slot rejection and full-store rollback.
