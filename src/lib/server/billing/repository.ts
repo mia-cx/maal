@@ -326,6 +326,18 @@ export class BillingRepository {
 		);
 	}
 
+	async deletionRequestByRefundId(refundId: string): Promise<HouseholdDeletionRow | null> {
+		return (
+			(
+				await getDb(this.database)
+					.select()
+					.from(householdDeletionRequests)
+					.where(eq(householdDeletionRequests.stripeRefundId, refundId))
+					.limit(1)
+			)[0] ?? null
+		);
+	}
+
 	async upsertDeletionRequest(input: typeof householdDeletionRequests.$inferInsert): Promise<void> {
 		await getDb(this.database).insert(householdDeletionRequests).values(input).onConflictDoUpdate({
 			target: householdDeletionRequests.householdId,

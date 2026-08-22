@@ -20,7 +20,7 @@ Drizzle baseline or canonical taxonomy seed.
 
 ## TODOs
 
-- [ ] Make the refund/deletion saga and canonical webhook projection fail closed and resumable.
+- [x] Make the refund/deletion saga and canonical webhook projection fail closed and resumable.
 - [ ] Enforce paid-period deadlines and protect the current billing owner in all membership mutations.
 - [ ] Reconcile stale trial resources and purge check-in recovery rows in scheduled maintenance.
 - [ ] Restart portable-import backfill and preserve authoritative deletion intent for natural-key replacements.
@@ -34,3 +34,6 @@ Drizzle baseline or canonical taxonomy seed.
 - No remote D1, WorkOS, Stripe, Cloudflare, deployment, issue, or PR mutation runs here.
 - Vitest and Playwright stay at four workers or fewer. Suites never overlap.
 - Preserve both generated Drizzle migrations and the canonical 40-unit/184-alias seed byte-for-byte.
+- Refund/deletion slice: 1 file / 4 tests passed. Pending and action-required refunds stay outside
+  recovery until canonical Stripe status succeeds; failed refunds stay failed. Webhooks fetch canonical
+  refund/subscription state before projection.
