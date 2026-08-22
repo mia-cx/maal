@@ -1,8 +1,10 @@
 import { expect, test } from '@playwright/test';
 
-test('serves the clean rewrite shell', async ({ page }) => {
+test('enters the local-first meal plan through the shared shell', async ({ page }) => {
 	await page.goto('/');
 
-	await expect(page).toHaveTitle('Maal');
-	await expect(page.getByRole('heading', { level: 1, name: 'Maal' })).toBeVisible();
+	await expect(page).toHaveURL(/\/plan$/);
+	await expect(page).toHaveTitle('Meal plan · Maal');
+	await expect(page.getByTestId('shared-app-shell')).toHaveCount(1);
+	await expect(page.getByTestId('app-sidebar')).toHaveCount(1);
 });

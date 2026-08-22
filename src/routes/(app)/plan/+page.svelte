@@ -32,8 +32,6 @@
 	import type { MealCheckInPayload } from '$lib/components/dashboard/meal-check-in-dialog.svelte';
 	import { sortOrderForUntimedInsertion } from '$lib/components/dashboard/schedule-ordering.js';
 	import type { RecipeMenuItem } from '$lib/components/menu/index.js';
-	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
-	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { DomainIdSchema } from '$lib/domain/contracts/primitives.js';
 	import { recipeMenuItemToEditorPatch } from '$lib/menu/recipe-local-adapter.js';
 
@@ -238,37 +236,32 @@
 <svelte:head><title>Meal plan · Maal</title></svelte:head>
 
 {#if database}
-	<Sidebar.Provider>
-		<DashboardSidebar {database} />
-		<Sidebar.Inset class="min-w-0 overflow-hidden bg-background text-foreground">
-			{#if view}
-				{#key `${view.profileId}:${view.householdId}`}
-					<ScheduleDashboard
-						meals={dashboardMeals}
-						recipes={view.recipes}
-						weekStartsOn={view.weekStartsOn}
-						householdTimeZone={view.householdTimeZone}
-						currentUserId={view.userId}
-						householdMembers={view.householdMembers}
-						initialUiState={view.uiState}
-						onplanrecipe={planRecipe}
-						onmealchange={changeMeal}
-						onmealdelete={removeMeal}
-						onmealcheckin={checkIn}
-						oncreaterecipe={createRecipeAndMeal}
-						onloadedrangechange={updateRenderedMealRange}
-						onuistatechange={saveUiState}
-					/>
-				{/key}
-			{:else}
-				<div class="grid min-h-svh place-items-center px-6 text-center">
-					<p class="text-sm text-muted-foreground">
-						{error ?? 'Choose a local profile and household to start planning.'}
-					</p>
-				</div>
-			{/if}
-		</Sidebar.Inset>
-	</Sidebar.Provider>
+		{#if view}
+			{#key `${view.profileId}:${view.householdId}`}
+				<ScheduleDashboard
+					meals={dashboardMeals}
+					recipes={view.recipes}
+					weekStartsOn={view.weekStartsOn}
+					householdTimeZone={view.householdTimeZone}
+				currentUserId={view.userId}
+				householdMembers={view.householdMembers}
+				initialUiState={view.uiState}
+				onplanrecipe={planRecipe}
+				onmealchange={changeMeal}
+					onmealdelete={removeMeal}
+					onmealcheckin={checkIn}
+					oncreaterecipe={createRecipeAndMeal}
+					onloadedrangechange={updateRenderedMealRange}
+					onuistatechange={saveUiState}
+				/>
+		{/key}
+	{:else}
+		<div class="grid min-h-svh place-items-center px-6 text-center">
+			<p class="text-sm text-muted-foreground">
+				{error ?? 'Choose a local profile and household to start planning.'}
+				</p>
+			</div>
+		{/if}
 {:else}
 	<div class="grid min-h-svh place-items-center bg-background px-6 text-center text-foreground">
 		<div class="grid gap-2 text-sm text-muted-foreground">

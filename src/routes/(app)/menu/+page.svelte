@@ -15,7 +15,8 @@
 		type RecipeCommandContext
 	} from '$lib/client/recipes/index.js';
 	import { detachDeletedRecipeFromMeals } from '$lib/client/meals/index.js';
-	import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.js';
+	import { getBrowserDatabase } from '$lib/client/local/browser.js';
+	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import { DomainIdSchema } from '$lib/domain/contracts/primitives.js';
 	import { MyMenuDashboard, type RecipeMenuItem } from '$lib/components/menu/index.js';
 	import {
@@ -29,11 +30,6 @@
 	let archivedRecipes = $state<RecipeMenuItem[]>([]);
 	let activeOwnerUserId = $state<string | null>(null);
 	let loadError = $state<string | null>(null);
-
-	const databaseEnvironment = (): string => {
-		const configured = import.meta.env.VITE_MAAL_DATABASE_ENVIRONMENT?.trim();
-		return configured || import.meta.env.MODE;
-	};
 
 	const commandContext = async (): Promise<RecipeCommandContext> => {
 		if (!database || !activeOwnerUserId) throw new Error('Choose a local profile first.');
@@ -122,7 +118,7 @@
 		let cancelled = false;
 		let subscription: { unsubscribe: () => void } | undefined;
 
-		void openMaalDatabase(databaseEnvironment())
+		void getBrowserDatabase()
 			.then((opened) => {
 				if (cancelled) {
 					opened.close();
@@ -160,7 +156,6 @@
 		return () => {
 			cancelled = true;
 			subscription?.unsubscribe();
-			database?.close();
 		};
 	});
 </script>

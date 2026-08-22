@@ -7,7 +7,6 @@
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import HouseholdOnboarding from '$lib/components/household/household-onboarding.svelte';
 	import HouseholdSettings from '$lib/components/household/household-settings.svelte';
-	import LocalAppSidebar from '$lib/components/local-app-sidebar.svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 
 	let database = $state<MaalDatabase | null>(null);
@@ -53,36 +52,27 @@
 <svelte:head><title>Household · Maal</title></svelte:head>
 
 {#if database}
-	<Sidebar.Provider>
-		<LocalAppSidebar {database} />
-		<Sidebar.Inset class="min-w-0 overflow-hidden bg-background text-foreground">
-			<header
-				class="sticky top-0 z-40 flex h-[52px] shrink-0 items-center border-b border-border bg-background px-2"
-			>
-				<div class="flex w-9 shrink-0 items-center justify-center"><Sidebar.Trigger /></div>
-			</header>
-			<main class="min-h-0 flex-1 overflow-y-auto">
-				{#if activeProfileId && activeHouseholdId}
-					<HouseholdSettings
-						{database}
-						profileId={activeProfileId}
-						householdId={activeHouseholdId}
-					/>
-				{:else if activeProfileId}
-					<HouseholdOnboarding {database} profileId={activeProfileId} />
-				{:else}
-					<div class="mx-auto grid min-h-[60svh] max-w-xl place-items-center px-6 text-center">
-						<div class="grid gap-2">
-							<h1 class="text-xl font-semibold tracking-tight">Add a profile</h1>
-							<p class="text-sm text-muted-foreground">
-								Use the profile menu to sign in a real user on this device.
-							</p>
-						</div>
-					</div>
-				{/if}
-			</main>
-		</Sidebar.Inset>
-	</Sidebar.Provider>
+	<header
+		class="sticky top-0 z-40 flex h-[52px] shrink-0 items-center border-b border-border bg-background px-2"
+	>
+		<div class="flex w-9 shrink-0 items-center justify-center"><Sidebar.Trigger /></div>
+	</header>
+	<div class="h-[calc(100svh-52px)] min-h-0 overflow-y-auto">
+		{#if activeProfileId && activeHouseholdId}
+			<HouseholdSettings {database} profileId={activeProfileId} householdId={activeHouseholdId} />
+		{:else if activeProfileId}
+			<HouseholdOnboarding {database} profileId={activeProfileId} />
+		{:else}
+			<div class="mx-auto grid min-h-[60svh] max-w-xl place-items-center px-6 text-center">
+				<div class="grid gap-2">
+					<h1 class="text-xl font-semibold tracking-tight">Add a profile</h1>
+					<p class="text-sm text-muted-foreground">
+						Use the profile menu to sign in a real user on this device.
+					</p>
+				</div>
+			</div>
+		{/if}
+	</div>
 {:else}
 	<div class="grid min-h-svh place-items-center bg-background px-6 text-center text-foreground">
 		<div class="grid gap-2 text-sm text-muted-foreground">
