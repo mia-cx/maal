@@ -7,13 +7,17 @@ const timestamp = '2026-08-21T12:00:00.000Z';
 
 const resetDatabase = async () => {
 	await new Promise<void>((resolve, reject) => {
-		const request = indexedDB.deleteDatabase(databaseName);
+		const request = indexedDB.deleteDatabase('maal-v1:production');
 		request.onerror = () => reject(request.error);
 		request.onsuccess = () => resolve();
 	});
 };
 
 const seedSettings = async (paid: boolean) => {
+	const databaseName = 'maal-v1:production';
+	const profileId = '01990c69-7f00-7000-8000-000000000074';
+	const householdId = 'org_canal_kitchen';
+	const timestamp = '2026-08-21T12:00:00.000Z';
 	const database = await new Promise<IDBDatabase>((resolve, reject) => {
 		const request = indexedDB.open(databaseName);
 		request.onerror = () => reject(request.error);
@@ -121,7 +125,7 @@ const seed = async (page: Page, paid = false) => {
 		.poll(() =>
 			page.evaluate(async () =>
 				(await indexedDB.databases()).some(
-					(candidate) => candidate.name === databaseName && candidate.version === 50
+					(candidate) => candidate.name === 'maal-v1:production' && candidate.version === 50
 				)
 			)
 		)
@@ -158,7 +162,9 @@ test('opens local account and MCP settings in the shared shell without charging 
 	await page.getByRole('menuitem', { name: 'Settings' }).click();
 	await expect(page).toHaveURL(/\/plan\?settings=account$/);
 	await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-	await expect(page.getByText('Profiles on this device')).toBeVisible();
+	await expect(
+		page.getByRole('dialog').getByText('Profiles on this device', { exact: true })
+	).toBeVisible();
 	await expect(page.getByTestId('shared-app-shell')).toHaveCount(1);
 
 	await page.getByRole('button', { name: 'MCP keys' }).click();
@@ -193,7 +199,7 @@ test('manages a paid MCP key while keeping its raw secret out of IndexedDB', asy
 		.poll(() =>
 			page.evaluate(async () => {
 				const database = await new Promise<IDBDatabase>((resolve, reject) => {
-					const request = indexedDB.open(databaseName);
+					const request = indexedDB.open('maal-v1:production');
 					request.onerror = () => reject(request.error);
 					request.onsuccess = () => resolve(request.result);
 				});

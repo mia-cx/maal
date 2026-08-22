@@ -27,7 +27,8 @@
 		householdName,
 		workosUserId,
 		localOnly,
-		transferCandidates
+		transferCandidates,
+		showHeading = true
 	}: {
 		database: MaalDatabase;
 		profileId: string;
@@ -36,6 +37,7 @@
 		workosUserId: string;
 		localOnly: boolean;
 		transferCandidates: readonly { workosUserId: string; name: string }[];
+		showHeading?: boolean;
 	} = $props();
 
 	let capability = $state<BillingCapability | null>(null);
@@ -163,13 +165,25 @@
 	};
 </script>
 
-<section class="grid gap-4 border-t border-border pt-4" aria-label="Billing">
-	<div class="grid gap-1">
-		<h2 class="text-sm font-medium">Billing</h2>
+<section
+	class="grid gap-4"
+	class:border-t={showHeading}
+	class:border-border={showHeading}
+	class:pt-4={showHeading}
+	aria-label="Billing"
+>
+	{#if showHeading}
+		<div class="grid gap-1">
+			<h2 class="text-sm font-medium">Billing</h2>
+			<p class="text-xs text-muted-foreground">
+				Local meal planning stays free. One Maal plan adds sync, MCP, and hosted services for {householdName}.
+			</p>
+		</div>
+	{:else}
 		<p class="text-xs text-muted-foreground">
 			Local meal planning stays free. One Maal plan adds sync, MCP, and hosted services for {householdName}.
 		</p>
-	</div>
+	{/if}
 
 	{#if localOnly}
 		<p class="text-xs text-muted-foreground">

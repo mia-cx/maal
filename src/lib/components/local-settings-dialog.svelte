@@ -557,6 +557,7 @@
 							workosUserId={view.activeProfile.workosUserId}
 							localOnly={view.activeHousehold.localOnly}
 							transferCandidates={view.transferCandidates}
+							showHeading={false}
 						/>
 					{:else}
 						<p class="text-xs text-muted-foreground">Choose a local profile and household first.</p>
