@@ -527,12 +527,14 @@ export const runRecipeRetention = async (
 	const stored = records.map((record) =>
 		decode(StoredRecipeSchema, record, 'decode recipe retention row')
 	);
-	const recoverableExpired = stored.filter(
-		(record): record is RecipeAggregate =>
-			isRecipeAggregate(record) &&
-			record.deletedAt !== null &&
-			Date.parse(record.deletedAt) <= cutoff
-	).slice(0, batchSize);
+	const recoverableExpired = stored
+		.filter(
+			(record): record is RecipeAggregate =>
+				isRecipeAggregate(record) &&
+				record.deletedAt !== null &&
+				Date.parse(record.deletedAt) <= cutoff
+		)
+		.slice(0, batchSize);
 	const purgedRecipeIds: string[] = [];
 	for (const recipe of recoverableExpired) {
 		await purgeRecipe(database, { ...context, occurredAt: now }, recipe.id, 'recovery_expired');
@@ -562,6 +564,7 @@ export const runRecipeRetention = async (
 		purgedRecipeIds,
 		expiredTombstoneIds,
 		hasMore:
-			recoverableExpired.length === batchSize || expiredCandidates.length > expiredTombstoneIds.length
+			recoverableExpired.length === batchSize ||
+			expiredCandidates.length > expiredTombstoneIds.length
 	};
 };

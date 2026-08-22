@@ -7,7 +7,8 @@ import { runRecipeRetention } from './commands.js';
 
 const RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1_000;
 
-const utc = (date: Date): UtcInstant => Schema.decodeUnknownSync(UtcInstantSchema)(date.toISOString());
+const utc = (date: Date): UtcInstant =>
+	Schema.decodeUnknownSync(UtcInstantSchema)(date.toISOString());
 
 export interface ForegroundRecipeRetentionResult {
 	readonly profileCount: number;
@@ -59,7 +60,8 @@ export const runForegroundRecipeRetention = async (
 export const startForegroundRecipeRetention = (database: MaalDatabase): void => {
 	let running = false;
 	const run = async (): Promise<void> => {
-		if (running || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return;
+		if (running || (typeof document !== 'undefined' && document.visibilityState === 'hidden'))
+			return;
 		running = true;
 		try {
 			await runForegroundRecipeRetention(database);
