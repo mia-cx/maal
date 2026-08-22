@@ -35,6 +35,7 @@
 		"test:proof:product": "playwright test --config playwright.product-proof.config.ts --project=chromium",
 		"test:proof:product:browsers": "playwright test --config playwright.product-proof.config.ts --grep @browser-smoke",
 		"proof:prototype-ui": "node scripts/check-prototype-ui.mjs",
+		"proof:staging": "node scripts/prove-staging-cutover.mjs",
 		"perf:budget": "node scripts/check-build-budget.mjs",
 		"gen": "wrangler types",
 		"i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --silent",

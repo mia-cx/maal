@@ -1,0 +1,159 @@
+import { mkdir, open, stat, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+
+export const STAGING_CONFIRMATION = 'create-and-remove-disposable-staging-fixtures';
+
+const requiredLiveSettings = [
+	'MAAL_STAGING_BASE_URL',
+	'MAAL_STAGING_DEPLOYMENT_LABEL',
+	'MAAL_STAGING_DATABASE_NAME',
+	'MAAL_STAGING_WRANGLER_CONFIG',
+	'WORKOS_API_KEY',
+	'WORKOS_CLIENT_ID',
+	'WORKOS_COOKIE_PASSWORD',
+	'STRIPE_SECRET_KEY',
+	'STRIPE_WEBHOOK_SECRET',
+	'STRIPE_PRODUCT_ID',
+	'BILLING_MAINTENANCE_SECRET'
+];
+
+export const contractProofFiles = [
+	'tests/unit/auth-slots.spec.ts',
+	'tests/unit/auth-slot-proof-evidence.spec.ts',
+	'tests/unit/billing-capability.spec.ts',
+	'tests/unit/billing-services.spec.ts',
+	'tests/unit/billing-local.spec.ts',
+	'tests/unit/household-retention.spec.ts',
+	'tests/unit/user-sync.spec.ts',
+	'tests/unit/user-sync-d1.spec.ts',
+	'tests/unit/household-sync.spec.ts',
+	'tests/unit/household-sync-d1.spec.ts',
+	'tests/unit/scheduled-retention.spec.ts',
+	'tests/unit/mcp-authorization.spec.ts',
+	'tests/unit/mcp-contract.spec.ts',
+	'tests/unit/mcp-domain-d1.spec.ts',
+	'tests/unit/mcp-protocol.spec.ts',
+	'tests/unit/mcp-tools.spec.ts'
+];
+
+export const validateLiveEnvironment = async (environment, repositoryRoot) => {
+	const missing = requiredLiveSettings.filter((name) => !environment[name]?.trim());
+	if (environment.MAAL_STAGING_PROOF_CONFIRM !== STAGING_CONFIRMATION) {
+		missing.unshift(`MAAL_STAGING_PROOF_CONFIRM=${STAGING_CONFIRMATION}`);
+	}
+	if (missing.length > 0) {
+		throw new Error(`Staging proof is blocked. Missing operator inputs: ${missing.join(', ')}`);
+	}
+
+	if (!environment.WORKOS_API_KEY.startsWith('sk_test_')) {
+		throw new Error('Staging proof refuses a WorkOS key that is not a staging sk_test_ key.');
+	}
+	if (!environment.STRIPE_SECRET_KEY.startsWith('sk_test_')) {
+		throw new Error('Staging proof refuses a Stripe key that is not a test-mode sk_test_ key.');
+	}
+	if (!environment.STRIPE_WEBHOOK_SECRET.startsWith('whsec_')) {
+		throw new Error('Staging proof requires the test endpoint Stripe webhook secret.');
+	}
+	if (environment.WORKOS_COOKIE_PASSWORD.length < 32) {
+		throw new Error('WORKOS_COOKIE_PASSWORD must contain at least 32 characters.');
+	}
+	if (environment.MAAL_STAGING_DATABASE_NAME !== 'maal-v1-staging') {
+		throw new Error('Staging proof only accepts MAAL_STAGING_DATABASE_NAME=maal-v1-staging.');
+	}
+
+	const baseUrl = new URL(environment.MAAL_STAGING_BASE_URL);
+	if (
+		baseUrl.protocol !== 'https:' ||
+		baseUrl.username ||
+		baseUrl.password ||
+		baseUrl.search ||
+		baseUrl.hash
+	) {
+		throw new Error('MAAL_STAGING_BASE_URL must be a clean HTTPS staging origin.');
+	}
+	if (baseUrl.hostname === 'maal.mia.cx') {
+		throw new Error('Staging proof refuses the production Maal hostname.');
+	}
+	if (!/^[-a-zA-Z0-9_.]{1,80}$/.test(environment.MAAL_STAGING_DEPLOYMENT_LABEL)) {
+		throw new Error('MAAL_STAGING_DEPLOYMENT_LABEL must be a short non-secret label.');
+	}
+
+	const configPath = resolve(repositoryRoot, environment.MAAL_STAGING_WRANGLER_CONFIG);
+	const configStats = await stat(configPath).catch(() => null);
+	if (!configStats?.isFile()) {
+		throw new Error('MAAL_STAGING_WRANGLER_CONFIG must name an existing ignored Wrangler file.');
+	}
+	return {
+		baseUrl: baseUrl.origin,
+		deploymentLabel: environment.MAAL_STAGING_DEPLOYMENT_LABEL,
+		databaseName: environment.MAAL_STAGING_DATABASE_NAME,
+		wranglerConfigPath: configPath,
+		providerModes: { workos: 'staging', stripe: 'test', cloudflare: 'staging' }
+	};
+};
+
+export const summarizeAuthEvidence = (value) => ({
+	result: value?.result === 'passed' ? 'passed' : 'failed',
+	aliceCookieBytes: safeInteger(value?.aliceCookieBytes),
+	bobCookieBytes: safeInteger(value?.bobCookieBytes),
+	bobSurvivedAliceRefresh: value?.bobSurvivedAliceRefresh === true,
+	bobSurvivedAliceRevocation: value?.bobSurvivedAliceRevocation === true,
+	cleanup: cleanupSummary(value?.cleanup)
+});
+
+export const summarizeBillingEvidence = (value) => ({
+	result: value?.result === 'passed' ? 'passed' : 'failed',
+	mode: {
+		stripe: value?.mode?.stripe === 'test' ? 'test' : 'unknown',
+		workos: value?.mode?.workos === 'staging' ? 'staging' : 'unknown'
+	},
+	checks: booleanChecks(value?.checks),
+	cleanup: cleanupSummary(value?.cleanup)
+});
+
+export const safeCommandEvidence = ({ name, result, startedAt, finishedAt }) => ({
+	name,
+	result: result === 'passed' ? 'passed' : 'failed',
+	startedAt: utc(startedAt),
+	finishedAt: utc(finishedAt)
+});
+
+export const writeSanitizedEvidence = async (path, evidence) => {
+	const absolutePath = resolve(path);
+	await mkdir(dirname(absolutePath), { recursive: true, mode: 0o700 });
+	const handle = await open(absolutePath, 'wx', 0o600);
+	try {
+		await writeFile(handle, `${JSON.stringify(evidence, null, 2)}\n`);
+	} finally {
+		await handle.close();
+	}
+	return absolutePath;
+};
+
+const cleanupSummary = (value) => ({
+	attempted: safeInteger(value?.attempted),
+	verifiedDeleted: safeInteger(value?.verifiedDeleted),
+	remainingDisposableUsers: safeInteger(value?.remainingDisposableUsers),
+	failedCount: Array.isArray(value?.failed) ? value.failed.length : 0,
+	verifiedAtUtc: typeof value?.verifiedAtUtc === 'string' ? utc(value.verifiedAtUtc) : null
+});
+
+const booleanChecks = (value) =>
+	value && typeof value === 'object'
+		? Object.fromEntries(
+				Object.entries(value)
+					.filter(
+						([name, check]) =>
+							/^[a-zA-Z][a-zA-Z0-9]{0,79}$/.test(name) && typeof check === 'boolean'
+					)
+					.map(([name, check]) => [name, check])
+			)
+		: {};
+
+const safeInteger = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : null);
+
+const utc = (value) => {
+	const parsed = new Date(value);
+	if (!Number.isFinite(parsed.getTime())) throw new Error('Evidence timestamp is invalid.');
+	return parsed.toISOString();
+};
