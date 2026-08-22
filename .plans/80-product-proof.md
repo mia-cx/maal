@@ -7,14 +7,14 @@ Automate what this Linux host can execute and record native or missing-runtime g
 
 ## Acceptance criteria
 
-- [ ] Light and dark automated accessibility checks cover plan, recipes, profiles, household settings,
+- [x] Light and dark automated accessibility checks cover plan, recipes, profiles, household settings,
       preferences, billing, and recovery, including visible keyboard focus.
-- [ ] Chromium, Firefox, and WebKit smoke runs cover local-first startup, offline reopen, update startup, and
+- [x] Chromium, Firefox, and WebKit smoke runs cover local-first startup, offline reopen, update startup, and
       recovery where the host can launch them.
-- [ ] Browser measurements enforce shell render, interaction, long-task, CLS, 10,000-recipe, and bundle budgets.
-- [ ] Phone, tablet, and desktop evidence compares every in-scope product route with the prototype authority and
+- [x] Browser measurements enforce shell render, interaction, long-task, CLS, 10,000-recipe, and bundle budgets.
+- [x] Phone, tablet, and desktop evidence compares every in-scope product route with the prototype authority and
       covers scroll, drag/drop, keyboard planning, check-ins, settings, and billing.
-- [ ] Confirmed product regressions are fixed. Host and device limitations remain explicit external gates.
+- [x] Confirmed product regressions are fixed. Host and device limitations remain explicit external gates.
 
 ## TODOs
 
@@ -34,3 +34,5 @@ Automate what this Linux host can execute and record native or missing-runtime g
 - Native Safari, iOS, and Android evidence remains issue #70.
 - The focused Chromium proof, Firefox smoke, 33 responsive snapshots, and prototype-source check pass against the
   production Worker build. WebKit cannot launch on this host because its system libraries are unavailable.
+- Merger validation made the existing redirected settings screenshot wait for the dialog before capture. The full
+  gate then passed 289 unit tests, the production build and bundle budget, and all 21 end-to-end tests.
