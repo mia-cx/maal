@@ -1,6 +1,11 @@
 import type { ClientInit } from '@sveltejs/kit';
 
-import { clearBrowserDatabasePromises, getBrowserDatabase } from '$lib/client/local/browser.js';
+import {
+	clearBrowserDatabasePromises,
+	getBrowserDatabase,
+	isBrowserRecoveryRequired,
+	markBrowserRecoveryRequired
+} from '$lib/client/local/browser.js';
 import { readRecoveryState } from '$lib/client/local/recovery.js';
 import { startDeviceSync } from '$lib/client/sync/device-coordinator.js';
 import { deLocalizeUrl, localizeHref } from '$lib/paraglide/runtime';
@@ -9,6 +14,10 @@ import { Locale } from '$lib/paraglide.svelte';
 export const init: ClientInit = async () => {
 	new Locale();
 	if (deLocalizeUrl(new URL(window.location.href)).pathname === '/recovery') return;
+	if (isBrowserRecoveryRequired()) {
+		window.location.replace(localizeHref('/recovery'));
+		return;
+	}
 
 	try {
 		const database = await getBrowserDatabase();
@@ -20,6 +29,7 @@ export const init: ClientInit = async () => {
 		startDeviceSync(database);
 	} catch {
 		clearBrowserDatabasePromises();
+		markBrowserRecoveryRequired();
 		window.location.replace(localizeHref('/recovery'));
 	}
 };

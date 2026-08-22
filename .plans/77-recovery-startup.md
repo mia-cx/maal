@@ -29,5 +29,7 @@ Keep the recovery route outside normal Dexie, sync, auth callback, and PWA start
 - `pnpm check` passes after the recovery screen refinement.
 - Normal startup preflights the native IndexedDB version. It never lets Dexie extend a newer committed schema.
 - `pnpm exec vitest run tests/unit/local-runtime.spec.ts` passes 14 tests.
-- `pnpm exec playwright test tests/e2e/recovery-startup.e2e.ts` passes 1 browser proof.
+- `pnpm exec playwright test tests/e2e/recovery-startup.e2e.ts` passes 2 browser proofs.
 - Focused Prettier, ESLint, and `pnpm check` pass.
+- Merger audit added a literal `IDBFactory.open()` upgrade failure proof. A local recovery latch now keeps normal routes closed until explicit retry or reset.
+- The focused recovery browser file passes both the newer-schema and failed-upgrade proofs.

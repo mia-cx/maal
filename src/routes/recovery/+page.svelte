@@ -6,6 +6,7 @@
 
 	import {
 		clearBrowserDatabasePromises,
+		clearBrowserRecoveryRequired,
 		getBrowserRecoveryDatabase
 	} from '$lib/client/local/browser.js';
 	import { exportSafeRecoveryData } from '$lib/client/local/recovery-export.js';
@@ -66,12 +67,19 @@
 		try {
 			await resetRecoveredDatabase(database, confirmation);
 			clearBrowserDatabasePromises();
+			clearBrowserRecoveryRequired();
 			window.location.assign('/plan');
 		} catch (error) {
 			failed = true;
 			message = error instanceof Error ? error.message : 'The local database was not reset.';
 			pending = false;
 		}
+	};
+
+	const retryStartup = () => {
+		clearBrowserRecoveryRequired();
+		clearBrowserDatabasePromises();
+		window.location.assign('/plan');
 	};
 </script>
 
@@ -99,6 +107,11 @@
 			<Alert.Title>{failed ? 'Recovery needs attention' : 'Recovery-only mode'}</Alert.Title>
 			<Alert.Description>{message}</Alert.Description>
 		</Alert.Root>
+		<div>
+			<Button variant="ghost" class="min-h-11" onclick={retryStartup}>
+				Try normal startup again
+			</Button>
+		</div>
 
 		<section class="grid gap-4 rounded-xl border bg-card p-5 text-card-foreground">
 			<div>
