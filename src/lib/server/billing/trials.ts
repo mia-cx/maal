@@ -47,6 +47,12 @@ export const startMaalTrial = async (input: {
 			{ idempotencyKey: `maal-trial-customer:${claimId}` }
 		);
 		customerId = customer.id;
+		await input.repository.recordTrialResources({
+			id: claimId,
+			stripeCustomerId: customerId,
+			stripeSubscriptionId: null,
+			updatedAt: input.now
+		});
 		const subscription = await input.stripe.subscriptions.create(
 			{
 				customer: customer.id,
@@ -58,6 +64,12 @@ export const startMaalTrial = async (input: {
 			{ idempotencyKey: `maal-trial-subscription:${claimId}` }
 		);
 		subscriptionId = subscription.id;
+		await input.repository.recordTrialResources({
+			id: claimId,
+			stripeCustomerId: customerId,
+			stripeSubscriptionId: subscriptionId,
+			updatedAt: input.now
+		});
 		await input.repository.commitStartedTrial({
 			claimId,
 			startedAt: input.now,
@@ -94,7 +106,9 @@ export const startMaalTrial = async (input: {
 				customerRemoved = false;
 			}
 		}
-		if (subscriptionRemoved && customerRemoved) {
+		if (subscriptionId && subscriptionRemoved && customerRemoved) {
+			await input.repository.completeTrialRollback(claimId, input.now);
+		} else if (subscriptionRemoved && customerRemoved) {
 			await input.repository.abandonTrialReservation(claimId);
 		} else {
 			await input.repository.markTrialRollbackPending({

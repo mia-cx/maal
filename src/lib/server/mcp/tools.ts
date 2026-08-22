@@ -181,9 +181,7 @@ export const tools: readonly ToolDefinition[] = [
 		annotations: { readOnlyHint: true },
 		handler: async (context) => {
 			requireScope(context.principal, 'households:read');
-			const readable = context.principal.effectiveHouseholds.filter(({ permissions }) =>
-				permissions.includes('households:read')
-			);
+			const readable = context.principal.effectiveHouseholds;
 			const ids = readable.map(({ householdId }) => householdId);
 			const names = new Map(
 				readable.map(({ householdId, householdName }) => [householdId, householdName])
@@ -295,9 +293,11 @@ export const tools: readonly ToolDefinition[] = [
 			await propagateRecipeUpdateToLinkedMeals({
 				domain: context.domain,
 				actorUserId: context.principal.ownerUserId,
-				householdIds: context.principal.effectiveHouseholds
-					.filter(({ permissions }) => permissions.includes('meals:write'))
-					.map(({ householdId }) => householdId),
+				householdIds: context.principal.scopes.includes('meals:write')
+					? context.principal.effectiveHouseholds
+							.filter(({ permissions }) => permissions.includes('meals:write'))
+							.map(({ householdId }) => householdId)
+					: [],
 				previous: current,
 				next: recipe
 			});
@@ -569,7 +569,7 @@ export const tools: readonly ToolDefinition[] = [
 		inputSchema: Schema.Struct({ ...optionalHouseholdInput }),
 		annotations: { readOnlyHint: true },
 		handler: async (context, args) => {
-			resolveUserDataProof(context, args, 'food_profile:read');
+			resolveUserDataProof(context, args, 'food_profile:read', 'recipes:read');
 			return { profile: await context.domain.getUserFoodProfile(context.principal.ownerUserId) };
 		}
 	},
@@ -585,7 +585,7 @@ export const tools: readonly ToolDefinition[] = [
 		}),
 		annotations: { readOnlyHint: false },
 		handler: async (context, args) => {
-			resolveUserDataProof(context, args, 'food_profile:write');
+			resolveUserDataProof(context, args, 'food_profile:write', 'recipes:write');
 			const foodId = requiredText(args.foodId, 'foodId');
 			const profile = await context.domain.getUserFoodProfile(context.principal.ownerUserId);
 			const existing = profile.userFoodPreferences.find((row) => row.foodId === foodId);

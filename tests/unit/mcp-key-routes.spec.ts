@@ -15,16 +15,11 @@ const authenticateSyncSlot = vi.hoisted(() =>
 				householdName: 'Family',
 				roleSlug: 'admin',
 				permissions: [
-					'households:read',
 					'households:write',
 					'recipes:read',
 					'recipes:write',
 					'meals:read',
-					'meals:write',
-					'check_ins:read',
-					'check_ins:write',
-					'food_profile:read',
-					'food_profile:write'
+					'meals:write'
 				]
 			}
 		]

@@ -174,6 +174,23 @@ export class BillingRepository {
 			.where(and(eq(billingTrialClaims.id, id), eq(billingTrialClaims.state, 'reserved')));
 	}
 
+	async recordTrialResources(input: {
+		id: string;
+		stripeCustomerId: string | null;
+		stripeSubscriptionId: string | null;
+		updatedAt: string;
+	}): Promise<void> {
+		await this.database
+			.prepare(
+				`UPDATE billing_trial_claims
+				 SET stripe_customer_id = COALESCE(?, stripe_customer_id),
+				     stripe_subscription_id = COALESCE(?, stripe_subscription_id), updated_at = ?
+				 WHERE id = ? AND state = 'reserved'`
+			)
+			.bind(input.stripeCustomerId, input.stripeSubscriptionId, input.updatedAt, input.id)
+			.run();
+	}
+
 	async staleTrialClaims(
 		staleBefore: string,
 		limit = 25
@@ -207,12 +224,25 @@ export class BillingRepository {
 		return result.meta.changes > 0;
 	}
 
+	async releaseTrialClaimAfterRollback(id: string): Promise<boolean> {
+		const result = await this.database
+			.prepare(
+				`DELETE FROM billing_trial_claims
+				 WHERE id = ? AND state IN ('reserved', 'rollback_pending')
+				 AND stripe_subscription_id IS NULL`
+			)
+			.bind(id)
+			.run();
+		return result.meta.changes > 0;
+	}
+
 	async completeTrialRollback(id: string, resolvedAt: string): Promise<boolean> {
 		const result = await this.database
 			.prepare(
 				`UPDATE billing_trial_claims
 				 SET state = 'started', started_at = COALESCE(started_at, reserved_at), updated_at = ?
-				 WHERE id = ? AND state = 'rollback_pending'`
+				 WHERE id = ? AND state IN ('reserved', 'rollback_pending')
+				 AND stripe_subscription_id IS NOT NULL`
 			)
 			.bind(resolvedAt, id)
 			.run();
@@ -388,6 +418,17 @@ export class BillingRepository {
 		);
 	}
 
+	async outstandingDeletionRefunds(limit = 10): Promise<readonly HouseholdDeletionRow[]> {
+		const size = boundedSize(limit);
+		return (
+			await getDb(this.database)
+				.select()
+				.from(householdDeletionRequests)
+				.where(eq(householdDeletionRequests.state, 'refunding'))
+				.limit(size)
+		).filter(({ stripeRefundId }) => stripeRefundId !== null);
+	}
+
 	async upsertDeletionRequest(input: typeof householdDeletionRequests.$inferInsert): Promise<void> {
 		await getDb(this.database).insert(householdDeletionRequests).values(input).onConflictDoUpdate({
 			target: householdDeletionRequests.householdId,
@@ -539,7 +580,28 @@ export class BillingRepository {
 				WHERE billing_subscriptions.last_stripe_event_created_at IS NULL
 					OR excluded.last_stripe_event_created_at > billing_subscriptions.last_stripe_event_created_at
 					OR (excluded.last_stripe_event_created_at = billing_subscriptions.last_stripe_event_created_at
-						AND excluded.last_stripe_event_id > COALESCE(billing_subscriptions.last_stripe_event_id, ''))`
+						AND excluded.updated_at > billing_subscriptions.updated_at)
+					OR (excluded.last_stripe_event_created_at = billing_subscriptions.last_stripe_event_created_at
+						AND excluded.updated_at = billing_subscriptions.updated_at
+						AND (
+							CASE excluded.status
+								WHEN 'active' THEN 0 WHEN 'trialing' THEN 0
+								WHEN 'past_due' THEN 1 WHEN 'paused' THEN 1 ELSE 2 END
+							>
+							CASE billing_subscriptions.status
+								WHEN 'active' THEN 0 WHEN 'trialing' THEN 0
+								WHEN 'past_due' THEN 1 WHEN 'paused' THEN 1 ELSE 2 END
+							OR (
+								CASE excluded.status
+									WHEN 'active' THEN 0 WHEN 'trialing' THEN 0
+									WHEN 'past_due' THEN 1 WHEN 'paused' THEN 1 ELSE 2 END
+								=
+								CASE billing_subscriptions.status
+									WHEN 'active' THEN 0 WHEN 'trialing' THEN 0
+									WHEN 'past_due' THEN 1 WHEN 'paused' THEN 1 ELSE 2 END
+								AND excluded.last_stripe_event_id > COALESCE(billing_subscriptions.last_stripe_event_id, '')
+							)
+						))`
 			)
 			.bind(
 				projection.householdId,

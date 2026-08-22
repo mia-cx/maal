@@ -111,7 +111,13 @@ const principal = {
 			householdName: 'Family',
 			membershipId: 'membership_alice',
 			roleSlug: 'admin',
-			permissions: MAAL_API_SCOPES
+			permissions: [
+				'households:write',
+				'recipes:read',
+				'recipes:write',
+				'meals:read',
+				'meals:write'
+			]
 		}
 	],
 	authenticatedAt: '2026-08-22T12:00:00.000Z'
@@ -293,6 +299,21 @@ describe('MCP tool adapters', () => {
 		expect(domain.calls).toEqual(['getUserRecipe', 'writeUserRecipe']);
 	});
 
+	test('recipe propagation also requires the key meals write scope', async () => {
+		const domain = new SpyDomain();
+		const definition = tools.find(({ name }) => name === 'update_user_recipe')!;
+		await definition.handler(
+			contextFor(domain, {
+				principal: {
+					...principal,
+					scopes: principal.scopes.filter((scope) => scope !== 'meals:write')
+				}
+			}),
+			{ recipeId: existingRecipe.id, patch: { title: 'Private update' } }
+		);
+		expect(domain.calls).toEqual(['getUserRecipe', 'writeUserRecipe']);
+	});
+
 	test('URL meal import consumes the limiter, parses once, then writes recipe and meal through the port', async () => {
 		const domain = new SpyDomain();
 		const order: string[] = [];
@@ -396,6 +417,31 @@ describe('MCP tool adapters', () => {
 		await expect(
 			tools.find((tool) => tool.name === name)!.handler(context, args)
 		).rejects.toMatchObject({ code: 'insufficient_scope' });
+		expect(domain.calls).toEqual([]);
+	});
+
+	test.each([
+		['list_meal_check_ins', {}, 'meals:read'],
+		['get_food_profile', {}, 'recipes:read'],
+		['set_food_preference', { foodId: 'food_onion', preference: 'like' }, 'recipes:write']
+	] as const)('%s checks its projected household permission', async (name, args, permission) => {
+		const domain = new SpyDomain();
+		const context = contextFor(domain, {
+			principal: {
+				...principal,
+				effectiveHouseholds: [
+					{
+						...principal.effectiveHouseholds[0],
+						permissions: principal.effectiveHouseholds[0].permissions.filter(
+							(candidate) => candidate !== permission
+						)
+					}
+				]
+			}
+		});
+		await expect(
+			tools.find((tool) => tool.name === name)!.handler(context, args)
+		).rejects.toMatchObject({ code: 'insufficient_role_permission' });
 		expect(domain.calls).toEqual([]);
 	});
 });

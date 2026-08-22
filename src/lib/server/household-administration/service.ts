@@ -268,7 +268,8 @@ export class HouseholdAdministrationService {
 			}
 			if (
 				input.roleSlug !== 'admin' &&
-				(await this.repository.activeBillingOwner(input.householdId)) === target.workosUserId
+				(await this.repository.activeBillingOwner(input.householdId, this.now())) ===
+					target.workosUserId
 			) {
 				throw new HouseholdAdministrationError({ code: 'billing_owner_required' });
 			}
@@ -321,7 +322,10 @@ export class HouseholdAdministrationService {
 			if (target.workosUserId === input.actor.workosUserId) {
 				throw new HouseholdAdministrationError({ code: 'permission_denied' });
 			}
-			if ((await this.repository.activeBillingOwner(input.householdId)) === target.workosUserId) {
+			if (
+				(await this.repository.activeBillingOwner(input.householdId, this.now())) ===
+				target.workosUserId
+			) {
 				throw new HouseholdAdministrationError({ code: 'billing_owner_required' });
 			}
 			this.assertRemovable(target, members);
@@ -343,7 +347,8 @@ export class HouseholdAdministrationService {
 			const members = await this.identityMemberships(input.householdId);
 			this.assertRemovable(live, members);
 			if (
-				(await this.repository.activeBillingOwner(input.householdId)) === input.actor.workosUserId
+				(await this.repository.activeBillingOwner(input.householdId, this.now())) ===
+				input.actor.workosUserId
 			) {
 				throw new HouseholdAdministrationError({ code: 'billing_owner_required' });
 			}

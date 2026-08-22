@@ -461,10 +461,10 @@ describe('household administration Worker service', () => {
 			.prepare(
 				`INSERT INTO billing_subscriptions
 				 (household_id, stripe_customer_id, stripe_subscription_id, stripe_price_id,
-				  subscriber_user_id, status, current_period_end)
-				 VALUES ('org_family', 'cus_test', 'sub_test', 'price_test', ?, 'past_due', ?)`
+				  subscriber_user_id, status, current_period_end, grace_until)
+				 VALUES ('org_family', 'cus_test', 'sub_test', 'price_test', ?, 'past_due', ?, ?)`
 			)
-			.bind(bobId, '2026-09-22T08:00:00.000Z')
+			.bind(bobId, '2026-09-22T08:00:00.000Z', '2026-09-21T08:00:00.000Z')
 			.run();
 
 		await expect(
@@ -485,7 +485,7 @@ describe('household administration Worker service', () => {
 
 		await database
 			.prepare(
-				"UPDATE billing_subscriptions SET status = 'canceled' WHERE household_id = 'org_family'"
+				"UPDATE billing_subscriptions SET grace_until = '2026-08-22T07:59:59.999Z' WHERE household_id = 'org_family'"
 			)
 			.run();
 		await expect(

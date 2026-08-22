@@ -83,7 +83,8 @@ export const resolveUserRecipeProof = (
 export const resolveUserDataProof = (
 	context: McpContext,
 	args: Record<string, unknown>,
-	scope: 'food_profile:read' | 'food_profile:write'
+	scope: 'food_profile:read' | 'food_profile:write',
+	permission: 'recipes:read' | 'recipes:write'
 ): McpEffectiveHousehold => {
 	requireScope(context.principal, scope);
 	const requested = householdArgument(args);
@@ -93,11 +94,11 @@ export const resolveUserDataProof = (
 	if (requested && households.length === 0) {
 		throw toolError('household_forbidden', 'This MCP key cannot access that household.');
 	}
-	const proof = households.find(({ permissions }) => permissions.includes(scope));
+	const proof = households.find(({ permissions }) => permissions.includes(permission));
 	if (!proof) {
 		throw toolError(
 			'insufficient_role_permission',
-			`The MCP key owner does not have ${scope} in a granted paid household.`
+			`The MCP key owner does not have ${permission} in a granted paid household.`
 		);
 	}
 	return proof;

@@ -368,10 +368,12 @@
 		pending = true;
 		message = '';
 		try {
-			await requestHouseholdDeletion(database, profileId, householdId);
+			const state = await requestHouseholdDeletion(database, profileId, householdId);
 			deleteHouseholdOpen = false;
 			message =
-				'The subscription was cancelled and any prorated cash refund was requested. This household can be recovered for 30 days.';
+				state === 'recoverable'
+					? 'The subscription was cancelled and refunded. This household can be recovered for 30 days.'
+					: 'The subscription was cancelled. The household stays locked while Stripe finishes the refund.';
 		} catch {
 			message =
 				'Household deletion could not finish. No remote data was purged; retry to resume the cancellation and refund.';

@@ -8,6 +8,7 @@ import {
 	applyBillingProjection,
 	refreshBillingProjectionsOnLaunch,
 	refreshBillingProjection,
+	requestHouseholdDeletion,
 	shouldRefreshBillingOnLaunch
 } from '$lib/client/billing.js';
 import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/index.js';
@@ -217,6 +218,68 @@ describe('local billing projection', () => {
 		expect(requests[0]).toContain('householdId=org_kitchen');
 		await expect(database.billingCapabilities.get('org_kitchen')).resolves.toMatchObject({
 			state: 'enabled'
+		});
+	});
+
+	it('keeps a pending Stripe refund out of the local recovery window', async () => {
+		database = await openMaalDatabase(`billing-deletion-${crypto.randomUUID()}`);
+		const profileId = uuidv7();
+		await database.profiles.put({
+			profileId,
+			workosUserId: 'user_alice',
+			displayName: 'Alice',
+			email: 'alice@example.test',
+			profilePictureUrl: null,
+			locale: 'en-NL',
+			timezone: 'Europe/Amsterdam',
+			pinSalt: null,
+			pinVerifier: null,
+			lockPolicy: 'none',
+			lastUsedAt: '2026-08-21T12:00:00.000Z',
+			authState: 'authenticated'
+		});
+		await database.authSlots.put({
+			authSlotId: '0123456789abcdef0123456789abcdef',
+			profileId,
+			workosUserId: 'user_alice',
+			sessionState: 'authenticated',
+			lastRefreshedAt: null,
+			lastVerifiedAt: null,
+			nextRetryAt: null,
+			retryCount: 0
+		});
+		await database.households.put({
+			householdId: 'org_kitchen',
+			name: 'Kitchen',
+			locale: 'en-NL',
+			timezone: 'Europe/Amsterdam',
+			weekStartsOn: 1,
+			defaultPlannedYield: 4,
+			preferredDinnerTime: '18:30',
+			createdByUserId: 'user_alice',
+			deletionState: 'active',
+			localOnly: false,
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: '2026-08-21T12:00:00.000Z',
+			updatedAt: '2026-08-21T12:00:00.000Z',
+			deletedAt: null,
+			conflictClocks: {}
+		});
+		await database.billingCapabilities.put(projection().capability);
+		const fetcher: typeof globalThis.fetch = vi.fn(async () =>
+			Response.json({ state: 'refunding' })
+		);
+
+		await expect(
+			requestHouseholdDeletion(database, profileId, 'org_kitchen', fetcher)
+		).resolves.toBe('pending');
+		await expect(database.households.get('org_kitchen')).resolves.toMatchObject({
+			deletionState: 'deletionPending'
+		});
+		await expect(database.billingCapabilities.get('org_kitchen')).resolves.toMatchObject({
+			state: 'disabled',
+			validUntil: null
 		});
 	});
 });

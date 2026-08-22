@@ -22,7 +22,14 @@ export const reconcileHouseholdDeletionRefund = async (input: {
 	now: string;
 }): Promise<HouseholdDeletionRow | null> => {
 	const request = await input.repository.deletionRequestByRefundId(input.refund.id);
-	if (!request || request.state === 'purged' || request.state === 'recovered') return request;
+	if (
+		!request ||
+		request.state === 'recoverable' ||
+		request.state === 'purged' ||
+		request.state === 'recovered'
+	) {
+		return request;
+	}
 	const requiredAmount = request.previewedAmountMinor ?? 0;
 	const refundMatches =
 		input.refund.amount >= requiredAmount &&
@@ -62,6 +69,32 @@ export const reconcileHouseholdDeletionRefund = async (input: {
 		});
 	}
 	return input.repository.deletionRequest(request.householdId);
+};
+
+export const reconcileOutstandingHouseholdDeletionRefunds = async (input: {
+	repository: BillingRepository;
+	stripe: Stripe;
+	now: string;
+	limit?: number;
+}): Promise<{ reconciled: number; pending: number }> => {
+	const requests = await input.repository.outstandingDeletionRefunds(input.limit);
+	let reconciled = 0;
+	let pending = 0;
+	for (const request of requests) {
+		try {
+			const refund = await input.stripe.refunds.retrieve(request.stripeRefundId!);
+			const next = await reconcileHouseholdDeletionRefund({
+				repository: input.repository,
+				refund,
+				now: input.now
+			});
+			if (next?.state === 'recoverable') reconciled += 1;
+			else pending += 1;
+		} catch {
+			pending += 1;
+		}
+	}
+	return { reconciled, pending };
 };
 
 export const proratedRefundMinor = (input: {
@@ -214,6 +247,22 @@ export const deleteHouseholdAfterRefund = async (input: {
 			refundedAmountMinor = refund.amount;
 		} else if (refundId) {
 			refund = await input.stripe.refunds.retrieve(refundId);
+			if (refundPreview && (refund.status === 'failed' || refund.status === 'canceled')) {
+				const failedRefundId = refund.id;
+				refund = await input.stripe.refunds.create(
+					{
+						charge: refundPreview.chargeId,
+						amount: refundPreview.amountMinor,
+						metadata: {
+							householdId: input.householdId,
+							reason: 'prorated_household_deletion_retry'
+						}
+					},
+					{ idempotencyKey: `maal-delete-refund:${input.householdId}:after:${failedRefundId}` }
+				);
+				refundId = refund.id;
+				refundedAmountMinor = refund.amount;
+			}
 		}
 		await input.repository.upsertDeletionRequest({
 			householdId: input.householdId,

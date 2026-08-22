@@ -5,6 +5,7 @@ import {
 	BillingRepository,
 	createStripeClient,
 	purgeExpiredHouseholds,
+	reconcileOutstandingHouseholdDeletionRefunds,
 	reconcileStaleTrialClaims
 } from '$lib/server/billing/index.js';
 
@@ -26,6 +27,8 @@ export interface ScheduledMaintenanceResult {
 	readonly trialReservationsReleased: number;
 	readonly trialRollbacksCompleted: number;
 	readonly trialRollbacksPending: number;
+	readonly deletionRefundsReconciled: number;
+	readonly deletionRefundsPending: number;
 }
 
 export const runScheduledMaintenance = async (
@@ -60,6 +63,11 @@ export const runScheduledMaintenance = async (
 		stripe,
 		now: serverNow
 	});
+	const deletionRefundResult = await reconcileOutstandingHouseholdDeletionRefunds({
+		repository: new BillingRepository(database),
+		stripe,
+		now: serverNow
+	});
 	return {
 		...syncResult,
 		householdsPurged: householdResult.purged.length,
@@ -67,7 +75,9 @@ export const runScheduledMaintenance = async (
 		householdRowsDeleted: householdResult.rowsDeleted,
 		trialReservationsReleased: trialResult.reservationsReleased,
 		trialRollbacksCompleted: trialResult.rollbacksCompleted,
-		trialRollbacksPending: trialResult.pending
+		trialRollbacksPending: trialResult.pending,
+		deletionRefundsReconciled: deletionRefundResult.reconciled,
+		deletionRefundsPending: deletionRefundResult.pending
 	};
 };
 

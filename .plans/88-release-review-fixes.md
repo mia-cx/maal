@@ -57,3 +57,9 @@ Drizzle baseline or canonical taxonomy seed.
   66 unit files / 368 tests passed; production build and 189,887 / 256,000-byte initial gzip budget
   passed; 22 Playwright tests passed with four workers. Both migrations and the taxonomy seed match
   their base-commit SHA-256 hashes byte-for-byte.
+- Merge audit: fixed terminal refund retry and missed-webhook reconciliation, kept local deletion
+  pending until refund success, made stale-trial cleanup restore live Stripe subscriptions and retain
+  used claims, released customer-only claims, applied billing-owner deadlines, and required both MCP
+  key scope and canonical WorkOS/D1 permissions. Focused regressions passed 84/84, the final trial
+  file passed 5/5, and `pnpm check` reported 0 errors and 0 warnings. Migration and seed hashes still
+  match the base commit byte-for-byte.

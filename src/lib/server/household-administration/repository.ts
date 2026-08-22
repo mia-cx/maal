@@ -358,15 +358,18 @@ export class HouseholdAdministrationRepository {
 		}
 	}
 
-	async activeBillingOwner(householdId: string): Promise<string | null> {
+	async activeBillingOwner(householdId: string, now: string): Promise<string | null> {
 		const row = await this.database
 			.prepare(
 				`SELECT subscriber_user_id
 				 FROM billing_subscriptions
 				 WHERE household_id = ?
-				   AND status IN ('active', 'trialing', 'past_due', 'paused')`
+				   AND (
+				     (status IN ('active', 'trialing') AND current_period_end > ?)
+				     OR (status IN ('past_due', 'paused') AND grace_until IS NOT NULL AND grace_until > ?)
+				   )`
 			)
-			.bind(householdId)
+			.bind(householdId, now, now)
 			.first<{ subscriber_user_id: string | null }>();
 		return row?.subscriber_user_id ?? null;
 	}

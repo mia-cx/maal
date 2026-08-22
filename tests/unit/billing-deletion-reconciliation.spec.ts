@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
 	BillingRepository,
 	deleteHouseholdAfterRefund,
-	processStripeWebhook
+	processStripeWebhook,
+	reconcileOutstandingHouseholdDeletionRefunds
 } from '$lib/server/billing/index.js';
 import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js';
 
@@ -189,11 +190,96 @@ describe('household deletion refund reconciliation', () => {
 			safeErrorCode: 'refund_failed'
 		});
 	});
+
+	test('retries a terminal failed refund idempotently and waits for the replacement to succeed', async () => {
+		let currentRefund = refund('failed');
+		let createCount = 0;
+		const stripe = {
+			subscriptions: {
+				retrieve: vi.fn(async () => subscription()),
+				cancel: vi.fn(async () => subscription('canceled'))
+			},
+			invoices: {
+				retrieve: vi.fn(async () => ({ id: 'in_maal', amount_paid: 1_000, currency: 'eur' }))
+			},
+			invoicePayments: {
+				list: vi.fn(async () => ({
+					data: [{ amount_paid: 1_000, payment: { charge: 'ch_maal' } }]
+				}))
+			},
+			charges: {
+				retrieve: vi.fn(async () => ({ id: 'ch_maal', amount: 1_000, amount_refunded: 0 }))
+			},
+			refunds: {
+				create: vi.fn(async (request: Stripe.RefundCreateParams) => {
+					createCount += 1;
+					currentRefund = {
+						...refund(createCount === 1 ? 'failed' : 'succeeded'),
+						id: createCount === 1 ? 're_maal' : 're_retry',
+						amount: request.amount ?? 300
+					};
+					return currentRefund;
+				}),
+				retrieve: vi.fn(async () => currentRefund)
+			}
+		} as unknown as Stripe;
+
+		await expect(
+			deleteHouseholdAfterRefund({
+				stripe,
+				repository,
+				householdId: 'org_family',
+				requesterUserId: 'user_alice',
+				now
+			})
+		).resolves.toMatchObject({ state: 'failed', recoverableUntil: null });
+		await expect(
+			deleteHouseholdAfterRefund({
+				stripe,
+				repository,
+				householdId: 'org_family',
+				requesterUserId: 'user_alice',
+				now: '2026-08-22T12:10:00.000Z'
+			})
+		).resolves.toMatchObject({
+			state: 'recoverable',
+			stripeRefundId: 're_retry',
+			recoverableUntil: '2026-09-21T12:10:00.000Z'
+		});
+		expect(stripe.refunds.create).toHaveBeenCalledTimes(2);
+		expect(vi.mocked(stripe.refunds.create).mock.calls[1]?.[1]).toMatchObject({
+			idempotencyKey: 'maal-delete-refund:org_family:after:re_maal'
+		});
+	});
+
+	test('scheduled reconciliation closes a pending refund when its webhook was missed', async () => {
+		await repository.upsertDeletionRequest({
+			householdId: 'org_family',
+			requesterUserId: 'user_alice',
+			state: 'refunding',
+			stripeRefundId: 're_maal',
+			previewedAmountMinor: 300,
+			currency: 'eur',
+			requestedAt: now,
+			updatedAt: now
+		});
+		await expect(
+			reconcileOutstandingHouseholdDeletionRefunds({
+				repository,
+				stripe: { refunds: { retrieve: async () => refund('succeeded') } } as unknown as Stripe,
+				now: '2026-08-22T12:15:00.000Z'
+			})
+		).resolves.toEqual({ reconciled: 1, pending: 0 });
+		await expect(repository.deletionRequest('org_family')).resolves.toMatchObject({
+			state: 'recoverable',
+			recoverableUntil: '2026-09-21T12:15:00.000Z'
+		});
+	});
 });
 
 describe('canonical Stripe webhook projection', () => {
 	test('cannot restore stale service from same-second event payload ordering', async () => {
-		const canonical = subscription('canceled');
+		let canonical = subscription('canceled');
 		const stripe = {
 			subscriptions: { retrieve: vi.fn(async () => canonical) }
 		} as unknown as Stripe;
@@ -203,11 +289,12 @@ describe('canonical Stripe webhook projection', () => {
 			event: event({ id: 'evt_z', type: 'customer.subscription.deleted', object: canonical }),
 			receivedAt: '2026-08-22T12:00:01.000Z'
 		});
+		canonical = subscription('active');
 		await processStripeWebhook({
 			stripe,
 			repository,
 			event: event({ id: 'evt_a', type: 'customer.subscription.updated', object: subscription() }),
-			receivedAt: '2026-08-22T12:00:02.000Z'
+			receivedAt: '2026-08-22T12:00:01.000Z'
 		});
 		await expect(repository.subscription('org_family')).resolves.toMatchObject({
 			status: 'canceled',
