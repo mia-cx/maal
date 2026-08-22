@@ -39,9 +39,9 @@ export const meals = sqliteTable(
 	'meals',
 	{
 		id: text('id').primaryKey(),
-		householdId: text('household_id').references(() => households.householdId, {
-			onDelete: 'cascade'
-		}),
+		householdId: text('household_id')
+			.notNull()
+			.references(() => households.householdId, { onDelete: 'cascade' }),
 		sourceRecipeId: text('source_recipe_id').references(() => recipes.id, {
 			onDelete: 'set null'
 		}),
@@ -332,5 +332,31 @@ export const mealCheckIns = sqliteTable(
 		enumCheck('meal_check_ins_verdict_check', table.verdict, mealVerdictValues),
 		check('meal_check_ins_cook_time_positive', nullablePositive(table.cookTimeMinutes)),
 		check('meal_check_ins_revision_positive', sql`${table.revision} > 0`)
+	]
+);
+
+export const mealCheckInRecovery = sqliteTable(
+	'meal_check_in_recovery',
+	{
+		id: text('id').primaryKey(),
+		householdId: text('household_id'),
+		reporterUserId: text('reporter_user_id').notNull(),
+		mealId: text('meal_id'),
+		cookTimeMinutes: integer('cook_time_minutes'),
+		verdict: text('verdict', { enum: mealVerdictValues }).notNull(),
+		reason: text('reason'),
+		schemaVersion: integer('schema_version').notNull().default(1),
+		revision: integer('revision').notNull().default(1),
+		createdAt: text('created_at').notNull(),
+		updatedAt: text('updated_at').notNull(),
+		deletedAt: text('deleted_at'),
+		recoveryReason: text('recovery_reason', { enum: ['household_unresolved'] }).notNull(),
+		preservedAt: text('preserved_at')
+			.notNull()
+			.default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+	},
+	(table) => [
+		enumCheck('meal_check_in_recovery_verdict_check', table.verdict, mealVerdictValues),
+		enumCheck('meal_check_in_recovery_reason_check', table.recoveryReason, ['household_unresolved'])
 	]
 );

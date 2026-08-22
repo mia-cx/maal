@@ -1,4 +1,66 @@
 PRAGMA foreign_keys=OFF;--> statement-breakpoint
+CREATE TABLE `meal_check_in_recovery` (
+	`id` text PRIMARY KEY NOT NULL,
+	`household_id` text,
+	`reporter_user_id` text NOT NULL,
+	`meal_id` text,
+	`cook_time_minutes` integer,
+	`verdict` text NOT NULL,
+	`reason` text,
+	`schema_version` integer DEFAULT 1 NOT NULL,
+	`revision` integer DEFAULT 1 NOT NULL,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	`deleted_at` text,
+	`recovery_reason` text NOT NULL,
+	`preserved_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	CONSTRAINT "meal_check_in_recovery_verdict_check" CHECK("meal_check_in_recovery"."verdict" IN ('repeat', 'neutral', 'avoid')),
+	CONSTRAINT "meal_check_in_recovery_reason_check" CHECK("meal_check_in_recovery"."recovery_reason" IN ('household_unresolved'))
+);--> statement-breakpoint
+CREATE TABLE `__meal_check_ins_repaired` (
+	`id` text PRIMARY KEY NOT NULL,
+	`household_id` text,
+	`reporter_user_id` text NOT NULL,
+	`meal_id` text,
+	`cook_time_minutes` integer,
+	`verdict` text NOT NULL,
+	`reason` text,
+	`schema_version` integer NOT NULL,
+	`revision` integer NOT NULL,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	`deleted_at` text
+);--> statement-breakpoint
+INSERT INTO `__meal_check_ins_repaired`
+SELECT mci.`id`,
+	COALESCE(
+		NULLIF(mci.`household_id`, ''),
+		(SELECT meal.`household_id` FROM `meals` meal WHERE meal.`id` = mci.`meal_id`),
+		(SELECT version.`audience_id` FROM `sync_entity_versions` version
+		 WHERE version.`audience_kind` = 'household'
+		   AND version.`entity_kind` IN ('meal_check_in', 'mealCheckIn')
+		   AND version.`entity_id` = mci.`id`
+		 ORDER BY version.`last_sequence` DESC LIMIT 1),
+		(SELECT change.`audience_id` FROM `sync_changes` change
+		 WHERE change.`audience_kind` = 'household'
+		   AND change.`entity_kind` IN ('meal_check_in', 'mealCheckIn')
+		   AND change.`entity_id` = mci.`id`
+		 ORDER BY change.`seq` DESC LIMIT 1)
+	),
+	mci.`reporter_user_id`, mci.`meal_id`, mci.`cook_time_minutes`, mci.`verdict`, mci.`reason`,
+	mci.`schema_version`, mci.`revision`, mci.`created_at`, mci.`updated_at`, mci.`deleted_at`
+FROM `meal_check_ins` mci;--> statement-breakpoint
+INSERT INTO `meal_check_in_recovery`
+	(`id`, `household_id`, `reporter_user_id`, `meal_id`, `cook_time_minutes`, `verdict`, `reason`,
+	 `schema_version`, `revision`, `created_at`, `updated_at`, `deleted_at`, `recovery_reason`)
+SELECT repaired.`id`, repaired.`household_id`, repaired.`reporter_user_id`, repaired.`meal_id`,
+	repaired.`cook_time_minutes`, repaired.`verdict`, repaired.`reason`, repaired.`schema_version`,
+	repaired.`revision`, repaired.`created_at`, repaired.`updated_at`, repaired.`deleted_at`,
+	'household_unresolved'
+FROM `__meal_check_ins_repaired` repaired
+WHERE repaired.`household_id` IS NULL OR NOT EXISTS (
+	SELECT 1 FROM `households` household WHERE household.`household_id` = repaired.`household_id`
+);--> statement-breakpoint
 CREATE TABLE `__new_meal_check_ins` (
 	`id` text PRIMARY KEY NOT NULL,
 	`household_id` text NOT NULL,
@@ -20,7 +82,13 @@ CREATE TABLE `__new_meal_check_ins` (
 	CONSTRAINT "meal_check_ins_revision_positive" CHECK("__new_meal_check_ins"."revision" > 0)
 );
 --> statement-breakpoint
-INSERT INTO `__new_meal_check_ins`("id", "household_id", "reporter_user_id", "meal_id", "cook_time_minutes", "verdict", "reason", "schema_version", "revision", "created_at", "updated_at", "deleted_at") SELECT "id", "household_id", "reporter_user_id", "meal_id", "cook_time_minutes", "verdict", "reason", "schema_version", "revision", "created_at", "updated_at", "deleted_at" FROM `meal_check_ins`;--> statement-breakpoint
+INSERT INTO `__new_meal_check_ins`("id", "household_id", "reporter_user_id", "meal_id", "cook_time_minutes", "verdict", "reason", "schema_version", "revision", "created_at", "updated_at", "deleted_at")
+SELECT repaired."id", repaired."household_id", repaired."reporter_user_id", repaired."meal_id", repaired."cook_time_minutes", repaired."verdict", repaired."reason", repaired."schema_version", repaired."revision", repaired."created_at", repaired."updated_at", repaired."deleted_at"
+FROM `__meal_check_ins_repaired` repaired
+WHERE EXISTS (
+	SELECT 1 FROM `households` household WHERE household.`household_id` = repaired.`household_id`
+);--> statement-breakpoint
+DROP TABLE `__meal_check_ins_repaired`;--> statement-breakpoint
 DROP TABLE `meal_check_ins`;--> statement-breakpoint
 ALTER TABLE `__new_meal_check_ins` RENAME TO `meal_check_ins`;--> statement-breakpoint
 PRAGMA foreign_keys=ON;--> statement-breakpoint
@@ -30,7 +98,7 @@ CREATE INDEX `meal_check_ins_reporter_idx` ON `meal_check_ins` (`reporter_user_i
 CREATE INDEX `meal_check_ins_deleted_idx` ON `meal_check_ins` (`deleted_at`);--> statement-breakpoint
 CREATE TABLE `__new_meals` (
 	`id` text PRIMARY KEY NOT NULL,
-	`household_id` text,
+	`household_id` text NOT NULL,
 	`source_recipe_id` text,
 	`title` text NOT NULL,
 	`description` text,
