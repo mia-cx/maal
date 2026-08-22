@@ -8,12 +8,12 @@ export, and routine free content use without Worker or D1 requests.
 
 ## Acceptance criteria
 
-- [ ] CI runs `pnpm validate` and the complete local D1 migration-chain proof.
-- [ ] Two real tabs prepare, drain, acknowledge, activate, and reload without losing a local commit.
-- [ ] A real browser quota abort leaves both the aggregate and outbox unchanged.
-- [ ] Recovery export remains usable after the quota abort.
-- [ ] Routine free recipe and meal use makes no Worker/D1 content requests.
-- [ ] Focused and final serialized release validation passes.
+- [x] CI runs `pnpm validate` and the complete local D1 migration-chain proof.
+- [x] Two real tabs prepare, drain, acknowledge, activate, and reload without losing a local commit.
+- [x] A real browser quota abort leaves both the aggregate and outbox unchanged.
+- [x] Recovery export remains usable after the quota abort.
+- [x] Routine free recipe and meal use makes no Worker/D1 content requests.
+- [x] Focused and final serialized release validation passes.
 
 ## TODOs
 
@@ -21,7 +21,7 @@ export, and routine free content use without Worker or D1 requests.
 - [x] Prove the two-tab service-worker update protocol through real browser pages and a real worker.
 - [x] Prove quota-abort atomicity and recovery export through the browser UI.
 - [x] Record a final free-use content trace that distinguishes Worker/D1 routes from shell assets.
-- [ ] Run the focused gates, then run the full gate only after the integration test slot is granted.
+- [x] Run the focused gates, then run the full gate only after the integration test slot is granted.
 
 ## Notes
 
@@ -36,3 +36,6 @@ export, and routine free content use without Worker or D1 requests.
   write begins. Dexie keeps the recipe and outbox counts unchanged when the browser aborts the transaction.
 - The recipe and meal browser proofs attach every same-origin request and a separate list of D1-capable API
   requests. Routine free writes, reloads, and offline use leave the D1-capable list empty.
+- Final `pnpm validate` passed formatting, lint, Svelte diagnostics with zero errors and warnings, 54 unit
+  files with 288 tests, the production build, a 185,808/256,000-byte gzip initial bundle, and all 21
+  Playwright proofs. The serialized `pnpm test:d1-schema` migration-chain proof also passed.
