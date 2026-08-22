@@ -1,4 +1,4 @@
-export const AUTH_SLOT_PROOF_SCHEMA_VERSION = 1 as const;
+export const AUTH_SLOT_PROOF_SCHEMA_VERSION = 2 as const;
 export const NATIVE_AUTH_SLOT_TARGETS = [
 	'native-macos-safari',
 	'native-ios-safari',
@@ -34,12 +34,6 @@ export interface NativeAuthSlotEvidence {
 		readonly name: string;
 		readonly version: string;
 		readonly userAgent: string;
-	};
-	readonly identities: {
-		readonly aliceWorkosUserId: string;
-		readonly bobWorkosUserId: string;
-		readonly aliceSessionId: string;
-		readonly bobSessionId: string;
 	};
 	readonly cookies: {
 		readonly aliceInitial: CookieEvidence;
@@ -169,12 +163,6 @@ export function createNativeEvidenceTemplate(target: NativeAuthSlotTarget): Nati
 			version: '<exact browser version>',
 			userAgent: '<browser-reported user agent>'
 		},
-		identities: {
-			aliceWorkosUserId: '<WorkOS user ID>',
-			bobWorkosUserId: '<WorkOS user ID>',
-			aliceSessionId: '<WorkOS session ID>',
-			bobSessionId: '<WorkOS session ID>'
-		},
 		cookies: {
 			aliceInitial: { ...cookie },
 			bobInitial: { ...cookie },
@@ -215,14 +203,13 @@ export function validateNativeEvidence(value: unknown): asserts value is NativeA
 		'runAtUtc',
 		'device',
 		'browser',
-		'identities',
 		'cookies',
 		'requestCookieNames',
 		'checks',
 		'd1Opened',
 		'cleanup'
 	]);
-	assert(value.schemaVersion === 1, 'schemaVersion must be 1');
+	assert(value.schemaVersion === 2, 'schemaVersion must be 2');
 	assert(value.kind === 'native-device', 'kind must be native-device');
 	assert(
 		NATIVE_AUTH_SLOT_TARGETS.includes(value.target as NativeAuthSlotTarget),
@@ -243,30 +230,6 @@ export function validateNativeEvidence(value: unknown): asserts value is NativeA
 	assertString(value.browser.name, 'browser.name');
 	assertString(value.browser.version, 'browser.version');
 	assertString(value.browser.userAgent, 'browser.userAgent');
-
-	assertObject(value.identities, 'identities');
-	assertKeys(value.identities, 'identities', [
-		'aliceWorkosUserId',
-		'bobWorkosUserId',
-		'aliceSessionId',
-		'bobSessionId'
-	]);
-	for (const key of [
-		'aliceWorkosUserId',
-		'bobWorkosUserId',
-		'aliceSessionId',
-		'bobSessionId'
-	] as const) {
-		assertString(value.identities[key], `identities.${key}`, /^(user|session)_[A-Za-z0-9]+$/);
-	}
-	assert(
-		value.identities.aliceWorkosUserId !== value.identities.bobWorkosUserId,
-		'Alice and Bob must have distinct WorkOS users'
-	);
-	assert(
-		value.identities.aliceSessionId !== value.identities.bobSessionId,
-		'Alice and Bob must have distinct WorkOS sessions'
-	);
 
 	assertObject(value.cookies, 'cookies');
 	assertKeys(value.cookies, 'cookies', [

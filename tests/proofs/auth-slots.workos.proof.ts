@@ -23,6 +23,7 @@ const cookiePassword = process.env.WORKOS_COOKIE_PASSWORD ?? '';
 test.beforeAll(() => {
 	const missing = [
 		['AUTH_SLOT_PROOF_BASE_URL', process.env.AUTH_SLOT_PROOF_BASE_URL],
+		['AUTH_SLOT_PROOF_REDIRECT_URI', process.env.AUTH_SLOT_PROOF_REDIRECT_URI],
 		['WORKOS_API_KEY', apiKey],
 		['WORKOS_CLIENT_ID', clientId],
 		['WORKOS_COOKIE_PASSWORD', cookiePassword]
@@ -35,6 +36,19 @@ test.beforeAll(() => {
 		throw new Error('Refusing to create proof users outside WorkOS staging');
 	}
 	if (cookiePassword.length < 32) throw new Error('WORKOS_COOKIE_PASSWORD must be 32+ characters');
+	const base = new URL(process.env.AUTH_SLOT_PROOF_BASE_URL!);
+	const redirect = new URL(process.env.AUTH_SLOT_PROOF_REDIRECT_URI!);
+	if (
+		redirect.origin !== base.origin ||
+		redirect.pathname !== '/api/auth/callback' ||
+		redirect.search ||
+		redirect.hash ||
+		/auth-slots|slot/i.test(redirect.pathname)
+	) {
+		throw new Error(
+			'Live route proof requires the exact staging /api/auth/callback without a slot'
+		);
+	}
 });
 
 test('Hosted AuthKit retains, refreshes, and revokes Alice and Bob independently', async ({

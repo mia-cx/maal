@@ -77,12 +77,6 @@ function completeEvidence() {
 		runAtUtc: '2026-08-22T01:00:00.000Z',
 		device: { hardwareModel: 'MacBook Pro', osName: 'macOS', osVersion: '26.0' },
 		browser: { name: 'Safari', version: '26.0', userAgent: 'native Safari user agent' },
-		identities: {
-			aliceWorkosUserId: 'user_alice',
-			bobWorkosUserId: 'user_bob',
-			aliceSessionId: 'session_alice',
-			bobSessionId: 'session_bob'
-		},
 		cookies: {
 			aliceInitial: cookieEvidence(ALICE_SLOT, 2200),
 			bobInitial: cookieEvidence(BOB_SLOT, 2250),

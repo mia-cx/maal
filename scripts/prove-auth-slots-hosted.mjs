@@ -16,7 +16,12 @@ if (!clientId || cookiePassword.length < 32)
 	throw new Error('WorkOS proof configuration is incomplete');
 if (!browserType) throw new Error(`Unsupported proof browser: ${browserName}`);
 const redirect = new URL(redirectUri);
-if (redirect.pathname !== '/api/auth/callback' || /auth-slots|slot/i.test(redirect.pathname)) {
+if (
+	redirect.pathname !== '/api/auth/callback' ||
+	redirect.search ||
+	redirect.hash ||
+	/auth-slots|slot/i.test(redirect.pathname)
+) {
 	throw new Error('Hosted proof requires the stable slot-free /api/auth/callback redirect URI');
 }
 
