@@ -269,6 +269,30 @@ describe('foreground user coordinator', () => {
 		});
 	});
 
+	test('stops an active cached capability at validUntil without content traffic', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		await database.billingCapabilities.update('household_paid', { validUntil: timestamp });
+		const transport = noOpTransport();
+		const requests = [
+			vi.spyOn(transport, 'pull'),
+			vi.spyOn(transport, 'push'),
+			vi.spyOn(transport, 'bootstrap'),
+			vi.spyOn(transport, 'backfill')
+		];
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport,
+			environment: environment(),
+			now: () => new Date(timestamp)
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('disabled');
+		expect(requests.map(({ mock }) => mock.calls.length)).toEqual([0, 0, 0, 0]);
+	});
+
 	test('pulls, applies to Dexie, pushes immutable intent, then pulls through its D1 sequence', async () => {
 		const database = await openDatabase();
 		await seedPaidProfile(database);

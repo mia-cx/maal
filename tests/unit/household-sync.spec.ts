@@ -450,6 +450,36 @@ describe('foreground household coordinator', () => {
 		expect(spies.map(({ mock }) => mock.calls.length)).toEqual([0, 0, 0, 0]);
 	});
 
+	test('stops an active cached capability at validUntil without content traffic', async () => {
+		const database = await openDatabase('expired-capability');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: true
+		});
+		await database.billingCapabilities.update(householdId, { validUntil: timestamp });
+		const transport = new MemoryHouseholdServer().transport('user_alice');
+		const requests = [
+			vi.spyOn(transport, 'pull'),
+			vi.spyOn(transport, 'push'),
+			vi.spyOn(transport, 'bootstrap'),
+			vi.spyOn(transport, 'backfill')
+		];
+		const coordinator = createHouseholdSyncCoordinator({
+			database,
+			authSlotId: 'slot_alice',
+			workosUserId: 'user_alice',
+			householdId,
+			transport,
+			environment: environment(),
+			now: () => new Date(timestamp)
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('disabled');
+		expect(requests.map(({ mock }) => mock.calls.length)).toEqual([0, 0, 0, 0]);
+	});
+
 	test('pulls, reapplies local intent, pushes under its retained auth slot, then converges two devices', async () => {
 		const server = new MemoryHouseholdServer();
 		const alice = await openDatabase('alice');
