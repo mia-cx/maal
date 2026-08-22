@@ -18,7 +18,7 @@ Restore the prototype product shell around the local-first routes. Reconnect pro
 
 - [x] Restore the shared app shell and remove route-owned sidebar providers.
 - [x] Add the local-first settings routes and MCP key client adapter.
-- [~] Add the local-first subscribe route on the approved billing UI.
+- [x] Add the local-first subscribe route on the approved billing UI.
 - [ ] Add route, unit, browser, zero-network, and visual regression proof.
 - [ ] Run focused validation and the full validation suite.
 
