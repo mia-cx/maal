@@ -9,8 +9,10 @@ import {
 	deleteMeal,
 	defaultScheduleUiState,
 	detachDeletedRecipeFromMeals,
+	liveMealCalendarRange,
 	listHouseholdMeals,
 	planRecipeAsMeal,
+	readMealCalendarRange,
 	readScheduleUiState,
 	saveMealCheckIn,
 	updateMealSchedule,
@@ -285,6 +287,142 @@ describe('meal lifecycle and focused check-ins', () => {
 		);
 		expect(historical.mealId).toBeNull();
 		expect(historical.reason).toBe('Good enough for Tuesday.');
+	});
+});
+
+describe('indexed calendar ranges', () => {
+	test('live query ignores writes outside its compound date range', async () => {
+		const database = await openDatabase();
+		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
+		const visibleMeal = await planRecipeAsMeal(database, mealContext(), recipe.id, {
+			date: '2026-08-23',
+			time: '18:30'
+		});
+		const historicalMeal = await planRecipeAsMeal(database, mealContext(), recipe.id, {
+			date: '2020-01-01',
+			time: '18:30'
+		});
+		const emissions: string[][] = [];
+		const reads: number[] = [];
+		const subscription = liveMealCalendarRange(
+			database,
+			'org_family',
+			{ start: '2026-08-20', end: '2026-08-26' },
+			(read) => reads.push(read.mealRowsRead)
+		).subscribe(({ meals }) => emissions.push(meals.map(({ id }) => id)));
+		await vi.waitFor(() => expect(emissions).toHaveLength(1));
+
+		await updateMealSchedule(database, mealContext(at(22)), historicalMeal.id, {
+			date: historicalMeal.date,
+			time: '19:00',
+			sortOrder: historicalMeal.sortOrder
+		});
+		await new Promise((resolve) => setTimeout(resolve, 25));
+		expect(emissions).toHaveLength(1);
+
+		await updateMealSchedule(database, mealContext(at(23)), visibleMeal.id, {
+			date: visibleMeal.date,
+			time: '19:00',
+			sortOrder: visibleMeal.sortOrder
+		});
+		await vi.waitFor(() => expect(emissions).toHaveLength(2));
+		expect(emissions[1]).toEqual([visibleMeal.id]);
+		expect(reads).toEqual([1, 1]);
+		subscription.unsubscribe();
+	});
+
+	test('keeps reads bounded with twelve years of meals and check-ins', async () => {
+		const database = await openDatabase();
+		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
+		const seedMeal = await planRecipeAsMeal(database, mealContext(), recipe.id, {
+			date: '2026-03-29',
+			time: '18:30'
+		});
+		const seedCheckIn = (
+			await saveMealCheckIn(database, mealContext(at(23)), seedMeal.id, {
+				status: 'cooked',
+				verdict: 'repeat',
+				cookTimeMinutes: 41,
+				reason: 'Historical fixture.'
+			})
+		).checkIn;
+		await database.meals.clear();
+		await database.mealCheckIns.clear();
+
+		const firstDay = Date.UTC(2020, 0, 1);
+		const dayCount = 366 * 12;
+		const dates = Array.from({ length: dayCount }, (_, offset) =>
+			new Date(firstDay + offset * 86_400_000).toISOString().slice(0, 10)
+		);
+		const householdIds = ['org_family', 'org_other'] as const;
+		const meals = householdIds.flatMap((householdId) =>
+			dates.map((date) => ({
+				...seedMeal,
+				id: uuidv7(),
+				householdId,
+				date,
+				title: `${householdId} ${date}`
+			}))
+		);
+		const checkIns = meals.map((meal) => ({
+			...seedCheckIn,
+			id: uuidv7(),
+			mealId: meal.id,
+			reason: meal.date
+		}));
+		await database.transaction('rw', database.meals, database.mealCheckIns, async () => {
+			await database.meals.bulkPut(meals);
+			await database.mealCheckIns.bulkPut(checkIns);
+		});
+
+		const mealWhere = vi.spyOn(database.meals, 'where');
+		const mealFullScan = vi.spyOn(database.meals, 'toArray');
+		const checkInWhere = vi.spyOn(database.mealCheckIns, 'where');
+		const checkInFullScan = vi.spyOn(database.mealCheckIns, 'toArray');
+		const reads: Parameters<NonNullable<Parameters<typeof readMealCalendarRange>[3]>>[0][] = [];
+		const result = await readMealCalendarRange(
+			database,
+			'org_family',
+			{ start: '2026-03-28', end: '2026-03-30' },
+			(read) => reads.push(read)
+		);
+
+		expect(result.meals.map(({ date }) => date)).toEqual([
+			'2026-03-28',
+			'2026-03-29',
+			'2026-03-30'
+		]);
+		expect(result.checkIns.map(({ reason }) => reason).toSorted()).toEqual([
+			'2026-03-28',
+			'2026-03-29',
+			'2026-03-30'
+		]);
+		expect(reads).toEqual([
+			{
+				householdId: 'org_family',
+				start: '2026-03-28',
+				end: '2026-03-30',
+				mealIndex: '[householdId+date]',
+				mealRowsRead: 3,
+				checkInIndex: 'mealId',
+				checkInRowsRead: 3
+			}
+		]);
+		expect(mealWhere).toHaveBeenCalledWith('[householdId+date]');
+		expect(checkInWhere).toHaveBeenCalledWith('mealId');
+		expect(mealFullScan).not.toHaveBeenCalled();
+		expect(checkInFullScan).not.toHaveBeenCalled();
+	});
+
+	test('returns an empty range without touching the check-in index', async () => {
+		const database = await openDatabase();
+		const checkInWhere = vi.spyOn(database.mealCheckIns, 'where');
+		const result = await readMealCalendarRange(database, 'org_family', {
+			start: '2026-08-20',
+			end: '2026-08-21'
+		});
+		expect(result).toEqual({ meals: [], checkIns: [] });
+		expect(checkInWhere).not.toHaveBeenCalled();
 	});
 });
 
