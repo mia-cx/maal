@@ -84,11 +84,12 @@ const defaultAuthenticate = async (event: RequestEvent): Promise<HouseholdAdmini
 	try {
 		return await authenticateSyncSlot(event);
 	} catch (cause) {
+		const tagged = typeof cause === 'object' && cause !== null && '_tag' in cause;
+		if (!tagged || cause._tag !== 'SyncUnauthenticated') {
+			throw new HouseholdAdministrationError({ code: 'workos_unavailable', cause });
+		}
 		const code =
-			typeof cause === 'object' &&
-			cause !== null &&
-			'code' in cause &&
-			cause.code === 'auth_slot_missing'
+			'code' in cause && cause.code === 'auth_slot_missing'
 				? 'auth_slot_missing'
 				: 'auth_slot_expired';
 		throw new HouseholdAdministrationError({ code, cause });

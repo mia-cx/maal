@@ -10,7 +10,6 @@
 		createHouseholdInvite,
 		leaveRemoteHousehold,
 		removeHouseholdMember,
-		refreshRemoteHousehold,
 		revokeHouseholdInvite,
 		updateHouseholdMemberRole,
 		type CreatedHouseholdInvite
@@ -92,7 +91,6 @@
 	let forkOpen = $state(false);
 	let forkName = $state('');
 	let deleteHouseholdOpen = $state(false);
-	let remoteRefreshStarted = false;
 
 	const canManage = $derived(
 		household?.localOnly || hasCachedPermission(membership ?? undefined, 'households:write')
@@ -216,17 +214,6 @@
 				weekStartsOn = String(value.household.weekStartsOn) as '0' | '1';
 				defaultPlannedYield = String(value.household.defaultPlannedYield);
 				preferredDinnerTime = value.household.preferredDinnerTime ?? '';
-			}
-			if (
-				!remoteRefreshStarted &&
-				value.household &&
-				!value.household.localOnly &&
-				value.membership?.status === 'active'
-			) {
-				remoteRefreshStarted = true;
-				void refreshRemoteHousehold(database, profileId, householdId).catch(() => {
-					message = 'The latest household members and invites could not be loaded.';
-				});
 			}
 		});
 		return () => subscription.unsubscribe();

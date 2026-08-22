@@ -325,6 +325,11 @@ export class HouseholdAdministrationService {
 		householdId: string;
 	}): Promise<string> {
 		return this.repository.withMembershipMutationLock(input.householdId, async () => {
+			const alreadyLeft = await this.repository.membership(
+				input.householdId,
+				input.actor.workosUserId
+			);
+			if (alreadyLeft?.status === 'revoked') return alreadyLeft.membershipId;
 			const { live } = await this.requireIntersection(input.actor, input.householdId, null);
 			const members = await this.identityMemberships(input.householdId);
 			this.assertRemovable(live, members);
