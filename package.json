@@ -43,6 +43,7 @@
 		"gen": "wrangler types",
 		"i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --silent",
 		"db:generate": "drizzle-kit generate",
+		"db:generate:seed": "node scripts/generate-d1-taxonomy-seed.mjs",
 		"db:migrate:local": "wrangler d1 migrations apply maal-local --local",
 		"db:migrate:staging": "wrangler d1 migrations apply maal-staging --remote --env staging",
 		"db:migrate:production": "wrangler d1 migrations apply maal-prod --remote --env production",

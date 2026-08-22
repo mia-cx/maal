@@ -28,13 +28,20 @@ export const applyD1Migrations = async (
 	migrations: readonly D1MigrationFile[]
 ): Promise<void> => {
 	for (const migration of migrations) {
-		for (const statement of migration.source
-			.split('--> statement-breakpoint')
-			.map((part) => part.trim())
-			.filter(Boolean)) {
-			await database.prepare(statement).run();
-		}
+		await applyD1Migration(database, migration);
 	}
+};
+
+export const applyD1Migration = async (
+	database: D1Database,
+	migration: D1MigrationFile
+): Promise<void> => {
+	const statements = migration.source
+		.split('--> statement-breakpoint')
+		.map((part) => part.trim())
+		.filter(Boolean)
+		.map((statement) => database.prepare(statement));
+	await database.batch(statements);
 };
 
 const splitTopLevel = (value: string): readonly string[] => {

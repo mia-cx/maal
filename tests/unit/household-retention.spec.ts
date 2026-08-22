@@ -1,22 +1,11 @@
-import { readFile } from 'node:fs/promises';
-
 import { Miniflare } from 'miniflare';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { BillingRepository, purgeExpiredHouseholds } from '$lib/server/billing/index.js';
+import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js';
 
 let miniflare: Miniflare;
 let database: D1Database;
-
-const applyMigration = async (path: string): Promise<void> => {
-	const source = await readFile(path, 'utf8');
-	for (const statement of source
-		.split('--> statement-breakpoint')
-		.map((part) => part.trim())
-		.filter(Boolean)) {
-		await database.prepare(statement).run();
-	}
-};
 
 beforeEach(async () => {
 	miniflare = new Miniflare({
@@ -27,16 +16,7 @@ beforeEach(async () => {
 		d1Databases: ['DB']
 	});
 	database = await miniflare.getD1Database('DB');
-	for (const migration of [
-		'drizzle/0000_quick_hitman.sql',
-		'drizzle/0001_long_mysterio.sql',
-		'drizzle/0002_naive_the_liberteens.sql',
-		'drizzle/0003_glossy_leader.sql',
-		'drizzle/0004_right_sway.sql',
-		'drizzle/0005_needy_khan.sql'
-	]) {
-		await applyMigration(migration);
-	}
+	await applyD1Migrations(database, await readD1MigrationFiles());
 	await database.prepare("INSERT INTO users (workos_user_id) VALUES ('user_alice')").run();
 	await database
 		.prepare(
