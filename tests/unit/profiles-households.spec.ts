@@ -202,6 +202,35 @@ describe('device-local profile lifecycle', () => {
 			deletedAt: null,
 			conflictClocks: {}
 		});
+		const retainedMealId = uuidv7();
+		const retainedCheckInId = uuidv7();
+		await database.meals.add({
+			id: retainedMealId,
+			householdId: home.householdId,
+			date: '2026-08-22',
+			status: 'cooked',
+			sortOrder: 1000,
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+			deletedAt: null,
+			conflictClocks: {}
+		});
+		await database.mealCheckIns.add({
+			id: retainedCheckInId,
+			mealId: retainedMealId,
+			reporterUserId: alice.workosUserId,
+			verdict: 'repeat',
+			cookTimeMinutes: 30,
+			reason: null,
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+			deletedAt: null,
+			conflictClocks: {}
+		});
 
 		const revoke = vi.fn(async () => new Response(null, { status: 204 }));
 		await signOutLocalProfile(database, alice.profileId, revoke as typeof fetch);
@@ -217,6 +246,10 @@ describe('device-local profile lifecycle', () => {
 		expect(removed.retainedHouseholdIds).toEqual([home.householdId]);
 		await expect(database.recipes.get(recipeId)).resolves.toBeUndefined();
 		await expect(database.households.get(home.householdId)).resolves.toBeDefined();
+		await expect(database.mealCheckIns.get(retainedCheckInId)).resolves.toMatchObject({
+			reporterUserId: alice.workosUserId,
+			mealId: retainedMealId
+		});
 		await expect(
 			database.authSlots.where('profileId').equals(alice.profileId).count()
 		).resolves.toBe(0);

@@ -25,7 +25,9 @@ import {
 	type RecipeCommandContext
 } from '$lib/client/recipes/index.js';
 import type { PortableArchive } from '$lib/domain/portability/schema.js';
+import { MEAL_CONFLICT_GROUPS } from '$lib/domain/meals/schema.js';
 import {
+	RECIPE_CONFLICT_GROUPS,
 	RecipeImportedCandidateSchema,
 	type RecipeImportedCandidate
 } from '$lib/domain/recipes/schema.js';
@@ -328,9 +330,38 @@ describe('portable archives', () => {
 		expect(restoredMeal?.householdId).toBe(restoredHousehold?.householdId);
 		expect(restoredMeal?.id).not.toBe(seeded.meal.id);
 		expect(restoredCheckIn?.mealId).toBe(restoredMeal?.id);
+		expect(Object.keys(restoredRecipe?.conflictClocks ?? {}).toSorted()).toEqual(
+			[...RECIPE_CONFLICT_GROUPS].toSorted()
+		);
+		expect(Object.keys(restoredMeal?.conflictClocks ?? {}).toSorted()).toEqual(
+			[...MEAL_CONFLICT_GROUPS].toSorted()
+		);
 		const instructions = restoredMeal?.instructions as { id: string }[];
 		const events = restoredMeal?.instructionEvents as { mealInstructionId: string }[];
 		expect(events[0]?.mealInstructionId).toBe(instructions[0]?.id);
+	});
+
+	test('never replaces the current bundled global taxonomy with archive seed rows', async () => {
+		const source = await openDatabase();
+		const sourceIdentity = await seedIdentity(source, { withHousehold: false });
+		const archive = await decodePortableArchive(
+			await exportPortableArchive(source, sourceIdentity.profileId, { createdAt: at(13) })
+		);
+		const archivedGram = archive.taxonomy.units.find(({ id }) => id === 'grams');
+		expect(archivedGram).toBeDefined();
+		(archivedGram as { toBaseFactor: number }).toBaseFactor = 999;
+
+		const target = await openDatabase();
+		const targetIdentity = await seedIdentity(target, { withHousehold: false });
+		const preview = await planPortableImport(target, archive, targetIdentity.profileId);
+		const replaceAll = Object.fromEntries(
+			preview.collisions.map(({ collisionId }) => [collisionId, 'replace' as const])
+		);
+		const plan = await planPortableImport(target, archive, targetIdentity.profileId, replaceAll);
+		await commitPortableImport(target, plan);
+
+		expect(plan.writes.get('units') ?? []).toEqual([]);
+		await expect(target.units.get('grams')).resolves.toMatchObject({ toBaseFactor: 1 });
 	});
 
 	test('preflights primary and natural-key collisions and supports keep, replace, and copy', async () => {

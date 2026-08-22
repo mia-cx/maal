@@ -264,8 +264,8 @@ export const removeProfileFromDevice = async (
 		await database.mealCheckIns
 			.filter(
 				(checkIn) =>
-					checkIn.reporterUserId === profile.workosUserId ||
-					(typeof checkIn.mealId === 'string' && removedMealIds.has(checkIn.mealId))
+					(typeof checkIn.mealId === 'string' && removedMealIds.has(checkIn.mealId)) ||
+					(checkIn.mealId === null && checkIn.reporterUserId === profile.workosUserId)
 			)
 			.delete();
 		for (const tableName of [

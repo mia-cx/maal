@@ -14,8 +14,8 @@ deletion-state denial, profile removal, and portable import reconciliation.
 - [x] Fresh authentication projects households, memberships, and billing capability before sync starts.
 - [x] Billing and sync requests intersect D1 membership data with live WorkOS identity, role, and permissions.
 - [x] Deletion, refund, recoverable, and purge-pending households cannot sync.
-- [ ] Removing one profile preserves check-ins in households retained by another local profile.
-- [ ] Portable import protects global taxonomy seed rows and stamps every recipe or meal conflict group.
+- [x] Removing one profile preserves check-ins in households retained by another local profile.
+- [x] Portable import protects global taxonomy seed rows and stamps every recipe or meal conflict group.
 - [ ] Focused D1, Worker, local, browser, and full validation gates pass.
 
 ## Test seams
@@ -29,7 +29,7 @@ and portable archive import. Regression tests exercise behavior only through tho
 - [x] Make pruned-log bootstrap self-contained and fix user bootstrap page ordering.
 - [x] Emit supported household settings, appliance, meal-status, and check-in mutations atomically.
 - [x] Discover remote household state on a fresh device and harden live WorkOS authorization and deletion denial.
-- [ ] Preserve retained check-ins and harden portable taxonomy and aggregate import.
+- [x] Preserve retained check-ins and harden portable taxonomy and aggregate import.
 - [ ] Run focused local, D1, Worker, browser, prototype-preservation, and full validation gates.
 
 ## Notes
@@ -40,3 +40,4 @@ and portable archive import. Regression tests exercise behavior only through tho
 - Bootstrap slice: 26 focused tests passed; the complete D1 migration chain passed.
 - Local mutation slice: 43 focused tests passed; D1 migration and Svelte checks passed.
 - Discovery/authentication slice: 40 focused tests passed; Svelte checks passed.
+- Profile/portability slice: 15 focused tests passed.

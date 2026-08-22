@@ -4,7 +4,9 @@ import { runTrackedLocalCommit } from '$lib/client/local/commit-activity.js';
 import type { LocalStoreName, MaalDatabase } from '$lib/client/local/database.js';
 import { activeHouseholdKey } from '$lib/client/local/profiles.js';
 import { PortableArchiveError } from '$lib/domain/contracts/errors.js';
+import { MEAL_CONFLICT_GROUPS } from '$lib/domain/meals/schema.js';
 import type { PortableArchive } from '$lib/domain/portability/schema.js';
+import { RECIPE_CONFLICT_GROUPS } from '$lib/domain/recipes/schema.js';
 
 export type ImportResolution = 'keep-local' | 'replace' | 'import-as-copy';
 
@@ -395,6 +397,13 @@ const taxonomyStores = [
 	'foodHouseholdAliases'
 ] as const satisfies readonly PortableImportStore[];
 
+const globalTaxonomyStores = new Set<PortableImportStore>([
+	'units',
+	'unitAliases',
+	'foods',
+	'foodAliases'
+]);
+
 const preferenceStores = [
 	'userFoodPreferences',
 	'userFoodDisplayPreferences',
@@ -642,6 +651,10 @@ export const planPortableImport = async (
 		for (const archived of archiveRowsForStore(archive, store)) {
 			const original = copyRecord(archived);
 			const originalId = text(original.id);
+			if (globalTaxonomyStores.has(store)) {
+				taxonomyIds.set(originalId, originalId);
+				continue;
+			}
 			const ownerChanged =
 				original.workosUserId === archive.manifest.exporterWorkosUserId &&
 				archive.manifest.exporterWorkosUserId !== profile.workosUserId;
@@ -820,18 +833,26 @@ const aggregateStores = new Set<PortableImportStore>([
 ]);
 
 const importedAggregate = (
+	store: PortableImportStore,
 	record: Record<string, unknown>,
 	importedAt: `${string}Z`,
 	originDeviceId: string
-): Record<string, unknown> => ({
-	...record,
-	schemaVersion: 1,
-	revision: 1,
-	updatedAt: importedAt,
-	conflictClocks: {
-		import: { occurredAt: importedAt, originDeviceId, mutationId: uuidv7() }
-	}
-});
+): Record<string, unknown> => {
+	const groups =
+		store === 'recipes'
+			? RECIPE_CONFLICT_GROUPS
+			: store === 'meals'
+				? MEAL_CONFLICT_GROUPS
+				: (['import'] as const);
+	const clock = { occurredAt: importedAt, originDeviceId, mutationId: uuidv7() };
+	return {
+		...record,
+		schemaVersion: 1,
+		revision: 1,
+		updatedAt: importedAt,
+		conflictClocks: Object.fromEntries(groups.map((group) => [group, clock]))
+	};
+};
 
 export const commitPortableImport = async (
 	database: MaalDatabase,
@@ -860,7 +881,7 @@ export const commitPortableImport = async (
 				for (const [store, ids] of plan.deletes) await database.table(store).bulkDelete([...ids]);
 				for (const [store, rows] of plan.writes) {
 					const prepared = aggregateStores.has(store)
-						? rows.map((row) => importedAggregate(row, importedAt, originDeviceId))
+						? rows.map((row) => importedAggregate(store, row, importedAt, originDeviceId))
 						: [...rows];
 					if (prepared.length > 0) await database.table(store).bulkPut(prepared);
 					if (aggregateStores.has(store)) {
