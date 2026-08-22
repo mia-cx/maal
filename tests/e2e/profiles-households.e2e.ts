@@ -215,3 +215,64 @@ test('keeps the approved household layout usable at kitchen-tablet and phone wid
 	await expect(page.getByRole('heading', { name: 'Household settings' })).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Save household' })).toBeVisible();
 });
+
+test('leaves through the auth-slot client path while preserving both local profiles and the snapshot', async ({
+	page
+}) => {
+	await seedProfilesAndHousehold(page);
+	await page.evaluate(async () => {
+		const database = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open('maal-v1:production');
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve(request.result);
+		});
+		const transaction = database.transaction('memberships', 'readwrite');
+		const store = transaction.objectStore('memberships');
+		const bob = await new Promise<Record<string, unknown>>((resolve, reject) => {
+			const request = store.get('membership_bob');
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve(request.result as Record<string, unknown>);
+		});
+		store.put({ ...bob, roleSlug: 'admin' });
+		await new Promise<void>((resolve, reject) => {
+			transaction.oncomplete = () => resolve();
+			transaction.onerror = () => reject(transaction.error);
+		});
+		database.close();
+	});
+	await page.reload();
+
+	const leavePath =
+		'/api/auth-slots/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/households/org_canal_kitchen/membership';
+	let leaveRequests = 0;
+	await page.route(`**${leavePath}`, async (route) => {
+		leaveRequests += 1;
+		expect(route.request().method()).toBe('DELETE');
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				schemaVersion: 1,
+				payload: {
+					householdId: 'org_canal_kitchen',
+					membershipId: 'membership_alice',
+					removed: true
+				}
+			})
+		});
+	});
+
+	await page.getByRole('button', { name: 'Leave household' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Leave household?' });
+	await expect(dialog).toBeVisible();
+	await dialog.getByRole('button', { name: 'Leave household' }).click();
+	await expect(page.getByRole('heading', { name: 'Detached household snapshot' })).toBeVisible();
+	expect(leaveRequests).toBe(1);
+
+	await page.getByRole('button', { name: /AD Alice de Vries alice@example\.test/ }).click();
+	await page.getByRole('menuitem', { name: /Bob de Vries/ }).click();
+	await expect(
+		page.getByRole('button', { name: /BD Bob de Vries bob@example\.test/ })
+	).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Household settings' })).toBeVisible();
+});
