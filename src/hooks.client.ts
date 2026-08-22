@@ -7,6 +7,7 @@ import {
 	markBrowserRecoveryRequired
 } from '$lib/client/local/browser.js';
 import { readRecoveryState } from '$lib/client/local/recovery.js';
+import { startForegroundRecipeRetention } from '$lib/client/recipes/retention.js';
 import { startDeviceSync } from '$lib/client/sync/device-coordinator.js';
 import { deLocalizeUrl, localizeHref } from '$lib/paraglide/runtime';
 import { Locale } from '$lib/paraglide.svelte';
@@ -26,6 +27,7 @@ export const init: ClientInit = async () => {
 			database.close();
 			throw new TypeError('Local recovery is required.');
 		}
+		startForegroundRecipeRetention(database);
 		startDeviceSync(database);
 	} catch {
 		clearBrowserDatabasePromises();

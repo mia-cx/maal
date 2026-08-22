@@ -15,7 +15,7 @@ purges from a configured Cloudflare scheduled handler using D1 server time, boun
 
 ## TODOs
 
-- [ ] Add bounded foreground recipe retention for retained local auth slots and keep unacknowledged purge tombstones.
+- [x] Add bounded foreground recipe retention for retained local auth slots and keep unacknowledged purge tombstones.
 - [ ] Add scoped, bounded D1 sync retention with retained-floor updates and a scheduled Worker entrypoint.
 - [ ] Add claimed, bounded, retry-safe household purge after the recovery window.
 - [ ] Run focused validation and record the serialized full-validation handoff.
@@ -26,3 +26,4 @@ purges from a configured Cloudflare scheduled handler using D1 server time, boun
 - Retention updates only scopes whose change rows were deleted. A cursor below the new floor must bootstrap.
 - Household purge keeps trial claims, deletion requests, and billing audit facts. It removes household content and sync payloads.
 - Local tombstones may outlive one year when their delete mutation has not reached D1. This prevents a later sync from losing the deletion intent.
+- Focused local validation: `pnpm exec vitest run tests/unit/recipes.spec.ts` (7 tests passed).

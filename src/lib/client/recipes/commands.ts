@@ -516,8 +516,12 @@ export const permanentlyDeleteRecipe = (
 export const runRecipeRetention = async (
 	database: MaalDatabase,
 	context: RecipeCommandContext,
-	now: UtcInstant = commandTime(context)
-): Promise<{ purgedRecipeIds: string[]; expiredTombstoneIds: string[] }> => {
+	now: UtcInstant = commandTime(context),
+	batchSize = 25
+): Promise<{ purgedRecipeIds: string[]; expiredTombstoneIds: string[]; hasMore: boolean }> => {
+	if (!Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 100) {
+		throw new TypeError('Recipe retention batch size must be between 1 and 100.');
+	}
 	const cutoff = Date.parse(now) - 30 * 86_400_000;
 	const records = await database.recipes.where('ownerUserId').equals(context.ownerUserId).toArray();
 	const stored = records.map((record) =>
@@ -528,18 +532,36 @@ export const runRecipeRetention = async (
 			isRecipeAggregate(record) &&
 			record.deletedAt !== null &&
 			Date.parse(record.deletedAt) <= cutoff
-	);
+	).slice(0, batchSize);
 	const purgedRecipeIds: string[] = [];
 	for (const recipe of recoverableExpired) {
 		await purgeRecipe(database, { ...context, occurredAt: now }, recipe.id, 'recovery_expired');
 		purgedRecipeIds.push(recipe.id);
 	}
-	const expiredTombstoneIds = stored
+	const acknowledgedDeletes = new Set(
+		(
+			await database.outbox
+				.where('[scopeKind+scopeId+status]')
+				.equals(['user', context.ownerUserId, 'acknowledged'])
+				.toArray()
+		)
+			.filter(({ entityKind, operation }) => entityKind === 'recipe' && operation === 'delete')
+			.map(({ aggregateId }) => aggregateId)
+	);
+	const expiredCandidates = stored
 		.filter(
 			(record): record is RecipePurgeTombstone =>
-				!isRecipeAggregate(record) && Date.parse(record.retainUntil) <= Date.parse(now)
+				!isRecipeAggregate(record) &&
+				Date.parse(record.retainUntil) <= Date.parse(now) &&
+				acknowledgedDeletes.has(record.id)
 		)
 		.map(({ id }) => id);
+	const expiredTombstoneIds = expiredCandidates.slice(0, batchSize);
 	if (expiredTombstoneIds.length > 0) await database.recipes.bulkDelete(expiredTombstoneIds);
-	return { purgedRecipeIds, expiredTombstoneIds };
+	return {
+		purgedRecipeIds,
+		expiredTombstoneIds,
+		hasMore:
+			recoverableExpired.length === batchSize || expiredCandidates.length > expiredTombstoneIds.length
+	};
 };

@@ -3,7 +3,7 @@ import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
 import { Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import {
 	commitImportedRecipeCandidate,
@@ -13,6 +13,7 @@ import {
 	listRecipes,
 	permanentlyDeleteRecipe,
 	restoreRecipe,
+	runForegroundRecipeRetention,
 	runRecipeRetention,
 	searchRecipes,
 	updateRecipeFromEditor,
@@ -370,7 +371,56 @@ describe('offline recipe commands and queries', () => {
 			context('2026-02-02T00:00:00.000Z'),
 			'2026-02-02T00:00:00.000Z'
 		);
-		expect(second.expiredTombstoneIds).toEqual([recipe.id]);
+		expect(second.expiredTombstoneIds).toEqual([]);
+		expect(await database.recipes.get(recipe.id)).toBeDefined();
+
+		await database.outbox
+			.where('aggregateId')
+			.equals(recipe.id)
+			.filter(({ operation }) => operation === 'delete')
+			.modify({ status: 'acknowledged' });
+		const acknowledged = await runRecipeRetention(
+			database,
+			context('2026-02-02T00:00:00.000Z'),
+			'2026-02-02T00:00:00.000Z'
+		);
+		expect(acknowledged.expiredTombstoneIds).toEqual([recipe.id]);
 		expect(await database.recipes.get(recipe.id)).toBeUndefined();
+	});
+
+	test('runs bounded retention for retained profiles without contacting the Worker', async () => {
+		const database = await openDatabase();
+		await database.authSlots.put({
+			authSlotId: 'slot-alice',
+			profileId: uuidv7(),
+			workosUserId: 'user_alice',
+			sessionState: 'reauthRequired',
+			lastRefreshedAt: null,
+			lastVerifiedAt: null,
+			nextRetryAt: null,
+			retryCount: 0
+		});
+		const first = await commitImportedRecipeCandidate(database, context(), importedCandidate());
+		const second = await commitImportedRecipeCandidate(database, context(), {
+			...importedCandidate(),
+			title: 'Second soup'
+		});
+		await deleteRecipe(database, context('2025-01-01T00:00:00.000Z'), first.id);
+		await deleteRecipe(database, context('2025-01-02T00:00:00.000Z'), second.id);
+		const fetcher = vi.spyOn(globalThis, 'fetch');
+
+		const result = await runForegroundRecipeRetention(
+			database,
+			new Date('2025-02-02T00:00:00.000Z'),
+			1
+		);
+
+		expect(result).toMatchObject({
+			profileCount: 1,
+			purgedRecipeCount: 1,
+			hasMore: true
+		});
+		expect(fetcher).not.toHaveBeenCalled();
+		fetcher.mockRestore();
 	});
 });
