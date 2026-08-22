@@ -276,6 +276,7 @@ test('keeps the approved settings and subscribe composition at desktop and phone
 	await page.setViewportSize({ width: 1280, height: 820 });
 	await seed(page);
 	await page.goto('/settings/account');
+	await expect(page.getByRole('dialog').getByRole('heading', { name: 'Settings' })).toBeVisible();
 	await expect(page).toHaveScreenshot('settings-account-desktop.png', {
 		animations: 'disabled',
 		maxDiffPixelRatio: 0.01
