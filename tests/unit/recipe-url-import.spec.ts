@@ -164,7 +164,16 @@ describe('recipe URL candidate boundary', () => {
 			actor: {
 				authSlotId: 'slot_alice',
 				workosUserId: MCP_TEST_USER,
-				activeOrganizationIds: [MCP_TEST_HOUSEHOLD]
+				activeOrganizationIds: [MCP_TEST_HOUSEHOLD],
+				activeMemberships: [
+					{
+						membershipId: `membership_${MCP_TEST_HOUSEHOLD}`,
+						householdId: MCP_TEST_HOUSEHOLD,
+						householdName: 'Family',
+						roleSlug: 'admin',
+						permissions: ['meals:write']
+					}
+				]
 			},
 			householdId: MCP_TEST_HOUSEHOLD,
 			now: MCP_TEST_NOW
@@ -193,7 +202,16 @@ describe('recipe URL candidate boundary', () => {
 				actor: {
 					authSlotId: 'slot_alice',
 					workosUserId: MCP_TEST_USER,
-					activeOrganizationIds: [MCP_TEST_HOUSEHOLD]
+					activeOrganizationIds: [MCP_TEST_HOUSEHOLD],
+					activeMemberships: [
+						{
+							membershipId: `membership_${MCP_TEST_HOUSEHOLD}`,
+							householdId: MCP_TEST_HOUSEHOLD,
+							householdName: 'Family',
+							roleSlug: 'admin',
+							permissions: ['meals:write']
+						}
+					]
 				},
 				householdId: MCP_TEST_HOUSEHOLD,
 				now: MCP_TEST_NOW

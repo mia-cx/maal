@@ -117,7 +117,15 @@ const upsertAuthenticatedSlot = async (
 
 	await database.transaction(
 		'rw',
-		[database.profiles, database.authSlots, database.userAttributions, database.uiState],
+		[
+			database.profiles,
+			database.authSlots,
+			database.userAttributions,
+			database.households,
+			database.memberships,
+			database.billingCapabilities,
+			database.uiState
+		],
 		async () => {
 			const [slot, profileForUser] = await Promise.all([
 				database.authSlots.get(metadata.authSlotId),
@@ -183,10 +191,26 @@ const upsertAuthenticatedSlot = async (
 				displayName: profile.displayName,
 				profilePictureUrl: profile.profilePictureUrl
 			});
-			await database.uiState.bulkPut([
+			const discovered = metadata.households ?? [];
+			if (discovered.length > 0) {
+				await database.households.bulkPut(discovered.map(({ household }) => household));
+				await database.memberships.bulkPut(discovered.map(({ membership }) => membership));
+				await database.billingCapabilities.bulkPut(discovered.map(({ capability }) => capability));
+			}
+			const uiState = [
 				{ key: 'activeProfileId', value: profileId },
 				{ key: `profileLock:${profileId}`, value: false }
-			]);
+			];
+			if (
+				discovered.length > 0 &&
+				!(await database.uiState.get(`activeHouseholdId:${profileId}`))
+			) {
+				uiState.push({
+					key: `activeHouseholdId:${profileId}`,
+					value: discovered[0]!.household.householdId
+				});
+			}
+			await database.uiState.bulkPut(uiState);
 		}
 	);
 

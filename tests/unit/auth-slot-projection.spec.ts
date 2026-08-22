@@ -87,6 +87,7 @@ const authenticatedResponse = (authSlotId: AuthSlotId, workosUserId: string, fir
 			lastName: 'de Vries',
 			profilePictureUrl: null,
 			verifiedAt: timestamp,
+			households: [],
 			sealedSession: 'must be discarded'
 		}),
 		{ status: 200, headers: { 'content-type': 'application/json' } }
@@ -112,6 +113,88 @@ describe('auth callback marker', () => {
 });
 
 describe('auth callback projection', () => {
+	test('projects household membership and paid capability before fresh-device authentication returns', async () => {
+		const database = await openDatabase();
+		const home = {
+			householdId: 'org_family',
+			name: 'Family kitchen',
+			locale: 'en-NL',
+			timezone: 'Europe/Amsterdam',
+			weekStartsOn: 1,
+			defaultPlannedYield: 4,
+			preferredDinnerTime: '18:30',
+			createdByUserId: 'user_alice',
+			deletionState: 'active',
+			localOnly: false,
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+			deletedAt: null,
+			conflictClocks: {}
+		} as const;
+		const aliceMembership = {
+			membershipId: 'membership_alice',
+			householdId: home.householdId,
+			workosUserId: 'user_alice',
+			roleSlug: 'admin',
+			permissions: [
+				'households:write',
+				'recipes:read',
+				'recipes:write',
+				'meals:read',
+				'meals:write'
+			],
+			status: 'active',
+			directoryManaged: false,
+			workosCreatedAt: timestamp,
+			lastVerifiedAt: timestamp,
+			updatedAt: timestamp,
+			detachedAt: null,
+			denialCode: null,
+			source: 'workos'
+		} as const;
+		const capability = {
+			householdId: home.householdId,
+			state: 'enabled',
+			stripeStatus: 'active',
+			subscriberUserId: 'user_alice',
+			stripePriceId: 'price_monthly',
+			currentPeriodEnd: '2026-09-22T09:00:00.000Z',
+			interruptionStartedAt: null,
+			graceUntil: null,
+			validUntil: '2026-09-22T09:00:00.000Z',
+			cancelAtPeriodEnd: false,
+			stale: false,
+			source: 'stripe-d1'
+		} as const;
+		const fetcher = vi.fn(async () => {
+			const response = await authenticatedResponse(ALICE_SLOT, 'user_alice', 'Alice');
+			const body = (await response.json()) as Record<string, unknown>;
+			return Response.json({
+				...body,
+				households: [{ household: home, membership: aliceMembership, capability }]
+			});
+		});
+
+		const outcome = await projectAuthCallback(
+			database,
+			{ authSlotId: ALICE_SLOT, authStatus: 'authenticated' },
+			{ fetcher, now: timestamp }
+		);
+
+		expect(outcome.state).toBe('authenticated');
+		await expect(database.households.get(home.householdId)).resolves.toEqual(home);
+		await expect(database.memberships.get(aliceMembership.membershipId)).resolves.toEqual(
+			aliceMembership
+		);
+		await expect(database.billingCapabilities.get(home.householdId)).resolves.toEqual(capability);
+		await expect(database.uiState.get(`activeHouseholdId:${outcome.profileId}`)).resolves.toEqual({
+			key: `activeHouseholdId:${outcome.profileId}`,
+			value: home.householdId
+		});
+	});
+
 	test('adds Bob, selects him, and keeps Alice plus all unrelated local data', async () => {
 		const database = await openDatabase();
 		const alice = profile('user_alice', 'Alice');

@@ -3,7 +3,8 @@ import type { RequestEvent } from '@sveltejs/kit';
 import {
 	authSlotAdapterFor,
 	authSlotCookieName,
-	routeSlotId
+	routeSlotId,
+	type LiveWorkOSMembership
 } from '$lib/server/auth-slots/index.js';
 
 import { ServerSyncUnauthenticated } from './errors.js';
@@ -12,6 +13,7 @@ export interface AuthenticatedSyncSlot {
 	readonly authSlotId: string;
 	readonly workosUserId: string;
 	readonly activeOrganizationIds: readonly string[];
+	readonly activeMemberships: readonly LiveWorkOSMembership[];
 }
 
 export const authenticateSyncSlot = async (
@@ -33,6 +35,11 @@ export const authenticateSyncSlot = async (
 			message: 'The selected auth slot must be reauthenticated.'
 		});
 	}
-	const activeOrganizationIds = await adapter.listActiveOrganizationIds(authentication.user.id);
-	return { authSlotId, workosUserId: authentication.user.id, activeOrganizationIds };
+	const activeMemberships = await adapter.listActiveMemberships(authentication.user.id);
+	return {
+		authSlotId,
+		workosUserId: authentication.user.id,
+		activeOrganizationIds: activeMemberships.map(({ householdId }) => householdId),
+		activeMemberships
+	};
 };

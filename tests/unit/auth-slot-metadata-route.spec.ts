@@ -5,10 +5,13 @@ import { AuthSlotMetadata } from '$lib/auth-slots/index.js';
 
 const SLOT = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const authenticate = vi.hoisted(() => vi.fn());
+const listActiveMemberships = vi.hoisted(() => vi.fn());
+const discoverActiveHouseholds = vi.hoisted(() => vi.fn());
 
 vi.mock('$lib/server/auth-slots', async (importOriginal) => ({
 	...(await importOriginal<typeof import('$lib/server/auth-slots')>()),
-	authSlotAdapterFor: () => ({ authenticate })
+	authSlotAdapterFor: () => ({ authenticate, listActiveMemberships }),
+	discoverActiveHouseholds
 }));
 
 const { GET } = await import('../../src/routes/api/auth-slots/[slot]/+server.js');
@@ -17,10 +20,14 @@ const eventFor = (sealedSession?: string) =>
 	({
 		params: { slot: SLOT },
 		cookies: { get: vi.fn(() => sealedSession) },
-		platform: { env: {} }
+		platform: { env: { DB: {} } }
 	}) as unknown as Parameters<typeof GET>[0];
 
-beforeEach(() => authenticate.mockReset());
+beforeEach(() => {
+	authenticate.mockReset();
+	listActiveMemberships.mockReset().mockResolvedValue([]);
+	discoverActiveHouseholds.mockReset().mockResolvedValue([]);
+});
 
 describe('selected auth-slot metadata route', () => {
 	test('returns a versioned reauthentication projection without loading WorkOS when no cookie exists', async () => {
@@ -49,7 +56,7 @@ describe('selected auth-slot metadata route', () => {
 		});
 
 		const response = await GET(eventFor('sealed-session-secret'));
-		const raw = await response.json();
+		const raw = (await response.json()) as Record<string, unknown>;
 		expect(Schema.decodeUnknownSync(AuthSlotMetadata)(raw)).toMatchObject({
 			schemaVersion: 1,
 			authSlotId: SLOT,
@@ -62,7 +69,12 @@ describe('selected auth-slot metadata route', () => {
 		expect(raw).not.toHaveProperty('sessionId');
 		expect(raw).not.toHaveProperty('organizationId');
 		expect(raw).not.toHaveProperty('user');
+		expect(raw.households).toEqual([]);
 		expect(JSON.stringify(raw)).not.toContain('secret');
 		expect(authenticate).toHaveBeenCalledWith('sealed-session-secret');
+		expect(listActiveMemberships).toHaveBeenCalledWith('user_alice');
+		expect(discoverActiveHouseholds).toHaveBeenCalledWith(
+			expect.objectContaining({ workosUserId: 'user_alice', liveMemberships: [] })
+		);
 	});
 });

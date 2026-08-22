@@ -212,7 +212,7 @@ export const handleUserSyncRequest = async (
 					database,
 					workosUserId: slot.workosUserId,
 					householdId: decoded.audience.id,
-					activeWorkOSOrganizationIds: slot.activeOrganizationIds,
+					activeWorkOSMemberships: slot.activeMemberships,
 					permission,
 					now: new Date().toISOString()
 				});
@@ -250,7 +250,7 @@ export const handleUserSyncRequest = async (
 		await d1UserSyncCapabilityAuthorizer.authorize({
 			database,
 			workosUserId: slot.workosUserId,
-			activeWorkOSOrganizationIds: slot.activeOrganizationIds,
+			activeWorkOSMemberships: slot.activeMemberships,
 			permission: permissionFor(operation),
 			now: new Date().toISOString()
 		});

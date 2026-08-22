@@ -27,12 +27,15 @@ export const requireBillingActor = async (
 	const authSlotId = routeSlotId(event);
 	const sealedSession = event.cookies.get(authSlotCookieName(authSlotId));
 	if (!sealedSession) throw new BillingAuthorizationError('reauth_required');
-	const authentication = await authSlotAdapterFor(event.platform?.env).authenticate(sealedSession);
+	const adapter = authSlotAdapterFor(event.platform?.env);
+	const authentication = await adapter.authenticate(sealedSession);
 	if (!authentication.authenticated) throw new BillingAuthorizationError('reauth_required');
 
 	const membership = (
 		await getDb(database)
 			.select({
+				membershipId: householdMemberships.membershipId,
+				roleSlug: householdMemberships.roleSlug,
 				status: householdMemberships.status,
 				permissions: householdMemberships.permissions
 			})
@@ -46,13 +49,23 @@ export const requireBillingActor = async (
 			.limit(1)
 	)[0];
 	if (membership?.status !== 'active') throw new BillingAuthorizationError('membership_inactive');
+	const liveMembership = (await adapter.listActiveMemberships(authentication.user.id)).find(
+		(row) => row.householdId === householdId
+	);
+	if (!liveMembership) throw new BillingAuthorizationError('membership_inactive');
 	let permissions: unknown;
 	try {
 		permissions = JSON.parse(membership.permissions);
 	} catch {
 		throw new BillingAuthorizationError('membership_projection_invalid');
 	}
-	if (!Array.isArray(permissions) || (permission !== null && !permissions.includes(permission))) {
+	if (
+		!Array.isArray(permissions) ||
+		membership.membershipId !== liveMembership.membershipId ||
+		membership.roleSlug !== liveMembership.roleSlug ||
+		(permission !== null &&
+			(!permissions.includes(permission) || !liveMembership.permissions.includes(permission)))
+	) {
 		throw new BillingAuthorizationError('permission_denied');
 	}
 	return {

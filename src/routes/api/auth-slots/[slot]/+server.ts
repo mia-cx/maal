@@ -6,6 +6,7 @@ import {
 	authSlotAdapterFor,
 	authSlotCookieName,
 	authStatusForReason,
+	discoverActiveHouseholds,
 	revokeSelectedSession,
 	routeSlotId,
 	taggedErrorResponse
@@ -23,7 +24,8 @@ export const GET: RequestHandler = async (event) => {
 			return metadataResponse({ schemaVersion: 1, authSlotId: slotId, status: 'reauthRequired' });
 		}
 
-		const result = await authSlotAdapterFor(event.platform?.env).authenticate(sealedSession);
+		const adapter = authSlotAdapterFor(event.platform?.env);
+		const result = await adapter.authenticate(sealedSession);
 		if (!result.authenticated) {
 			return metadataResponse({
 				schemaVersion: 1,
@@ -31,6 +33,16 @@ export const GET: RequestHandler = async (event) => {
 				status: authStatusForReason(result.reason)
 			});
 		}
+
+		const database = event.platform?.env.DB;
+		if (!database) throw new TypeError('D1 is unavailable.');
+		const now = new Date().toISOString() as `${string}Z`;
+		const households = await discoverActiveHouseholds({
+			database,
+			workosUserId: result.user.id,
+			liveMemberships: await adapter.listActiveMemberships(result.user.id),
+			now
+		});
 
 		return metadataResponse({
 			schemaVersion: 1,
@@ -41,7 +53,8 @@ export const GET: RequestHandler = async (event) => {
 			firstName: result.user.firstName,
 			lastName: result.user.lastName,
 			profilePictureUrl: result.user.profilePictureUrl,
-			verifiedAt: new Date().toISOString() as `${string}Z`
+			verifiedAt: now,
+			households
 		});
 	} catch (cause) {
 		return taggedErrorResponse(cause);

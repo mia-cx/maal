@@ -1,6 +1,7 @@
 import { Data, Schema } from 'effect';
 
 import { UtcInstantSchema } from '$lib/domain/contracts/primitives.js';
+import { HouseholdDiscoveryEntrySchema } from '$lib/domain/household/administration.js';
 
 export const MAX_AUTHENTICATED_SLOTS = 8 as const;
 export const AUTH_SLOT_ID_PATTERN = /^[0-9a-f]{32}$/;
@@ -28,7 +29,8 @@ export const AuthenticatedAuthSlotMetadata = Schema.Struct({
 	firstName: Schema.NullOr(Schema.String),
 	lastName: Schema.NullOr(Schema.String),
 	profilePictureUrl: Schema.NullOr(Schema.String),
-	verifiedAt: UtcInstantSchema
+	verifiedAt: UtcInstantSchema,
+	households: Schema.optional(Schema.Array(HouseholdDiscoveryEntrySchema))
 });
 export type AuthenticatedAuthSlotMetadata = typeof AuthenticatedAuthSlotMetadata.Type;
 

@@ -16,6 +16,14 @@ const userId = 'user_alice';
 const timestamp = '2026-08-21T12:00:00.000Z' as const;
 let miniflare: Miniflare;
 let database: D1Database;
+const liveMembership = (overrides: Record<string, unknown> = {}) => ({
+	membershipId: 'membership_paid',
+	householdId: 'org_paid',
+	householdName: 'Paid',
+	roleSlug: 'member',
+	permissions: ['recipes:read', 'recipes:write'],
+	...overrides
+});
 
 const applyMigration = async (path: string): Promise<void> => {
 	const source = await readFile(path, 'utf8');
@@ -185,7 +193,7 @@ describe('D1 user sync repository', () => {
 			d1UserSyncCapabilityAuthorizer.authorize({
 				database,
 				workosUserId: userId,
-				activeWorkOSOrganizationIds: ['org_paid'],
+				activeWorkOSMemberships: [liveMembership()],
 				permission: 'recipes:write',
 				now: timestamp
 			})
@@ -194,7 +202,7 @@ describe('D1 user sync repository', () => {
 			d1UserSyncCapabilityAuthorizer.authorize({
 				database,
 				workosUserId: userId,
-				activeWorkOSOrganizationIds: ['org_removed'],
+				activeWorkOSMemberships: [liveMembership({ householdId: 'org_removed' })],
 				permission: 'recipes:read',
 				now: timestamp
 			})
@@ -203,7 +211,16 @@ describe('D1 user sync repository', () => {
 			d1UserSyncCapabilityAuthorizer.authorize({
 				database,
 				workosUserId: userId,
-				activeWorkOSOrganizationIds: ['org_paid'],
+				activeWorkOSMemberships: [liveMembership({ permissions: ['recipes:read'] })],
+				permission: 'recipes:write',
+				now: timestamp
+			})
+		).rejects.toMatchObject({ _tag: 'SyncPermissionDenied' });
+		await expect(
+			d1UserSyncCapabilityAuthorizer.authorize({
+				database,
+				workosUserId: userId,
+				activeWorkOSMemberships: [liveMembership()],
 				permission: 'recipes:read',
 				now: '2026-09-01T00:00:00.000Z'
 			})

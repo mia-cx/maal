@@ -27,6 +27,8 @@ export interface LiveWorkOSMembership {
 	readonly householdName: string;
 	readonly roleSlug: string;
 	readonly permissions: readonly string[];
+	readonly directoryManaged?: boolean;
+	readonly workosCreatedAt?: string;
 }
 
 export interface NewSlotSession extends AuthenticatedSlot {
@@ -153,7 +155,9 @@ export function createWorkOSAuthSlotAdapter(config: AuthSlotServerConfig): AuthS
 						householdId: membership.organizationId,
 						householdName: membership.organizationName,
 						roleSlug: membership.role.slug,
-						permissions: role.permissions
+						permissions: role.permissions,
+						directoryManaged: membership.directoryManaged,
+						workosCreatedAt: membership.createdAt
 					};
 				})
 			);

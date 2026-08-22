@@ -10,6 +10,7 @@ import {
 	MembershipSchema
 } from './contracts.js';
 import { CreateHouseholdInviteInputSchema } from './invites.js';
+import { BillingCapabilitySchema } from '$lib/domain/billing/contracts.js';
 
 export const CreateRemoteHouseholdRequestSchema = Schema.Struct({
 	name: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(120)),
@@ -58,6 +59,12 @@ export type HouseholdAdministrationProjection = typeof HouseholdAdministrationPr
 export const HouseholdAdministrationProjectionResponseSchema = versionedContract(
 	HouseholdAdministrationProjectionSchema
 );
+export const HouseholdDiscoveryEntrySchema = Schema.Struct({
+	household: HouseholdSchema,
+	membership: MembershipSchema,
+	capability: BillingCapabilitySchema
+});
+export type HouseholdDiscoveryEntry = typeof HouseholdDiscoveryEntrySchema.Type;
 export const HouseholdInviteResponseSchema = versionedContract(HouseholdInviteSummarySchema);
 export const HouseholdMembershipResponseSchema = versionedContract(MembershipSchema);
 export const HouseholdMemberRemovalResponseSchema = versionedContract(

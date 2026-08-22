@@ -23,6 +23,14 @@ const timestamp = '2026-08-21T12:00:00.000Z' as const;
 const deviceId = uuidv7();
 let miniflare: Miniflare;
 let database: D1Database;
+const liveMembership = (overrides: Record<string, unknown> = {}) => ({
+	membershipId: 'membership_alice',
+	householdId,
+	householdName: 'Family',
+	roleSlug: 'member',
+	permissions: ['meals:read', 'meals:write', 'households:write'],
+	...overrides
+});
 
 const applyMigration = async (path: string): Promise<void> => {
 	const source = await readFile(path, 'utf8');
@@ -237,7 +245,7 @@ describe('D1 household sync', () => {
 				database,
 				workosUserId: aliceId,
 				householdId,
-				activeWorkOSOrganizationIds: [householdId],
+				activeWorkOSMemberships: [liveMembership()],
 				permission: 'meals:write',
 				now: timestamp
 			})
@@ -247,11 +255,40 @@ describe('D1 household sync', () => {
 				database,
 				workosUserId: aliceId,
 				householdId,
-				activeWorkOSOrganizationIds: [],
+				activeWorkOSMemberships: [],
 				permission: 'meals:read',
 				now: timestamp
 			})
 		).rejects.toMatchObject({ _tag: 'SyncPermissionDenied', code: 'workos_membership_missing' });
+		await expect(
+			d1HouseholdSyncCapabilityAuthorizer.authorize({
+				database,
+				workosUserId: aliceId,
+				householdId,
+				activeWorkOSMemberships: [liveMembership({ permissions: ['meals:read'] })],
+				permission: 'meals:write',
+				now: timestamp
+			})
+		).rejects.toMatchObject({ _tag: 'SyncPermissionDenied' });
+
+		await database
+			.prepare(
+				`INSERT INTO household_deletion_requests
+				 (household_id, requester_user_id, state, requested_at)
+				 VALUES (?, ?, 'refunding', ?)`
+			)
+			.bind(householdId, aliceId, timestamp)
+			.run();
+		await expect(
+			d1HouseholdSyncCapabilityAuthorizer.authorize({
+				database,
+				workosUserId: aliceId,
+				householdId,
+				activeWorkOSMemberships: [liveMembership()],
+				permission: 'meals:read',
+				now: timestamp
+			})
+		).rejects.toMatchObject({ _tag: 'SyncCapabilityDenied' });
 	});
 
 	test('uses D1 commit order live and original event time only for historical backfill', async () => {

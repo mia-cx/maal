@@ -17,7 +17,7 @@ export const authorizeBrowserRecipeImport = async (input: {
 		database: input.database,
 		workosUserId: input.actor.workosUserId,
 		householdId: input.householdId,
-		activeWorkOSOrganizationIds: input.actor.activeOrganizationIds,
+		activeWorkOSMemberships: input.actor.activeMemberships,
 		permission: 'meals:write',
 		now: input.now
 	});
