@@ -236,32 +236,32 @@
 <svelte:head><title>Meal plan · Maal</title></svelte:head>
 
 {#if database}
-		{#if view}
-			{#key `${view.profileId}:${view.householdId}`}
-				<ScheduleDashboard
-					meals={dashboardMeals}
-					recipes={view.recipes}
-					weekStartsOn={view.weekStartsOn}
-					householdTimeZone={view.householdTimeZone}
+	{#if view}
+		{#key `${view.profileId}:${view.householdId}`}
+			<ScheduleDashboard
+				meals={dashboardMeals}
+				recipes={view.recipes}
+				weekStartsOn={view.weekStartsOn}
+				householdTimeZone={view.householdTimeZone}
 				currentUserId={view.userId}
 				householdMembers={view.householdMembers}
 				initialUiState={view.uiState}
 				onplanrecipe={planRecipe}
 				onmealchange={changeMeal}
-					onmealdelete={removeMeal}
-					onmealcheckin={checkIn}
-					oncreaterecipe={createRecipeAndMeal}
-					onloadedrangechange={updateRenderedMealRange}
-					onuistatechange={saveUiState}
-				/>
+				onmealdelete={removeMeal}
+				onmealcheckin={checkIn}
+				oncreaterecipe={createRecipeAndMeal}
+				onloadedrangechange={updateRenderedMealRange}
+				onuistatechange={saveUiState}
+			/>
 		{/key}
 	{:else}
 		<div class="grid min-h-svh place-items-center px-6 text-center">
 			<p class="text-sm text-muted-foreground">
 				{error ?? 'Choose a local profile and household to start planning.'}
-				</p>
-			</div>
-		{/if}
+			</p>
+		</div>
+	{/if}
 {:else}
 	<div class="grid min-h-svh place-items-center bg-background px-6 text-center text-foreground">
 		<div class="grid gap-2 text-sm text-muted-foreground">
