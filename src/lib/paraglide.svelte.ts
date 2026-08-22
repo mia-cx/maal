@@ -26,6 +26,7 @@ export class Locale {
 		overwriteSetLocale((locale) => {
 			this.#current = locale;
 			const localizedPath = localizeUrl(page.url.pathname, { locale }).pathname as Pathname;
+			// eslint-disable-next-line svelte/no-navigation-without-resolve -- this is already a generated localized pathname
 			goto(resolvePathname(localizedPath));
 		});
 	}

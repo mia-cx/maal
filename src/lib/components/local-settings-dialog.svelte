@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { liveQuery } from 'dexie';
 	import { onMount } from 'svelte';
@@ -249,7 +250,8 @@
 		const nextUrl = new URL(page.url);
 		nextUrl.searchParams.set('settings', category.id);
 		try {
-			await goto(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`, {
+			// eslint-disable-next-line svelte/no-navigation-without-resolve -- the route path is resolved before its query string is appended
+			await goto(`${resolve('/plan')}${nextUrl.search}${nextUrl.hash}`, {
 				keepFocus: true,
 				noScroll: true,
 				replaceState: true
@@ -277,7 +279,8 @@
 		const nextUrl = new URL(page.url);
 		nextUrl.searchParams.delete('settings');
 		lastSettingsUrlParam = null;
-		void goto(`${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`, {
+		// eslint-disable-next-line svelte/no-navigation-without-resolve -- the route path is resolved before its query string is appended
+		void goto(`${resolve('/plan')}${nextUrl.search}${nextUrl.hash}`, {
 			keepFocus: true,
 			noScroll: true,
 			replaceState: true

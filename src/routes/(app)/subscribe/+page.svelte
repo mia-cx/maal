@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { liveQuery } from 'dexie';
 	import { onMount } from 'svelte';
 
@@ -221,7 +222,8 @@
 					<Button disabled={busy} onclick={() => void portal()}>
 						{busy ? 'Opening…' : 'Manage subscription'}
 					</Button>
-					<Button variant="outline" onclick={() => goto('/plan')}>Back to meal plan</Button>
+					<Button variant="outline" onclick={() => goto(resolve('/plan'))}>Back to meal plan</Button
+					>
 				</div>
 			</div>
 		{:else if view.prices.length > 0}

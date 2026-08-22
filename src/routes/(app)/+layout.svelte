@@ -1,13 +1,12 @@
 <script lang="ts">
 	import { navigating, page } from '$app/state';
-	import { onMount, type Snippet } from 'svelte';
+	import { onMount, type Component, type Snippet } from 'svelte';
 
 	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut.js';
 	import { getBrowserDatabase } from '$lib/client/local/browser.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import { activeNavItemForPath } from '$lib/components/dashboard/active-nav.js';
 	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
-	import LocalSettingsDialog from '$lib/components/local-settings-dialog.svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 
 	const minSidebarWidth = 208;
@@ -20,10 +19,37 @@
 	let sidebarOpen = $state(true);
 	let sidebarWidth = $state(256);
 	let resizingSidebar = $state(false);
+	let SettingsDialog = $state<Component<{ database: MaalDatabase }> | null>(null);
+	let settingsDialogLoading = $state(false);
+	let settingsDialogError = $state<string | null>(null);
 
 	const activeNav = $derived(activeNavItemForPath(page.url.pathname));
 	const navigatingWithinApp = $derived(Boolean(navigating.to?.url.pathname.startsWith('/')));
 	const isSubscribePage = $derived(page.url.pathname.startsWith('/subscribe'));
+
+	$effect(() => {
+		if (
+			!database ||
+			!page.url.searchParams.has('settings') ||
+			SettingsDialog ||
+			settingsDialogLoading ||
+			settingsDialogError
+		) {
+			return;
+		}
+
+		settingsDialogLoading = true;
+		void import('$lib/components/local-settings-dialog.svelte')
+			.then(({ default: dialog }) => {
+				SettingsDialog = dialog;
+			})
+			.catch(() => {
+				settingsDialogError = 'Settings could not be opened. Try reloading Maal.';
+			})
+			.finally(() => {
+				settingsDialogLoading = false;
+			});
+	});
 
 	const persistShellState = async () => {
 		if (!database) return;
@@ -40,8 +66,9 @@
 
 	const startSidebarResize = (event: PointerEvent) => {
 		resizingSidebar = true;
-		event.currentTarget instanceof HTMLElement &&
+		if (event.currentTarget instanceof HTMLElement) {
 			event.currentTarget.setPointerCapture(event.pointerId);
+		}
 		event.preventDefault();
 	};
 
@@ -100,7 +127,16 @@
 			style="--sidebar-width: {sidebarWidth}px;"
 			data-testid="shared-app-shell"
 		>
-			<LocalSettingsDialog {database} />
+			{#if SettingsDialog}
+				<SettingsDialog {database} />
+			{:else if settingsDialogError}
+				<p
+					role="alert"
+					class="fixed top-4 left-1/2 z-[80] -translate-x-1/2 rounded-lg border border-destructive/30 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
+				>
+					{settingsDialogError}
+				</p>
+			{/if}
 			<DashboardSidebar {database} {activeNav} />
 			{#if sidebarOpen}
 				<button

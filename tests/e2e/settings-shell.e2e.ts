@@ -1,7 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const databaseName = 'maal-v1:production';
-const profileId = '01990c69-7f00-7000-8000-000000000074';
 const householdId = 'org_canal_kitchen';
 const timestamp = '2026-08-21T12:00:00.000Z';
 
