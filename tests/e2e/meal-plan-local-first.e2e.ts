@@ -248,7 +248,7 @@ test('plans while offline and reloads from Dexie without content API requests', 
 	await seed(page);
 
 	await context.setOffline(true);
-	const { recipeCard, targetDay } = await planRecipeOn(page, '2026-08-23');
+	const { recipeCard } = await planRecipeOn(page, '2026-08-23');
 	await expect(recipeCard).toBeVisible();
 	await expect
 		.poll(() =>
