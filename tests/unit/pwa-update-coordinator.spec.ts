@@ -267,9 +267,7 @@ describe('PWA update coordination', () => {
 		const ready = deferred();
 		const waiting = new FakeWorker();
 		const registration = new FakeRegistration(waiting);
-		const serviceWorkers = new FakeServiceWorkers(
-			ready.promise.then(() => registration)
-		);
+		const serviceWorkers = new FakeServiceWorkers(ready.promise.then(() => registration));
 		const timers = new ReceiverSensitiveTimers();
 		const coordinator = new PwaUpdateCoordinator(runtimeFor(serviceWorkers, timers));
 

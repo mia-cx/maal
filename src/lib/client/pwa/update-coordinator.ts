@@ -172,10 +172,7 @@ export class PwaUpdateCoordinator {
 				});
 			});
 			this.#sendHeartbeat();
-			this.#heartbeat = this.#runtime.timers.setInterval(
-				() => this.#sendHeartbeat(),
-				HEARTBEAT_MS
-			);
+			this.#heartbeat = this.#runtime.timers.setInterval(() => this.#sendHeartbeat(), HEARTBEAT_MS);
 			const registration = await serviceWorker.ready;
 			if (!this.#started || lifecycle !== this.#lifecycle) return;
 			this.#registration = registration;
