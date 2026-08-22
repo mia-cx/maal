@@ -239,6 +239,25 @@ describe('shared device database', () => {
 			title: 'Still here'
 		});
 	});
+
+	test('fails closed when the local database uses a newer schema', async () => {
+		const environment = environmentName();
+		const name = getMaalDatabaseName(environment);
+		const future = new Dexie(name);
+		future.version(CURRENT_DATABASE_VERSION + 1).stores({ recipes: '&id' });
+		await future.open();
+		future.close();
+		databaseNames.add(name);
+
+		await expect(openMaalDatabase(environment)).rejects.toMatchObject({
+			_tag: 'LocalMigrationError'
+		});
+		const recovery = await openRecoveryDatabase(environment);
+		databases.push(recovery);
+		expect(recovery.name).toBe(name);
+		expect(recovery.backendDB().version).toBe((CURRENT_DATABASE_VERSION + 1) * 10);
+		expect(recovery.tables.map(({ name }) => name)).toEqual(['recipes']);
+	});
 });
 
 describe('local command boundary', () => {

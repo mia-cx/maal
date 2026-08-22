@@ -17,7 +17,7 @@ Keep the recovery route outside normal Dexie, sync, auth callback, and PWA start
 - [x] Gate client startup and root application helpers around recovery.
 - [x] Bound salvage reads and cover them with focused unit tests.
 - [x] Refine the existing recovery screen around export-first and explicit reset behavior.
-- [ ] Add the failed-schema browser proof and run focused validation.
+- [x] Add the failed-schema browser proof and run focused validation.
 
 ## Notes
 
@@ -27,3 +27,7 @@ Keep the recovery route outside normal Dexie, sync, auth callback, and PWA start
 - `pnpm check` passes after the startup gate.
 - `pnpm exec vitest run tests/unit/local-runtime.spec.ts` passes 13 tests, including one-row recovery batches.
 - `pnpm check` passes after the recovery screen refinement.
+- Normal startup preflights the native IndexedDB version. It never lets Dexie extend a newer committed schema.
+- `pnpm exec vitest run tests/unit/local-runtime.spec.ts` passes 14 tests.
+- `pnpm exec playwright test tests/e2e/recovery-startup.e2e.ts` passes 1 browser proof.
+- Focused Prettier, ESLint, and `pnpm check` pass.

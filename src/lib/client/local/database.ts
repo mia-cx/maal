@@ -267,7 +267,28 @@ export const openRecoveryDatabase = async (environment: string): Promise<Dexie> 
 	return database;
 };
 
+const readExistingNativeDatabaseVersion = async (name: string): Promise<number | null> => {
+	if (!(await Dexie.exists(name))) return null;
+	return new Promise<number>((resolve, reject) => {
+		const request = indexedDB.open(name);
+		request.onerror = () => reject(request.error);
+		request.onsuccess = () => {
+			const version = request.result.version;
+			request.result.close();
+			resolve(version);
+		};
+	});
+};
+
 export const openMaalDatabase = async (environment: string): Promise<MaalDatabase> => {
+	const name = getMaalDatabaseName(environment);
+	const existingNativeVersion = await readExistingNativeDatabaseVersion(name);
+	if (existingNativeVersion !== null && existingNativeVersion > CURRENT_DATABASE_VERSION * 10) {
+		throw new LocalMigrationError({
+			operation: 'open local database',
+			message: 'The local database uses a newer schema. Recovery is required.'
+		});
+	}
 	const database = new MaalDatabase(environment);
 	try {
 		await database.open();
