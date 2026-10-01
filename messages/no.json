@@ -465,5 +465,12 @@
 	"household_create_and_start_trial": "Create household and start trial",
 	"household_create": "Create household",
 	"app_add_meal_on_date": "Add meal on {date}",
-	"app_open_date_day_view": "Open {date} in day view"
+	"app_open_date_day_view": "Open {date} in day view",
+	"menu_url_import_requires_plan": "URL import requires an active Maal plan.",
+	"menu_url_import_sign_in": "Sign in again to import recipes from a URL.",
+	"menu_url_import_no_permission": "Your household role can't import recipes.",
+	"menu_url_import_rate_limited": "Too many imports. Try again in a minute.",
+	"menu_url_import_page_unreachable": "Maal couldn't open that page. Check the URL and try again.",
+	"menu_url_import_no_recipe": "Maal couldn't find a recipe on that page.",
+	"menu_url_import_unavailable": "URL import isn't available right now. Try again later."
 }
