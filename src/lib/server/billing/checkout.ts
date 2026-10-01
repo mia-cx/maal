@@ -1,11 +1,9 @@
 import type Stripe from 'stripe';
 
-import { projectBillingCapability } from '$lib/domain/billing/capability.js';
-
 import { BillingConflictError } from './errors.js';
 import { requireMaalPrice } from './pricing.js';
 import type { BillingRepository } from './repository.js';
-import { deletionAllowsProjectedSubscription } from './subscription-identity.js';
+import { openStripeSubscriptions } from './subscriptions.js';
 
 export const createMaalCheckout = async (input: {
 	stripe: Stripe;
@@ -27,22 +25,6 @@ export const createMaalCheckout = async (input: {
 	if (deletion !== null && deletion.state !== 'recovered') {
 		throw new BillingConflictError('household_deletion_pending');
 	}
-	if (existing && deletionAllowsProjectedSubscription(deletion, existing)) {
-		const capability = projectBillingCapability(
-			{
-				householdId: input.householdId,
-				status: existing.status,
-				subscriberUserId: existing.subscriberUserId,
-				stripePriceId: existing.stripePriceId,
-				currentPeriodEnd: existing.currentPeriodEnd,
-				cancelAtPeriodEnd: existing.cancelAtPeriodEnd,
-				interruptionStartedAt: existing.interruptionStartedAt,
-				graceUntil: existing.graceUntil
-			},
-			input.now
-		);
-		if (capability.state !== 'disabled') throw new BillingConflictError('already_subscribed');
-	}
 
 	const customerId =
 		existing?.stripeCustomerId ??
@@ -55,6 +37,11 @@ export const createMaalCheckout = async (input: {
 				{ idempotencyKey: `maal-customer:${input.householdId}` }
 			)
 		).id;
+	// Stripe, not the projection, decides: a lapsed subscription that Stripe still retries, or a
+	// completed checkout whose webhook has not landed, must be paid or cancelled, never doubled.
+	if ((await openStripeSubscriptions(input.stripe, customerId)).length > 0) {
+		throw new BillingConflictError('already_subscribed');
+	}
 	const session = await input.stripe.checkout.sessions.create(
 		{
 			mode: 'subscription',

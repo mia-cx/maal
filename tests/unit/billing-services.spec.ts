@@ -144,6 +144,9 @@ describe('Stripe subscription projection', () => {
 				repository: repository as never,
 				stripe: {
 					prices: { retrieve: async () => price() },
+					subscriptions: {
+						list: async () => ({ data: [subscription({ id: stripeSubscriptionId })] })
+					},
 					checkout: {
 						sessions: {
 							create: async () => {

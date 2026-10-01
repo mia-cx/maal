@@ -2,6 +2,7 @@ import type Stripe from 'stripe';
 
 import { BillingConflictError } from './errors.js';
 import type { BillingRepository, HouseholdDeletionRow } from './repository.js';
+import { openStripeSubscriptions } from './subscriptions.js';
 
 const RECOVERY_MILLISECONDS = 30 * 24 * 60 * 60 * 1_000;
 
@@ -342,8 +343,30 @@ export const recoverDeletedHousehold = async (input: {
 	});
 };
 
+/** Cancels every subscription Stripe still bills for a household that is about to be purged. */
+const cancelOpenSubscriptions = async (
+	stripe: Stripe,
+	repository: BillingRepository,
+	householdId: string
+): Promise<void> => {
+	const billing = await repository.subscription(householdId);
+	if (!billing) return;
+	for (const subscription of await openStripeSubscriptions(stripe, billing.stripeCustomerId)) {
+		await stripe.subscriptions.cancel(
+			subscription.id,
+			{
+				invoice_now: false,
+				prorate: false,
+				cancellation_details: { comment: 'Household purged after the recovery window' }
+			},
+			{ idempotencyKey: `maal-purge-cancel:${subscription.id}` }
+		);
+	}
+};
+
 export const purgeExpiredHouseholds = async (input: {
 	repository: BillingRepository;
+	stripe: Stripe;
 	now: string;
 	deleteWorkOSOrganization: (householdId: string) => Promise<void>;
 	householdLimit?: number;
@@ -356,6 +379,7 @@ export const purgeExpiredHouseholds = async (input: {
 	const pending: string[] = [];
 	let rowsDeleted = 0;
 	for (const householdId of householdIds) {
+		await cancelOpenSubscriptions(input.stripe, input.repository, householdId);
 		await input.deleteWorkOSOrganization(householdId);
 		const result = await input.repository.purgeHouseholdContentBatch(
 			householdId,

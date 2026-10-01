@@ -612,7 +612,11 @@ export class BillingRepository {
 					last_stripe_event_created_at = excluded.last_stripe_event_created_at,
 					last_stripe_event_id = excluded.last_stripe_event_id,
 					updated_at = excluded.updated_at
-				WHERE billing_subscriptions.last_stripe_event_created_at IS NULL
+				-- One subscription per household: a superseded one never overwrites the current row
+				-- unless the current subscription has ended.
+				WHERE (billing_subscriptions.stripe_subscription_id = excluded.stripe_subscription_id
+					OR billing_subscriptions.status IN ('canceled', 'incomplete_expired'))
+				AND (billing_subscriptions.last_stripe_event_created_at IS NULL
 					OR excluded.last_stripe_event_created_at > billing_subscriptions.last_stripe_event_created_at
 					OR (excluded.last_stripe_event_created_at = billing_subscriptions.last_stripe_event_created_at
 						AND excluded.updated_at > billing_subscriptions.updated_at)
@@ -636,7 +640,7 @@ export class BillingRepository {
 									WHEN 'past_due' THEN 1 WHEN 'paused' THEN 1 ELSE 2 END
 								AND excluded.last_stripe_event_id > COALESCE(billing_subscriptions.last_stripe_event_id, '')
 							)
-						))`
+						)))`
 			)
 			.bind(
 				projection.householdId,

@@ -55,6 +55,7 @@ export const runScheduledMaintenance = async (
 	if (!serverNow) throw new TypeError('Scheduled retention did not return D1 server time.');
 	const householdResult = await purgeExpiredHouseholds({
 		repository: new BillingRepository(database),
+		stripe,
 		now: serverNow,
 		deleteWorkOSOrganization
 	});
