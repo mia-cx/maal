@@ -8,6 +8,7 @@
 		profile,
 		slot,
 		pin = $bindable(''),
+		currentPin = $bindable(''),
 		busy,
 		message,
 		error,
@@ -20,6 +21,7 @@
 		profile: Profile | null;
 		slot: AuthSlotRecord | null;
 		pin: string;
+		currentPin: string;
 		busy: boolean;
 		message: string | null;
 		error: string | null;
@@ -78,6 +80,18 @@
 					A PIN is a casual gate on this device, not encryption. Background sync can continue.
 				</p>
 			</div>
+			{#if profile.lockPolicy === 'pin'}
+				<Input
+					type="password"
+					inputmode="numeric"
+					pattern="[0-9][0-9][0-9][0-9][0-9]?[0-9]?[0-9]?[0-9]?"
+					maxlength={8}
+					placeholder="Current PIN"
+					bind:value={currentPin}
+					autocomplete="current-password"
+					aria-label="Current profile PIN"
+				/>
+			{/if}
 			<form
 				class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"
 				onsubmit={(event) => {

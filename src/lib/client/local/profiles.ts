@@ -98,14 +98,28 @@ export const addOrUpdateLocalProfile = async (
 	await database.profiles.put(decoded);
 };
 
+const verifyProfilePin = async (profile: Profile, pin: string | undefined): Promise<void> => {
+	if (!pin) throw new ProfilePinRequired({ profileId: profile.profileId });
+	if (!PIN_PATTERN.test(pin) || !profile.pinSalt || !profile.pinVerifier) {
+		throw new ProfilePinInvalid({ profileId: profile.profileId });
+	}
+	const candidate = await derivePinVerifier(pin, decodeBase64Url(profile.pinSalt));
+	if (!equalVerifier(candidate, profile.pinVerifier)) {
+		throw new ProfilePinInvalid({ profileId: profile.profileId });
+	}
+};
+
+/** Profiles that already have a PIN need `currentPin` to change it. */
 export const setProfilePin = async (
 	database: MaalDatabase,
 	profileId: string,
-	pin: string
+	pin: string,
+	currentPin?: string
 ): Promise<void> => {
 	if (!PIN_PATTERN.test(pin)) throw new ProfilePinFormatInvalid();
 	const profile = await database.profiles.get(profileId);
 	if (!profile) throw new LocalProfileMissing({ profileId });
+	if (profile.lockPolicy === 'pin') await verifyProfilePin(profile, currentPin);
 	const salt = crypto.getRandomValues(new Uint8Array(16));
 	const verifier = await derivePinVerifier(pin, salt);
 	await database.transaction('rw', database.profiles, database.uiState, async () => {
@@ -118,13 +132,19 @@ export const setProfilePin = async (
 	});
 };
 
-export const clearProfilePin = async (database: MaalDatabase, profileId: string): Promise<void> => {
-	const changed = await database.profiles.update(profileId, {
+export const clearProfilePin = async (
+	database: MaalDatabase,
+	profileId: string,
+	currentPin?: string
+): Promise<void> => {
+	const profile = await database.profiles.get(profileId);
+	if (!profile) throw new LocalProfileMissing({ profileId });
+	if (profile.lockPolicy === 'pin') await verifyProfilePin(profile, currentPin);
+	await database.profiles.update(profileId, {
 		pinSalt: null,
 		pinVerifier: null,
 		lockPolicy: 'none'
 	});
-	if (!changed) throw new LocalProfileMissing({ profileId });
 	await database.uiState.delete(profileLockKey(profileId));
 };
 
@@ -152,14 +172,7 @@ const assertProfileUnlocked = async (
 	if (profile.lockPolicy !== 'pin') return;
 	const lock = await database.uiState.get(profileLockKey(profile.profileId));
 	if (lock?.value !== true) return;
-	if (!pin) throw new ProfilePinRequired({ profileId: profile.profileId });
-	if (!PIN_PATTERN.test(pin) || !profile.pinSalt || !profile.pinVerifier) {
-		throw new ProfilePinInvalid({ profileId: profile.profileId });
-	}
-	const candidate = await derivePinVerifier(pin, decodeBase64Url(profile.pinSalt));
-	if (!equalVerifier(candidate, profile.pinVerifier)) {
-		throw new ProfilePinInvalid({ profileId: profile.profileId });
-	}
+	await verifyProfilePin(profile, pin);
 };
 
 export const switchActiveProfile = async (
@@ -195,6 +208,14 @@ export const readActiveProfile = async (database: MaalDatabase): Promise<Profile
 	const profileId = (await database.uiState.get(ACTIVE_PROFILE_KEY))?.value;
 	if (typeof profileId !== 'string') return null;
 	return (await database.profiles.get(profileId)) ?? null;
+};
+
+/** The active profile while it sits behind its PIN, otherwise `null`. The app shell shows the lock screen for it. */
+export const readLockedActiveProfile = async (database: MaalDatabase): Promise<Profile | null> => {
+	const profile = await readActiveProfile(database);
+	if (profile?.lockPolicy !== 'pin') return null;
+	const lock = await database.uiState.get(profileLockKey(profile.profileId));
+	return lock?.value === true ? profile : null;
 };
 
 /**

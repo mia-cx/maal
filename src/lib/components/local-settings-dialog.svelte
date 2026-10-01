@@ -18,6 +18,8 @@
 		activeHouseholdKey,
 		clearProfilePin,
 		lockProfile,
+		ProfilePinFormatInvalid,
+		ProfilePinRequired,
 		setProfilePin,
 		switchActiveProfile
 	} from '$lib/client/local/profiles.js';
@@ -86,6 +88,7 @@
 	let switchingProfileId = $state<string | null>(null);
 	let profileError = $state<string | null>(null);
 	let pin = $state('');
+	let currentPin = $state('');
 	let securityBusy = $state(false);
 	let securityMessage = $state<string | null>(null);
 	let securityError = $state<string | null>(null);
@@ -302,37 +305,37 @@
 		}
 	};
 
-	const savePin = async () => {
+	const changePin = async (change: (profileId: string) => Promise<void>, done: string) => {
 		if (!view.activeProfile) return;
 		securityBusy = true;
 		securityMessage = null;
 		securityError = null;
 		try {
-			await setProfilePin(database, view.activeProfile.profileId, pin);
+			await change(view.activeProfile.profileId);
 			pin = '';
-			securityMessage = 'Profile PIN saved.';
-		} catch {
-			securityError = 'Use four to eight numbers for the profile PIN.';
+			currentPin = '';
+			securityMessage = done;
+		} catch (cause) {
+			securityError =
+				cause instanceof ProfilePinFormatInvalid
+					? 'Use four to eight numbers for the profile PIN.'
+					: cause instanceof ProfilePinRequired
+						? 'Enter the current PIN.'
+						: 'The current PIN did not match.';
 		} finally {
 			securityBusy = false;
 		}
 	};
-
-	const removePin = async () => {
-		if (!view.activeProfile) return;
-		securityBusy = true;
-		securityMessage = null;
-		securityError = null;
-		try {
-			await clearProfilePin(database, view.activeProfile.profileId);
-			pin = '';
-			securityMessage = 'Profile PIN removed.';
-		} catch {
-			securityError = 'The profile PIN could not be removed.';
-		} finally {
-			securityBusy = false;
-		}
-	};
+	const savePin = () =>
+		changePin(
+			(profileId) => setProfilePin(database, profileId, pin, currentPin),
+			'Profile PIN saved.'
+		);
+	const removePin = () =>
+		changePin(
+			(profileId) => clearProfilePin(database, profileId, currentPin),
+			'Profile PIN removed.'
+		);
 
 	const lockActiveProfile = async () => {
 		if (!view.activeProfile) return;
@@ -496,6 +499,7 @@
 						profile={view.activeProfile}
 						slot={view.activeSlot}
 						bind:pin
+						bind:currentPin
 						busy={securityBusy}
 						message={securityMessage}
 						error={securityError}

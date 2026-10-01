@@ -203,6 +203,56 @@ test('switches real local profiles with a PIN and changes household data without
 	expect(remoteRequests).toEqual([]);
 });
 
+test('a locked profile hides its data until its PIN or a fresh sign-in opens it', async ({
+	page
+}) => {
+	await seedProfilesAndHousehold(page);
+	const alice = page.getByRole('button', { name: /AD Alice de Vries alice@example\.test/ });
+	const lockScreen = page.getByRole('heading', { name: 'Open Alice de Vries' });
+	const setPin = async (pin: string) => {
+		await page.getByPlaceholder('4 to 8 numbers').fill(pin);
+		await page.getByRole('button', { name: 'Save PIN' }).click();
+	};
+	const lock = async () => {
+		await alice.click();
+		await page.getByRole('menuitem', { name: 'Lock profile' }).click();
+		await expect(lockScreen).toBeVisible();
+	};
+
+	await alice.click();
+	await page.getByRole('menuitem', { name: /Set profile PIN/ }).click();
+	await setPin('4826');
+	await lock();
+	await expect(page.getByTestId('shared-app-shell')).toHaveCount(0);
+	await page.reload();
+	await expect(lockScreen).toBeVisible();
+	await expect(page.getByText('Canal kitchen')).toHaveCount(0);
+
+	await page.getByLabel('Profile PIN').fill('1111');
+	await page.getByRole('button', { name: 'Open profile' }).click();
+	await expect(page.getByText('That PIN did not match.')).toBeVisible();
+	await page.getByLabel('Profile PIN').fill('4826');
+	await page.getByRole('button', { name: 'Open profile' }).click();
+	await expect(page.getByLabel('Name')).toHaveValue('Canal kitchen');
+
+	await alice.click();
+	await page.getByRole('menuitem', { name: /Change profile PIN/ }).click();
+	await setPin('1234');
+	await expect(page.getByText('Enter the current PIN.')).toBeVisible();
+	await page.getByLabel('Current PIN').fill('4826');
+	await setPin('1234');
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+
+	await lock();
+	await page.route('**/api/auth-slots/*/authorize?**', (route) =>
+		route.fulfill({ status: 200, contentType: 'text/plain', body: 'WorkOS sign-in' })
+	);
+	await page.getByRole('button', { name: 'Forgot PIN?' }).click();
+	await expect(page).toHaveURL(
+		/\/api\/auth-slots\/a{32}\/authorize\?purpose=reauthenticate&returnTo=%2Fplan$/
+	);
+});
+
 test('keeps the approved household layout usable at kitchen-tablet and phone widths', async ({
 	page
 }) => {
