@@ -35,21 +35,54 @@ if (
 }
 
 const source = await readFile(schemaPath, 'utf8');
-const names = (kind) => {
-	const pattern = new RegExp(
-		`CREATE\\s+${kind}(?:\\s+IF\\s+NOT\\s+EXISTS)?\\s+(?:"([^"]+)"|\x60([^\x60]+)\x60|\\[([^\\]]+)\\]|([A-Za-z_][A-Za-z0-9_]*))`,
-		'gi'
-	);
-	return [...source.matchAll(pattern)]
-		.map((match) => match[1] ?? match[2] ?? match[3] ?? match[4])
-		.filter((name) => {
-			const normalized = name.toLowerCase();
-			return !normalized.startsWith('sqlite_') && !normalized.startsWith('_cf_');
-		});
+const identifierPattern = `(?:"([^"]+)"|\x60([^\x60]+)\x60|\\[([^\\]]+)\\]|([A-Za-z_][A-Za-z0-9_]*))`;
+const identifierOf = (match) => match[1] ?? match[2] ?? match[3] ?? match[4];
+const createPattern = (kind) =>
+	new RegExp(`CREATE\\s+${kind}(?:\\s+IF\\s+NOT\\s+EXISTS)?\\s+${identifierPattern}`, 'i');
+const isApplicationObject = (name) => {
+	const normalized = name.toLowerCase();
+	return !normalized.startsWith('sqlite_') && !normalized.startsWith('_cf_');
 };
+const names = (kind) =>
+	[...source.matchAll(new RegExp(createPattern(kind), 'gi'))]
+		.map(identifierOf)
+		.filter(isApplicationObject);
+
+// Each table's foreign-key parents. Dropping a parent before its children fails on D1
+// (`no such table: main.<parent>`), even with deferred foreign keys.
+const parents = new Map();
+for (const statement of source.split(/;\s*\n/)) {
+	const table = statement.match(createPattern('TABLE'));
+	if (!table) continue;
+	const name = identifierOf(table).toLowerCase();
+	const references = [...statement.matchAll(new RegExp(`REFERENCES\\s+${identifierPattern}`, 'gi'))]
+		.map((match) => identifierOf(match).toLowerCase())
+		.filter((parent) => parent !== name);
+	parents.set(name, new Set(references));
+}
+const childrenFirst = (tables) => {
+	const remaining = new Set(tables);
+	const ordered = [];
+	while (remaining.size > 0) {
+		const referenced = (table) =>
+			[...remaining].some((child) => parents.get(child.toLowerCase())?.has(table.toLowerCase()));
+		const droppable = [...remaining].filter((table) => !referenced(table)).sort();
+		if (droppable.length === 0) {
+			throw new TypeError(
+				`The schema export has a foreign-key cycle between: ${[...remaining].sort().join(', ')}`
+			);
+		}
+		for (const table of droppable) {
+			ordered.push(table);
+			remaining.delete(table);
+		}
+	}
+	return ordered;
+};
+
 const triggers = [...new Set(names('TRIGGER'))].sort();
 const views = [...new Set(names('VIEW'))].sort();
-const tables = [...new Set([...names('TABLE'), 'd1_migrations'])].sort().reverse();
+const tables = childrenFirst(new Set([...names('TABLE'), 'd1_migrations']));
 if (tables.length === 1)
 	throw new TypeError('The schema export did not contain an application table.');
 const identifier = (name) => `"${name.replaceAll('"', '""')}"`;

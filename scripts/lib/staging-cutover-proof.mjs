@@ -21,6 +21,8 @@ const requiredLiveSettings = [
 
 export const contractProofFiles = [
 	'tests/unit/staging-cutover-proof.spec.ts',
+	'tests/unit/d1-reset-generator.spec.ts',
+	'tests/unit/d1-reset-rehearsal-d1.spec.ts',
 	'tests/unit/auth-slots.spec.ts',
 	'tests/unit/auth-slot-proof-evidence.spec.ts',
 	'tests/unit/billing-capability.spec.ts',
