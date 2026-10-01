@@ -300,6 +300,7 @@
 			return;
 		}
 		addMealBusy = true;
+		addMealError = null;
 		try {
 			const meal = await onimporturl(url, addMealDate);
 			scheduleMeals = [...scheduleMeals, meal];
