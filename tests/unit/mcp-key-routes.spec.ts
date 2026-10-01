@@ -1,7 +1,7 @@
 import type { Miniflare } from 'miniflare';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-import { createMcpTestDatabase, seedMcpHousehold } from './mcp-test-helpers.js';
+import { MCP_TEST_NOW, createMcpTestDatabase, seedMcpHousehold } from './mcp-test-helpers.js';
 
 const authenticateSyncSlot = vi.hoisted(() =>
 	vi.fn(async () => ({
@@ -48,11 +48,17 @@ const routeEvent = (method: string, body?: unknown) =>
 	}) as never;
 
 beforeEach(async () => {
+	// Paid eligibility and key expiry must not depend on when CI runs.
+	vi.useFakeTimers({ toFake: ['Date'] });
+	vi.setSystemTime(new Date(MCP_TEST_NOW));
 	({ miniflare, database } = await createMcpTestDatabase());
 	await seedMcpHousehold(database);
 });
 
-afterEach(async () => miniflare.dispose());
+afterEach(async () => {
+	await miniflare.dispose();
+	vi.useRealTimers();
+});
 
 describe('MCP key management routes', () => {
 	test('gates create and reroll on current paid service but leaves list and revoke available', async () => {

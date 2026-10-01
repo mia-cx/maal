@@ -3,7 +3,7 @@ import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
 import { Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.js';
 import { acquireSyncLease, renewSyncLease } from '$lib/client/local/leases.js';
@@ -49,6 +49,12 @@ const timestamp = '2026-08-21T12:00:00.000Z' as const;
 const userId = 'user_alice';
 const authSlotId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
+beforeEach(() => {
+	// Pin subscription validity without intercepting Dexie or coordinator timers.
+	vi.useFakeTimers({ toFake: ['Date'] });
+	vi.setSystemTime(new Date(timestamp));
+});
+
 const openDatabase = async (): Promise<MaalDatabase> => {
 	const database = await openMaalDatabase(`user-sync-${crypto.randomUUID()}`);
 	databases.push(database);
@@ -62,6 +68,7 @@ afterEach(async () => {
 		await Dexie.delete(name);
 	}
 	databases.length = 0;
+	vi.useRealTimers();
 });
 
 const environment = (

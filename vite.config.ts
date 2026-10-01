@@ -5,6 +5,22 @@ import { defineConfig } from 'vitest/config';
 import adapter from '@sveltejs/adapter-cloudflare';
 import { sveltekit } from '@sveltejs/kit/vite';
 
+// Miniflare starts workerd processes. Keep these suites out of the parallel
+// unit/browser pool so runner contention cannot consume their assertion budget.
+const d1TestFiles = [
+	'tests/unit/*-d1.spec.ts',
+	'tests/unit/d1-schema-baseline.spec.ts',
+	'tests/unit/billing-live-membership.spec.ts',
+	'tests/unit/billing-trial-maintenance.spec.ts',
+	'tests/unit/billing-deletion-reconciliation.spec.ts',
+	'tests/unit/household-retention.spec.ts',
+	'tests/unit/meal-check-in-recovery.spec.ts',
+	'tests/unit/scheduled-retention.spec.ts',
+	'tests/unit/mcp-key-routes.spec.ts',
+	'tests/unit/mcp-authorization.spec.ts',
+	'tests/unit/recipe-url-import.spec.ts'
+];
+
 export default defineConfig({
 	plugins: [
 		tailwindcss(),
@@ -59,7 +75,20 @@ export default defineConfig({
 					name: 'server',
 					environment: 'node',
 					include: ['src/**/*.{test,spec}.{js,ts}', 'tests/unit/**/*.{test,spec}.{js,ts}'],
-					exclude: ['src/**/*.svelte.{test,spec}.{js,ts}']
+					exclude: ['src/**/*.svelte.{test,spec}.{js,ts}', ...d1TestFiles]
+				}
+			},
+			{
+				extends: './vite.config.ts',
+				test: {
+					name: 'd1',
+					environment: 'node',
+					include: d1TestFiles,
+					fileParallelism: false,
+					sequence: { groupOrder: 1 },
+					// These are integration checks, not five-second performance budgets.
+					testTimeout: 30_000,
+					hookTimeout: 30_000
 				}
 			},
 			{
