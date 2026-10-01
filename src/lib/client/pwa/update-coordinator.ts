@@ -27,6 +27,9 @@ export interface PwaUpdateState {
 }
 
 type Listener = (state: PwaUpdateState) => void;
+type PrepareUpdateMessage = Extract<UpdateChannelMessage, { type: 'PREPARE_UPDATE' }>;
+
+const UPDATING_STATUSES: ReadonlySet<PwaUpdateStatus> = new Set(['preparing', 'waiting-for-tabs']);
 
 interface UpdateWorker {
 	readonly scriptURL: string;
@@ -111,7 +114,8 @@ export class PwaUpdateCoordinator {
 	#peers = new Map<string, number>();
 	#readyTabs = new Set<string>();
 	#commitPauseReasons = new Set<string>();
-	#requestId: string | null = null;
+	/** The update request this tab started, re-sent to any tab that is not ready yet. */
+	#request: PrepareUpdateMessage | null = null;
 	#heartbeat: ReturnType<typeof setInterval> | null = null;
 	#activationTimeout: ReturnType<typeof setTimeout> | null = null;
 	#unsubscribeDatabaseEvents: (() => void) | null = null;
@@ -147,9 +151,7 @@ export class PwaUpdateCoordinator {
 				this.#announceUpdate(event.data.version, event.data.critical);
 			};
 			const handleControllerChange = () => {
-				if (!this.#started || !['preparing', 'waiting-for-tabs'].includes(this.#state.status)) {
-					return;
-				}
+				if (!this.#started || !this.#updating()) return;
 				this.#post({
 					type: 'RELOAD',
 					tabId: this.tabId,
@@ -181,7 +183,7 @@ export class PwaUpdateCoordinator {
 			if (!this.#started || lifecycle !== this.#lifecycle) return;
 			this.#registration = registration;
 			this.#watchRegistration(registration);
-			if (registration.waiting) {
+			if (registration.waiting && !this.#updating()) {
 				if (this.#state.critical && this.#state.version) void this.activate();
 				else registration.waiting.postMessage({ type: 'GET_VERSION' });
 			}
@@ -212,28 +214,32 @@ export class PwaUpdateCoordinator {
 		this.#channel?.close();
 		this.#channel = null;
 		this.#registration = null;
-		this.#requestId = null;
+		this.#request = null;
 		this.#readyTabs.clear();
 		this.#peers.clear();
-		for (const reason of this.#commitPauseReasons) this.#runtime.resumeCommits(reason);
-		this.#commitPauseReasons.clear();
+		this.#resumeCommits();
 	}
 
 	async activate(): Promise<void> {
 		if (!this.#state.version || !this.#registration?.waiting) return;
-		const requestId = this.#runtime.createId();
-		this.#requestId = requestId;
 		this.#readyTabs.clear();
 		this.#setState({ ...this.#state, status: 'preparing', message: 'Finishing local changes…' });
-		const message: UpdateChannelMessage = {
+		const message: PrepareUpdateMessage = {
 			type: 'PREPARE_UPDATE',
 			tabId: this.tabId,
-			requestId,
+			requestId: this.#runtime.createId(),
 			version: this.#state.version,
 			critical: this.#state.critical
 		};
+		this.#request = message;
 		this.#post(message);
 		await this.#prepareTab(message);
+	}
+
+	/** Abandons the pending update in every tab, so local saving resumes everywhere. */
+	cancel(): void {
+		this.#post({ type: 'CANCEL_UPDATE', tabId: this.tabId });
+		this.#abandonUpdate();
 	}
 
 	#watchRegistration(registration: UpdateRegistration): void {
@@ -257,6 +263,7 @@ export class PwaUpdateCoordinator {
 	}
 
 	#announceUpdate(version: string, critical: boolean): void {
+		if (this.#updating()) return;
 		this.#setState({ status: 'available', version, critical, message: null });
 		this.#post({ type: 'UPDATE_AVAILABLE', tabId: this.tabId, version, critical });
 		if (critical) void this.activate();
@@ -268,6 +275,8 @@ export class PwaUpdateCoordinator {
 		switch (value.type) {
 			case 'HEARTBEAT':
 				this.#peers.set(value.tabId, value.sentAt);
+				// A tab opened after PREPARE_UPDATE went out still has to drain before activation.
+				if (this.#request && !this.#readyTabs.has(value.tabId)) this.#post(this.#request);
 				break;
 			case 'UPDATE_AVAILABLE':
 				if (this.#state.status === 'idle') {
@@ -283,12 +292,15 @@ export class PwaUpdateCoordinator {
 				void this.#prepareTab(value);
 				break;
 			case 'UPDATE_READY':
-				if (value.requestId === this.#requestId) {
+				if (value.requestId === this.#request?.requestId) {
 					this.#readyTabs.add(value.tabId);
 					this.#tryActivation();
 				}
 				break;
 			case 'UPDATE_PREPARING':
+				break;
+			case 'CANCEL_UPDATE':
+				this.#abandonUpdate();
 				break;
 			case 'RELOAD':
 				this.#runtime.reload();
@@ -296,9 +308,7 @@ export class PwaUpdateCoordinator {
 		}
 	}
 
-	async #prepareTab(
-		message: Extract<UpdateChannelMessage, { type: 'PREPARE_UPDATE' }>
-	): Promise<void> {
+	async #prepareTab(message: PrepareUpdateMessage): Promise<void> {
 		if (!this.#started) return;
 		const lifecycle = this.#lifecycle;
 		if (message.tabId !== this.tabId) {
@@ -317,6 +327,7 @@ export class PwaUpdateCoordinator {
 		});
 		await this.#runtime.drainCommits();
 		if (!this.#started || lifecycle !== this.#lifecycle) return;
+		if (!this.#commitPauseReasons.has(pauseReason)) return;
 		if (message.tabId === this.tabId) {
 			this.#readyTabs.add(this.tabId);
 			if (this.#activationTimeout !== null) {
@@ -332,7 +343,8 @@ export class PwaUpdateCoordinator {
 	}
 
 	#tryActivation(): void {
-		if (!this.#requestId || !this.#registration?.waiting || !this.#state.version) return;
+		if (!this.#request || !this.#readyTabs.has(this.tabId)) return;
+		if (!this.#registration?.waiting || !this.#state.version) return;
 		const now = this.#runtime.now();
 		const livePeers = [...this.#peers]
 			.filter(([, seenAt]) => now - seenAt <= LIVE_TAB_MS)
@@ -358,6 +370,26 @@ export class PwaUpdateCoordinator {
 		}
 		this.#post({ type: 'HEARTBEAT', tabId: this.tabId, sentAt: now });
 		if (this.#state.status === 'waiting-for-tabs') this.#tryActivation();
+	}
+
+	#abandonUpdate(): void {
+		this.#request = null;
+		this.#readyTabs.clear();
+		if (this.#activationTimeout !== null) {
+			this.#runtime.timers.clearTimeout(this.#activationTimeout);
+			this.#activationTimeout = null;
+		}
+		this.#resumeCommits();
+		if (this.#updating()) this.#setState({ ...this.#state, status: 'available', message: null });
+	}
+
+	#resumeCommits(): void {
+		for (const reason of this.#commitPauseReasons) this.#runtime.resumeCommits(reason);
+		this.#commitPauseReasons.clear();
+	}
+
+	#updating(): boolean {
+		return UPDATING_STATUSES.has(this.#state.status);
 	}
 
 	#post(message: UpdateChannelMessage): void {

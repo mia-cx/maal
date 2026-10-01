@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from 'vitest';
 import {
 	PwaUpdateCoordinator,
 	type PwaUpdateRuntime,
+	type PwaUpdateState,
 	type PwaUpdateTimers
 } from '$lib/client/pwa/update-coordinator.js';
 
@@ -157,6 +158,39 @@ const runtimeFor = (
 	...overrides
 });
 
+/** Tabs that share one channel and one waiting worker, on the global (fakeable) timers. */
+class UpdateTabs {
+	readonly hub = new FakeChannelHub();
+	readonly waiting = new FakeWorker();
+	readonly registration = new FakeRegistration(this.waiting);
+	#nextId = 0;
+
+	open(drainCommits: () => Promise<void> = async () => undefined) {
+		const serviceWorkers = new FakeServiceWorkers(Promise.resolve(this.registration));
+		const paused: string[] = [];
+		const resumed: string[] = [];
+		const coordinator = new PwaUpdateCoordinator({
+			serviceWorker: serviceWorkers,
+			createChannel: () => this.hub.create(),
+			createId: () => `id-${++this.#nextId}`,
+			now: () => Date.now(),
+			timers: {
+				setInterval: (callback, delay) => setInterval(callback, delay),
+				clearInterval: (handle) => clearInterval(handle),
+				setTimeout: (callback, delay) => setTimeout(callback, delay),
+				clearTimeout: (handle) => clearTimeout(handle)
+			},
+			pauseCommits: (reason) => paused.push(reason),
+			resumeCommits: (reason) => resumed.push(reason),
+			drainCommits,
+			reload: () => undefined
+		});
+		let state: PwaUpdateState | null = null;
+		coordinator.subscribe((next) => (state = next));
+		return { coordinator, serviceWorkers, paused, resumed, status: () => state?.status };
+	}
+}
+
 describe('PWA update coordination', () => {
 	test('does not activate until every live tab has drained its local commits', async () => {
 		const hub = new FakeChannelHub();
@@ -270,6 +304,97 @@ describe('PWA update coordination', () => {
 		expect(serviceWorkers.listenerCount('message')).toBe(1);
 		expect(registration.listeners).toHaveLength(1);
 		coordinator.dispose();
+	});
+
+	test('prepares a tab that opens mid-update so the update can still activate', async () => {
+		vi.useFakeTimers();
+		try {
+			const tabs = new UpdateTabs();
+			const first = tabs.open();
+			await first.coordinator.start();
+			first.serviceWorkers.emitMessage({
+				type: 'UPDATE_WAITING',
+				version: 'build-2',
+				critical: false
+			});
+			await first.coordinator.activate();
+			const late = tabs.open();
+			await late.coordinator.start();
+			late.serviceWorkers.emitMessage({
+				type: 'UPDATE_WAITING',
+				version: 'build-2',
+				critical: false
+			});
+			await vi.advanceTimersByTimeAsync(1_000);
+
+			expect(late.paused).toHaveLength(1);
+			expect(late.status()).toBe('preparing');
+			expect(tabs.waiting.messages).toContainEqual({ type: 'SKIP_WAITING', version: 'build-2' });
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	test('waits for the initiating tab to drain even when every peer is ready first', async () => {
+		vi.useFakeTimers();
+		try {
+			const tabs = new UpdateTabs();
+			const ownDrain = deferred();
+			const first = tabs.open(() => ownDrain.promise);
+			const peer = tabs.open();
+			await Promise.all([first.coordinator.start(), peer.coordinator.start()]);
+			first.serviceWorkers.emitMessage({
+				type: 'UPDATE_WAITING',
+				version: 'build-2',
+				critical: false
+			});
+			void first.coordinator.activate();
+			await vi.advanceTimersByTimeAsync(6_000);
+			expect(tabs.waiting.messages).not.toContainEqual({
+				type: 'SKIP_WAITING',
+				version: 'build-2'
+			});
+
+			ownDrain.resolve();
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect(tabs.waiting.messages).toContainEqual({ type: 'SKIP_WAITING', version: 'build-2' });
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	test('cancelling a waiting update resumes local commits in every tab', async () => {
+		vi.useFakeTimers();
+		try {
+			const tabs = new UpdateTabs();
+			const stuckDrain = deferred();
+			const first = tabs.open();
+			const stuck = tabs.open(() => stuckDrain.promise);
+			await Promise.all([first.coordinator.start(), stuck.coordinator.start()]);
+			first.serviceWorkers.emitMessage({
+				type: 'UPDATE_WAITING',
+				version: 'build-2',
+				critical: false
+			});
+			await first.coordinator.activate();
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect(first.status()).toBe('waiting-for-tabs');
+
+			first.coordinator.cancel();
+			stuckDrain.resolve();
+			await vi.advanceTimersByTimeAsync(6_000);
+
+			expect(first.status()).toBe('available');
+			expect(stuck.status()).toBe('available');
+			expect(first.resumed).toEqual(first.paused);
+			expect(stuck.resumed).toEqual(stuck.paused);
+			expect(tabs.waiting.messages).not.toContainEqual({
+				type: 'SKIP_WAITING',
+				version: 'build-2'
+			});
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	test('cancels delayed activation and an unresolved startup when stopped', async () => {
