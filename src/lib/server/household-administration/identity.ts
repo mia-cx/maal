@@ -1,6 +1,7 @@
 import { WorkOS } from '@workos-inc/node';
 
-import type { HouseholdRole } from '$lib/domain/household/contracts.js';
+import type { HouseholdPermission, HouseholdRole } from '$lib/domain/household/contracts.js';
+import { expandWorkOSPermissions } from '$lib/domain/household/permissions.js';
 import { readAuthSlotConfig } from '$lib/server/auth-slots/config.js';
 
 import { HouseholdAdministrationError } from './errors.js';
@@ -17,7 +18,8 @@ export interface IdentityMembership {
 	readonly householdId: string;
 	readonly workosUserId: string;
 	readonly roleSlug: HouseholdRole;
-	readonly permissions: readonly string[];
+	/** Already expanded by `expandWorkOSPermissions`. */
+	readonly permissions: readonly HouseholdPermission[];
 	readonly directoryManaged: boolean;
 	readonly createdAt: string;
 	readonly updatedAt: string;
@@ -76,15 +78,15 @@ export const createWorkOSHouseholdIdentityAdapter = (
 	const permissionsFor = async (
 		householdId: string,
 		roleSlugs: readonly string[]
-	): Promise<readonly string[]> => {
-		const permissions = new Set<string>();
+	): Promise<readonly HouseholdPermission[]> => {
+		const permissions: string[] = [];
 		for (const roleSlug of new Set(roleSlugs)) {
 			const role = await workos.authorization
 				.getOrganizationRole(householdId, roleSlug)
 				.catch(() => workos.authorization.getEnvironmentRole(roleSlug));
-			for (const permission of role.permissions) permissions.add(permission);
+			permissions.push(...role.permissions);
 		}
-		return [...permissions].sort();
+		return expandWorkOSPermissions(permissions);
 	};
 
 	const mapMembership = async (membership: {

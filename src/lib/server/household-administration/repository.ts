@@ -6,6 +6,7 @@ import type {
 	Membership
 } from '$lib/domain/household/contracts.js';
 import type { CreateRemoteHouseholdRequest } from '$lib/domain/household/administration.js';
+import { expandWorkOSPermissions } from '$lib/domain/household/permissions.js';
 
 import { HouseholdAdministrationError, asHouseholdAdministrationError } from './errors.js';
 import type { IdentityMembership } from './identity.js';
@@ -70,14 +71,7 @@ export const membershipFromRow = (row: MembershipRow): Membership => ({
 	householdId: row.household_id,
 	workosUserId: row.workos_user_id,
 	roleSlug: row.role_slug,
-	permissions: permissionsFrom(row.permissions).filter(
-		(permission): permission is Membership['permissions'][number] =>
-			permission === 'households:write' ||
-			permission === 'recipes:read' ||
-			permission === 'recipes:write' ||
-			permission === 'meals:read' ||
-			permission === 'meals:write'
-	),
+	permissions: expandWorkOSPermissions(permissionsFrom(row.permissions)),
 	status:
 		row.status === 'active' || row.status === 'detached' || row.status === 'revoked'
 			? row.status

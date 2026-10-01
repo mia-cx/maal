@@ -8,6 +8,7 @@ import {
 	d1UserSyncCapabilityAuthorizer,
 	pullUserSync
 } from '$lib/server/sync/index.js';
+import type { LiveWorkOSMembership } from '$lib/server/auth-slots/adapter.js';
 import type { SyncMutation } from '$lib/sync/contracts.js';
 import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js';
 
@@ -15,7 +16,7 @@ const userId = 'user_alice';
 const timestamp = '2026-08-21T12:00:00.000Z' as const;
 let miniflare: Miniflare;
 let database: D1Database;
-const liveMembership = (overrides: Record<string, unknown> = {}) => ({
+const liveMembership = (overrides: Partial<LiveWorkOSMembership> = {}): LiveWorkOSMembership => ({
 	membershipId: 'membership_paid',
 	householdId: 'org_paid',
 	householdName: 'Paid',

@@ -1,5 +1,7 @@
 import { WorkOS } from '@workos-inc/node';
 import type { AuthSlotId, AuthSlotStatus } from '$lib/auth-slots';
+import type { HouseholdPermission } from '$lib/domain/household/contracts.js';
+import { expandWorkOSPermissions } from '$lib/domain/household/permissions.js';
 
 export interface AuthenticatedSlot {
 	readonly authenticated: true;
@@ -26,7 +28,8 @@ export interface LiveWorkOSMembership {
 	readonly householdId: string;
 	readonly householdName: string;
 	readonly roleSlug: string;
-	readonly permissions: readonly string[];
+	/** Already expanded by `expandWorkOSPermissions`. */
+	readonly permissions: readonly HouseholdPermission[];
 	readonly directoryManaged?: boolean;
 	readonly workosCreatedAt?: string;
 }
@@ -155,7 +158,7 @@ export function createWorkOSAuthSlotAdapter(config: AuthSlotServerConfig): AuthS
 						householdId: membership.organizationId,
 						householdName: membership.organizationName,
 						roleSlug: membership.role.slug,
-						permissions: role.permissions,
+						permissions: expandWorkOSPermissions(role.permissions),
 						directoryManaged: membership.directoryManaged,
 						workosCreatedAt: membership.createdAt
 					};

@@ -31,7 +31,7 @@ let repository: McpKeyRepository;
 const membership = (
 	householdId = MCP_TEST_HOUSEHOLD,
 	membershipId = `membership_${householdId}`,
-	permissions: readonly string[] = MCP_TEST_PERMISSIONS
+	permissions: LiveWorkOSMembership['permissions'] = MCP_TEST_PERMISSIONS
 ): LiveWorkOSMembership => ({
 	membershipId,
 	householdId,

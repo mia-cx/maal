@@ -12,6 +12,7 @@ import {
 	pullHouseholdSync,
 	pushHouseholdSync
 } from '$lib/server/sync/index.js';
+import type { LiveWorkOSMembership } from '$lib/server/auth-slots/adapter.js';
 import type { HouseholdSyncMutation } from '$lib/sync/household-contracts.js';
 import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js';
 
@@ -22,7 +23,7 @@ const timestamp = '2026-08-21T12:00:00.000Z' as const;
 const deviceId = uuidv7();
 let miniflare: Miniflare;
 let database: D1Database;
-const liveMembership = (overrides: Record<string, unknown> = {}) => ({
+const liveMembership = (overrides: Partial<LiveWorkOSMembership> = {}): LiveWorkOSMembership => ({
 	membershipId: 'membership_alice',
 	householdId,
 	householdName: 'Family',
