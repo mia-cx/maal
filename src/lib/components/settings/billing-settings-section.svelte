@@ -18,6 +18,7 @@
 		BillingPrice,
 		BillingProjectionEnvelope
 	} from '$lib/domain/billing/contracts.js';
+	import { hasCachedPermission } from '$lib/domain/household/permissions.js';
 
 	let {
 		database,
@@ -57,7 +58,10 @@
 				? `Grace period · through ${new Date(capability.graceUntil!).toLocaleDateString()}`
 				: 'No active plan'
 	);
-	const ownsBilling = $derived(capability?.subscriberUserId === workosUserId);
+	let canManage = $state(false);
+	const hasPlan = $derived(capability?.state === 'enabled' || capability?.state === 'grace');
+	// The Worker opens the portal only for the billing owner, and only while they can manage.
+	const ownsBilling = $derived(canManage && capability?.subscriberUserId === workosUserId);
 
 	const useProjection = (projection: BillingProjectionEnvelope) => {
 		capability = projection.capability;
@@ -80,12 +84,17 @@
 
 	onMount(() => {
 		const subscription = liveQuery(async () => {
-			const [nextCapability, meta] = await Promise.all([
+			const [nextCapability, meta, membership] = await Promise.all([
 				database.billingCapabilities.get(householdId),
-				database.remoteProjectionMeta.get(`billing:${householdId}`)
+				database.remoteProjectionMeta.get(`billing:${householdId}`),
+				database.memberships
+					.where('[householdId+workosUserId]')
+					.equals([householdId, workosUserId])
+					.first()
 			]);
 			const value = meta?.value;
 			return {
+				canManage: hasCachedPermission(membership, 'households:write'),
 				capability: nextCapability ?? null,
 				prices:
 					typeof value === 'object' &&
@@ -101,6 +110,7 @@
 					value.trialAvailable === true
 			};
 		}).subscribe((value) => {
+			canManage = value.canManage;
 			capability = value.capability;
 			prices = value.prices;
 			trialAvailable = value.trialAvailable;
@@ -192,15 +202,17 @@
 				<p class="truncate text-xs text-muted-foreground">{capabilityLabel}</p>
 			</div>
 			<div class="flex flex-wrap gap-2">
-				{#if capability?.state === 'enabled' || capability?.state === 'grace'}
-					{#if ownsBilling}
-						<Button variant="outline" size="sm" disabled={busy} onclick={() => void portal()}>
-							{busy ? 'Opening…' : 'Manage subscription'}
-						</Button>
-					{/if}
-				{:else if prices.length === 0}
+				{#if ownsBilling}
+					<Button variant="outline" size="sm" disabled={busy} onclick={() => void portal()}>
+						{busy ? 'Opening…' : 'Manage subscription'}
+					</Button>
+				{:else if canManage && !hasPlan && prices.length === 0}
 					<Button variant="outline" size="sm" disabled={busy} onclick={() => void refresh()}>
 						{busy ? 'Loading…' : 'See plans'}
+					</Button>
+				{:else}
+					<Button variant="outline" size="sm" disabled={busy} onclick={() => void refresh()}>
+						{busy ? 'Loading…' : 'Refresh'}
 					</Button>
 				{/if}
 			</div>
@@ -215,7 +227,7 @@
 			</p>
 		{/if}
 
-		{#if capability?.state !== 'enabled' && capability?.state !== 'grace' && prices.length > 0}
+		{#if canManage && !hasPlan && prices.length > 0}
 			<BillingPlanPicker
 				pricing={prices}
 				{trialAvailable}

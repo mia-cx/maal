@@ -28,6 +28,7 @@
 		householdName: string;
 		localOnly: boolean;
 		canManage: boolean;
+		ownsBilling: boolean;
 		capability: BillingCapability | null;
 		prices: readonly BillingPrice[];
 		trialAvailable: boolean;
@@ -70,17 +71,20 @@
 		]);
 		if (!household) return null;
 		const value = projection?.value;
+		const canManage =
+			household.localOnly ||
+			Boolean(
+				membership?.status === 'active' &&
+				(membership.roleSlug === 'admin' || membership.permissions.includes('households:write'))
+			);
 		return {
 			profileId,
 			householdId,
 			householdName: household.name,
 			localOnly: household.localOnly,
-			canManage:
-				household.localOnly ||
-				Boolean(
-					membership?.status === 'active' &&
-					(membership.roleSlug === 'admin' || membership.permissions.includes('households:write'))
-				),
+			canManage,
+			// The Worker opens the portal only for the billing owner.
+			ownsBilling: canManage && capability?.subscriberUserId === profile.workosUserId,
 			capability: capability ?? null,
 			prices:
 				typeof value === 'object' &&
@@ -219,9 +223,11 @@
 			<div class="grid justify-items-center gap-3 text-center">
 				<p class="text-sm text-muted-foreground">{view.householdName} already has Maal service.</p>
 				<div class="flex flex-wrap justify-center gap-2">
-					<Button disabled={busy} onclick={() => void portal()}>
-						{busy ? 'Opening…' : 'Manage subscription'}
-					</Button>
+					{#if view.ownsBilling}
+						<Button disabled={busy} onclick={() => void portal()}>
+							{busy ? 'Opening…' : 'Manage subscription'}
+						</Button>
+					{/if}
 					<Button variant="outline" onclick={() => goto(resolve('/plan'))}>Back to meal plan</Button
 					>
 				</div>
