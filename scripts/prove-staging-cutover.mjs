@@ -3,12 +3,15 @@ import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import authSlotConfig from '../playwright.auth-slots.config.ts';
 import {
+	STAGING_WRANGLER_CONFIG,
 	assertPassingAuthProof,
 	assertPassingBillingProof,
 	assertPassingBooleanProof,
 	contractProofFiles,
 	safeCommandEvidence,
+	selectAuthSlotProjects,
 	summarizeAuthEvidence,
 	summarizeBillingEvidence,
 	summarizeBooleanProof,
@@ -17,12 +20,16 @@ import {
 } from './lib/staging-cutover-proof.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const [command = 'help'] = process.argv.slice(2);
+const [command = 'help', ...flags] = process.argv.slice(2);
+const unknownFlags = flags.filter((flag) => !(command === 'live' && flag === '--skip-webkit'));
+if (unknownFlags.length > 0) {
+	throw new Error(`Unknown staging proof option for ${command}: ${unknownFlags.join(' ')}`);
+}
 
 switch (command) {
 	case 'preflight': {
 		const config = await validateLiveEnvironment(process.env, root);
-		await assertIgnored(config.wranglerConfigPath);
+		await assertCommittedWranglerConfig();
 		process.stdout.write(
 			`${JSON.stringify(
 				{
@@ -72,7 +79,15 @@ switch (command) {
 	}
 	case 'live': {
 		const config = await validateLiveEnvironment(process.env, root);
-		await assertIgnored(config.wranglerConfigPath);
+		await assertCommittedWranglerConfig();
+		const authSlotProjects = selectAuthSlotProjects(authSlotConfig.projects, {
+			skipWebkit: flags.includes('--skip-webkit')
+		});
+		if (authSlotProjects.skipReason) {
+			process.stderr.write(
+				`Skipping auth-slot projects ${authSlotProjects.skippedProjects.join(', ')} (${authSlotProjects.skipReason}). The evidence records this.\n`
+			);
+		}
 		const startedAt = new Date().toISOString();
 		const output = config.evidencePath;
 		const providerEnvironment = {
@@ -94,7 +109,14 @@ switch (command) {
 		const authHosted = summarizeAuthEvidence(
 			await runJson('pnpm', ['test:proof:auth-slots:hosted'], providerEnvironment)
 		);
-		await run('pnpm', ['test:proof:auth-slots'], { env: providerEnvironment });
+		await run(
+			'pnpm',
+			[
+				'test:proof:auth-slots',
+				...authSlotProjects.projects.map((project) => `--project=${project}`)
+			],
+			{ env: providerEnvironment }
+		);
 		const billing = summarizeBillingEvidence(
 			await runJson('pnpm', ['test:proof:billing'], providerEnvironment)
 		);
@@ -127,7 +149,11 @@ switch (command) {
 				finishedAt: new Date().toISOString()
 			}),
 			gates: {
-				retainedSlots: { directApi: authApi, hostedAuthKit: authHosted, deployedRoute: 'passed' },
+				retainedSlots: {
+					directApi: authApi,
+					hostedAuthKit: authHosted,
+					deployedRoute: { result: 'passed', ...authSlotProjects }
+				},
 				billing,
 				runtime,
 				freeUse
@@ -143,10 +169,11 @@ switch (command) {
 	case 'help':
 		process.stdout.write(
 			[
-				'Usage: pnpm proof:staging <preflight|contracts|live>',
+				'Usage: pnpm proof:staging <preflight|contracts|live [--skip-webkit]>',
 				'  preflight  validate staging-only operator inputs without printing them',
 				'  contracts  run the local release-gate matrix and write sanitized evidence',
-				'  live       run disposable provider and deployed-runtime proofs'
+				'  live       run disposable provider and deployed-runtime proofs',
+				'             --skip-webkit: this host cannot launch WebKit; skip and record those projects'
 			].join('\n') + '\n'
 		);
 		break;
@@ -154,10 +181,12 @@ switch (command) {
 		throw new Error(`Unknown staging proof command: ${command}`);
 }
 
-async function assertIgnored(path) {
-	const result = await run('git', ['check-ignore', '--quiet', path], { reject: false });
+async function assertCommittedWranglerConfig() {
+	const result = await run('git', ['diff', '--quiet', 'HEAD', '--', STAGING_WRANGLER_CONFIG], {
+		reject: false
+	});
 	if (result !== 0) {
-		throw new Error('MAAL_STAGING_WRANGLER_CONFIG must be ignored by Git.');
+		throw new Error(`${STAGING_WRANGLER_CONFIG} must match the candidate commit.`);
 	}
 }
 

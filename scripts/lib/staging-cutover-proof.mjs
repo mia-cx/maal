@@ -1,13 +1,17 @@
-import { mkdir, open, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 export const STAGING_CONFIRMATION = 'create-and-remove-disposable-staging-fixtures';
+
+/** The committed config that deploy, migrations, and the runtime proof's D1 commands all use. */
+export const STAGING_WRANGLER_CONFIG = 'wrangler.jsonc';
 
 const requiredLiveSettings = [
 	'MAAL_STAGING_BASE_URL',
 	'MAAL_STAGING_DEPLOYMENT_LABEL',
 	'MAAL_STAGING_DATABASE_NAME',
-	'MAAL_STAGING_WRANGLER_CONFIG',
+	// Wrangler sees several accounts and the committed config names none.
+	'CLOUDFLARE_ACCOUNT_ID',
 	'MAAL_STAGING_FIXTURE_FILE',
 	'MAAL_STAGING_EVIDENCE_FILE',
 	'WORKOS_API_KEY',
@@ -92,17 +96,16 @@ export const validateLiveEnvironment = async (environment, repositoryRoot) => {
 	if (environment.MAAL_STAGING_DATABASE_NAME !== 'maal-staging') {
 		throw new Error('Staging proof only accepts MAAL_STAGING_DATABASE_NAME=maal-staging.');
 	}
+	if (!/^[0-9a-f]{32}$/.test(environment.CLOUDFLARE_ACCOUNT_ID)) {
+		throw new Error('CLOUDFLARE_ACCOUNT_ID must be a 32-character Cloudflare account ID.');
+	}
 
 	const baseUrl = validateStagingOrigin(environment.MAAL_STAGING_BASE_URL);
 	if (!/^[-a-zA-Z0-9_.]{1,80}$/.test(environment.MAAL_STAGING_DEPLOYMENT_LABEL)) {
 		throw new Error('MAAL_STAGING_DEPLOYMENT_LABEL must be a short non-secret label.');
 	}
 
-	const configPath = resolve(repositoryRoot, environment.MAAL_STAGING_WRANGLER_CONFIG);
-	const configStats = await stat(configPath).catch(() => null);
-	if (!configStats?.isFile()) {
-		throw new Error('MAAL_STAGING_WRANGLER_CONFIG must name an existing ignored Wrangler file.');
-	}
+	const configPath = resolve(repositoryRoot, STAGING_WRANGLER_CONFIG);
 	await validateWranglerStagingConfig(configPath);
 	const fixturePath = privatePath(
 		environment.MAAL_STAGING_FIXTURE_FILE,
@@ -134,7 +137,7 @@ const validateWranglerStagingConfig = async (path) => {
 	try {
 		configuration = JSON.parse(await readFile(path, 'utf8'));
 	} catch {
-		throw new Error('MAAL_STAGING_WRANGLER_CONFIG must contain valid JSON-compatible JSONC.');
+		throw new Error(`${STAGING_WRANGLER_CONFIG} must exist and contain JSON-compatible JSONC.`);
 	}
 	const staging = configuration?.env?.staging;
 	if (configuration?.main !== 'src/worker.ts') {
@@ -328,6 +331,26 @@ export const requireCleanupQuiescence = async ({ cycle, pause, maxAttempts = 8 }
 		if (attempt + 1 < maxAttempts) await pause(attempt);
 	}
 	throw new Error('Disposable fixture cleanup did not reach two stable zero-remnant observations.');
+};
+
+export const WEBKIT_SKIP_REASON = 'operator-declared-host-cannot-launch-webkit';
+
+/**
+ * Picks the deployed auth-slot Playwright projects for `proof:staging live`. With `skipWebkit`
+ * (the operator's `--skip-webkit`), WebKit projects drop out and the result names them for the
+ * evidence.
+ */
+export const selectAuthSlotProjects = (projects, { skipWebkit }) => {
+	const skippedProjects = skipWebkit
+		? projects
+				.filter((project) => project.use?.defaultBrowserType === 'webkit')
+				.map(({ name }) => name)
+		: [];
+	return {
+		projects: projects.map(({ name }) => name).filter((name) => !skippedProjects.includes(name)),
+		skippedProjects,
+		skipReason: skippedProjects.length > 0 ? WEBKIT_SKIP_REASON : null
+	};
 };
 
 export const summarizeAuthEvidence = (value) => ({
