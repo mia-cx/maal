@@ -58,27 +58,6 @@ export const mealAggregateToScheduleMeal = (
 	...(householdTimeZone ? { householdTimeZone } : {})
 });
 
-export const recipeAggregateToPoolMeal = (recipe: RecipeAggregate): Meal => {
-	const item = recipeAggregateToMenuItem(recipe);
-	return {
-		id: recipe.id,
-		userRecipeId: recipe.id,
-		title: recipe.title,
-		sortOrder: 0,
-		...(recipe.cookTimeMinutes === null ? {} : { cookTimeMinutes: recipe.cookTimeMinutes }),
-		...(recipe.yield === null ? {} : { servingsPlanned: recipe.yield, baseServings: recipe.yield }),
-		...(recipe.imageUrl === null ? {} : { image: recipe.imageUrl }),
-		...(recipe.description === null ? {} : { description: recipe.description }),
-		ingredients: recipe.ingredients
-			.toSorted((left, right) => left.lineIndex - right.lineIndex)
-			.map(({ originalText }) => originalText),
-		instructions: recipe.instructions
-			.toSorted((left, right) => left.stepIndex - right.stepIndex)
-			.map(({ text }) => text),
-		familiarity: item.latestVerdict === 'avoid' ? 'wildcard' : 'safe'
-	};
-};
-
 export const recipeAggregateToPickerItem = (recipe: RecipeAggregate): RecipeMenuItem =>
 	recipeAggregateToMenuItem(recipe);
 

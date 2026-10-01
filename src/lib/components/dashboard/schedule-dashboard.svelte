@@ -41,6 +41,7 @@
 		householdMembers = [],
 		unitPreferences = {},
 		initialUiState,
+		error: loadError = null,
 		onplanrecipe,
 		onmealchange,
 		onmealdelete,
@@ -58,11 +59,9 @@
 		householdMembers?: HouseholdMember[];
 		unitPreferences?: UnitPreferences;
 		initialUiState: ScheduleUiSnapshot;
-		onplanrecipe?: (
-			recipe: RecipeMenuItem,
-			date?: string,
-			target?: MealDropTarget
-		) => Promise<Meal>;
+		/** A local read or write failure owned by the route, shown in the schedule notice bar. */
+		error?: string | null;
+		onplanrecipe?: (recipe: RecipeMenuItem, date?: string) => Promise<Meal>;
 		onmealchange?: (meal: Meal, previous?: Meal) => void | Promise<void>;
 		onmealdelete?: (meal: Meal) => void | Promise<void>;
 		onmealcheckin?: (payload: MealCheckInPayload) => Promise<Meal>;
@@ -74,7 +73,8 @@
 
 	const mealPoolImageMinHeight = 760;
 	const startingUiState = untrack(() => initialUiState);
-	let scheduleMeals = $state<Meal[]>([]);
+	// The stored meals, overwritten optimistically by drags and sheet edits until the next emission.
+	let scheduleMeals = $derived<Meal[]>([...incomingMeals]);
 	let selectedMealId = $state<string | null>(null);
 	let mode = $state<ScheduleMode>(startingUiState.scheduleMode);
 	let anchorDate = $state(dateFromKey(startingUiState.scheduleAnchorDate));
@@ -97,6 +97,7 @@
 	let dragX = $state(0);
 	let dragY = $state(0);
 	let dropTarget = $state<MealDropTarget | null>(null);
+	let mealWriteError = $state<string | null>(null);
 	let secondaryScrollPointerId: number | null = null;
 	let secondaryScrollElement: HTMLElement | null = null;
 	let secondaryScrollX = 0;
@@ -109,6 +110,7 @@
 	const showDateControls = $derived(true);
 	const showStepControls = $derived(mode === 'multi-day' || mode === 'monthly');
 	const showMealPoolImages = $derived(dashboardHeight >= mealPoolImageMinHeight);
+	const notice = $derived(mealWriteError ?? loadError);
 	const scheduleModeByKey: Record<string, ScheduleMode> = {
 		d: 'daily',
 		w: 'multi-day',
@@ -250,16 +252,10 @@
 	};
 
 	const previewMeal = (meal: Meal) => {
-		if (meal.id === meal.userRecipeId) {
-			const recipe = recipes.find(({ id }) => id === meal.userRecipeId);
-			if (recipe) void planAndPreview(recipe);
-			return;
-		}
 		selectedMealId = meal.id;
 		previewOpen = true;
 	};
 	const openMealCheckIn = (meal: Meal) => {
-		if (meal.id === meal.userRecipeId) return;
 		checkInMeal = meal;
 		checkInOpen = true;
 	};
@@ -358,20 +354,17 @@
 		dragY = event.clientY;
 		dropTarget = dropTargetFromPointer(event, draggedMeal, scheduleMeals);
 	};
+	/** Puts the stored meals back on screen after a failed local write and says why. */
+	const rollBackMealWrite = (error: unknown) => {
+		scheduleMeals = [...incomingMeals];
+		mealWriteError = error instanceof Error ? error.message : 'Could not save that meal.';
+	};
 	const updateDraggedMeal = async (target: MealDropTarget) => {
 		if (!draggedMeal) return;
-		if (draggedMeal.id === draggedMeal.userRecipeId) {
-			if (target.kind === 'pool') return;
-			const recipe = recipes.find(({ id }) => id === draggedMeal?.userRecipeId);
-			if (!recipe || !onplanrecipe) return;
-			const meal = await onplanrecipe(recipe, target.date, target);
-			scheduleMeals = [...scheduleMeals, meal];
-			return;
-		}
-		const previous = draggedMeal;
+		const previousById = new Map(scheduleMeals.map((meal) => [meal.id, meal]));
 		const nextMeals = moveMealToDropTarget(scheduleMeals, draggedMeal, target);
 		const changed = nextMeals.filter((meal) => {
-			const before = scheduleMeals.find(({ id }) => id === meal.id);
+			const before = previousById.get(meal.id);
 			return (
 				before &&
 				(before.date !== meal.date ||
@@ -381,9 +374,10 @@
 		});
 		scheduleMeals = nextMeals;
 		try {
-			for (const meal of changed) await onmealchange?.(meal, previous);
-		} catch {
-			scheduleMeals = scheduleMeals.map((meal) => (meal.id === previous.id ? previous : meal));
+			for (const meal of changed) await onmealchange?.(meal, previousById.get(meal.id));
+			mealWriteError = null;
+		} catch (error) {
+			rollBackMealWrite(error);
 		}
 	};
 	const stopMealDrag = (event: PointerEvent) => {
@@ -408,12 +402,6 @@
 		await onmealdelete?.(meal);
 	};
 
-	$effect(() => {
-		scheduleMeals = [...incomingMeals];
-		if (selectedMealId && !incomingMeals.some(({ id }) => id === selectedMealId)) {
-			selectedMealId = null;
-		}
-	});
 	$effect(() => {
 		void onuistatechange?.({
 			scheduleMode: mode,
@@ -456,6 +444,12 @@
 		onnext={next}
 		ontoday={today}
 	/>
+
+	{#if notice}
+		<div class="border-b border-border bg-secondary px-4 py-2 text-sm text-muted-foreground">
+			{notice}
+		</div>
+	{/if}
 
 	<div class="min-h-0 min-w-0 flex-1 overflow-hidden">
 		{#if mode === 'daily'}

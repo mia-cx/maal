@@ -1,4 +1,4 @@
-import { liveQuery } from 'dexie';
+import { Dexie, liveQuery } from 'dexie';
 import { Schema } from 'effect';
 
 import type { MaalDatabase } from '$lib/client/local/database.js';
@@ -139,3 +139,32 @@ export const liveMealCalendarRange = (
 	range: MealCalendarRange,
 	onRead?: MealCalendarRangeInstrumentation
 ) => liveQuery(() => readMealCalendarRange(database, householdId, range, onRead));
+
+/**
+ * Reads the household meal pool: every member's undated, non-deleted meals plus their check-ins.
+ * IndexedDB leaves null dates out of `[householdId+date]`, so this diffs that index's keys
+ * against the `householdId` index and loads only the undated rows.
+ */
+export const readMealPool = async (
+	database: MaalDatabase,
+	householdId: string
+): Promise<MealCalendarRangeResult> => {
+	const [householdKeys, datedKeys] = await Promise.all([
+		database.meals.where('householdId').equals(householdId).primaryKeys(),
+		database.meals
+			.where('[householdId+date]')
+			.between([householdId, Dexie.minKey], [householdId, Dexie.maxKey], true, true)
+			.primaryKeys()
+	]);
+	const dated = new Set(datedKeys);
+	const undatedKeys = householdKeys.filter((key) => !dated.has(key));
+	const rows = await database.meals.bulkGet(undatedKeys);
+	const meals = decodeMealRows(rows.filter((row) => row !== undefined));
+	const checkIns = decodeMealCheckInRows(
+		await queryMealCheckInRows(database, new Set(meals.map(({ id }) => id)))
+	);
+	return { meals, checkIns };
+};
+
+export const liveMealPool = (database: MaalDatabase, householdId: string) =>
+	liveQuery(() => readMealPool(database, householdId));

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const resetDatabase = async () => {
 	await new Promise<void>((resolve, reject) => {
@@ -187,30 +187,71 @@ const seed = async (page: Page) => {
 		.toBe(true);
 	await page.evaluate(seedPlan);
 	await page.reload();
-	await expect(page.getByText('Gingery chicken rice bowls').first()).toBeVisible();
+	await addRecipeToPool(page);
 };
 
-const planRecipeOn = async (page: Page, date: string) => {
-	const recipeCard = page.getByRole('button', { name: 'Open Gingery chicken rice bowls' }).first();
-	const targetDay = page.locator(`[data-meal-drop-date="${date}"]`).first();
-	const [recipeBox, targetBox] = await Promise.all([
-		recipeCard.boundingBox(),
-		targetDay.boundingBox()
-	]);
-	if (!recipeBox || !targetBox) throw new Error('The recipe card and target day must be visible.');
-	await page.mouse.move(recipeBox.x + recipeBox.width / 2, recipeBox.y + recipeBox.height / 2);
+const mealPool = (page: Page) => page.locator('[data-meal-drop-kind="pool"]').first();
+
+/** Adds the seeded recipe through the pool's Add meal picker, then closes the meal preview. */
+const addRecipeToPool = async (page: Page) => {
+	await mealPool(page).getByRole('button', { name: 'Add meal' }).click();
+	await page.getByRole('option', { name: /Gingery chicken rice bowls/ }).click();
+	await closeMealPreview(page);
+	await expect(mealPool(page)).toContainText('Gingery chicken rice bowls');
+};
+
+const closeMealPreview = async (page: Page) => {
+	const close = page.getByRole('button', { name: 'Close meal preview' }).first();
+	await expect(close).toBeVisible();
+	await page.keyboard.press('Escape');
+	await expect(close).toBeHidden();
+};
+
+type Row = Record<string, unknown>;
+const readStore = (page: Page, store: string) =>
+	page.evaluate(async (name) => {
+		const database = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open('maal-v1:production');
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve(request.result);
+		});
+		const rows = await new Promise<Row[]>((resolve, reject) => {
+			const request = database.transaction(name).objectStore(name).getAll();
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve(request.result as Row[]);
+		});
+		database.close();
+		return rows;
+	}, store);
+
+const dragTo = async (page: Page, source: Locator, target: Locator, targetY?: number) => {
+	const [sourceBox, targetBox] = await Promise.all([source.boundingBox(), target.boundingBox()]);
+	if (!sourceBox || !targetBox) throw new Error('The dragged card and its target must be visible.');
+	await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
 	await page.mouse.down();
 	await page.mouse.move(
-		recipeBox.x + recipeBox.width / 2 + 12,
-		recipeBox.y + recipeBox.height / 2,
+		sourceBox.x + sourceBox.width / 2 + 12,
+		sourceBox.y + sourceBox.height / 2,
 		{
 			steps: 2
 		}
 	);
-	await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + 120, { steps: 8 });
+	await page.mouse.move(
+		targetBox.x + targetBox.width / 2,
+		targetY ?? targetBox.y + Math.min(120, targetBox.height / 2),
+		{ steps: 8 }
+	);
 	await page.mouse.up();
+};
+
+const planRecipeOn = async (page: Page, date: string) => {
+	const recipeCard = mealPool(page)
+		.getByRole('button', { name: 'Open Gingery chicken rice bowls' })
+		.first();
+	const targetDay = page.locator(`[data-meal-drop-date="${date}"]`).first();
+	await dragTo(page, recipeCard, targetDay);
 	await expect(targetDay).toContainText('Gingery chicken rice bowls');
-	return { recipeCard, targetDay };
+	return { targetDay };
 };
 
 const moveStoredMealToDate = async (page: Page, date: string) => {
@@ -257,8 +298,7 @@ test('plans while offline and reloads from Dexie without content API requests', 
 	await seed(page);
 
 	await context.setOffline(true);
-	const { recipeCard } = await planRecipeOn(page, '2026-08-23');
-	await expect(recipeCard).toBeVisible();
+	await planRecipeOn(page, '2026-08-23');
 	await expect
 		.poll(() =>
 			page.evaluate(async () => {
@@ -354,5 +394,112 @@ test('preserves the schedule composition at desktop and phone widths', async ({ 
 	await expect(page).toHaveScreenshot('meal-plan-day-phone.png', {
 		animations: 'disabled',
 		maxDiffPixelRatio: 0.01
+	});
+});
+
+test.describe('meal pool', () => {
+	test.beforeEach(async ({ page }) => {
+		await page.clock.setFixedTime(new Date('2026-08-24T12:00:00.000Z'));
+		await page.setViewportSize({ width: 1280, height: 820 });
+	});
+
+	test('keeps a meal dragged back to the pool across reloads', async ({ page }) => {
+		await seed(page);
+		const { targetDay } = await planRecipeOn(page, '2026-08-23');
+		const [meal] = await readStore(page, 'meals');
+		await dragTo(page, targetDay.locator(`[data-meal-card-id="${meal!.id}"]`), mealPool(page));
+		await expect.poll(async () => (await readStore(page, 'meals'))[0]!.date).toBeNull();
+		await expect(mealPool(page).locator(`[data-meal-card-id="${meal!.id}"]`)).toBeVisible();
+
+		await page.reload();
+		await expect(mealPool(page).locator(`[data-meal-card-id="${meal!.id}"]`)).toBeVisible();
+		await expect(targetDay).not.toContainText('Gingery chicken rice bowls');
+	});
+
+	test('previews a pool meal without writing anything', async ({ page }) => {
+		await seed(page);
+		const counts = async () => ({
+			meals: (await readStore(page, 'meals')).length,
+			outbox: (await readStore(page, 'outbox')).length
+		});
+		const before = await counts();
+		expect(before.meals).toBe(1);
+		const card = mealPool(page).getByRole('button', { name: 'Open Gingery chicken rice bowls' });
+		for (let opened = 0; opened < 2; opened += 1) {
+			await card.click();
+			await closeMealPreview(page);
+		}
+		expect(await counts()).toEqual(before);
+	});
+
+	test('drops a pool meal at the pointer index below an unordered meal', async ({ page }) => {
+		await seed(page);
+		const { targetDay } = await planRecipeOn(page, '2026-08-23');
+		const [first] = await readStore(page, 'meals');
+		await page.evaluate(async (row) => {
+			const database = await new Promise<IDBDatabase>((resolve, reject) => {
+				const request = indexedDB.open('maal-v1:production');
+				request.onerror = () => reject(request.error);
+				request.onsuccess = () => resolve(request.result);
+			});
+			const transaction = database.transaction('meals', 'readwrite');
+			transaction.objectStore('meals').put({ ...row, sortOrder: null });
+			await new Promise<void>((resolve, reject) => {
+				transaction.oncomplete = () => resolve();
+				transaction.onerror = () => reject(transaction.error);
+			});
+			database.close();
+		}, first!);
+		await addRecipeToPool(page);
+
+		const firstCard = targetDay.locator(`[data-meal-card-id="${first!.id}"]`);
+		const firstBox = await firstCard.boundingBox();
+		if (!firstBox) throw new Error('The first planned meal must be visible.');
+		await dragTo(
+			page,
+			mealPool(page).getByRole('button', { name: 'Open Gingery chicken rice bowls' }),
+			targetDay,
+			firstBox.y + firstBox.height + 24
+		);
+		const dayOrder = () =>
+			targetDay
+				.locator('[data-meal-card-id]')
+				.evaluateAll((cards) => cards.map((card) => card.getAttribute('data-meal-card-id')));
+		await expect.poll(async () => (await dayOrder()).length).toBe(2);
+		expect((await dayOrder())[0]).toBe(first!.id);
+		await page.reload();
+		await expect.poll(async () => (await dayOrder())[0]).toBe(first!.id);
+	});
+
+	test('settles daily scroll state without a Dexie write per frame', async ({ page }) => {
+		await page.addInitScript(() => {
+			const counts = { uiStatePuts: 0 };
+			(window as unknown as { __maalCounts: typeof counts }).__maalCounts = counts;
+			const put = IDBObjectStore.prototype.put;
+			IDBObjectStore.prototype.put = function (...args: Parameters<typeof put>) {
+				if (this.name === 'uiState') counts.uiStatePuts += 1;
+				return put.apply(this, args);
+			};
+		});
+		await seed(page);
+		await page.keyboard.press('d');
+		const scroller = page.locator('[data-daily-scroller]');
+		await expect(scroller).toBeVisible();
+		await page.waitForTimeout(500);
+		const uiStatePuts = () =>
+			page.evaluate(
+				() =>
+					(window as unknown as { __maalCounts: { uiStatePuts: number } }).__maalCounts.uiStatePuts
+			);
+		const before = await uiStatePuts();
+		const box = await scroller.boundingBox();
+		if (!box) throw new Error('The daily scroller must be visible.');
+		await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+		for (let step = 0; step < 20; step += 1) {
+			await page.mouse.wheel(0, 120);
+			await page.waitForTimeout(50);
+		}
+		await page.waitForTimeout(500);
+		expect((await uiStatePuts()) - before).toBeLessThanOrEqual(12);
 	});
 });
