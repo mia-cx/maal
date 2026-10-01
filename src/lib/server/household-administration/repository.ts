@@ -7,6 +7,8 @@ import type {
 } from '$lib/domain/household/contracts.js';
 import type { CreateRemoteHouseholdRequest } from '$lib/domain/household/administration.js';
 import { expandWorkOSPermissions } from '$lib/domain/household/permissions.js';
+import { BillingRepository } from '$lib/server/billing/repository.js';
+import { billingOwnerMayLeave } from '$lib/server/billing/transfer.js';
 
 import { HouseholdAdministrationError, asHouseholdAdministrationError } from './errors.js';
 import type { IdentityMembership } from './identity.js';
@@ -352,20 +354,11 @@ export class HouseholdAdministrationRepository {
 		}
 	}
 
+	/** The billing owner who must transfer billing or schedule cancellation before leaving. */
 	async activeBillingOwner(householdId: string, now: string): Promise<string | null> {
-		const row = await this.database
-			.prepare(
-				`SELECT subscriber_user_id
-				 FROM billing_subscriptions
-				 WHERE household_id = ?
-				   AND (
-				     (status IN ('active', 'trialing') AND current_period_end > ?)
-				     OR (status IN ('past_due', 'paused') AND grace_until IS NOT NULL AND grace_until > ?)
-				   )`
-			)
-			.bind(householdId, now, now)
-			.first<{ subscriber_user_id: string | null }>();
-		return row?.subscriber_user_id ?? null;
+		const subscription = await new BillingRepository(this.database).subscription(householdId);
+		if (!subscription || billingOwnerMayLeave(subscription, now)) return null;
+		return subscription.subscriberUserId;
 	}
 
 	async withMembershipMutationLock<A>(householdId: string, mutation: () => Promise<A>): Promise<A> {
