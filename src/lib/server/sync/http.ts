@@ -58,7 +58,8 @@ const householdPermissionsFor = (
 			entityKind === 'meal' || entityKind === 'meal_check_in' ? 'meals:write' : 'households:write'
 		);
 	}
-	return [...permissions];
+	// An empty batch still returns the household's sequence, so it must pass the read gate.
+	return permissions.size > 0 ? [...permissions] : ['meals:read'];
 };
 
 const readBody = async (request: Request): Promise<unknown> => {
