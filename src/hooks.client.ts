@@ -6,7 +6,7 @@ import {
 	isBrowserRecoveryRequired,
 	markBrowserRecoveryRequired
 } from '$lib/client/local/browser.js';
-import { refreshBillingProjectionsOnLaunch } from '$lib/client/billing.js';
+import { refreshBillingOnLoad } from '$lib/client/billing.js';
 import { readRecoveryState } from '$lib/client/local/recovery.js';
 import { startForegroundRecipeRetention } from '$lib/client/recipes/retention.js';
 import { startDeviceSync } from '$lib/client/sync/device-coordinator.js';
@@ -29,7 +29,7 @@ export const init: ClientInit = async () => {
 			throw new TypeError('Local recovery is required.');
 		}
 		startForegroundRecipeRetention(database);
-		void refreshBillingProjectionsOnLaunch(database);
+		void refreshBillingOnLoad(database, new URL(window.location.href));
 		startDeviceSync(database);
 	} catch {
 		clearBrowserDatabasePromises();

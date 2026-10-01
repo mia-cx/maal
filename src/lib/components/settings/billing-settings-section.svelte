@@ -7,7 +7,6 @@
 		beginTrial,
 		openBillingPortal,
 		refreshBillingProjection,
-		shouldRefreshBillingOnLaunch,
 		transferBillingOwner
 	} from '$lib/client/billing.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
@@ -105,9 +104,6 @@
 			capability = value.capability;
 			prices = value.prices;
 			trialAvailable = value.trialAvailable;
-		});
-		void shouldRefreshBillingOnLaunch(database, householdId).then((shouldRefresh) => {
-			if (shouldRefresh) void refresh();
 		});
 		return () => subscription.unsubscribe();
 	});

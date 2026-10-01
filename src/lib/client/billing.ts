@@ -1,10 +1,8 @@
 import { Schema } from 'effect';
 
 import type { MaalDatabase } from '$lib/client/local/database.js';
-import {
-	billingCapabilityIsEnabledAt,
-	billingCapabilityWasPreviouslyPaid
-} from '$lib/domain/billing/capability.js';
+import { activeHouseholdKey } from '$lib/client/local/profiles.js';
+import { billingCapabilityWasPreviouslyPaid } from '$lib/domain/billing/capability.js';
 import {
 	BillingProjectionEnvelopeSchema,
 	type BillingProjectionEnvelope
@@ -86,22 +84,33 @@ export const refreshBillingProjection = async (
 	return decoded;
 };
 
+/**
+ * Stores the plan of a household this profile just created or joined, so a member of a paid
+ * household syncs without signing in again. The household change already succeeded; a failed read
+ * leaves the plan to the next explicit refresh.
+ */
+export const refreshJoinedHouseholdBilling = async (
+	database: MaalDatabase,
+	profileId: string,
+	{ householdId }: { readonly householdId: string },
+	fetcher: Fetch = globalThis.fetch
+): Promise<void> => {
+	await refreshBillingProjection(database, profileId, householdId, fetcher).catch(() => undefined);
+};
+
+/** True for paid (enabled or grace) and stale households. Free and lapsed ones never poll. */
 export const shouldRefreshBillingOnLaunch = async (
 	database: MaalDatabase,
-	householdId: string,
-	now = Date.now()
+	householdId: string
 ): Promise<boolean> => {
 	const capability = await database.billingCapabilities.get(householdId);
-	if (!capability) return false;
-	if (!billingCapabilityWasPreviouslyPaid(capability)) return false;
-	if (capability.stale) return true;
-	return capability.state !== 'disabled' && !billingCapabilityIsEnabledAt(capability, now);
+	if (!capability || !billingCapabilityWasPreviouslyPaid(capability)) return false;
+	return capability.stale || capability.state !== 'disabled';
 };
 
 export const refreshBillingProjectionsOnLaunch = async (
 	database: MaalDatabase,
-	fetcher: Fetch = globalThis.fetch,
-	now = Date.now()
+	fetcher: Fetch = globalThis.fetch
 ): Promise<{ attempted: number; refreshed: number }> => {
 	const [capabilities, memberships, slots] = await Promise.all([
 		database.billingCapabilities.toArray(),
@@ -122,10 +131,7 @@ export const refreshBillingProjectionsOnLaunch = async (
 	let refreshed = 0;
 	for (const capability of capabilities) {
 		const profileId = profileByHouseholdId.get(capability.householdId);
-		if (
-			!profileId ||
-			!(await shouldRefreshBillingOnLaunch(database, capability.householdId, now))
-		) {
+		if (!profileId || !(await shouldRefreshBillingOnLaunch(database, capability.householdId))) {
 			continue;
 		}
 		attempted += 1;
@@ -133,10 +139,59 @@ export const refreshBillingProjectionsOnLaunch = async (
 			await refreshBillingProjection(database, profileId, capability.householdId, fetcher);
 			refreshed += 1;
 		} catch {
-			// The cached expiry still blocks content sync. A later launch or explicit billing action retries.
+			// The cached plan stays in force. A later launch or explicit billing action retries.
 		}
 	}
 	return { attempted, refreshed };
+};
+
+/** Waits between status reads while Stripe's Checkout webhook reaches the Worker (about 30 s). */
+const CHECKOUT_WEBHOOK_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000] as const;
+
+const delay = (milliseconds: number): Promise<void> =>
+	new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+const activeHousehold = async (
+	database: MaalDatabase
+): Promise<{ profileId: string; householdId: string } | null> => {
+	const profileId = (await database.uiState.get('activeProfileId'))?.value;
+	if (typeof profileId !== 'string') return null;
+	const householdId = (await database.uiState.get(activeHouseholdKey(profileId)))?.value;
+	return typeof householdId === 'string' ? { profileId, householdId } : null;
+};
+
+/**
+ * Runs once per page load. Paid and stale households get one status read. Stripe sends the payer
+ * back with `?billing=checkout-success` or `?billing=returned` (portal): the active household is
+ * then read too, and after Checkout re-read until the webhook's plan lands.
+ */
+export const refreshBillingOnLoad = async (
+	database: MaalDatabase,
+	url: URL,
+	fetcher: Fetch = globalThis.fetch,
+	wait: (milliseconds: number) => Promise<void> = delay
+): Promise<void> => {
+	const stripeReturn = url.searchParams.get('billing');
+	const returned =
+		stripeReturn === 'checkout-success' || stripeReturn === 'returned'
+			? await activeHousehold(database)
+			: null;
+	const coveredByLaunch =
+		returned !== null && (await shouldRefreshBillingOnLaunch(database, returned.householdId));
+	await refreshBillingProjectionsOnLaunch(database, fetcher);
+	if (!returned || coveredByLaunch) return;
+
+	const retries = stripeReturn === 'checkout-success' ? CHECKOUT_WEBHOOK_RETRY_DELAYS_MS : [];
+	for (const pause of [0, ...retries]) {
+		if (pause > 0) await wait(pause);
+		const projection = await refreshBillingProjection(
+			database,
+			returned.profileId,
+			returned.householdId,
+			fetcher
+		).catch(() => null);
+		if (projection && projection.capability.state !== 'disabled') return;
+	}
 };
 
 export const beginCheckout = (
