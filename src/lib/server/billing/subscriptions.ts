@@ -35,13 +35,16 @@ export const subscriptionPeriodEnd = (subscription: Stripe.Subscription): string
 	return end === undefined ? null : utcFromSeconds(end);
 };
 
+/**
+ * Projects a live Stripe subscription into the D1 row. Grace windows start at the Stripe event's
+ * creation time, so webhook outages and retries never lengthen grace.
+ */
 export const projectionFromStripeSubscription = (input: {
 	subscription: Stripe.Subscription;
 	householdId: string;
 	subscriberUserId: string | null;
 	eventId: string;
 	eventCreatedAt: string;
-	eventReceivedAt: string;
 	existing: BillingSubscriptionRow | null;
 	paidPeriodSucceeded: boolean;
 }): SubscriptionProjectionWrite => {
@@ -49,12 +52,14 @@ export const projectionFromStripeSubscription = (input: {
 	const priceId = subscriptionPriceId(input.subscription);
 	const currentPeriodEnd = subscriptionPeriodEnd(input.subscription);
 	if (!customerId || !priceId || !currentPeriodEnd) throw new BillingProjectionError();
+	const status = effectiveStripeStatus(input.subscription);
 	const sameSubscription = input.existing?.stripeSubscriptionId === input.subscription.id;
 	const grace = graceWindowForStatus(
-		effectiveStripeStatus(input.subscription),
+		status,
 		sameSubscription ? (input.existing?.interruptionStartedAt ?? null) : null,
-		input.eventReceivedAt,
-		input.paidPeriodSucceeded
+		input.eventCreatedAt,
+		// A paid invoice for an earlier period does not end an interruption Stripe still reports.
+		input.paidPeriodSucceeded && (status === 'active' || status === 'trialing')
 	);
 	return {
 		householdId: input.householdId,
@@ -66,12 +71,12 @@ export const projectionFromStripeSubscription = (input: {
 			input.subscriberUserId ||
 			input.existing?.subscriberUserId ||
 			null,
-		status: effectiveStripeStatus(input.subscription),
+		status,
 		currentPeriodEnd,
 		cancelAtPeriodEnd: input.subscription.cancel_at_period_end,
 		...grace,
 		lastSuccessfulPaymentAt: input.paidPeriodSucceeded
-			? input.eventReceivedAt
+			? input.eventCreatedAt
 			: (input.existing?.lastSuccessfulPaymentAt ?? null),
 		eventId: input.eventId,
 		eventCreatedAt: input.eventCreatedAt

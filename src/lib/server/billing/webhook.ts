@@ -88,6 +88,9 @@ export const processStripeWebhook = async (input: {
 			await input.repository.finishStripeEventWithoutProjection(input.event.id, input.receivedAt);
 			return 'ignored';
 		}
+		const eventCreatedAt = utcFromSeconds(input.event.created);
+		const paidPeriodSucceeded =
+			input.event.type === 'invoice.paid' || input.event.type === 'invoice.payment_succeeded';
 		await input.repository.commitStripeProjection(
 			input.event.id,
 			projectionFromStripeSubscription({
@@ -95,13 +98,12 @@ export const processStripeWebhook = async (input: {
 				householdId,
 				subscriberUserId: subscription.metadata.workosUserId || existing?.subscriberUserId || null,
 				eventId: input.event.id,
-				eventCreatedAt: utcFromSeconds(input.event.created),
-				eventReceivedAt: input.receivedAt,
+				eventCreatedAt,
 				existing,
-				paidPeriodSucceeded:
-					input.event.type === 'invoice.paid' || input.event.type === 'invoice.payment_succeeded'
+				paidPeriodSucceeded
 			}),
-			input.receivedAt
+			input.receivedAt,
+			paidPeriodSucceeded ? eventCreatedAt : null
 		);
 		return 'processed';
 	} catch (cause) {

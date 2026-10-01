@@ -1,5 +1,6 @@
 import { and, eq, gte, or } from 'drizzle-orm';
 
+import { BILLING_GRACE_DAYS } from '$lib/domain/billing/capability.js';
 import type { StripeSubscriptionStatus } from '$lib/domain/billing/contracts.js';
 import { getDb } from '$lib/server/db/index.js';
 import {
@@ -338,13 +339,19 @@ export class BillingRepository {
 			.run();
 	}
 
+	/**
+	 * Applies one Stripe event. Pass `paidAt` (the paid event's Stripe creation time) for a
+	 * successful invoice payment: it resets grace even when a newer event was projected first.
+	 */
 	async commitStripeProjection(
 		eventId: string,
 		projection: SubscriptionProjectionWrite,
-		processedAt: string
+		processedAt: string,
+		paidAt: string | null = null
 	): Promise<void> {
 		await this.database.batch([
 			this.subscriptionUpsertStatement(projection, processedAt),
+			...(paidAt ? [this.paymentResetStatement(projection, paidAt)] : []),
 			this.database
 				.prepare(
 					`UPDATE stripe_events SET state = 'processed', processed_at = ?, safe_error_code = NULL WHERE stripe_event_id = ?`
@@ -549,6 +556,34 @@ export class BillingRepository {
 		safeDetails?: Readonly<Record<string, string | number | boolean | null>>;
 	}): Promise<void> {
 		await this.auditStatement(input).run();
+	}
+
+	/**
+	 * A successful payment is a monotonic fact, so it applies outside the event-recency guard: any
+	 * interruption that began at or before the payment is over. If Stripe already reports a newer
+	 * interruption, its window restarts no earlier than the newest projected event.
+	 */
+	private paymentResetStatement(
+		projection: SubscriptionProjectionWrite,
+		paidAt: string
+	): D1PreparedStatement {
+		return this.database
+			.prepare(
+				`UPDATE billing_subscriptions SET
+					last_successful_payment_at = MAX(COALESCE(last_successful_payment_at, ?1), ?1),
+					interruption_started_at = CASE
+						WHEN interruption_started_at IS NULL OR interruption_started_at > ?1
+							THEN interruption_started_at
+						WHEN status IN ('past_due', 'paused') THEN last_stripe_event_created_at
+						ELSE NULL END,
+					grace_until = CASE
+						WHEN interruption_started_at IS NULL OR interruption_started_at > ?1 THEN grace_until
+						WHEN status IN ('past_due', 'paused')
+							THEN strftime('%Y-%m-%dT%H:%M:%fZ', last_stripe_event_created_at, '+${BILLING_GRACE_DAYS} days')
+						ELSE NULL END
+				 WHERE household_id = ?2 AND stripe_subscription_id = ?3`
+			)
+			.bind(paidAt, projection.householdId, projection.stripeSubscriptionId);
 	}
 
 	private subscriptionUpsertStatement(
