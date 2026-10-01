@@ -8,6 +8,7 @@ import {
 	type SyncLease
 } from '$lib/client/local/leases.js';
 import type { MaalDatabase } from '$lib/client/local/database.js';
+import { markProfileReauthRequired } from '$lib/client/local/profiles.js';
 import type { BackfillCheckpointRecord, OutboxRecord } from '$lib/client/local/records.js';
 import {
 	CURRENT_PROTOCOL_VERSION,
@@ -581,9 +582,7 @@ export const createUserSyncCoordinator = (
 		terminalBlocked = true;
 		if (error instanceof SyncUnauthenticated) {
 			currentState = 'reauthRequired';
-			await options.database.authSlots.update(options.authSlotId, {
-				sessionState: 'reauthRequired'
-			});
+			await markProfileReauthRequired(options.database, options.authSlotId);
 		} else {
 			currentState = 'blocked';
 			const capabilities = await options.database.billingCapabilities.toArray();

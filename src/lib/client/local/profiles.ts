@@ -185,17 +185,19 @@ export const readActiveProfile = async (database: MaalDatabase): Promise<Profile
 	return (await database.profiles.get(profileId)) ?? null;
 };
 
+/**
+ * Called when the server rejects a slot's session. The slot's profile turns `reauthRequired` so the
+ * switcher and settings offer Reauthenticate; local data stays usable (spec §4.1).
+ */
 export const markProfileReauthRequired = async (
 	database: MaalDatabase,
-	profileId: string
+	authSlotId: string
 ): Promise<void> => {
-	const profile = await database.profiles.get(profileId);
-	if (!profile) throw new LocalProfileMissing({ profileId });
 	await database.transaction('rw', database.profiles, database.authSlots, async () => {
-		await database.profiles.update(profileId, { authState: 'reauthRequired' });
-		await database.authSlots.where('profileId').equals(profileId).modify({
-			sessionState: 'reauthRequired'
-		});
+		const slot = await database.authSlots.get(authSlotId);
+		if (!slot) return;
+		await database.authSlots.update(authSlotId, { sessionState: 'reauthRequired' });
+		await database.profiles.update(slot.profileId, { authState: 'reauthRequired' });
 	});
 };
 
