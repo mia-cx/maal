@@ -17,6 +17,8 @@
 	import {
 		clearProfilePin,
 		lockProfile,
+		ProfilePinFormatInvalid,
+		ProfilePinRequired,
 		setProfilePin,
 		switchActiveProfile
 	} from '$lib/client/local/profiles.js';
@@ -27,6 +29,7 @@
 	import type { AuthSlotRecord } from '$lib/client/local/records.js';
 	import type { Profile } from '$lib/domain/household/contracts.js';
 	import PortableDataDialog from '$lib/components/portable-data-dialog.svelte';
+	import ProfileUnlockForm from '$lib/components/profile-unlock-form.svelte';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
@@ -56,7 +59,7 @@
 	let removeOpen = $state(false);
 	let portableOpen = $state(false);
 	let portableProfileId = $state<string | null>(null);
-	let pin = $state('');
+	let currentPin = $state('');
 	let newPin = $state('');
 	let message = $state('');
 	let pending = $state(false);
@@ -113,7 +116,6 @@
 	const chooseProfile = async (view: ProfileView) => {
 		message = '';
 		if (view.locked) {
-			pin = '';
 			unlockProfile = view;
 			unlockOpen = true;
 			return;
@@ -121,42 +123,32 @@
 		await switchActiveProfile(database, view.profile.profileId);
 	};
 
-	const unlock = async () => {
-		if (!unlockProfile) return;
-		pending = true;
-		message = '';
-		try {
-			await switchActiveProfile(database, unlockProfile.profile.profileId, pin);
-			unlockOpen = false;
-			pin = '';
-		} catch {
-			message = 'That PIN did not match.';
-		} finally {
-			pending = false;
-		}
-	};
+	const pinError = (cause: unknown): string =>
+		cause instanceof ProfilePinFormatInvalid
+			? 'Use four to eight numbers for the profile PIN.'
+			: cause instanceof ProfilePinRequired
+				? 'Enter the current PIN.'
+				: 'The current PIN did not match.';
 
-	const savePin = async () => {
+	const changePin = async (change: (profileId: string) => Promise<void>) => {
 		if (!manageProfile) return;
 		pending = true;
 		message = '';
 		try {
-			await setProfilePin(database, manageProfile.profile.profileId, newPin);
+			await change(manageProfile.profile.profileId);
+			currentPin = '';
 			newPin = '';
 			manageOpen = false;
-		} catch {
-			message = 'Use four to eight numbers for the profile PIN.';
+		} catch (cause) {
+			message = pinError(cause);
 		} finally {
 			pending = false;
 		}
 	};
-
-	const removePin = async () => {
-		if (!manageProfile) return;
-		await clearProfilePin(database, manageProfile.profile.profileId);
-		manageOpen = false;
-		newPin = '';
-	};
+	const savePin = () =>
+		changePin((profileId) => setProfilePin(database, profileId, newPin, currentPin));
+	const removePin = () =>
+		changePin((profileId) => clearProfilePin(database, profileId, currentPin));
 
 	const signOut = async (view: ProfileView) => {
 		pending = true;
@@ -206,26 +198,25 @@
 			<Dialog.Title>Open {unlockProfile?.profile.displayName ?? 'profile'}</Dialog.Title>
 			<Dialog.Description>Enter this profile’s local PIN.</Dialog.Description>
 		</Dialog.Header>
-		<form
-			class="grid gap-3"
-			onsubmit={(event) => {
-				event.preventDefault();
-				void unlock();
-			}}
-		>
-			<Input
-				type="password"
-				inputmode="numeric"
-				pattern="[0-9][0-9][0-9][0-9][0-9]?[0-9]?[0-9]?[0-9]?"
-				maxlength={8}
-				bind:value={pin}
-				autocomplete="off"
-				autofocus
-				aria-label="Profile PIN"
+		{#if unlockProfile}
+			<ProfileUnlockForm
+				{database}
+				profile={unlockProfile.profile}
+				slot={unlockProfile.slot}
+				onopen={() => (unlockOpen = false)}
 			/>
-			{#if message}<p class="text-sm text-destructive" role="alert">{message}</p>{/if}
-			<Dialog.Footer><Button type="submit" disabled={pending}>Open profile</Button></Dialog.Footer>
-		</form>
+			<Button
+				variant="ghost"
+				class="justify-self-start text-destructive"
+				onclick={() => {
+					removeProfile = unlockProfile;
+					unlockOpen = false;
+					removeOpen = true;
+				}}
+			>
+				<Trash2Icon /> Remove from this device
+			</Button>
+		{/if}
 	</Dialog.Content>
 </Dialog.Root>
 
@@ -245,6 +236,18 @@
 				void savePin();
 			}}
 		>
+			{#if manageProfile?.profile.lockPolicy === 'pin'}
+				<Input
+					type="password"
+					inputmode="numeric"
+					pattern="[0-9][0-9][0-9][0-9][0-9]?[0-9]?[0-9]?[0-9]?"
+					maxlength={8}
+					placeholder="Current PIN"
+					bind:value={currentPin}
+					autocomplete="current-password"
+					aria-label="Current PIN"
+				/>
+			{/if}
 			<Input
 				type="password"
 				inputmode="numeric"
@@ -257,8 +260,11 @@
 			{#if message}<p class="text-sm text-destructive" role="alert">{message}</p>{/if}
 			<Dialog.Footer>
 				{#if manageProfile?.profile.lockPolicy === 'pin'}
-					<Button type="button" variant="outline" onclick={() => void removePin()}
-						>Remove PIN</Button
+					<Button
+						type="button"
+						variant="outline"
+						disabled={pending}
+						onclick={() => void removePin()}>Remove PIN</Button
 					>
 				{/if}
 				<Button type="submit" disabled={pending || newPin.length < 4}>Save PIN</Button>
@@ -279,12 +285,14 @@
 			</Dialog.Description>
 		</Dialog.Header>
 		<div class="flex flex-wrap gap-2">
-			<Button
-				variant="outline"
-				onclick={() => removeProfile && void openPortableData(removeProfile.profile.profileId)}
-			>
-				Export data first
-			</Button>
+			{#if !removeProfile?.locked}
+				<Button
+					variant="outline"
+					onclick={() => removeProfile && void openPortableData(removeProfile.profile.profileId)}
+				>
+					Export data first
+				</Button>
+			{/if}
 			<Button variant="destructive" disabled={pending} onclick={() => void confirmRemoval()}>
 				Remove from this device
 			</Button>
@@ -372,6 +380,9 @@
 							<DropdownMenu.Item
 								onclick={() => {
 									manageProfile = view;
+									currentPin = '';
+									newPin = '';
+									message = '';
 									manageOpen = true;
 								}}
 							>
