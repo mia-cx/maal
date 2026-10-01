@@ -204,7 +204,7 @@ const closeMealPreview = async (page: Page) => {
 	const close = page.getByRole('button', { name: 'Close meal preview' }).first();
 	await expect(close).toBeVisible();
 	await page.keyboard.press('Escape');
-	await expect(close).toBeHidden();
+	await expect(page.getByRole('dialog')).toHaveCount(0);
 };
 
 type Row = Record<string, unknown>;

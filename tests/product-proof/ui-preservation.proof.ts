@@ -25,7 +25,7 @@ const addRecipeToPool = async (page: Page) => {
 	const close = page.getByRole('button', { name: 'Close meal preview' }).first();
 	await expect(close).toBeVisible();
 	await page.keyboard.press('Escape');
-	await expect(close).toBeHidden();
+	await expect(page.getByRole('dialog')).toHaveCount(0);
 	await expect(pool).toContainText('Gingery chicken rice bowls');
 };
 
