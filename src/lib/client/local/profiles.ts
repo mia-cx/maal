@@ -7,8 +7,12 @@ import { ProfileSchema, type Profile } from '$lib/domain/household/contracts.js'
 import type { MaalDatabase } from './database.js';
 
 const ACTIVE_PROFILE_KEY = 'activeProfileId';
-const profileLockKey = (profileId: string) => `profileLock:${profileId}`;
+export const profileLockKey = (profileId: string) => `profileLock:${profileId}`;
 export const activeHouseholdKey = (profileId: string) => `activeHouseholdId:${profileId}`;
+/** Set by "Forgot PIN"; the next verified sign-in for the profile clears its PIN. */
+export const pinResetKey = (profileId: string) => `pinReset:${profileId}`;
+/** Outbox owner for work a profile queues while it has no slot; rebound on its next sign-in. */
+export const signedOutAuthSlotId = (profileId: string) => `signed-out:${profileId}`;
 
 const PIN_ITERATIONS = 310_000;
 const PIN_PATTERN = /^\d{4,8}$/;
@@ -122,6 +126,14 @@ export const clearProfilePin = async (database: MaalDatabase, profileId: string)
 	});
 	if (!changed) throw new LocalProfileMissing({ profileId });
 	await database.uiState.delete(profileLockKey(profileId));
+};
+
+/** Marks a forgotten PIN for reset; call it right before sending the user to sign in. */
+export const requestProfilePinReset = async (
+	database: MaalDatabase,
+	profileId: string
+): Promise<void> => {
+	await database.uiState.put({ key: pinResetKey(profileId), value: true });
 };
 
 export const lockProfile = async (database: MaalDatabase, profileId: string): Promise<void> => {
@@ -308,9 +320,9 @@ export const removeProfileFromDevice = async (
 		}
 
 		await database.memberships.where('workosUserId').equals(profile.workosUserId).delete();
-		if (slot) {
-			await database.outbox.filter((mutation) => mutation.authSlotId === slot.authSlotId).delete();
-		}
+		// Sign-in rebinds earlier slots' work to the current slot, so these two IDs own all of it.
+		const ownSlotIds = new Set([signedOutAuthSlotId(profileId), slot?.authSlotId]);
+		await database.outbox.filter((mutation) => ownSlotIds.has(mutation.authSlotId)).delete();
 		await database.outbox
 			.filter(
 				(mutation) => mutation.scopeKind === 'user' && mutation.scopeId === profile.workosUserId
@@ -327,8 +339,11 @@ export const removeProfileFromDevice = async (
 			.delete();
 		await database.authSlots.where('profileId').equals(profileId).delete();
 		await database.profiles.delete(profileId);
-		await database.uiState.delete(profileLockKey(profileId));
-		await database.uiState.delete(activeHouseholdKey(profileId));
+		await database.uiState.bulkDelete([
+			profileLockKey(profileId),
+			activeHouseholdKey(profileId),
+			pinResetKey(profileId)
+		]);
 
 		const activeProfile = await database.uiState.get(ACTIVE_PROFILE_KEY);
 		if (activeProfile?.value === profileId) {

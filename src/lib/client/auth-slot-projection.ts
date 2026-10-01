@@ -2,15 +2,22 @@ import { Data, Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
 
 import {
+	assertAuthSlotCapacity,
 	AuthSlotCapacityExceeded,
 	AuthSlotMetadata,
 	isAuthSlotId,
-	MAX_AUTHENTICATED_SLOTS,
 	type AuthSlotId,
 	type AuthSlotMetadata as AuthSlotMetadataType,
 	type AuthSlotStatus
 } from '$lib/auth-slots/index.js';
 import type { MaalDatabase } from '$lib/client/local/database.js';
+import {
+	activeHouseholdKey,
+	pinResetKey,
+	profileLockKey,
+	signedOutAuthSlotId
+} from '$lib/client/local/profiles.js';
+import type { AuthSlotRecord } from '$lib/client/local/records.js';
 import {
 	LocaleSchema,
 	TimeZoneSchema,
@@ -84,6 +91,24 @@ const displayNameFor = (
 	return name || metadata.email.split('@')[0] || 'Maal profile';
 };
 
+/**
+ * The slots holding one of the eight retained sessions (spec §4.1). Signed-out and reauth-required
+ * profiles hold none. The profile switcher and the sign-in projection both count with this.
+ */
+export const retainedAuthSlots = (
+	views: readonly {
+		readonly profile: Pick<Profile, 'authState'>;
+		readonly slot: Pick<AuthSlotRecord, 'authSlotId'> | null;
+	}[]
+): { authSlotId: AuthSlotId; status: 'authenticated' | 'stale' }[] =>
+	views.flatMap(({ profile: { authState }, slot }) =>
+		slot &&
+		isAuthSlotId(slot.authSlotId) &&
+		(authState === 'authenticated' || authState === 'stale')
+			? [{ authSlotId: slot.authSlotId, status: authState }]
+			: []
+	);
+
 const safeLocale = (value: string): string => (Schema.is(LocaleSchema)(value) ? value : 'en-US');
 const safeTimeZone = (value: string | null): string | null =>
 	value !== null && Schema.is(TimeZoneSchema)(value) ? value : null;
@@ -124,12 +149,15 @@ const upsertAuthenticatedSlot = async (
 			database.households,
 			database.memberships,
 			database.billingCapabilities,
-			database.uiState
+			database.uiState,
+			database.outbox
 		],
 		async () => {
-			const [slot, profileForUser] = await Promise.all([
+			const [slot, profileForUser, profiles, slots] = await Promise.all([
 				database.authSlots.get(metadata.authSlotId),
-				database.profiles.where('workosUserId').equals(metadata.workosUserId).first()
+				database.profiles.where('workosUserId').equals(metadata.workosUserId).first(),
+				database.profiles.toArray(),
+				database.authSlots.toArray()
 			]);
 
 			if (slot && slot.workosUserId !== metadata.workosUserId) {
@@ -142,19 +170,20 @@ const upsertAuthenticatedSlot = async (
 
 			const profileForSlot = slot ? await database.profiles.get(slot.profileId) : null;
 			const existing = profileForSlot ?? profileForUser ?? null;
-			const existingCountsTowardCapacity =
-				existing?.authState === 'authenticated' || existing?.authState === 'stale';
-			if (!existingCountsTowardCapacity) {
-				const authenticatedProfileCount = await database.profiles
-					.where('authState')
-					.anyOf('authenticated', 'stale')
-					.count();
-				if (authenticatedProfileCount >= MAX_AUTHENTICATED_SLOTS) {
-					throw new AuthSlotCapacityExceeded({ maximum: MAX_AUTHENTICATED_SLOTS });
-				}
-			}
+			const slotByProfile = new Map(slots.map((record) => [record.profileId, record]));
+			const priorSlot = existing ? slotByProfile.get(existing.profileId) : undefined;
+			assertAuthSlotCapacity(
+				retainedAuthSlots(
+					profiles.map((profile) => ({
+						profile,
+						slot: slotByProfile.get(profile.profileId) ?? null
+					}))
+				),
+				priorSlot && isAuthSlotId(priorSlot.authSlotId) ? priorSlot.authSlotId : undefined
+			);
 			const profileId = existing?.profileId ?? uuidv7();
 			projectedProfileId = profileId;
+			const pinReset = (await database.uiState.get(pinResetKey(profileId)))?.value === true;
 
 			const profile = Schema.decodeUnknownSync(ProfileSchema)({
 				profileId,
@@ -164,17 +193,21 @@ const upsertAuthenticatedSlot = async (
 				profilePictureUrl: metadata.profilePictureUrl,
 				locale: existing?.locale ?? safeLocale(options.locale),
 				timezone: existing?.timezone ?? safeTimeZone(options.timezone),
-				pinSalt: existing?.pinSalt ?? null,
-				pinVerifier: existing?.pinVerifier ?? null,
-				lockPolicy: existing?.lockPolicy ?? 'none',
+				pinSalt: pinReset ? null : (existing?.pinSalt ?? null),
+				pinVerifier: pinReset ? null : (existing?.pinVerifier ?? null),
+				lockPolicy: pinReset ? 'none' : (existing?.lockPolicy ?? 'none'),
 				lastUsedAt: now,
 				authState: 'authenticated'
 			}) satisfies Profile;
 
-			const priorSlot = await database.authSlots.where('profileId').equals(profileId).first();
 			if (priorSlot && priorSlot.authSlotId !== metadata.authSlotId) {
 				await database.authSlots.delete(priorSlot.authSlotId);
 			}
+			// Work queued while signed out or under the earlier slot uploads with the new slot.
+			const queuedSlotIds = new Set([signedOutAuthSlotId(profileId), priorSlot?.authSlotId]);
+			await database.outbox
+				.filter((row) => queuedSlotIds.has(row.authSlotId) && row.status !== 'acknowledged')
+				.modify({ authSlotId: metadata.authSlotId });
 			await database.profiles.put(profile);
 			await database.authSlots.put({
 				authSlotId: metadata.authSlotId,
@@ -193,20 +226,32 @@ const upsertAuthenticatedSlot = async (
 			});
 			const discovered = metadata.households ?? [];
 			if (discovered.length > 0) {
-				await database.households.bulkPut(discovered.map(({ household }) => household));
+				// A household with unsent local edits keeps them; sync reconciles it later.
+				const editedHouseholdIds = new Set(
+					(
+						await database.outbox
+							.where('aggregateId')
+							.anyOf(discovered.map(({ household }) => household.householdId))
+							.filter(({ status }) => status !== 'acknowledged' && status !== 'rejected')
+							.toArray()
+					).map(({ aggregateId }) => aggregateId)
+				);
+				await database.households.bulkPut(
+					discovered
+						.map(({ household }) => household)
+						.filter(({ householdId }) => !editedHouseholdIds.has(householdId))
+				);
 				await database.memberships.bulkPut(discovered.map(({ membership }) => membership));
 				await database.billingCapabilities.bulkPut(discovered.map(({ capability }) => capability));
 			}
+			if (pinReset) await database.uiState.delete(pinResetKey(profileId));
 			const uiState = [
 				{ key: 'activeProfileId', value: profileId },
-				{ key: `profileLock:${profileId}`, value: false }
+				{ key: profileLockKey(profileId), value: false }
 			];
-			if (
-				discovered.length > 0 &&
-				!(await database.uiState.get(`activeHouseholdId:${profileId}`))
-			) {
+			if (discovered.length > 0 && !(await database.uiState.get(activeHouseholdKey(profileId)))) {
 				uiState.push({
-					key: `activeHouseholdId:${profileId}`,
+					key: activeHouseholdKey(profileId),
 					value: discovered[0]!.household.householdId
 				});
 			}
@@ -275,6 +320,12 @@ export const projectAuthCallback = async (
 	} catch (cause) {
 		if (cause instanceof AuthSlotProjectionIdentityMismatch) {
 			await markSlotState(database, marker.authSlotId, 'reauthRequired');
+		}
+		if (cause instanceof AuthSlotCapacityExceeded) {
+			// The callback already set this slot's cookie; revoke it so no ninth session is retained.
+			await fetcher(`/api/auth-slots/${encodeURIComponent(marker.authSlotId)}/`, {
+				method: 'DELETE'
+			});
 		}
 		throw cause;
 	}
