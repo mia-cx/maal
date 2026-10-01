@@ -121,10 +121,12 @@ const encode = <A, I>(schema: Schema.Schema<A, I>, value: A, operation: string):
 	}
 };
 
-export const executeLocalCommand = async (
-	database: MaalDatabase,
-	command: LocalCommand
-): Promise<{ mutationId: string; aggregates: readonly unknown[] }> => {
+export interface LocalCommandResult {
+	mutationId: string;
+	aggregates: readonly unknown[];
+}
+
+const prepareCommand = (command: LocalCommand) => {
 	const mutationId = decode(DomainIdSchema, command.mutationId ?? uuidv7(), 'decode mutation ID');
 	const occurredAt = decode(
 		UtcInstantSchema,
@@ -132,6 +134,21 @@ export const executeLocalCommand = async (
 		'decode mutation time'
 	);
 	const originDeviceId = decode(DomainIdSchema, command.originDeviceId, 'decode device ID');
+	const decodedPayload = decode(command.payloadSchema, command.payload, 'decode command payload');
+	const encodedPayload = encode(command.payloadSchema, decodedPayload, 'encode command payload');
+	return { command, mutationId, occurredAt, originDeviceId, encodedPayload };
+};
+
+const commitPreparedCommand = async (
+	database: MaalDatabase,
+	{
+		command,
+		mutationId,
+		occurredAt,
+		originDeviceId,
+		encodedPayload
+	}: ReturnType<typeof prepareCommand>
+): Promise<LocalCommandResult> => {
 	const clockFor = (candidateMutationId: string) =>
 		decode(
 			ConflictClockSchema,
@@ -142,90 +159,106 @@ export const executeLocalCommand = async (
 			},
 			'decode conflict clock'
 		);
-	const decodedPayload = decode(command.payloadSchema, command.payload, 'decode command payload');
-	const encodedPayload = encode(command.payloadSchema, decodedPayload, 'encode command payload');
-	const tables = [...new Set(command.writes.map(({ store }) => database.table(store)))];
+	const aggregates: unknown[] = [];
+
+	for (const write of command.writes) {
+		const clock = clockFor(write.mutationId ?? mutationId);
+		const table = database.table(write.store);
+		const stored = await table.get(write.aggregateId);
+		const current = stored
+			? decode(write.schema, stored, `decode ${write.store} aggregate`)
+			: undefined;
+		const currentMetadata = stored
+			? decode(MutableAggregateSchema, stored, `decode ${write.store} metadata`)
+			: undefined;
+		const candidate = write.update(current);
+		if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) {
+			throw new LocalDecodeError({
+				operation: `update ${write.store} aggregate`,
+				message: 'A local command returned an invalid aggregate.'
+			});
+		}
+
+		const next = decode(
+			write.schema,
+			{
+				...candidate,
+				...(write.identity ?? { id: write.aggregateId }),
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				revision: (currentMetadata?.revision ?? 0) + 1,
+				createdAt: currentMetadata?.createdAt ?? occurredAt,
+				updatedAt: occurredAt,
+				conflictClocks: {
+					...(currentMetadata?.conflictClocks ?? {}),
+					...Object.fromEntries(write.conflictGroups.map((group) => [group, clock]))
+				}
+			},
+			`decode updated ${write.store} aggregate`
+		);
+		const encoded = encode(write.schema, next, `encode updated ${write.store} aggregate`);
+
+		await table.put(encoded);
+		aggregates.push(next);
+	}
+
+	const mutationInputs = [
+		{
+			mutationId,
+			entityKind: command.entityKind,
+			aggregateId: command.aggregateId,
+			conflictGroup: command.conflictGroup,
+			operation: command.operation
+		},
+		...(command.additionalMutations ?? [])
+	];
+	const outboxRecords = mutationInputs.map((input): OutboxRecord => {
+		const mutation = decode(
+			OutboxMutationSchema,
+			{
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				...input,
+				authSlotId: command.authSlotId,
+				scopeKind: command.scopeKind,
+				scopeId: command.scopeId,
+				occurredAt,
+				originDeviceId,
+				payload: encodedPayload
+			},
+			'decode outbox mutation'
+		);
+		return {
+			...mutation,
+			status: 'pending',
+			nextAttemptAt: occurredAt,
+			attempts: 0
+		};
+	});
+	await database.outbox.bulkAdd(outboxRecords);
+
+	return { mutationId, aggregates };
+};
+
+/**
+ * Commits every command of one user gesture in a single Dexie transaction, so aggregates and outbox rows
+ * across stores and sync scopes (user recipe plus household meals) land together or not at all.
+ * Results follow the order of `commands`.
+ */
+export const executeLocalCommands = async (
+	database: MaalDatabase,
+	commands: readonly LocalCommand[]
+): Promise<LocalCommandResult[]> => {
+	const prepared = commands.map(prepareCommand);
+	const tables = [
+		...new Set(commands.flatMap(({ writes }) => writes.map(({ store }) => database.table(store))))
+	];
 
 	try {
 		return await runTrackedLocalCommit(database.name, 'commit local command', () =>
 			database.transaction('rw', [...tables, database.outbox], async () => {
-				const aggregates: unknown[] = [];
-
-				for (const write of command.writes) {
-					const clock = clockFor(write.mutationId ?? mutationId);
-					const table = database.table(write.store);
-					const stored = await table.get(write.aggregateId);
-					const current = stored
-						? decode(write.schema, stored, `decode ${write.store} aggregate`)
-						: undefined;
-					const currentMetadata = stored
-						? decode(MutableAggregateSchema, stored, `decode ${write.store} metadata`)
-						: undefined;
-					const candidate = write.update(current);
-					if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) {
-						throw new LocalDecodeError({
-							operation: `update ${write.store} aggregate`,
-							message: 'A local command returned an invalid aggregate.'
-						});
-					}
-
-					const next = decode(
-						write.schema,
-						{
-							...candidate,
-							...(write.identity ?? { id: write.aggregateId }),
-							schemaVersion: CURRENT_SCHEMA_VERSION,
-							revision: (currentMetadata?.revision ?? 0) + 1,
-							createdAt: currentMetadata?.createdAt ?? occurredAt,
-							updatedAt: occurredAt,
-							conflictClocks: {
-								...(currentMetadata?.conflictClocks ?? {}),
-								...Object.fromEntries(write.conflictGroups.map((group) => [group, clock]))
-							}
-						},
-						`decode updated ${write.store} aggregate`
-					);
-					const encoded = encode(write.schema, next, `encode updated ${write.store} aggregate`);
-
-					await table.put(encoded);
-					aggregates.push(next);
-				}
-
-				const mutationInputs = [
-					{
-						mutationId,
-						entityKind: command.entityKind,
-						aggregateId: command.aggregateId,
-						conflictGroup: command.conflictGroup,
-						operation: command.operation
-					},
-					...(command.additionalMutations ?? [])
-				];
-				const outboxRecords = mutationInputs.map((input): OutboxRecord => {
-					const mutation = decode(
-						OutboxMutationSchema,
-						{
-							schemaVersion: CURRENT_SCHEMA_VERSION,
-							...input,
-							authSlotId: command.authSlotId,
-							scopeKind: command.scopeKind,
-							scopeId: command.scopeId,
-							occurredAt,
-							originDeviceId,
-							payload: encodedPayload
-						},
-						'decode outbox mutation'
-					);
-					return {
-						...mutation,
-						status: 'pending',
-						nextAttemptAt: occurredAt,
-						attempts: 0
-					};
-				});
-				await database.outbox.bulkAdd(outboxRecords);
-
-				return { mutationId, aggregates };
+				const results: LocalCommandResult[] = [];
+				for (const command of prepared)
+					results.push(await commitPreparedCommand(database, command));
+				return results;
 			})
 		);
 	} catch (error) {
@@ -242,5 +275,10 @@ export const executeLocalCommand = async (
 		});
 	}
 };
+
+export const executeLocalCommand = async (
+	database: MaalDatabase,
+	command: LocalCommand
+): Promise<LocalCommandResult> => (await executeLocalCommands(database, [command]))[0]!;
 
 export type { LocalStoreName };
