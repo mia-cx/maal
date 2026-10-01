@@ -134,7 +134,7 @@ const seedPlan = async () => {
 				id: '01990c69-7f00-7000-8000-000000000034',
 				stepIndex: 0,
 				sectionName: null,
-				text: 'Sear the chicken and build the bowls.',
+				text: 'Roast the chicken at 200°C and build the bowls.',
 				durationMinutes: 25,
 				confidence: 1,
 				createdAt: '2026-08-21T12:00:00.000Z',
@@ -542,5 +542,106 @@ test.describe('meal pool', () => {
 		}
 		await page.waitForTimeout(500);
 		expect((await uiStatePuts()) - before).toBeLessThanOrEqual(12);
+	});
+});
+
+const putRow = (page: Page, store: string, row: Row) =>
+	page.evaluate(
+		async ({ name, value }) => {
+			const database = await new Promise<IDBDatabase>((resolve, reject) => {
+				const request = indexedDB.open('maal-v1:production');
+				request.onerror = () => reject(request.error);
+				request.onsuccess = () => resolve(request.result);
+			});
+			const transaction = database.transaction(name, 'readwrite');
+			transaction.objectStore(name).put(value);
+			await new Promise<void>((resolve, reject) => {
+				transaction.oncomplete = () => resolve();
+				transaction.onerror = () => reject(transaction.error);
+			});
+			database.close();
+		},
+		{ name: store, value: row }
+	);
+
+test.describe('meal sheet', () => {
+	test.beforeEach(async ({ page }) => {
+		await page.clock.setFixedTime(new Date('2026-08-24T12:00:00.000Z'));
+		await page.setViewportSize({ width: 1280, height: 820 });
+	});
+
+	test('shows only the active profile’s own check-in', async ({ page }) => {
+		await seed(page);
+		await planRecipeOn(page, '2026-08-23');
+		const [meal] = await readStore(page, 'meals');
+		await putRow(page, 'mealCheckIns', {
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: '2026-08-23T20:00:00.000Z',
+			updatedAt: '2026-08-23T20:00:00.000Z',
+			deletedAt: null,
+			conflictClocks: {},
+			id: '01990c69-7f00-7000-8000-0000000000b0',
+			reporterUserId: 'user_bob',
+			mealId: meal!.id,
+			cookTimeMinutes: null,
+			verdict: 'avoid',
+			reason: 'Bob says too spicy'
+		});
+		await page.reload();
+
+		await expect(page.getByRole('button', { name: 'Check in' }).first()).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Edit check-in' })).toHaveCount(0);
+		await page.getByRole('button', { name: 'Check in' }).first().click();
+		await expect(page.getByRole('dialog', { name: 'Meal check-in' })).toBeVisible();
+		await expect(page.getByLabel('Notes')).toHaveValue('');
+	});
+
+	test('saves a custom meal’s name from the sheet', async ({ page }) => {
+		await seed(page);
+		const { targetDay } = await planRecipeOn(page, '2026-08-23');
+		const [meal] = await readStore(page, 'meals');
+		await putRow(page, 'meals', { ...meal, sourceRecipeId: null });
+		await page.reload();
+
+		await targetDay.getByRole('button', { name: 'Open Gingery chicken rice bowls' }).click();
+		await page.getByLabel('Meal name').fill('Renamed bowls');
+		await page.getByRole('button', { name: 'Save meal' }).click();
+		await expect.poll(async () => (await readStore(page, 'meals'))[0]!.title).toBe('Renamed bowls');
+		expect(
+			(await readStore(page, 'outbox')).filter(
+				({ aggregateId, conflictGroup }) => aggregateId === meal!.id && conflictGroup === 'header'
+			)
+		).toHaveLength(1);
+
+		await page.reload();
+		await expect(targetDay).toContainText('Renamed bowls');
+	});
+
+	test('restores the meal and says why when a sheet save fails', async ({ page }) => {
+		await seed(page);
+		const { targetDay } = await planRecipeOn(page, '2026-08-23');
+		const [meal] = await readStore(page, 'meals');
+		await targetDay.getByRole('button', { name: 'Open Gingery chicken rice bowls' }).click();
+		// Another device deleted the meal while this sheet was open.
+		await putRow(page, 'meals', { ...meal, deletedAt: '2026-08-24T11:00:00.000Z' });
+		await page.getByRole('button', { name: 'Save meal' }).click();
+
+		await expect(page.getByText('The meal is not available in this household.')).toBeVisible();
+	});
+
+	test('shows meal sheet temperatures in the household’s preferred unit', async ({ page }) => {
+		await seed(page);
+		await page.goto('/household');
+		const temperature = page.locator('label', { hasText: 'Temperature unit' });
+		await temperature.getByRole('button').click();
+		await page.getByRole('option', { name: /°F/ }).first().click();
+		await page.getByRole('button', { name: 'Save overrides' }).click();
+		await expect(temperature).toContainText('°F');
+
+		await page.goto('/plan');
+		await mealPool(page).getByRole('button', { name: 'Open Gingery chicken rice bowls' }).click();
+		await expect(page.getByText(/Roast the chicken at 39\d°F/)).toBeVisible();
+		await expect(page.getByText('200°C')).toHaveCount(0);
 	});
 });

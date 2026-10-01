@@ -15,6 +15,7 @@
 		recipeAggregateToPickerItem,
 		reorderMeals,
 		saveMealCheckIn,
+		updateMealHeader,
 		updateMealSchedule,
 		writeScheduleUiState,
 		type MealCalendarRange,
@@ -37,11 +38,16 @@
 	import type { RecipeMenuItem } from '$lib/components/menu/index.js';
 	import { DomainIdSchema } from '$lib/domain/contracts/primitives.js';
 	import { recipeMenuItemToEditorPatch } from '$lib/menu/recipe-local-adapter.js';
+	import {
+		bindTaxonomyPreferences,
+		unitPreferencesStore
+	} from '$lib/stores/taxonomy-preferences.js';
 
 	type PlanView = {
 		profileId: string;
 		userId: string;
 		householdId: string;
+		locale: string;
 		defaultMealServings: number;
 		weekStartsOn: 'sunday' | 'monday';
 		householdTimeZone?: string;
@@ -75,15 +81,15 @@
 				.toSorted((left, right) => left.revision - right.revision)
 				.map((meal) => [meal.id, meal])
 		);
-		const latestCheckInByMeal = new Map(
+		// Check-ins are unique per (meal, reporter); the card and dialog show only this profile's.
+		const { userId, householdTimeZone } = view;
+		const ownCheckInByMeal = new Map(
 			[...rangeMeals.checkIns, ...poolMeals.checkIns]
-				.filter(({ mealId }) => mealId !== null)
-				.toSorted((left, right) => left.updatedAt.localeCompare(right.updatedAt))
+				.filter(({ mealId, reporterUserId }) => mealId !== null && reporterUserId === userId)
 				.map((checkIn) => [checkIn.mealId!, checkIn])
 		);
-		const timeZone = view.householdTimeZone;
 		return [...latest.values()].map((meal) =>
-			mealAggregateToScheduleMeal(meal, latestCheckInByMeal.get(meal.id), timeZone)
+			mealAggregateToScheduleMeal(meal, ownCheckInByMeal.get(meal.id), householdTimeZone)
 		);
 	});
 
@@ -108,9 +114,22 @@
 		return mealAggregateToScheduleMeal(planned, undefined, view.householdTimeZone);
 	};
 
-	const changeMeal = async (meal: Meal): Promise<void> => {
+	const changeMeal = async (meal: Meal, previous?: Meal): Promise<void> => {
 		if (!database) throw new Error('Local meal storage is still opening.');
-		await updateMealSchedule(database, await commandContext(), meal.id, {
+		const context = await commandContext();
+		const headerChanged =
+			previous !== undefined &&
+			(meal.title !== previous.title ||
+				(meal.description ?? '') !== (previous.description ?? '') ||
+				meal.cookTimeMinutes !== previous.cookTimeMinutes);
+		if (headerChanged) {
+			await updateMealHeader(database, context, meal.id, {
+				title: meal.title,
+				description: meal.description ?? null,
+				cookTimeMinutes: meal.cookTimeMinutes ?? null
+			});
+		}
+		await updateMealSchedule(database, context, meal.id, {
 			date: meal.date ?? null,
 			time: meal.time ?? null,
 			sortOrder: meal.sortOrder ?? null,
@@ -218,20 +237,22 @@
 					if (typeof activeHousehold?.value !== 'string') return null;
 					const household = await opened.households.get(activeHousehold.value);
 					if (!household) return null;
-					const [recipeAggregates, memberships, profiles] = await Promise.all([
+					const [recipeAggregates, memberships, profiles, attributions] = await Promise.all([
 						listRecipes(opened, profile.workosUserId),
 						opened.memberships.where('householdId').equals(household.householdId).toArray(),
-						opened.profiles.toArray()
+						opened.profiles.toArray(),
+						opened.userAttributions.toArray()
 					]);
 					return {
 						profileId: profile.profileId,
 						userId: profile.workosUserId,
 						householdId: household.householdId,
+						locale: household.locale,
 						defaultMealServings: household.defaultPlannedYield,
 						weekStartsOn: household.weekStartsOn === 0 ? 'sunday' : 'monday',
 						householdTimeZone: household.timezone ?? undefined,
 						recipes: recipeAggregates.map(recipeAggregateToPickerItem),
-						householdMembers: membershipsToHouseholdMembers(memberships, profiles)
+						householdMembers: membershipsToHouseholdMembers(memberships, profiles, attributions)
 					};
 				}).subscribe({
 					next: (nextView) => {
@@ -283,6 +304,14 @@
 		};
 	});
 
+	// Unit and temperature preferences for the meal sheet, live for this profile and household.
+	$effect(() => {
+		const opened = database;
+		if (!opened || !scope) return;
+		const { userId, householdId, locale } = untrack(() => view!);
+		return bindTaxonomyPreferences(opened, { workosUserId: userId, householdId, locale });
+	});
+
 	$effect(() => {
 		const opened = database;
 		if (!opened || !householdId) return;
@@ -330,6 +359,7 @@
 					householdTimeZone={view.householdTimeZone}
 					currentUserId={view.userId}
 					householdMembers={view.householdMembers}
+					unitPreferences={$unitPreferencesStore}
 					initialUiState={uiState.state}
 					{error}
 					onplanrecipe={planRecipe}

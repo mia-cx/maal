@@ -403,12 +403,22 @@
 	const saveMealChange = async (meal: Meal) => {
 		const previous = scheduleMeals.find(({ id }) => id === meal.id);
 		replaceMeal(meal);
-		await onmealchange?.(meal, previous);
+		try {
+			await onmealchange?.(meal, previous);
+			mealWriteError = null;
+		} catch (error) {
+			rollBackMealWrite(error);
+		}
 	};
 	const removeMeal = async (meal: Meal) => {
 		scheduleMeals = scheduleMeals.filter(({ id }) => id !== meal.id);
 		selectedMealId = null;
-		await onmealdelete?.(meal);
+		try {
+			await onmealdelete?.(meal);
+			mealWriteError = null;
+		} catch (error) {
+			rollBackMealWrite(error);
+		}
 	};
 
 	$effect(() => {
