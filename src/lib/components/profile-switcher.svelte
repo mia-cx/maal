@@ -12,6 +12,7 @@
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 
 	import { createAuthSlotId, MAX_AUTHENTICATED_SLOTS } from '$lib/auth-slots/contracts.js';
+	import { retainedAuthSlots } from '$lib/client/auth-slot-projection.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import {
 		clearProfilePin,
@@ -64,9 +65,7 @@
 	const activeView = $derived(
 		views.find(({ profile }) => profile.profileId === activeProfileId) ?? views[0] ?? null
 	);
-	const retainedSlotCount = $derived(
-		views.filter(({ slot }) => slot && slot.sessionState !== 'revoked').length
-	);
+	const retainedSlotCount = $derived(retainedAuthSlots(views).length);
 	const initials = (profile: Profile): string =>
 		profile.displayName
 			.split(/\s+/)
@@ -420,7 +419,9 @@
 				{:else}
 					<DropdownMenu.Item disabled class="items-start gap-2 p-2">
 						<PlusIcon class="mt-0.5" />
-						<span>Eight signed-in profiles are already retained. Remove one to add another.</span>
+						<span
+							>Eight profiles are already signed in on this device. Sign out of one to add another.</span
+						>
 					</DropdownMenu.Item>
 				{/if}
 				<DropdownMenu.Separator />

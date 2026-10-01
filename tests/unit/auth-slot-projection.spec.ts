@@ -13,9 +13,17 @@ import {
 import {
 	AuthSlotMetadataUnavailable,
 	projectAuthCallback,
+	retainedAuthSlots,
 	takeAuthCallbackMarker
 } from '$lib/client/auth-slot-projection.js';
 import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.js';
+import {
+	finalizeProfileSignOut,
+	requestProfilePinReset,
+	setProfilePin,
+	switchActiveProfile
+} from '$lib/client/local/profiles.js';
+import type { AuthSlotRecord, OutboxRecord } from '$lib/client/local/records.js';
 import { ProfileSchema, type Profile } from '$lib/domain/household/contracts.js';
 
 const ALICE_SLOT = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as AuthSlotId;
@@ -73,6 +81,27 @@ const localRecipe = () => ({
 	updatedAt: timestamp,
 	deletedAt: null,
 	conflictClocks: {}
+});
+
+const queuedMutation = (
+	authSlotId: string,
+	overrides: Partial<OutboxRecord> = {}
+): OutboxRecord => ({
+	mutationId: uuidv7(),
+	authSlotId,
+	scopeKind: 'household',
+	scopeId: 'org_canal',
+	status: 'pending',
+	occurredAt: timestamp,
+	aggregateId: uuidv7(),
+	entityKind: 'meal',
+	conflictGroup: 'meal',
+	operation: 'upsert',
+	originDeviceId: 'device',
+	payload: {},
+	nextAttemptAt: timestamp,
+	attempts: 0,
+	...overrides
 });
 
 const authenticatedResponse = (authSlotId: AuthSlotId, workosUserId: string, firstName: string) =>
@@ -317,15 +346,19 @@ describe('auth callback projection', () => {
 			await addSlot(database, retained, index.toString(16).padStart(32, '0') as AuthSlotId);
 		}
 		await database.uiState.put({ key: 'activeProfileId', value: 'original-profile' });
+		const fetcher = vi.fn(async () => authenticatedResponse(BOB_SLOT, 'user_nine', 'Nine'));
 
 		await expect(
 			projectAuthCallback(
 				database,
 				{ authSlotId: BOB_SLOT, authStatus: 'authenticated' },
-				{ fetcher: async () => authenticatedResponse(BOB_SLOT, 'user_nine', 'Nine') }
+				{ fetcher }
 			)
 		).rejects.toBeInstanceOf(AuthSlotCapacityExceeded);
 
+		expect(fetcher).toHaveBeenLastCalledWith(`/api/auth-slots/${BOB_SLOT}/`, {
+			method: 'DELETE'
+		});
 		await expect(database.profiles.count()).resolves.toBe(MAX_AUTHENTICATED_SLOTS);
 		await expect(database.authSlots.count()).resolves.toBe(MAX_AUTHENTICATED_SLOTS);
 		await expect(database.profiles.where('workosUserId').equals('user_nine').count()).resolves.toBe(
@@ -335,6 +368,181 @@ describe('auth callback projection', () => {
 		await expect(database.uiState.get('activeProfileId')).resolves.toMatchObject({
 			value: 'original-profile'
 		});
+	});
+
+	test('leaves reauth-required and signed-out profiles out of the eight-slot count', async () => {
+		const database = await openDatabase();
+		const views: { profile: Profile; slot: AuthSlotRecord }[] = [];
+		for (let index = 0; index < MAX_AUTHENTICATED_SLOTS; index += 1) {
+			const retained = profile(`user_${index}`, `Cook ${index}`);
+			const authSlotId = index.toString(16).padStart(32, '0') as AuthSlotId;
+			await database.profiles.add(retained);
+			await addSlot(database, retained, authSlotId);
+			views.push({ profile: retained, slot: (await database.authSlots.get(authSlotId))! });
+		}
+		await database.profiles.update(views[0]!.profile.profileId, { authState: 'reauthRequired' });
+		views[0] = { ...views[0]!, profile: { ...views[0]!.profile, authState: 'reauthRequired' } };
+
+		expect(retainedAuthSlots(views)).toHaveLength(MAX_AUTHENTICATED_SLOTS - 1);
+		await expect(
+			projectAuthCallback(
+				database,
+				{ authSlotId: BOB_SLOT, authStatus: 'authenticated' },
+				{ fetcher: async () => authenticatedResponse(BOB_SLOT, 'user_nine', 'Nine') }
+			)
+		).resolves.toMatchObject({ state: 'authenticated' });
+	});
+
+	test('moves work queued while signed out onto the slot Alice signs back in with', async () => {
+		const database = await openDatabase();
+		const alice = profile('user_alice', 'Alice');
+		const bob = profile('user_bob', 'Bob');
+		await database.profiles.bulkAdd([alice, bob]);
+		await addSlot(database, alice, ALICE_SLOT);
+		await addSlot(database, bob, BOB_SLOT);
+		await finalizeProfileSignOut(database, alice.profileId);
+		const oldSlotRow = queuedMutation(ALICE_SLOT);
+		const signedOutRow = queuedMutation(`signed-out:${alice.profileId}`, { status: 'quarantined' });
+		const acknowledgedRow = queuedMutation(ALICE_SLOT, { status: 'acknowledged' });
+		const bobRow = queuedMutation(BOB_SLOT);
+		await database.outbox.bulkAdd([oldSlotRow, signedOutRow, acknowledgedRow, bobRow]);
+		const newSlot = 'c'.repeat(32) as AuthSlotId;
+
+		await projectAuthCallback(
+			database,
+			{ authSlotId: newSlot, authStatus: 'authenticated' },
+			{ fetcher: async () => authenticatedResponse(newSlot, 'user_alice', 'Alice'), now: timestamp }
+		);
+
+		await expect(database.authSlots.get(ALICE_SLOT)).resolves.toBeUndefined();
+		const slotFor = async (row: OutboxRecord) =>
+			(await database.outbox.get(row.mutationId))?.authSlotId;
+		await expect(slotFor(oldSlotRow)).resolves.toBe(newSlot);
+		await expect(slotFor(signedOutRow)).resolves.toBe(newSlot);
+		await expect(slotFor(acknowledgedRow)).resolves.toBe(ALICE_SLOT);
+		await expect(slotFor(bobRow)).resolves.toBe(BOB_SLOT);
+	});
+
+	test('clears a forgotten PIN once Alice signs in again', async () => {
+		const database = await openDatabase();
+		const alice = profile('user_alice', 'Alice');
+		const bob = profile('user_bob', 'Bob');
+		await database.profiles.bulkAdd([alice, bob]);
+		await addSlot(database, alice, ALICE_SLOT);
+		await addSlot(database, bob, BOB_SLOT);
+		await switchActiveProfile(database, alice.profileId);
+		await setProfilePin(database, alice.profileId, '4826');
+		await switchActiveProfile(database, bob.profileId);
+		await requestProfilePinReset(database, alice.profileId);
+
+		await projectAuthCallback(
+			database,
+			{ authSlotId: ALICE_SLOT, authStatus: 'authenticated' },
+			{ fetcher: async () => authenticatedResponse(ALICE_SLOT, 'user_alice', 'Alice') }
+		);
+
+		await expect(database.profiles.get(alice.profileId)).resolves.toMatchObject({
+			lockPolicy: 'none',
+			pinSalt: null,
+			pinVerifier: null
+		});
+		await expect(database.uiState.get('activeProfileId')).resolves.toMatchObject({
+			value: alice.profileId
+		});
+		await expect(database.uiState.get(`profileLock:${alice.profileId}`)).resolves.toMatchObject({
+			value: false
+		});
+	});
+
+	test('keeps a household with pending local edits when sign-in discovers it', async () => {
+		const database = await openDatabase();
+		const household = (householdId: string, name: string, revision: number) =>
+			({
+				schemaVersion: 1,
+				revision,
+				createdAt: timestamp,
+				updatedAt: timestamp,
+				deletedAt: null,
+				conflictClocks: {},
+				householdId,
+				name,
+				locale: 'en-NL',
+				timezone: 'Europe/Amsterdam',
+				weekStartsOn: 1,
+				defaultPlannedYield: 4,
+				preferredDinnerTime: null,
+				createdByUserId: 'user_alice',
+				deletionState: 'active',
+				localOnly: false
+			}) as const;
+		const edited = household('org_canal', 'Friday table', 2);
+		const untouched = household('org_garden', 'Garden kitchen', 1);
+		await database.households.bulkAdd([edited, untouched]);
+		await database.outbox.add(
+			queuedMutation(`signed-out:profile_alice`, {
+				aggregateId: 'org_canal',
+				entityKind: 'household'
+			})
+		);
+		const discovered = (home: ReturnType<typeof household>) => ({
+			household: home,
+			membership: {
+				membershipId: `membership_${home.householdId}`,
+				householdId: home.householdId,
+				workosUserId: 'user_alice',
+				roleSlug: 'admin',
+				permissions: ['households:write', 'meals:read', 'meals:write'],
+				status: 'active',
+				directoryManaged: false,
+				workosCreatedAt: timestamp,
+				lastVerifiedAt: timestamp,
+				updatedAt: timestamp,
+				detachedAt: null,
+				denialCode: null,
+				source: 'workos'
+			},
+			capability: {
+				householdId: home.householdId,
+				state: 'disabled',
+				stripeStatus: null,
+				subscriberUserId: null,
+				stripePriceId: null,
+				currentPeriodEnd: null,
+				interruptionStartedAt: null,
+				graceUntil: null,
+				validUntil: null,
+				cancelAtPeriodEnd: false,
+				stale: false,
+				source: 'stripe-d1'
+			}
+		});
+		const fetcher = async () => {
+			const body = (await authenticatedResponse(
+				ALICE_SLOT,
+				'user_alice',
+				'Alice'
+			).json()) as Record<string, unknown>;
+			return Response.json({
+				...body,
+				households: [
+					discovered(household('org_canal', 'Canal kitchen', 1)),
+					discovered(household('org_garden', 'Garden table', 3))
+				]
+			});
+		};
+
+		await projectAuthCallback(
+			database,
+			{ authSlotId: ALICE_SLOT, authStatus: 'authenticated' },
+			{ fetcher, now: timestamp }
+		);
+
+		await expect(database.households.get('org_canal')).resolves.toEqual(edited);
+		await expect(database.households.get('org_garden')).resolves.toMatchObject({
+			name: 'Garden table',
+			revision: 3
+		});
+		await expect(database.memberships.get('membership_org_canal')).resolves.toBeDefined();
 	});
 
 	test('rolls back every projected store when the atomic write fails', async () => {
