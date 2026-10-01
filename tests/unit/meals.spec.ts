@@ -8,7 +8,6 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
 	deleteMeal,
 	defaultScheduleUiState,
-	detachDeletedRecipeFromMeals,
 	liveMealCalendarRange,
 	listHouseholdMeals,
 	planRecipeAsMeal,
@@ -22,6 +21,7 @@ import {
 import { MaalDatabase, openMaalDatabase } from '$lib/client/local/database.js';
 import {
 	commitImportedRecipeCandidate,
+	permanentlyDeleteRecipe,
 	updateRecipeFromEditor,
 	type RecipeCommandContext
 } from '$lib/client/recipes/index.js';
@@ -241,7 +241,22 @@ describe('lossless local meal snapshots', () => {
 		expect((await listHouseholdMeals(database, 'org_family'))[0]?.title).toBe('Sunday soup');
 		expect(await database.recipes.count()).toBe(1);
 
-		await detachDeletedRecipeFromMeals(database, mealContext(at(23)), recipe.id);
+		await database.memberships.put({
+			membershipId: 'membership_alice',
+			householdId: 'org_family',
+			workosUserId: 'user_alice',
+			roleSlug: 'admin',
+			permissions: ['meals:read', 'meals:write'],
+			status: 'active',
+			directoryManaged: false,
+			workosCreatedAt: at(20),
+			lastVerifiedAt: at(20),
+			updatedAt: at(20),
+			source: 'workos',
+			detachedAt: null,
+			denialCode: null
+		});
+		await permanentlyDeleteRecipe(database, recipeContext(at(23)), recipe.id);
 		const detached = (await listHouseholdMeals(database, 'org_family'))[0]!;
 		expect(detached.sourceRecipeId).toBeNull();
 		expect(detached.title).toBe('Sunday soup');

@@ -22,7 +22,7 @@
 	import { getBrowserDatabase } from '$lib/client/local/browser.js';
 	import { activeHouseholdKey } from '$lib/client/local/profiles.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
-	import { createRecipeFromEditor, listRecipes } from '$lib/client/recipes/index.js';
+	import { createRecipeAndPlanMeal, listRecipes } from '$lib/client/recipes/index.js';
 	import ScheduleDashboard from '$lib/components/dashboard/schedule-dashboard.svelte';
 	import type {
 		HouseholdMember,
@@ -114,16 +114,13 @@
 
 	const createRecipeAndMeal = async (recipe: RecipeMenuItem, date?: string): Promise<Meal> => {
 		if (!database || !view) throw new Error('Local recipe storage is still opening.');
-		const recipeContext = {
-			...(await commandContext()),
-			ownerUserId: view.userId
-		};
-		const created = await createRecipeFromEditor(
+		const { meal } = await createRecipeAndPlanMeal(
 			database,
-			recipeContext,
-			recipeMenuItemToEditorPatch(recipe)
+			await commandContext(),
+			recipeMenuItemToEditorPatch(recipe),
+			{ date: date ?? null, sortOrder: null, plannedYield: view.defaultMealServings }
 		);
-		return planRecipe(recipeAggregateToPickerItem(created), date);
+		return mealAggregateToScheduleMeal(meal, undefined, view.householdTimeZone);
 	};
 
 	const saveUiState = async (state: ScheduleUiState): Promise<void> => {
