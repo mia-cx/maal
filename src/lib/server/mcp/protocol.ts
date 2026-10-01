@@ -20,7 +20,7 @@ import { tools } from './tools.js';
 
 export const MCP_ALLOWED_HOSTNAMES = [
 	'maal.mia.cx',
-	'staging.maal.mia.cx',
+	'staging.maal.is',
 	'maal.test',
 	'localhost',
 	'127.0.0.1'
@@ -60,7 +60,7 @@ export const createMaalMcpHandler = (input: {
 			responseMode: 'json',
 			corsOptions: false,
 			allowedHostnames: MCP_ALLOWED_HOSTNAMES,
-			allowedOriginHostnames: ['maal.mia.cx', 'staging.maal.mia.cx', 'maal.test', 'localhost']
+			allowedOriginHostnames: ['maal.mia.cx', 'staging.maal.is', 'maal.test', 'localhost']
 		}
 	);
 

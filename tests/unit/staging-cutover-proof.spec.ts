@@ -63,6 +63,7 @@ const stagingWrangler = {
 		staging: {
 			name: 'maal-staging',
 			vars: { MAAL_PROOF_TELEMETRY: 'staging-only' },
+			routes: [{ pattern: 'staging.maal.test', custom_domain: true }],
 			triggers: { crons: ['17 3 * * *'] },
 			ratelimits: [
 				{
@@ -103,12 +104,14 @@ describe('staging cutover proof safety', () => {
 				directory
 			)
 		).rejects.toThrow('not a test-mode sk_test_ key');
-		await expect(
-			validateLiveEnvironment(
-				{ ...liveEnvironment, MAAL_STAGING_BASE_URL: 'https://maal.mia.cx' },
-				directory
-			)
-		).rejects.toThrow('refuses the production Maal hostname');
+		for (const production of ['https://maal.mia.cx', 'https://maal.is', 'https://www.maal.is']) {
+			await expect(
+				validateLiveEnvironment(
+					{ ...liveEnvironment, MAAL_STAGING_BASE_URL: production },
+					directory
+				)
+			).rejects.toThrow('refuses the production Maal hostname');
+		}
 	});
 
 	test('returns only safe deployment facts from a complete staging environment', async () => {
@@ -128,7 +131,13 @@ describe('staging cutover proof safety', () => {
 	});
 
 	test('validates the committed wrangler.jsonc that deploy and migrations use', async () => {
-		await expect(validateLiveEnvironment(liveEnvironment, resolve('.'))).resolves.toMatchObject({
+		await expect(
+			validateLiveEnvironment(
+				{ ...liveEnvironment, MAAL_STAGING_BASE_URL: 'https://staging.maal.is' },
+				resolve('.')
+			)
+		).resolves.toMatchObject({
+			baseUrl: 'https://staging.maal.is',
 			wranglerConfigPath: resolve('wrangler.jsonc')
 		});
 	});
@@ -226,7 +235,17 @@ describe('staging cutover proof safety', () => {
 				env: { staging: { ...stagingWrangler.env.staging, triggers: { crons: ['* * * * *'] } } }
 			},
 			{ ...stagingWrangler, assets: { binding: 'WRONG', directory: 'public' } },
-			{ ...stagingWrangler, observability: { enabled: false } }
+			{ ...stagingWrangler, observability: { enabled: false } },
+			{ ...stagingWrangler, env: { staging: { ...stagingWrangler.env.staging, routes: [] } } },
+			{
+				...stagingWrangler,
+				env: {
+					staging: {
+						...stagingWrangler.env.staging,
+						routes: [{ pattern: 'other.maal.test', custom_domain: true }]
+					}
+				}
+			}
 		]) {
 			await writeFile(configPath, JSON.stringify(invalid));
 			await expect(validateLiveEnvironment(liveEnvironment, directory)).rejects.toThrow();

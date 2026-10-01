@@ -5,7 +5,8 @@ the single WorkOS callback for every slot. The staging candidate is release-read
 passes. Native Safari and Android retained-slot evidence is tracked separately in #70.
 
 This runbook updates the existing `maal-staging` Worker and D1 database, connects WorkOS staging and a Stripe
-test sandbox, runs disposable release proofs, and removes every proof fixture. It never requires a real user,
+test sandbox, runs disposable release proofs, and removes every proof fixture. The staging origin is
+`https://staging.maal.is`; `<staging-origin>` below means that host. It never requires a real user,
 live Stripe object, or production provider key.
 
 ## Safety contract
@@ -15,9 +16,9 @@ live Stripe object, or production provider key.
 - Every Wrangler command uses the committed `wrangler.jsonc` with `--env staging`. It already holds the
   staging Worker, D1 binding, and ID, so there is no private copy.
 - Keep the operator environment, raw provider output, fixture ledger, and proof evidence outside Git. The
-  harness rejects the production Maal hostname, any Stripe key other than `sk_test_`, any WorkOS key other
-  than `sk_test_`, a missing `CLOUDFLARE_ACCOUNT_ID`, and a `wrangler.jsonc` that differs from the candidate
-  commit.
+  harness rejects the production hostnames (`maal.mia.cx`, `maal.is`, `www.maal.is`), any Stripe key other
+  than `sk_test_`, any WorkOS key other than `sk_test_`, a missing `CLOUDFLARE_ACCOUNT_ID`, and a
+  `wrangler.jsonc` that differs from the candidate commit.
 - Use a fresh private fixture-ledger path for every run. The runtime creates it once with mode `0600` and only
   removes it after WorkOS, Stripe, and D1 report zero remaining fixtures.
 - The output evidence is allowlisted. It contains pass/fail facts, counts, UTC times, and a non-secret
@@ -58,6 +59,8 @@ Keep the raw command output in the private change record. Do not attach its acco
 evidence. The committed `wrangler.jsonc` must keep these contracts:
 
 - Worker/environment name: `maal-staging`
+- custom domain route: `staging.maal.is` only, matching `MAAL_STAGING_BASE_URL`; deploy attaches it in the
+  active `maal.is` zone
 - D1 binding/name: `DB` / `maal-staging`
 - migration directory: `drizzle`
 - rate-limit binding: `RECIPE_URL_RATE_LIMIT`
@@ -253,7 +256,7 @@ run with shell tracing enabled.
 
 ```text
 MAAL_STAGING_PROOF_CONFIRM=create-and-remove-disposable-staging-fixtures
-MAAL_STAGING_BASE_URL=https://<staging-origin>
+MAAL_STAGING_BASE_URL=https://staging.maal.is
 MAAL_STAGING_DEPLOYMENT_LABEL=<non-secret-candidate-label>
 MAAL_STAGING_DATABASE_NAME=maal-staging
 CLOUDFLARE_ACCOUNT_ID=<mia.cx-account-id>

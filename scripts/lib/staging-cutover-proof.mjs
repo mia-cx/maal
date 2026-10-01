@@ -45,6 +45,8 @@ export const contractProofFiles = [
 	'tests/unit/mcp-tools.spec.ts'
 ];
 
+const productionHostnames = new Set(['maal.mia.cx', 'maal.is', 'www.maal.is']);
+
 export const validateStagingOrigin = (value) => {
 	if (!value?.trim()) throw new Error('MAAL_STAGING_BASE_URL is required.');
 	const url = new URL(value);
@@ -58,7 +60,7 @@ export const validateStagingOrigin = (value) => {
 	) {
 		throw new Error('MAAL_STAGING_BASE_URL must be a clean HTTPS staging origin.');
 	}
-	if (url.hostname === 'maal.mia.cx') {
+	if (productionHostnames.has(url.hostname)) {
 		throw new Error('Staging proof refuses the production Maal hostname.');
 	}
 	return url.origin;
@@ -106,7 +108,7 @@ export const validateLiveEnvironment = async (environment, repositoryRoot) => {
 	}
 
 	const configPath = resolve(repositoryRoot, STAGING_WRANGLER_CONFIG);
-	await validateWranglerStagingConfig(configPath);
+	await validateWranglerStagingConfig(configPath, new URL(baseUrl).hostname);
 	const fixturePath = privatePath(
 		environment.MAAL_STAGING_FIXTURE_FILE,
 		repositoryRoot,
@@ -132,7 +134,7 @@ export const validateLiveEnvironment = async (environment, repositoryRoot) => {
 	};
 };
 
-const validateWranglerStagingConfig = async (path) => {
+const validateWranglerStagingConfig = async (path, stagingHostname) => {
 	let configuration;
 	try {
 		configuration = JSON.parse(await readFile(path, 'utf8'));
@@ -152,6 +154,14 @@ const validateWranglerStagingConfig = async (path) => {
 	}
 	if (staging.vars?.MAAL_PROOF_TELEMETRY !== 'staging-only') {
 		throw new Error('Wrangler staging must enable staging-only proof telemetry.');
+	}
+	if (
+		!Array.isArray(staging.routes) ||
+		staging.routes.length !== 1 ||
+		staging.routes[0]?.pattern !== stagingHostname ||
+		staging.routes[0].custom_domain !== true
+	) {
+		throw new Error('Wrangler staging must route only the staging origin as its custom domain.');
 	}
 	assertNoSecretVars(configuration);
 	const databases = staging.d1_databases;
