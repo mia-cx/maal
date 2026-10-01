@@ -3,6 +3,7 @@ import { uuidv7 } from 'uuidv7';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
+import { renewalCutoff } from '$lib/server/billing/entitlement.js';
 import {
 	D1UserSyncRepository,
 	d1UserSyncCapabilityAuthorizer,
@@ -265,7 +266,7 @@ describe('D1 user sync repository', () => {
 			.prepare(
 				"UPDATE billing_subscriptions SET status = 'active', current_period_end = ? WHERE household_id = 'org_paid'"
 			)
-			.bind(timestamp)
+			.bind(renewalCutoff(timestamp))
 			.run();
 		await expect(
 			d1UserSyncCapabilityAuthorizer.authorize({
