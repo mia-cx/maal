@@ -79,7 +79,6 @@ export const startMaalTrial = async (input: {
 				subscriberUserId: input.workosUserId,
 				eventId: `trial:${claimId}`,
 				eventCreatedAt: input.now,
-				eventReceivedAt: input.now,
 				existing: null,
 				paidPeriodSucceeded: false
 			})
