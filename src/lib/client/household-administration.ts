@@ -20,6 +20,7 @@ import {
 	type Membership
 } from '$lib/domain/household/contracts.js';
 import { requireCachedPermission } from '$lib/domain/household/permissions.js';
+import { refreshJoinedHouseholdBilling } from '$lib/client/billing.js';
 import type { MaalDatabase } from '$lib/client/local/database.js';
 import { detachHouseholdSnapshot } from '$lib/client/local/households.js';
 import { LocalProfileMissing } from '$lib/client/local/profiles.js';
@@ -265,6 +266,7 @@ export const createRemoteHousehold = async (
 		CreateJoinResponseSchema
 	);
 	await commitCreateJoinProjection(database, profileId, response.payload, true);
+	await refreshJoinedHouseholdBilling(database, profileId, response.payload.household, fetcher);
 	return { householdId: response.payload.household.householdId };
 };
 
@@ -287,6 +289,7 @@ export const joinRemoteHousehold = async (
 		CreateJoinResponseSchema
 	);
 	await commitCreateJoinProjection(database, profileId, response.payload, true);
+	await refreshJoinedHouseholdBilling(database, profileId, response.payload.household, fetcher);
 	return { householdId: response.payload.household.householdId };
 };
 

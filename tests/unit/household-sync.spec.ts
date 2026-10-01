@@ -459,7 +459,7 @@ describe('foreground household coordinator', () => {
 		expect(spies.map(({ mock }) => mock.calls.length)).toEqual([0, 0, 0, 0]);
 	});
 
-	test('stops an active cached capability at validUntil without content traffic', async () => {
+	test('stops a plan cancelling at period end at validUntil without content traffic', async () => {
 		const database = await openDatabase('expired-capability');
 		await seedProfile(database, {
 			userId: 'user_alice',
@@ -467,7 +467,10 @@ describe('foreground household coordinator', () => {
 			authSlotId: 'slot_alice',
 			paid: true
 		});
-		await database.billingCapabilities.update(householdId, { validUntil: timestamp });
+		await database.billingCapabilities.update(householdId, {
+			validUntil: timestamp,
+			cancelAtPeriodEnd: true
+		});
 		const transport = new MemoryHouseholdServer().transport('user_alice');
 		const requests = [
 			vi.spyOn(transport, 'pull'),
