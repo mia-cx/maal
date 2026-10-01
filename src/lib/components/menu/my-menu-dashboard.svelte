@@ -49,8 +49,12 @@
 	let permanentDeleteOpen = $state(false);
 	let recipeSearchQuery = $state('');
 	let selectedRecipeId = $state<string | null>(null);
-	let displayedRecipeLimit = $state(120);
+	/** Initial card window and the step each scroll adds; bounds the DOM for large libraries. */
+	const RECIPE_WINDOW_SIZE = 120;
+	let displayedRecipeLimit = $state(RECIPE_WINDOW_SIZE);
 	let previousRecipeSearchQuery = '';
+	let recipeScrollElement = $state<HTMLElement>();
+	let loadMoreElement = $state<HTMLElement>();
 
 	const selectedRecipe = $derived(
 		draftRecipe ?? recipes.find((recipe) => recipe.id === selectedRecipeId) ?? null
@@ -59,9 +63,7 @@
 		rankRecipeWindow(recipes, recipeSearchQuery, displayedRecipeLimit)
 	);
 	const displayedRecipes = $derived(rankedRecipeWindow.recipes);
-	const hiddenRecipeCount = $derived(
-		Math.max(0, rankedRecipeWindow.total - displayedRecipes.length)
-	);
+	const hasHiddenRecipes = $derived(rankedRecipeWindow.total > displayedRecipes.length);
 	const selectedRecipes = $derived(
 		displayedRecipes.filter((recipe) => selectedRecipeIds.includes(recipe.id))
 	);
@@ -89,7 +91,23 @@
 	$effect(() => {
 		if (recipeSearchQuery === previousRecipeSearchQuery) return;
 		previousRecipeSearchQuery = recipeSearchQuery;
-		displayedRecipeLimit = 120;
+		displayedRecipeLimit = RECIPE_WINDOW_SIZE;
+	});
+
+	// Re-created after every window growth, so it keeps loading while the sentinel stays in range.
+	$effect(() => {
+		const limit = displayedRecipeLimit;
+		if (!loadMoreElement || !hasHiddenRecipes) return;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries.some((entry) => entry.isIntersecting)) {
+					displayedRecipeLimit = limit + RECIPE_WINDOW_SIZE;
+				}
+			},
+			{ root: recipeScrollElement, rootMargin: '480px 0px' }
+		);
+		observer.observe(loadMoreElement);
+		return () => observer.disconnect();
 	});
 
 	$effect(() => {
@@ -264,7 +282,10 @@
 		</div>
 	</header>
 
-	<div class="@container/my-menu-main min-h-0 flex-1 overflow-auto p-3 md:p-4">
+	<div
+		bind:this={recipeScrollElement}
+		class="@container/my-menu-main min-h-0 flex-1 overflow-auto p-3 md:p-4"
+	>
 		<div class="mb-3 flex flex-wrap items-center gap-2">
 			<p class="mr-2 text-sm font-medium">
 				{selectedRecipes.length} recipe{selectedRecipes.length === 1 ? '' : 's'} selected
@@ -335,23 +356,12 @@
 				/>
 			{/each}
 		</div>
-		{#if hiddenRecipeCount > 0}
-			<div class="flex justify-center py-4">
-				<Button
-					variant="outline"
-					onclick={() => (displayedRecipeLimit += 120)}
-					aria-label={`Show more recipes, ${hiddenRecipeCount} remaining`}
-				>
-					Show more recipes ({hiddenRecipeCount} remaining)
-				</Button>
-			</div>
-		{/if}
 		{#if recipeSearchQuery.trim() && displayedRecipes.length === 0}
 			<p class="py-8 text-center text-sm text-muted-foreground">
 				{m.menu_no_recipes_match_query({ query: recipeSearchQuery })}
 			</p>
 		{/if}
-		<div class="min-h-10 py-4"></div>
+		<div bind:this={loadMoreElement} class="min-h-10 py-4"></div>
 
 		<Accordion.Root type="multiple" class="border-border bg-background">
 			<Accordion.Item value="archive">

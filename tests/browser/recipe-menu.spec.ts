@@ -27,6 +27,22 @@ test('preserves the approved recipe library and editor interactions', async () =
 	});
 });
 
+test('loads the next window of recipe cards as the list scrolls', async () => {
+	const recipes = Array.from({ length: 300 }, (_, index) => ({
+		...myMenuRecipes[0]!,
+		id: `scroll-recipe-${index}`,
+		title: `Scroll recipe ${index}`
+	}));
+	const screen = await render(MyMenuDashboard, { recipes });
+	const cards = screen.getByRole('button', { name: /^Open Scroll recipe/ });
+
+	await expect.poll(() => cards.elements().length).toBe(120);
+	expect(screen.getByRole('button', { name: /show more/i }).elements()).toHaveLength(0);
+
+	cards.elements().at(-1)!.scrollIntoView();
+	await expect.poll(() => cards.elements().length).toBe(240);
+});
+
 test('keeps recovery controls and states that copied meals survive permanent deletion', async () => {
 	const onrestore = vi.fn<(recipe: RecipeMenuItem) => void>();
 	const onpermanentdelete = vi.fn<(recipes: RecipeMenuItem[]) => void>();
