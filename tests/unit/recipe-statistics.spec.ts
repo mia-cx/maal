@@ -12,6 +12,7 @@ import {
 	planRecipeAsMeal,
 	saveMealCheckIn,
 	setMealStatus,
+	updateMealSchedule,
 	type MealCommandContext
 } from '$lib/client/meals/index.js';
 import { createRecipeFromEditor } from '$lib/client/recipes/commands.js';
@@ -178,10 +179,15 @@ describe('recipe statistics', () => {
 		});
 	});
 
-	test('fall back to the cooked update time when a cooked meal has no date', async () => {
+	test('fall back to the status change time when a cooked meal has no date', async () => {
 		const { database, recipe } = await openKitchen();
 		const meal = await planRecipeAsMeal(database, cook('org_family', 3), recipe.id);
 		await setMealStatus(database, cook('org_family', 9), meal.id, 'cooked');
+		await updateMealSchedule(database, cook('org_family', 11), meal.id, {
+			date: null,
+			time: '18:30',
+			sortOrder: null
+		});
 
 		expect((await readRecipeStatistics(database)).get(recipe.id)).toEqual({
 			...emptyRecipeStats(),

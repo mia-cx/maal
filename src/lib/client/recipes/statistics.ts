@@ -47,7 +47,8 @@ const deriveRecipeStatistics = (
 		stats.plannedCount += 1;
 		if (meal.status !== 'cooked') continue;
 		stats.timesCooked += 1;
-		const cookedOn = meal.date ?? meal.updatedAt;
+		// Undated meals use the status clock: `updatedAt` also moves on unrelated edits.
+		const cookedOn = meal.date ?? meal.conflictClocks.status?.occurredAt ?? meal.updatedAt;
 		if (!stats.lastCookedAt || cookedOn > stats.lastCookedAt) stats.lastCookedAt = cookedOn;
 	}
 
