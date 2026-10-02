@@ -9,6 +9,7 @@ import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.
 import { acquireSyncLease, renewSyncLease } from '$lib/client/local/leases.js';
 import {
 	BACKFILL_SINGLE_RECORD_MAX_BYTES,
+	FOREGROUND_PULL_INTERVAL_MS,
 	applyUserMutationReceipts,
 	applyUserPullPage,
 	createUserSyncCoordinator,
@@ -1265,5 +1266,81 @@ describe('user outbox recovery', () => {
 			'pending',
 			'pending'
 		]);
+	});
+
+	test('drains a backlog larger than one push batch in a single run', async () => {
+		const database = await openDatabase();
+		const context = { database, authSlotId, originDeviceId: await deviceIdOf(database) };
+		for (let index = 0; index < 60; index += 1) {
+			await upsertTaxonomyRecord(
+				{ ...context, occurredAt: timestamp },
+				'unitUserEntry',
+				unitDraft(uuidv7(), `unit ${index}`)
+			);
+		}
+		await seedPaidProfile(database);
+		const pushes: PushRequest[] = [];
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: validatingTransport(pushes),
+			environment: environment()
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(pushes.map(({ mutations }) => mutations.length)).toEqual([50, 10]);
+		expect(
+			await database.outbox
+				.where('[scopeKind+scopeId+status]')
+				.equals(['user', userId, 'pending'])
+				.count()
+		).toBe(0);
+	});
+});
+
+describe('user sync scheduling', () => {
+	test('pulls again while paid and foregrounded, but a free profile never polls', async () => {
+		vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+		vi.setSystemTime(new Date(timestamp));
+		const paid = await openDatabase();
+		await seedPaidProfile(paid);
+		const free = await openDatabase();
+		const pulls = { paid: 0, free: 0 };
+		const counting = (key: keyof typeof pulls): UserSyncTransport => ({
+			...noOpTransport(),
+			pull: async (_slot, request) => {
+				pulls[key] += 1;
+				return emptyPull(request.after);
+			}
+		});
+		const coordinators = [
+			createUserSyncCoordinator({
+				database: paid,
+				authSlotId,
+				workosUserId: userId,
+				transport: counting('paid'),
+				environment: environment()
+			}),
+			createUserSyncCoordinator({
+				database: free,
+				authSlotId,
+				workosUserId: userId,
+				transport: counting('free'),
+				environment: environment()
+			})
+		];
+		for (const coordinator of coordinators) coordinator.start();
+		try {
+			await vi.advanceTimersByTimeAsync(0);
+			await vi.waitFor(() => expect(pulls.paid).toBe(1));
+			await vi.advanceTimersByTimeAsync(FOREGROUND_PULL_INTERVAL_MS);
+			await vi.waitFor(() => expect(pulls.paid).toBe(2));
+			await vi.advanceTimersByTimeAsync(FOREGROUND_PULL_INTERVAL_MS * 3);
+			expect(pulls.free).toBe(0);
+		} finally {
+			for (const coordinator of coordinators) coordinator.stop();
+		}
 	});
 });

@@ -46,7 +46,7 @@ import {
 	type LocalHouseholdSyncCapability
 } from './household-capability.js';
 import type { HouseholdSyncTransport } from './household-transport.js';
-import type { UserSyncEnvironment } from './coordinator.js';
+import { FOREGROUND_PULL_INTERVAL_MS, type UserSyncEnvironment } from './coordinator.js';
 import {
 	byOccurrence,
 	coalesceOutbox,
@@ -754,24 +754,31 @@ export const createHouseholdSyncCoordinator = (
 				lease = await renew(lease);
 			};
 			await pullAll(id, renewCurrentLease);
-			const pushed = await pushInteractive(id);
-			await renewCurrentLease();
-			if (pushed !== null && pushed.committedThrough !== null) {
-				await pullAll(id, renewCurrentLease);
+			// Drain: every batch moves its rows out of the due set, so this ends.
+			let pushed = false;
+			let rejectionCode: string | null = null;
+			let outcome = await pushInteractive(id);
+			while (outcome !== null) {
+				pushed ||= outcome.committedThrough !== null;
+				rejectionCode ??= outcome.rejectionCode;
+				await renewCurrentLease();
+				outcome = await pushInteractive(id);
 			}
+			await renewCurrentLease();
+			if (pushed) await pullAll(id, renewCurrentLease);
 			const backfilledThrough = await runBackfill(id);
 			await renewCurrentLease();
-			if (backfilledThrough !== null) {
-				await pullAll(id, renewCurrentLease);
-				schedule(HOUSEHOLD_BACKFILL_INTERVAL_MS);
-			}
+			if (backfilledThrough !== null) await pullAll(id, renewCurrentLease);
 			currentState = 'complete';
 			retryAttempt = 0;
 			await options.database.syncScopes.update(['household', options.householdId], {
 				state: 'idle',
 				lastSuccessAt: utc(now()),
-				lastErrorCode: pushed?.rejectionCode ?? null
+				lastErrorCode: rejectionCode
 			});
+			schedule(
+				backfilledThrough === null ? FOREGROUND_PULL_INTERVAL_MS : HOUSEHOLD_BACKFILL_INTERVAL_MS
+			);
 			return currentState;
 		} catch (error) {
 			if (error instanceof SyncCapabilityDenied) {

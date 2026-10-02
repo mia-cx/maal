@@ -63,6 +63,8 @@ export const BACKFILL_BATCH_SIZE = 25;
 export const BACKFILL_MAX_BYTES = 256 * 1024;
 export const BACKFILL_SINGLE_RECORD_MAX_BYTES = 1024 * 1024;
 export const BACKFILL_INTERVAL_MS = 30_000;
+/** How often a paid, visible, online scope pulls when nothing else triggers a run. */
+export const FOREGROUND_PULL_INTERVAL_MS = 60_000;
 const LEASE_TTL_MS = 20_000;
 const PULL_PAGE_SIZE = 100;
 
@@ -636,8 +638,17 @@ export const createUserSyncCoordinator = (
 			const id = await deviceId();
 			await pullAll(id);
 			lease = await renew(lease);
-			const pushed = await pushInteractive(id);
-			if (pushed !== null && pushed.committedThrough !== null) await pullAll(id);
+			// Drain: every batch moves its rows out of the due set, so this ends.
+			let pushed = false;
+			let rejectionCode: string | null = null;
+			let outcome = await pushInteractive(id);
+			while (outcome !== null) {
+				pushed ||= outcome.committedThrough !== null;
+				rejectionCode ??= outcome.rejectionCode;
+				lease = await renew(lease);
+				outcome = await pushInteractive(id);
+			}
+			if (pushed) await pullAll(id);
 			lease = await renew(lease);
 			const backfilledThrough = await runBackfill(id);
 			if (backfilledThrough !== null) await pullAll(id);
@@ -646,8 +657,9 @@ export const createUserSyncCoordinator = (
 			await options.database.syncScopes.update(['user', options.workosUserId], {
 				state: 'idle',
 				lastSuccessAt: utc(now()),
-				lastErrorCode: pushed?.rejectionCode ?? null
+				lastErrorCode: rejectionCode
 			});
+			schedule(backfilledThrough === null ? FOREGROUND_PULL_INTERVAL_MS : BACKFILL_INTERVAL_MS);
 			return currentState;
 		} catch (error) {
 			if (isTerminal(error)) {
