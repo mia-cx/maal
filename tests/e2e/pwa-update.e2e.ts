@@ -151,7 +151,13 @@ test('cancelling an update that waits on an unresponsive tab resumes local saves
 		.toBe(true);
 	await page.evaluate(seedLocalProfile, databaseName);
 	await page.reload();
-	// A peer that heartbeats but never answers PREPARE_UPDATE keeps the update waiting.
+	await page.evaluate(async (version) => {
+		await navigator.serviceWorker.register(`/service-worker.js?${version}`, { scope: '/' });
+	}, `cancel-proof-${Date.now()}`);
+	const update = page.getByRole('button', { name: 'Reload and update' });
+	await expect(update).toBeVisible();
+	// The prompt proves the coordinator is listening. This peer heartbeats but never answers
+	// PREPARE_UPDATE, so the update has to wait for it.
 	await page.evaluate(() => {
 		const peer = new BroadcastChannel('maal-pwa-updates-v1');
 		const beat = () =>
@@ -160,10 +166,7 @@ test('cancelling an update that waits on an unresponsive tab resumes local saves
 		setInterval(beat, 1_000);
 	});
 
-	await page.evaluate(async (version) => {
-		await navigator.serviceWorker.register(`/service-worker.js?${version}`, { scope: '/' });
-	}, `cancel-proof-${Date.now()}`);
-	await page.getByRole('button', { name: 'Reload and update' }).click();
+	await update.click();
 	await expect(page.getByText('Waiting for another open Maal tab…')).toBeVisible();
 	await page.getByRole('button', { name: 'Cancel update' }).click();
 	await expect(page.getByRole('button', { name: 'Reload and update' })).toBeVisible();
