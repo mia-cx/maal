@@ -21,6 +21,7 @@ import {
 	type UserSyncEnvironment,
 	type UserSyncTransport
 } from '$lib/client/sync/index.js';
+import { createRecipeFromEditor } from '$lib/client/recipes/commands.js';
 import { deleteTaxonomyRecord, upsertTaxonomyRecord } from '$lib/client/taxonomy/commands.js';
 import { CURRENT_PROTOCOL_VERSION } from '$lib/domain/contracts/versions.js';
 import { UnitUserEntrySchema, type UnitUserEntry } from '$lib/domain/taxonomy/schema.js';
@@ -1735,5 +1736,76 @@ describe('bootstrap reconciliation', () => {
 		expect(bootstrapPages).toBe(2);
 		expect((await database.unitUserEntries.get(first.id))?.toBaseFactor).toBe(99);
 		expect((await database.syncScopes.get(['user', userId]))?.cursor).toBe(3);
+	});
+});
+
+describe('device backfill budget', () => {
+	test('sends one backfill batch per device every 30 seconds across scopes', async () => {
+		const database = await openDatabase();
+		const bob = 'user_bob';
+		await database.unitUserEntries.bulkPut([userUnit(), userUnit({ workosUserId: bob })]);
+		const backfills: BackfillRequest[] = [];
+		const coordinatorFor = (workosUserId: string, slot: string) =>
+			createUserSyncCoordinator({
+				database,
+				authSlotId: slot,
+				workosUserId,
+				transport: { ...noOpTransport(), backfill: recordingBackfill(backfills) },
+				capabilityResolver: async () => ({
+					enabled: true,
+					stale: false,
+					householdId: 'household_paid'
+				}),
+				environment: environment({ saveData: false })
+			});
+
+		await coordinatorFor(userId, authSlotId).syncNow();
+		await coordinatorFor(bob, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb').syncNow();
+
+		expect(backfills.map(({ audience }) => audience.id)).toEqual([userId]);
+	});
+
+	test('backfills recipes cooked by upcoming meals first', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const context = { authSlotId, ownerUserId: userId, originDeviceId: await deviceIdOf(database) };
+		const patch = {
+			title: 'Soup',
+			description: null,
+			imageUrl: null,
+			sourceUrl: null,
+			sourceSiteName: null,
+			sourceAuthorName: null,
+			sourcePublisherName: null,
+			sourceIsBasedOnUrl: null,
+			prepTimeMinutes: null,
+			cookTimeMinutes: null,
+			yield: null,
+			ingredients: [],
+			instructions: []
+		};
+		const unplanned = await createRecipeFromEditor(database, context, patch);
+		const planned = await createRecipeFromEditor(database, context, { ...patch, title: 'Stew' });
+		// Recipes from before the outbox existed: present locally with no sync history.
+		await database.outbox.clear();
+		await database.meals.put({
+			id: uuidv7(),
+			householdId: 'household_paid',
+			date: '2026-08-22',
+			sourceRecipeId: planned.id,
+			deletedAt: null
+		} as never);
+		const backfills: BackfillRequest[] = [];
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: { ...noOpTransport(), backfill: recordingBackfill(backfills) },
+			environment: environment({ saveData: false })
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(backfilledIds(backfills)).toEqual([planned.id, unplanned.id]);
 	});
 });

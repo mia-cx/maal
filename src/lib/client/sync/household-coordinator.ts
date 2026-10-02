@@ -45,7 +45,7 @@ import {
 	resolveLocalHouseholdSyncCapability,
 	type LocalHouseholdSyncCapability
 } from './household-capability.js';
-import { backfillIneligibleKeys } from './backfill.js';
+import { backfillIneligibleKeys, claimBackfillSlot, mealPriorityKey } from './backfill.js';
 import type { HouseholdSyncTransport } from './household-transport.js';
 import { FOREGROUND_PULL_INTERVAL_MS, type UserSyncEnvironment } from './coordinator.js';
 import {
@@ -251,12 +251,7 @@ const priorityKeyFor = (
 ): string => {
 	const entityId = entityKind === 'household' ? record.householdId : record.id;
 	if (entityKind !== 'meal') return `5:${String(entityId)}`;
-	const date = typeof record.date === 'string' ? record.date : null;
-	if (date === null) return `4:${String(record.id)}`;
-	const today = now.toISOString().slice(0, 10);
-	if (date >= today) return `0:${date}:${String(record.id)}`;
-	const inverse = String(9_999_999_999_999 - Date.parse(`${date}T00:00:00.000Z`)).padStart(13, '0');
-	return `1:${inverse}:${String(record.id)}`;
+	return mealPriorityKey(record.date, String(record.id), now);
 };
 
 const belongsToHousehold = async (
@@ -652,6 +647,8 @@ export const createHouseholdSyncCoordinator = (
 			now()
 		);
 		if (!prepared) return null;
+		// Prepared rows wait for the next run when another scope holds the device's slot.
+		if (!(await claimBackfillSlot(options.database, now()))) return null;
 		const mutations = await Promise.all(
 			prepared.rows.map((row) =>
 				hydrateMutation(options.database, options.householdId, options.workosUserId, row)

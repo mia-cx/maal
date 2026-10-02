@@ -56,7 +56,7 @@ import {
 	type OutboxAggregate,
 	type PushOutcome
 } from './outbox.js';
-import { backfillIneligibleKeys } from './backfill.js';
+import { backfillIneligibleKeys, claimBackfillSlot, mealPriorityKey } from './backfill.js';
 import type { UserSyncTransport } from './transport.js';
 
 export const BACKFILL_BATCH_SIZE = 25;
@@ -229,24 +229,44 @@ const checkpointKey = (
 	entityKind: UserSyncEntityKind
 ): [string, string, string] => ['user', workosUserId, entityKind];
 
+/** Recipes take the key of the most urgent live meal that cooks them; the rest follow by ID. */
+const recipePriorityKeys = async (
+	database: MaalDatabase,
+	now: Date
+): Promise<Map<string, string>> => {
+	const keys = new Map<string, string>();
+	for (const meal of await database.meals.toArray()) {
+		const record = meal as Record<string, unknown>;
+		if (record.deletedAt !== null || typeof record.sourceRecipeId !== 'string') continue;
+		const key = `${mealPriorityKey(record.date, String(record.id), now)}:${record.sourceRecipeId}`;
+		const current = keys.get(record.sourceRecipeId);
+		if (current === undefined || key < current) keys.set(record.sourceRecipeId, key);
+	}
+	return keys;
+};
+
 /**
- * The owned records still to backfill, by ID. Records the server already has, or that a push or
- * earlier backfill already carries, are skipped, so a pass always moves forward.
+ * The owned records still to backfill, most urgent first. Records the server already has, or that a
+ * push or earlier backfill already carries, are skipped, so a pass always moves forward.
  */
 const recordsForBackfill = async (
 	database: MaalDatabase,
 	workosUserId: string,
-	entityKind: UserSyncEntityKind
+	entityKind: UserSyncEntityKind,
+	now: Date
 ): Promise<Record<string, unknown>[]> => {
 	const descriptor = USER_SYNC_ENTITY_DESCRIPTORS[entityKind];
 	const rows = (await database.table(descriptor.store).toArray()) as Record<string, unknown>[];
 	const ineligible = await backfillIneligibleKeys(database, 'user', workosUserId);
+	const referenced = entityKind === 'recipe' ? await recipePriorityKeys(database, now) : new Map();
+	const priority = (row: Record<string, unknown>): string =>
+		referenced.get(String(row.id)) ?? `5:${String(row.id)}`;
 	return rows
 		.filter((row) => {
 			const owner = row.ownerUserId ?? row.workosUserId;
 			return owner === workosUserId && !ineligible.has(`${entityKind}\u0000${String(row.id)}`);
 		})
-		.toSorted((left, right) => String(left.id).localeCompare(String(right.id)));
+		.toSorted((left, right) => priority(left).localeCompare(priority(right)));
 };
 
 const existingBackfillRows = async (
@@ -290,7 +310,7 @@ const prepareBackfill = async (
 		) {
 			return null;
 		}
-		const records = await recordsForBackfill(database, workosUserId, entityKind);
+		const records = await recordsForBackfill(database, workosUserId, entityKind, now);
 		if (records.length === 0) {
 			await database.backfillCheckpoints.put({
 				scopeKind: 'user',
@@ -575,6 +595,8 @@ export const createUserSyncCoordinator = (
 			now()
 		);
 		if (!prepared) return null;
+		// Prepared rows wait for the next run when another scope holds the device's slot.
+		if (!(await claimBackfillSlot(options.database, now()))) return null;
 		const mutations = await Promise.all(
 			prepared.rows.map((row) => hydrateMutation(options.database, options.workosUserId, row))
 		);
