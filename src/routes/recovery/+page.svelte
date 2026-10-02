@@ -9,12 +9,15 @@
 		clearBrowserRecoveryRequired,
 		getBrowserRecoveryDatabase
 	} from '$lib/client/local/browser.js';
-	import { exportSafeRecoveryData } from '$lib/client/local/recovery-export.js';
+	import {
+		exportRecoveryArchives,
+		type RecoveryArchiveExport
+	} from '$lib/client/local/recovery-export.js';
 	import {
 		getRecoveryResetConfirmation,
 		resetRecoveredDatabase
 	} from '$lib/client/local/recovery.js';
-	import { downloadBlob } from '$lib/client/portability/download.js';
+	import { downloadBlob, portableArchiveFileName } from '$lib/client/portability/download.js';
 	import * as Alert from '$lib/components/ui/alert/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -40,18 +43,39 @@
 			});
 	});
 
+	const recoveryMessage = ({ archives, skipped, unreadable }: RecoveryArchiveExport): string => {
+		const skippedCount = Object.values(skipped).reduce((total, count) => total + count, 0);
+		return [
+			archives.length === 1
+				? 'Recovery archive saved.'
+				: `${archives.length} recovery archives saved, one per person.`,
+			skippedCount === 1
+				? '1 unreadable record was skipped.'
+				: skippedCount > 1
+					? `${skippedCount} unreadable records were skipped.`
+					: '',
+			unreadable.length > 0 ? `These tables could not be read: ${unreadable.join(', ')}.` : ''
+		]
+			.filter(Boolean)
+			.join(' ');
+	};
+
 	const downloadRecovery = async () => {
 		if (!database) return;
 		pending = true;
 		failed = false;
 		try {
-			const recovery = await exportSafeRecoveryData(database);
-			const blob = new Blob([JSON.stringify(recovery, null, 2)], { type: 'application/json' });
-			downloadBlob(blob, `maal-recovery-${new Date().toISOString().slice(0, 10)}.json`);
-			const skipped = Object.values(recovery.skipped).reduce((total, count) => total + count, 0);
-			message = skipped
-				? `Recovery export saved. ${skipped} unreadable records were skipped.`
-				: 'Recovery export saved.';
+			const recovery = await exportRecoveryArchives(database);
+			if (recovery.archives.length === 0) {
+				failed = true;
+				message = 'No readable profile data was found, so there is nothing to download.';
+				return;
+			}
+			for (const { displayName, blob } of recovery.archives) {
+				downloadBlob(blob, portableArchiveFileName(`recovery ${displayName}`));
+			}
+			failed = recovery.unreadable.length > 0;
+			message = recoveryMessage(recovery);
 		} catch (error) {
 			failed = true;
 			message = error instanceof Error ? error.message : 'Recovery export failed.';
@@ -117,8 +141,9 @@
 			<div>
 				<h2 class="font-medium">Download readable data</h2>
 				<p class="mt-1 text-sm text-muted-foreground text-pretty">
-					This unencrypted JSON excludes profile PINs, auth sessions, billing, sync queues, and UI
-					state. Damaged rows are counted and skipped.
+					This unencrypted Maal archive excludes profile PINs, auth sessions, billing, sync queues,
+					and UI state. Damaged rows are counted and skipped. After a reset, import it with Import
+					or export data in the profile menu.
 				</p>
 			</div>
 			<Button
@@ -127,7 +152,7 @@
 				disabled={!database || pending}
 				onclick={() => void downloadRecovery()}
 			>
-				<DownloadIcon /> Download recovery JSON
+				<DownloadIcon /> Download recovery archive
 			</Button>
 		</section>
 
