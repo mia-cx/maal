@@ -408,3 +408,22 @@ test('leaves through the auth-slot client path while preserving both local profi
 	).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Household settings' })).toBeVisible();
 });
+
+test('opens create-or-join onboarding from New household while a household exists', async ({
+	page
+}) => {
+	await seedProfilesAndHousehold(page);
+	await page.getByRole('button', { name: /Canal kitchen/ }).click();
+	await page.getByRole('menuitem', { name: 'New household' }).click();
+
+	await expect(page.getByRole('heading', { name: 'Set up your household' })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Join household' })).toBeVisible();
+});
+
+test('opens a shared invite link as join with the code filled in', async ({ page }) => {
+	await seedProfilesAndHousehold(page);
+	await page.goto('/invite/7kq2-mz4h-xp9a');
+
+	await expect(page).toHaveURL('/household?join=7KQ2MZ4HXP9A');
+	await expect(page.getByLabel('Invite code')).toHaveValue('7KQ2MZ4HXP9A');
+});

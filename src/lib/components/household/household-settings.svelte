@@ -331,7 +331,7 @@
 
 	const copyInvite = async () => {
 		if (!createdInvite) return;
-		await navigator.clipboard.writeText(createdInvite.code);
+		await navigator.clipboard.writeText(`${location.origin}/invite/${createdInvite.code}`);
 		message = m.household_invite_url_copied();
 	};
 

@@ -173,6 +173,39 @@ test('lists only members whose membership is still active', async () => {
 	await expect.element(screen.getByText('Bob de Vries')).not.toBeInTheDocument();
 });
 
+test('copies a shareable invite URL', async () => {
+	const { database, profileId } = await seed();
+	vi.spyOn(window, 'fetch').mockImplementation(async (input) => {
+		const path = new URL(String(input), window.location.origin).pathname;
+		if (path !== `${refreshPath}/invites`) throw new TypeError(`unexpected request ${path}`);
+		return Response.json({
+			schemaVersion: 1,
+			payload: {
+				id: uuidv7(),
+				householdId,
+				roleSlug: 'member',
+				maxUses: null,
+				usesCount: 0,
+				expiresAt: '2026-08-28T12:00:00.000Z',
+				revokedAt: null,
+				createdAt: timestamp,
+				createdByUserId: 'user_alice'
+			}
+		});
+	});
+	const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+
+	const screen = await render(HouseholdSettings, { database, profileId, householdId });
+	await screen.getByRole('button', { name: 'Invite people to your household' }).click();
+	await page.getByRole('button', { name: 'Create invite link' }).click();
+	await page.getByRole('button', { name: 'Copy URL' }).click();
+
+	await expect.poll(() => writeText.mock.calls.length).toBe(1);
+	expect(writeText.mock.calls[0]![0]).toMatch(
+		new RegExp(`^${window.location.origin}/invite/[23456789A-HJ-NP-Z]{12}$`)
+	);
+});
+
 test('deletes a local-only household on this device without contacting the server', async () => {
 	const localHousehold = household({ householdId: uuidv7(), localOnly: true });
 	const { database, profileId } = await seed({

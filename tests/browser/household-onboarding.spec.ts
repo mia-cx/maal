@@ -70,3 +70,21 @@ test('retries a failed household creation with the same idempotency key', async 
 	await expect.poll(() => keys.length).toBe(3);
 	expect(keys[2]).not.toBe(keys[0]);
 });
+
+test('joins with the invite code from a shared link', async () => {
+	const { database, profileId } = await signedInDatabase();
+	const bodies: unknown[] = [];
+	vi.spyOn(window, 'fetch').mockImplementation(async (_input, init) => {
+		bodies.push(JSON.parse(String(init?.body)));
+		throw new TypeError('network down');
+	});
+	const screen = await render(HouseholdOnboarding, {
+		database,
+		profileId,
+		inviteCode: '7KQ2MZ4HXP9A'
+	});
+
+	await expect.element(screen.getByLabelText('Invite code')).toHaveValue('7KQ2MZ4HXP9A');
+	await screen.getByRole('button', { name: 'Join household' }).click();
+	await expect.poll(() => bodies).toEqual([{ code: '7KQ2MZ4HXP9A' }]);
+});

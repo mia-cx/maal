@@ -1,13 +1,18 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import { liveQuery } from 'dexie';
 	import { onMount } from 'svelte';
 
+	import { createAuthSlotId } from '$lib/auth-slots/contracts.js';
 	import { getBrowserDatabase } from '$lib/client/local/browser.js';
 	import { activeHouseholdKey } from '$lib/client/local/profiles.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import HouseholdOnboarding from '$lib/components/household/household-onboarding.svelte';
 	import HouseholdSettings from '$lib/components/household/household-settings.svelte';
 	import PortableDataDialog from '$lib/components/portable-data-dialog.svelte';
+	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 
 	let database = $state<MaalDatabase | null>(null);
@@ -15,6 +20,14 @@
 	let activeHouseholdId = $state<string | null>(null);
 	let error = $state<string | null>(null);
 	let exportOpen = $state(false);
+
+	// `?create=1` (team switcher) and `?join=<code>` (shared invite link) open onboarding even when
+	// the profile already has a household.
+	const inviteCode = $derived(page.url.searchParams.get('join') ?? '');
+	const onboarding = $derived(page.url.searchParams.has('create') || inviteCode !== '');
+	const signInToJoinHref = $derived(
+		`/api/auth-slots/${createAuthSlotId()}/authorize?purpose=add-profile&returnTo=${encodeURIComponent(`/household?join=${encodeURIComponent(inviteCode)}`)}`
+	);
 
 	onMount(() => {
 		let unsubscribe: (() => void) | null = null;
@@ -60,18 +73,38 @@
 		<div class="flex w-9 shrink-0 items-center justify-center"><Sidebar.Trigger /></div>
 	</header>
 	<div class="h-[calc(100svh-52px)] min-h-0 overflow-y-auto">
-		{#if activeProfileId && activeHouseholdId}
+		{#if activeProfileId && (onboarding || !activeHouseholdId)}
+			{#key `${activeProfileId}:${inviteCode}`}
+				<HouseholdOnboarding
+					{database}
+					profileId={activeProfileId}
+					{inviteCode}
+					oncomplete={() => goto(resolve('/household'))}
+				/>
+			{/key}
+		{:else if activeProfileId && activeHouseholdId}
 			<PortableDataDialog {database} profileId={activeProfileId} bind:open={exportOpen} />
-			<HouseholdSettings
-				{database}
-				profileId={activeProfileId}
-				householdId={activeHouseholdId}
-				onexport={() => {
-					exportOpen = true;
-				}}
-			/>
-		{:else if activeProfileId}
-			<HouseholdOnboarding {database} profileId={activeProfileId} />
+			{#key `${activeProfileId}:${activeHouseholdId}`}
+				<HouseholdSettings
+					{database}
+					profileId={activeProfileId}
+					householdId={activeHouseholdId}
+					onexport={() => {
+						exportOpen = true;
+					}}
+				/>
+			{/key}
+		{:else if inviteCode}
+			<div class="mx-auto grid min-h-[60svh] max-w-xl place-items-center px-6 text-center">
+				<div class="grid justify-items-center gap-3">
+					<h1 class="text-xl font-semibold tracking-tight">Sign in to join this household</h1>
+					<p class="text-sm text-muted-foreground">
+						After you sign in, the invite code is filled in for you.
+					</p>
+					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+					<Button href={signInToJoinHref}>Sign in</Button>
+				</div>
+			</div>
 		{:else}
 			<div class="mx-auto grid min-h-[60svh] max-w-xl place-items-center px-6 text-center">
 				<div class="grid gap-2">
