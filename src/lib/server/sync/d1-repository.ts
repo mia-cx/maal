@@ -11,10 +11,13 @@ import { decodeUserSyncAggregate } from '$lib/sync/user-entities.js';
 import { pruneSyncRetentionBatch } from '$lib/server/maintenance/sync-retention.js';
 
 import {
+	COMMIT_RACED,
 	JSON_IDENTITIES,
 	JSON_IDS,
+	MAX_COMMIT_ATTEMPTS,
 	assertIdentifier,
 	camelize,
+	entityHeadSql,
 	groupBy,
 	heldManifestKeys,
 	identitiesJson,
@@ -26,6 +29,7 @@ import {
 	type EntityIdentity,
 	type SqlValue
 } from './d1-snapshot.js';
+import { ServerSyncUnavailable } from './errors.js';
 import { incomingWinsHistoricalConflict, type WinningClock } from './reconciliation.js';
 import {
 	syncEntityKey,
@@ -724,6 +728,8 @@ const syntheticChange = (
 	};
 };
 
+const ENTITY_HEAD_SQL = entityHeadSql('user');
+
 type UserCommitInput = Parameters<UserSyncRepository['commit']>[0];
 
 export class D1UserSyncRepository implements UserSyncRepository {
@@ -802,8 +808,40 @@ export class D1UserSyncRepository implements UserSyncRepository {
 		return (await this.commitWithResult(input)).receipt;
 	}
 
-	/** Commits one mutation and returns the aggregate it stored. */
+	/**
+	 * Commits one mutation and returns the aggregate it stored. The merge base is read before the
+	 * write batch, so the batch only applies while the entity head is unchanged; a concurrent
+	 * commit makes it retry against the new head instead of overwriting the other edit.
+	 */
 	async commitWithResult(input: UserCommitInput): Promise<CommitResult> {
+		for (let attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt += 1) {
+			const result = await this.attemptCommit(input);
+			if (result !== COMMIT_RACED) return result;
+		}
+		throw new ServerSyncUnavailable({
+			code: 'commit_contention',
+			message: 'The entity kept changing while this mutation was committed.'
+		});
+	}
+
+	/** True when another commit moved the entity head or stored this mutation first. */
+	private async raced(input: UserCommitInput, head: number): Promise<boolean> {
+		const row = await this.database
+			.prepare(
+				`SELECT ${ENTITY_HEAD_SQL} AS head,
+				 EXISTS (SELECT 1 FROM sync_mutation_receipts WHERE mutation_id = ?) AS stored`
+			)
+			.bind(
+				input.actorUserId,
+				input.mutation.entityKind,
+				input.mutation.entityId,
+				input.mutation.mutationId
+			)
+			.first<{ head: number; stored: number }>();
+		return row !== null && (row.head !== head || row.stored === 1);
+	}
+
+	private async attemptCommit(input: UserCommitInput): Promise<CommitResult | typeof COMMIT_RACED> {
 		const existingReceipt = await this.database
 			.prepare('SELECT * FROM sync_mutation_receipts WHERE mutation_id = ?')
 			.bind(input.mutation.mutationId)
@@ -877,6 +915,7 @@ export class D1UserSyncRepository implements UserSyncRepository {
 		).toISOString();
 		if (acceptedGroups.length === 0) return rejected('historical_loser');
 
+		const head = Math.max(0, ...versions.map(({ last_sequence }) => last_sequence));
 		const current =
 			(await readLatestChangedAggregate(
 				this.database,
@@ -933,7 +972,8 @@ export class D1UserSyncRepository implements UserSyncRepository {
 				 (mutation_id, actor_user_id, origin_device_id, audience_kind, audience_id, entity_kind,
 				  entity_id, conflict_group, operation, resulting_revision, occurred_at, received_at,
 				  payload, tombstone_expires_at)
-				 VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				 VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?,
+				  CASE WHEN ${ENTITY_HEAD_SQL} = ? THEN ? END, ?)`
 				)
 				.bind(
 					input.mutation.mutationId,
@@ -947,6 +987,11 @@ export class D1UserSyncRepository implements UserSyncRepository {
 					revision,
 					input.mutation.occurredAt,
 					input.receivedAt,
+					// A moved head leaves the payload NULL, which fails NOT NULL and rolls the batch back.
+					input.actorUserId,
+					input.mutation.entityKind,
+					input.mutation.entityId,
+					head,
 					payload,
 					tombstoneExpiresAt
 				)
@@ -1054,7 +1099,12 @@ export class D1UserSyncRepository implements UserSyncRepository {
 					.bind(input.actorUserId, input.mutation.entityKind, input.mutation.entityId)
 			);
 		}
-		await this.database.batch(statements);
+		try {
+			await this.database.batch(statements);
+		} catch (error) {
+			if (await this.raced(input, head)) return COMMIT_RACED;
+			throw error;
+		}
 		const receipt = await this.database
 			.prepare('SELECT * FROM sync_mutation_receipts WHERE mutation_id = ?')
 			.bind(input.mutation.mutationId)

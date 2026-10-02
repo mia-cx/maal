@@ -343,3 +343,92 @@ describe('D1 bootstrap paging', () => {
 		]);
 	});
 });
+
+/** Holds the first batch until a second batch arrives, so both commits read the same base. */
+const racingBatches = (target: D1Database) => {
+	let release: (() => void) | null = null;
+	let held = false;
+	return new Proxy(target, {
+		get(object, property) {
+			if (property === 'batch') {
+				return async (statements: D1PreparedStatement[]) => {
+					if (!held) {
+						held = true;
+						await new Promise<void>((resolve) => (release = resolve));
+						return object.batch(statements);
+					}
+					const pending = release;
+					release = null;
+					pending?.();
+					// Let the held batch commit first, then run this one against the stale read.
+					await new Promise((resolve) => setTimeout(resolve, 50));
+					return object.batch(statements);
+				};
+			}
+			const value: unknown = Reflect.get(object, property);
+			return typeof value === 'function' ? value.bind(object) : value;
+		}
+	});
+};
+
+describe('D1 concurrent commits', () => {
+	test('two live edits to different meal groups both survive', async () => {
+		const [meal] = await seedMeals(1);
+		const port = new D1RemoteDomainPort(database);
+		const base = (await port.getHouseholdMeal(MCP_TEST_HOUSEHOLD, meal!.id))!;
+		const racing = new D1RemoteDomainPort(racingBatches(database));
+
+		await Promise.all([
+			racing.writeHouseholdMeal({
+				actorUserId: MCP_TEST_USER,
+				householdId: MCP_TEST_HOUSEHOLD,
+				aggregate: { ...base, date: '2026-09-01' },
+				conflictGroups: ['schedule'],
+				operation: 'upsert'
+			}),
+			racing.writeHouseholdMeal({
+				actorUserId: MCP_TEST_USER,
+				householdId: MCP_TEST_HOUSEHOLD,
+				aggregate: { ...base, title: 'Renamed soup' },
+				conflictGroups: ['header'],
+				operation: 'upsert'
+			})
+		]);
+
+		const result = await port.getHouseholdMeal(MCP_TEST_HOUSEHOLD, meal!.id);
+		expect(result).toMatchObject({ date: '2026-09-01', title: 'Renamed soup' });
+		const revisions = (
+			await new D1HouseholdSyncRepository(database).pull(MCP_TEST_HOUSEHOLD, 0, 10)
+		).changes.map(({ resultingRevision }) => resultingRevision);
+		expect(revisions).toEqual([1, 2, 3]);
+	});
+
+	test('two live edits to different recipe groups both survive', async () => {
+		const [seeded] = await seedRecipes(1);
+		const port = new D1RemoteDomainPort(database);
+		const base = (await port.getUserRecipe(MCP_TEST_USER, seeded!.id))!;
+		const racing = new D1RemoteDomainPort(racingBatches(database));
+
+		await Promise.all([
+			racing.writeUserRecipe({
+				actorUserId: MCP_TEST_USER,
+				aggregate: { ...base, title: 'Renamed stew' },
+				conflictGroups: ['header'],
+				operation: 'upsert'
+			}),
+			racing.writeUserRecipe({
+				actorUserId: MCP_TEST_USER,
+				aggregate: {
+					...base,
+					ingredients: base.ingredients.slice(0, 1)
+				},
+				conflictGroups: ['ingredients'],
+				operation: 'upsert'
+			})
+		]);
+
+		const result = await port.getUserRecipe(MCP_TEST_USER, seeded!.id);
+		expect(result?.title).toBe('Renamed stew');
+		expect(result?.ingredients).toHaveLength(1);
+	});
+});

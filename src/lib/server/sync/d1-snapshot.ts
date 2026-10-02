@@ -18,6 +18,10 @@ export interface CommitResult {
 	readonly aggregate: unknown | null;
 }
 
+export const MAX_COMMIT_ATTEMPTS = 3;
+/** Returned by one commit attempt when another commit moved the entity first. */
+export const COMMIT_RACED = Symbol('commit raced');
+
 /** One JSON parameter carries any number of IDs, so reads never hit D1's bound-parameter cap. */
 export const JSON_IDS = 'SELECT value FROM json_each(?)';
 export const JSON_IDENTITIES = `SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]')
@@ -80,6 +84,12 @@ const splitEntityKey = (key: string): [string, string] => {
 	const separator = key.indexOf('\u0000');
 	return separator === -1 ? [key, ''] : [key.slice(0, separator), key.slice(separator + 1)];
 };
+
+/** The newest committed sequence for one entity; any commit to the entity moves it. */
+export const entityHeadSql = (audienceKind: AudienceKind): string =>
+	`(SELECT COALESCE(MAX(last_sequence), 0) FROM sync_entity_versions
+	  WHERE audience_kind = ${kindLiteral(audienceKind)} AND audience_id = ? AND entity_kind = ?
+	  AND entity_id = ?)`;
 
 /**
  * Lists held entities in entity-key order, optionally after a key, within kinds, or up to a
