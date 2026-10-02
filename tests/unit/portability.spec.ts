@@ -7,7 +7,10 @@ import { uuidv7 } from 'uuidv7';
 import { afterEach, describe, expect, test } from 'vitest';
 
 import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.js';
+import { exportDecodableRecoveryData } from '$lib/client/local/recovery.js';
+import { exportRecoveryArchives } from '$lib/client/local/recovery-export.js';
 import {
+	bulkResolutions,
 	commitPortableImport,
 	createPortableArchiveBlob,
 	decodePortableArchive,
@@ -15,6 +18,9 @@ import {
 	planPortableImport,
 	type PortableImportPlan
 } from '$lib/client/portability/index.js';
+import { applyUserPullPage } from '$lib/client/sync/apply.js';
+import { CURRENT_PROTOCOL_VERSION } from '$lib/domain/contracts/versions.js';
+import { UserFoodPreferenceSchema } from '$lib/domain/taxonomy/schema.js';
 import {
 	planRecipeAsMeal,
 	saveMealCheckIn,
@@ -445,14 +451,25 @@ describe('portable archives', () => {
 		expect(copiedEvents[0]?.recipeInstructionId).toBe(copiedInstructions[0]?.id);
 	});
 
-	test('restarts completed backfill and deletes an acknowledged natural-key replacement remotely', async () => {
+	test('replaces a pulled natural-key match in place and queues its upsert under the profile slot', async () => {
 		const source = await openDatabase();
 		const seeded = await seedContent(source);
 		const archive = await decodePortableArchive(
 			await exportPortableArchive(source, seeded.profileId, { createdAt: at(13) })
 		);
+		const archived = archive.preferences.userFoodPreferences[0]!;
 		const target = await openDatabase();
 		const targetIdentity = await seedIdentity(target);
+		await target.authSlots.put({
+			authSlotId: 'slot-target',
+			profileId: targetIdentity.profileId,
+			workosUserId: 'user_alice',
+			sessionState: 'authenticated',
+			lastRefreshedAt: at(12),
+			lastVerifiedAt: at(12),
+			nextRetryAt: null,
+			retryCount: 0
+		});
 		const localPreferenceId = uuidv7();
 		await target.foodUserEntries.put({
 			id: tomatoFoodId,
@@ -481,23 +498,6 @@ describe('portable archives', () => {
 			deletedAt: null,
 			conflictClocks: {}
 		});
-		await target.outbox.put({
-			mutationId: uuidv7(),
-			authSlotId: 'slot-target',
-			scopeKind: 'user',
-			scopeId: 'user_alice',
-			status: 'acknowledged',
-			occurredAt: at(10),
-			aggregateId: localPreferenceId,
-			entityKind: 'userFoodPreference',
-			conflictGroup: 'row',
-			operation: 'upsert',
-			originDeviceId: deviceId,
-			payload: {},
-			nextAttemptAt: at(10),
-			attempts: 0,
-			acknowledgedSequence: 8
-		});
 		await target.backfillCheckpoints.put({
 			scopeKind: 'user',
 			scopeId: 'user_alice',
@@ -524,17 +524,30 @@ describe('portable archives', () => {
 		await commitPortableImport(target, plan);
 		unsubscribe();
 
-		await expect(target.userFoodPreferences.get(localPreferenceId)).resolves.toBeUndefined();
-		await expect(
-			target.outbox
-				.where('aggregateId')
-				.equals(localPreferenceId)
-				.filter(({ operation, status }) => operation === 'delete' && status === 'pending')
-				.first()
-		).resolves.toMatchObject({
-			entityKind: 'userFoodPreference',
-			snapshot: { deletedAt: expect.any(String) }
-		});
+		// D1 keeps one row per natural key, so the archive content takes over the local ID
+		// instead of a delete plus an insert that the server could apply out of order.
+		await expect(target.userFoodPreferences.toArray()).resolves.toEqual([
+			expect.objectContaining({
+				id: localPreferenceId,
+				preference: 'like',
+				reason: 'Good in soup',
+				updatedAt: archived.updatedAt
+			})
+		]);
+		const outbox = await target.outbox.where('aggregateId').equals(localPreferenceId).toArray();
+		expect(outbox).toEqual([
+			expect.objectContaining({
+				authSlotId: 'slot-target',
+				scopeKind: 'user',
+				scopeId: 'user_alice',
+				entityKind: 'userFoodPreference',
+				operation: 'upsert',
+				status: 'pending',
+				occurredAt: archived.updatedAt
+			})
+		]);
+		const replanned = await planPortableImport(target, archive, targetIdentity.profileId);
+		expect(replanned.collisions.filter(({ store }) => store === 'userFoodPreferences')).toEqual([]);
 		await expect(
 			target.backfillCheckpoints.get(['user', 'user_alice', 'userFoodPreference'])
 		).resolves.toBeUndefined();
@@ -729,5 +742,218 @@ describe('portable archives', () => {
 		});
 		await expect(target.households.count()).resolves.toBe(0);
 		await expect(target.recipes.count()).resolves.toBe(0);
+	});
+});
+
+describe('portable imports and sync', () => {
+	const ownArchive = async (database: MaalDatabase, profileId: string) =>
+		decodePortableArchive(await exportPortableArchive(database, profileId, { createdAt: at(13) }));
+
+	const keepAll = (plan: PortableImportPlan) => bulkResolutions(plan.collisions, 'keep-local');
+
+	test('a replaced row survives the next pull because it has a pending upsert', async () => {
+		const source = await openDatabase();
+		const seeded = await seedContent(source);
+		const archive = await ownArchive(source, seeded.profileId);
+		const archived = archive.preferences.userFoodPreferences[0]!;
+		const target = await openDatabase();
+		const targetIdentity = await seedIdentity(target);
+		await target.foodUserEntries.put({
+			...archive.taxonomy.foodUserEntries[0]!,
+			conflictClocks: {}
+		});
+		const local = { ...archived, preference: 'dislike' as const, revision: 3, conflictClocks: {} };
+		await target.userFoodPreferences.put(local);
+
+		const preview = await planPortableImport(target, archive, targetIdentity.profileId);
+		const collision = preview.collisions.find(({ store }) => store === 'userFoodPreferences')!;
+		await commitPortableImport(
+			target,
+			await planPortableImport(target, archive, targetIdentity.profileId, {
+				...keepAll(preview),
+				[collision.collisionId]: 'replace'
+			})
+		);
+		await expect(target.outbox.where('aggregateId').equals(archived.id).toArray()).resolves.toEqual(
+			[
+				expect.objectContaining({
+					operation: 'upsert',
+					status: 'pending',
+					occurredAt: archived.updatedAt
+				})
+			]
+		);
+
+		const remoteClock = { occurredAt: at(11), originDeviceId: uuidv7(), mutationId: uuidv7() };
+		await applyUserPullPage(target, 'user_alice', {
+			protocolVersion: CURRENT_PROTOCOL_VERSION,
+			changes: [
+				{
+					sequence: 1,
+					mutationId: remoteClock.mutationId,
+					originDeviceId: remoteClock.originDeviceId,
+					entityKind: 'userFoodPreference',
+					entityId: archived.id,
+					conflictGroups: ['row'],
+					operation: 'upsert',
+					resultingRevision: 4,
+					occurredAt: at(11),
+					receivedAt: at(11),
+					aggregate: Schema.encodeSync(UserFoodPreferenceSchema)({
+						...local,
+						revision: 4,
+						conflictClocks: { row: remoteClock }
+					}),
+					tombstoneExpiresAt: null
+				}
+			],
+			throughSequence: 1,
+			retainedFloor: 0,
+			bootstrapGeneration: 1,
+			hasMore: false
+		});
+		await expect(target.userFoodPreferences.get(archived.id)).resolves.toMatchObject({
+			preference: 'like'
+		});
+	});
+
+	test('imported rows keep their archive timestamps, so importing again changes nothing', async () => {
+		const source = await openDatabase();
+		const seeded = await seedContent(source);
+		const archive = await ownArchive(source, seeded.profileId);
+		const target = await openDatabase();
+		const targetIdentity = await seedIdentity(target);
+		const first = await planPortableImport(target, archive, targetIdentity.profileId);
+		await commitPortableImport(
+			target,
+			await planPortableImport(target, archive, targetIdentity.profileId, keepAll(first))
+		);
+
+		await expect(target.recipes.get(seeded.recipe.id)).resolves.toMatchObject({
+			updatedAt: archive.recipes.recipes[0]!.updatedAt,
+			conflictClocks: expect.objectContaining({
+				header: expect.objectContaining({ occurredAt: archive.recipes.recipes[0]!.updatedAt })
+			})
+		});
+		const second = await planPortableImport(target, archive, targetIdentity.profileId);
+		expect(second.collisions).toEqual([]);
+		expect(second.summary).toEqual({ userAttributions: 1 });
+	});
+
+	test('copying a household leaves recipes saved from the original household alone', async () => {
+		const db = await openDatabase();
+		const seeded = await seedContent(db);
+		const archive = await ownArchive(db, seeded.profileId);
+		await db.households.update(seeded.householdId, { name: 'Renamed locally' });
+		const preview = await planPortableImport(db, archive, seeded.profileId);
+		const household = preview.collisions.find(({ store }) => store === 'households')!;
+
+		const plan = await planPortableImport(db, archive, seeded.profileId, {
+			[household.collisionId]: 'import-as-copy'
+		});
+		expect(plan.collisions.map(({ store }) => store)).toEqual(['households']);
+	});
+
+	test('a non-member restore does not point synced recipes at its local-only household', async () => {
+		const source = await openDatabase();
+		const seeded = await seedContent(source);
+		const archive = await ownArchive(source, seeded.profileId);
+		const target = await openDatabase();
+		const targetIdentity = await seedIdentity(target, { withHousehold: false });
+		await commitPortableImport(
+			target,
+			await planPortableImport(target, archive, targetIdentity.profileId)
+		);
+
+		await expect(target.recipes.get(seeded.recipe.id)).resolves.toMatchObject({
+			savedFromHouseholdId: null
+		});
+	});
+
+	test('meal provenance to a recipe that is not on this device survives export and import', async () => {
+		const source = await openDatabase();
+		const seeded = await seedContent(source);
+		const otherMembersRecipeId = uuidv7();
+		await source.meals.update(seeded.meal.id, { sourceRecipeId: otherMembersRecipeId });
+		const archive = await ownArchive(source, seeded.profileId);
+		expect(archive.meals.meals[0]?.sourceRecipeId).toBe(otherMembersRecipeId);
+
+		const replanned = await planPortableImport(source, archive, seeded.profileId);
+		expect(replanned.collisions).toEqual([]);
+
+		const target = await openDatabase();
+		const targetIdentity = await seedIdentity(target);
+		const plan = await planPortableImport(target, archive, targetIdentity.profileId);
+		await commitPortableImport(
+			target,
+			await planPortableImport(target, archive, targetIdentity.profileId, keepAll(plan))
+		);
+		await expect(target.meals.get(seeded.meal.id)).resolves.toMatchObject({
+			sourceRecipeId: otherMembersRecipeId
+		});
+	});
+
+	test('collisions name the colliding record and bulk choices skip records that cannot take them', async () => {
+		const source = await openDatabase();
+		const seeded = await seedContent(source);
+		const archive = await ownArchive(source, seeded.profileId);
+		await source.households.update(seeded.householdId, { name: 'Renamed locally' });
+		await source.recipes.update(seeded.recipe.id, { title: 'Local soup' });
+		await source.userFoodPreferences.toCollection().modify({ preference: 'dislike' });
+
+		const plan = await planPortableImport(source, archive, seeded.profileId);
+		expect(plan.collisions.map(({ store, label }) => [store, label]).toSorted()).toEqual([
+			['households', 'Family kitchen'],
+			['recipes', 'Sunday soup'],
+			['userFoodPreferences', 'Tomato']
+		]);
+		const copies = bulkResolutions(plan.collisions, 'import-as-copy');
+		expect(Object.keys(copies)).toHaveLength(2);
+		const resolved = await planPortableImport(source, archive, seeded.profileId, copies);
+		expect(resolved.unresolvedCollisionIds).toEqual([
+			plan.collisions.find(({ store }) => store === 'userFoodPreferences')!.collisionId
+		]);
+	});
+
+	test('the recovery export is a portable archive the importer restores', async () => {
+		const source = await openDatabase();
+		const seeded = await seedContent(source);
+		const recovery = await exportRecoveryArchives(source);
+		expect(recovery.unreadable).toEqual([]);
+		expect(recovery.archives.map(({ workosUserId }) => workosUserId)).toEqual([
+			seeded.workosUserId
+		]);
+		const archive = await decodePortableArchive(recovery.archives[0]!.blob);
+		expect(JSON.stringify(archive)).not.toContain('never-export-this');
+
+		const target = await openDatabase();
+		const targetIdentity = await seedIdentity(target, { withHousehold: false });
+		await commitPortableImport(
+			target,
+			await planPortableImport(target, archive, targetIdentity.profileId)
+		);
+		await expect(target.recipes.get(seeded.recipe.id)).resolves.toMatchObject({
+			title: 'Sunday soup'
+		});
+		await expect(target.meals.count()).resolves.toBe(1);
+		await expect(target.mealCheckIns.count()).resolves.toBe(1);
+	});
+
+	test('the recovery export reports tables it could not read', async () => {
+		const source = await openDatabase();
+		await seedContent(source);
+		const broken = {
+			name: source.name,
+			table: <T, TKey, TInsertType = T>(name: string) => {
+				if (name === 'meals') throw new Error('The meals store is corrupt.');
+				return source.table<T, TKey, TInsertType>(name);
+			}
+		};
+		const recovery = await exportDecodableRecoveryData(broken, {
+			recipes: Schema.Unknown,
+			meals: Schema.Unknown
+		});
+		expect(recovery.records.recipes).toHaveLength(1);
+		expect(recovery.unreadable).toEqual(['meals']);
 	});
 });

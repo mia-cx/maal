@@ -5,9 +5,7 @@ import type { LocalStoreName, MaalDatabase } from '$lib/client/local/database.js
 import { activeHouseholdKey } from '$lib/client/local/profiles.js';
 import { requestLocalSync, type SyncRequestedScope } from '$lib/client/sync/requests.js';
 import { PortableArchiveError } from '$lib/domain/contracts/errors.js';
-import { MEAL_CONFLICT_GROUPS } from '$lib/domain/meals/schema.js';
 import type { PortableArchive } from '$lib/domain/portability/schema.js';
-import { RECIPE_CONFLICT_GROUPS } from '$lib/domain/recipes/schema.js';
 import {
 	HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS,
 	type HouseholdSyncEntityDescriptor
@@ -26,6 +24,8 @@ export interface PortableImportCollision {
 	readonly store: PortableImportStore;
 	readonly importedId: string;
 	readonly localId: string;
+	/** Display name of the archived record: a title, name, label, or the food or unit it is about. */
+	readonly label: string;
 	readonly kind: 'primary-id' | 'natural-key';
 	readonly allowedResolutions: readonly ImportResolution[];
 }
@@ -52,9 +52,24 @@ export interface PortableImportPlan {
 	readonly unresolvedCollisionIds: readonly string[];
 	readonly warnings: readonly string[];
 	readonly writes: ReadonlyMap<PortableImportStore, readonly Record<string, unknown>[]>;
-	readonly deletes: ReadonlyMap<PortableImportStore, readonly string[]>;
+	/** IDs of written rows that overwrite a local row because the user chose `replace`. */
+	readonly replacements: ReadonlyMap<PortableImportStore, ReadonlySet<string>>;
 	readonly summary: Readonly<Record<string, number>>;
 }
+
+/**
+ * Applies one choice to every collision that allows it. Collisions that cannot take the choice,
+ * such as a same-name match offered `import-as-copy`, keep no resolution and stay unresolved.
+ */
+export const bulkResolutions = (
+	collisions: readonly PortableImportCollision[],
+	resolution: ImportResolution
+): Record<string, ImportResolution> =>
+	Object.fromEntries(
+		collisions
+			.filter(({ allowedResolutions }) => allowedResolutions.includes(resolution))
+			.map(({ collisionId }) => [collisionId, resolution])
+	);
 
 const archiveError = (
 	code: PortableArchiveError['code'],
@@ -136,18 +151,23 @@ const remapChildCollection = (
 	});
 };
 
+/**
+ * A user recipe is not part of any household copy, so its `savedFromHouseholdId` keeps the original
+ * household when the importer knows it and is cleared otherwise. It never points at a local-only
+ * copy, because the recipe syncs in the user scope and the server has never seen that household.
+ */
 const remapRecipe = (
 	input: object,
 	id: string,
 	ownerUserId: string,
-	householdIds: ReadonlyMap<string, string>,
+	knownHouseholdIds: ReadonlySet<string>,
 	taxonomyIds: ReadonlyMap<string, string>,
 	copyRoot: boolean
 ): Record<string, unknown> => {
 	const row = copyRecord(input);
 	row.id = id;
 	row.ownerUserId = ownerUserId;
-	row.savedFromHouseholdId = mapId(householdIds, row.savedFromHouseholdId);
+	if (!knownHouseholdIds.has(text(row.savedFromHouseholdId))) row.savedFromHouseholdId = null;
 	for (const field of [
 		'ingredients',
 		'instructions',
@@ -324,11 +344,47 @@ const remapTaxonomyRow = (
 
 interface PlannerState {
 	readonly writes: Map<PortableImportStore, Record<string, unknown>[]>;
-	readonly deletes: Map<PortableImportStore, string[]>;
+	readonly replacements: Map<PortableImportStore, Set<string>>;
 	readonly collisions: PortableImportCollision[];
 	readonly unresolved: string[];
 	readonly resolutions: Readonly<Record<string, ImportResolution>>;
+	/** Display names by archive ID, for labelling records that only reference a food, unit, or meal. */
+	readonly names: ReadonlyMap<string, string>;
 }
+
+const archiveNames = (archive: PortableArchive): Map<string, string> => {
+	const names = new Map<string, string>();
+	const { taxonomy } = archive;
+	for (const alias of [...taxonomy.foodAliases, ...taxonomy.unitAliases]) {
+		const targetId = 'foodId' in alias ? alias.foodId : alias.unitId;
+		if (alias.defaultForLocale || !names.has(targetId)) names.set(targetId, alias.alias);
+	}
+	for (const alias of [...taxonomy.foodUserAliases, ...taxonomy.foodHouseholdAliases]) {
+		if (!names.has(alias.foodId)) names.set(alias.foodId, alias.alias);
+	}
+	for (const entry of [
+		...taxonomy.foodUserEntries,
+		...taxonomy.foodHouseholdEntries,
+		...taxonomy.unitUserEntries,
+		...taxonomy.unitHouseholdEntries
+	]) {
+		names.set(entry.id, entry.canonicalLabel);
+	}
+	for (const meal of archive.meals.meals) names.set(meal.id, meal.title);
+	return names;
+};
+
+const recordLabel = (
+	store: PortableImportStore,
+	row: Record<string, unknown>,
+	names: ReadonlyMap<string, string>
+): string => {
+	const own = row.title ?? row.name ?? row.canonicalLabel ?? row.alias ?? row.appliance;
+	if (typeof own === 'string') {
+		return store === 'meals' && typeof row.date === 'string' ? `${own} · ${row.date}` : own;
+	}
+	return names.get(text(row.foodId ?? row.baseUnitId ?? row.mealId)) ?? '';
+};
 
 const addWrite = (
 	state: PlannerState,
@@ -361,10 +417,11 @@ const resolveCandidate = async (
 		}
 	}
 	if (!local) return { action: 'write', id: importedId, copied: false };
-	if (portableRecordsEqual(local, row))
-		return { action: 'skip', id: rowId(store, local), copied: false };
-
 	const localId = rowId(store, local);
+	// A same-name match only differs by ID, so compare it as if it already had the local ID.
+	if (portableRecordsEqual(local, kind === 'natural-key' ? { ...row, id: localId } : row))
+		return { action: 'skip', id: localId, copied: false };
+
 	const collisionId = `${store}:${kind}:${naturalKey(store, row) ?? importedId}:${localId}`;
 	const allowedResolutions: readonly ImportResolution[] =
 		allowCopy && kind === 'primary-id'
@@ -375,6 +432,7 @@ const resolveCandidate = async (
 		store,
 		importedId,
 		localId,
+		label: recordLabel(store, row, state.names),
 		kind,
 		allowedResolutions
 	});
@@ -385,12 +443,12 @@ const resolveCandidate = async (
 	}
 	if (resolution === 'keep-local') return { action: 'skip', id: localId, copied: false };
 	if (resolution === 'import-as-copy') return { action: 'write', id: uuidv7(), copied: true };
-	if (localId !== importedId) {
-		const deletes = state.deletes.get(store) ?? [];
-		deletes.push(localId);
-		state.deletes.set(store, deletes);
-	}
-	return { action: 'write', id: importedId, copied: false };
+	// Replace writes the archived content under the local ID. D1 allows one row per natural key, so
+	// a delete plus an insert under a new ID could reach the server in the wrong order.
+	const replaced = state.replacements.get(store) ?? new Set<string>();
+	replaced.add(localId);
+	state.replacements.set(store, replaced);
+	return { action: 'write', id: localId, copied: false };
 };
 
 const taxonomyStores = [
@@ -485,24 +543,21 @@ const validatePlannedReferences = async (
 	const idsFor = async (...stores: PortableImportStore[]): Promise<Set<string>> => {
 		const ids = new Set<string>();
 		for (const store of stores) {
-			const deleted = new Set(state.deletes.get(store) ?? []);
 			for (const key of await database.table(store).toCollection().primaryKeys()) {
-				if (typeof key === 'string' && !deleted.has(key)) ids.add(key);
+				if (typeof key === 'string') ids.add(key);
 			}
 			for (const row of state.writes.get(store) ?? []) ids.add(rowId(store, row));
 		}
 		return ids;
 	};
-	const [householdIds, recipeIds, mealIds, foodIds, unitIds, foodAliasIds, unitAliasIds] =
-		await Promise.all([
-			idsFor('households'),
-			idsFor('recipes'),
-			idsFor('meals'),
-			idsFor('foods', 'foodUserEntries', 'foodHouseholdEntries'),
-			idsFor('units', 'unitUserEntries', 'unitHouseholdEntries'),
-			idsFor('foodAliases', 'foodUserAliases', 'foodHouseholdAliases'),
-			idsFor('unitAliases', 'unitUserAliases', 'unitHouseholdAliases')
-		]);
+	const [householdIds, mealIds, foodIds, unitIds, foodAliasIds, unitAliasIds] = await Promise.all([
+		idsFor('households'),
+		idsFor('meals'),
+		idsFor('foods', 'foodUserEntries', 'foodHouseholdEntries'),
+		idsFor('units', 'unitUserEntries', 'unitHouseholdEntries'),
+		idsFor('foodAliases', 'foodUserAliases', 'foodHouseholdAliases'),
+		idsFor('unitAliases', 'unitUserAliases', 'unitHouseholdAliases')
+	]);
 	const requireReference = (
 		value: unknown,
 		available: ReadonlySet<string>,
@@ -552,9 +607,10 @@ const validatePlannedReferences = async (
 			requireReference(ingredient.baseUnitFamilyId, unitIds, 'recipe unit family');
 		}
 	}
+	// Meal provenance may name another member's recipe, which syncs only to its owner, so it is
+	// not required to resolve on this device.
 	for (const row of state.writes.get('meals') ?? []) {
 		requireReference(row.householdId, householdIds, 'meal household');
-		requireReference(row.sourceRecipeId, recipeIds, 'meal recipe provenance');
 		for (const ingredient of (row.ingredients as Record<string, unknown>[] | undefined) ?? []) {
 			requireReference(ingredient.baseFoodId, foodIds, 'meal food');
 			requireReference(ingredient.baseUnitId, unitIds, 'meal unit');
@@ -605,10 +661,11 @@ export const planPortableImport = async (
 	const activeHouseholdIds = new Set(activeMemberships.map(({ householdId }) => householdId));
 	const state: PlannerState = {
 		writes: new Map(),
-		deletes: new Map(),
+		replacements: new Map(),
 		collisions: [],
 		unresolved: [],
-		resolutions
+		resolutions,
+		names: archiveNames(archive)
 	};
 	const warnings: string[] = [];
 	const householdIds = new Map<string, string>();
@@ -657,6 +714,10 @@ export const planPortableImport = async (
 			addWrite(state, 'households', candidate);
 		}
 	}
+	const knownHouseholdIds = new Set([
+		...(await database.households.toCollection().primaryKeys()),
+		...[...householdIds].flatMap(([original, mapped]) => (original === mapped ? [original] : []))
+	]);
 
 	for (const store of taxonomyStores) {
 		for (const archived of archiveRowsForStore(archive, store)) {
@@ -698,7 +759,7 @@ export const planPortableImport = async (
 			archived,
 			preliminaryId,
 			profile.workosUserId,
-			householdIds,
+			knownHouseholdIds,
 			taxonomyIds,
 			ownerChanged
 		);
@@ -710,7 +771,7 @@ export const planPortableImport = async (
 				archived,
 				finalId,
 				profile.workosUserId,
-				householdIds,
+				knownHouseholdIds,
 				taxonomyIds,
 				ownerChanged || decision.copied
 			);
@@ -817,31 +878,10 @@ export const planPortableImport = async (
 		unresolvedCollisionIds: state.unresolved,
 		warnings,
 		writes: state.writes,
-		deletes: state.deletes,
+		replacements: state.replacements,
 		summary
 	};
 };
-
-const aggregateStores = new Set<PortableImportStore>([
-	'households',
-	'householdAppliances',
-	'recipes',
-	'meals',
-	'mealCheckIns',
-	'foodUserAliases',
-	'foodHouseholdAliases',
-	'foodUserEntries',
-	'foodHouseholdEntries',
-	'unitUserAliases',
-	'unitHouseholdAliases',
-	'unitUserEntries',
-	'unitHouseholdEntries',
-	'userFoodPreferences',
-	'userFoodDisplayPreferences',
-	'householdFoodDisplayPreferences',
-	'userUnitDisplayPreferences',
-	'householdUnitDisplayPreferences'
-]);
 
 type PortableSyncDescriptor = {
 	readonly entityKind: UserSyncEntityKind | HouseholdSyncEntityKind;
@@ -879,25 +919,22 @@ const descriptorByStore = new Map(
 const syncScopeKey = (scope: SyncRequestedScope): string =>
 	`${scope.scopeKind}\u0000${scope.scopeId}`;
 
+/**
+ * Archives carry no conflict clocks, so every group gets a clock at the archived `updatedAt`.
+ * Keeping the original event time lets backfill order the row against server edits by when it
+ * changed, not by when it was imported, and keeps a second import of the same archive identical.
+ */
 const importedAggregate = (
-	store: PortableImportStore,
+	descriptor: PortableSyncDescriptor,
 	record: Record<string, unknown>,
-	importedAt: `${string}Z`,
-	originDeviceId: string
+	originDeviceId: string,
+	mutationId: string
 ): Record<string, unknown> => {
-	const groups =
-		store === 'recipes'
-			? RECIPE_CONFLICT_GROUPS
-			: store === 'meals'
-				? MEAL_CONFLICT_GROUPS
-				: (['import'] as const);
-	const clock = { occurredAt: importedAt, originDeviceId, mutationId: uuidv7() };
+	const clock = { occurredAt: text(record.updatedAt), originDeviceId, mutationId };
 	return {
 		...record,
 		schemaVersion: 1,
-		revision: 1,
-		updatedAt: importedAt,
-		conflictClocks: Object.fromEntries(groups.map((group) => [group, clock]))
+		conflictClocks: Object.fromEntries(descriptor.conflictGroups.map((group) => [group, clock]))
 	};
 };
 
@@ -922,93 +959,63 @@ export const commitPortableImport = async (
 		);
 	}
 	const importedAt = new Date().toISOString() as `${string}Z`;
+	const slot = await database.authSlots.where('profileId').equals(plan.profileId).first();
+	const authSlotId = slot?.authSlotId ?? `signed-out:${plan.profileId}`;
 	const requestedScopes = new Map<string, SyncRequestedScope>();
 	try {
 		await runTrackedLocalCommit(database.name, 'commit archive import', () =>
 			database.transaction('rw', database.tables, async () => {
-				for (const [store, ids] of plan.deletes) {
-					const descriptor = descriptorByStore.get(store);
-					for (const id of ids) {
-						const current = (await database.table(store).get(id)) as
-							Record<string, unknown> | undefined;
-						if (!descriptor || !current) continue;
-						const acknowledged = (await database.outbox.toArray()).find(
-							(row) =>
-								row.aggregateId === id &&
-								row.entityKind === descriptor.entityKind &&
-								row.status === 'acknowledged'
-						);
-						if (!acknowledged) continue;
-						const mutationId = uuidv7();
-						const conflictGroup = descriptor.conflictGroups[0]!;
-						const clock = { occurredAt: importedAt, originDeviceId, mutationId };
-						await database.outbox.add({
-							mutationId,
-							authSlotId: acknowledged.authSlotId,
-							scopeKind: acknowledged.scopeKind,
-							scopeId: acknowledged.scopeId,
-							status: 'pending',
-							occurredAt: importedAt,
-							aggregateId: id,
-							entityKind: descriptor.entityKind,
-							conflictGroup,
-							operation: 'delete',
-							originDeviceId,
-							payload: { source: 'portable-import-natural-key-replacement' },
-							nextAttemptAt: importedAt,
-							attempts: 0,
-							backfillConflictGroups: [conflictGroup],
-							snapshot: {
-								...current,
-								revision: Number(current.revision ?? 0) + 1,
-								updatedAt: importedAt,
-								deletedAt: importedAt,
-								conflictClocks: {
-									...(typeof current.conflictClocks === 'object' && current.conflictClocks !== null
-										? current.conflictClocks
-										: {}),
-									[conflictGroup]: clock
-								}
-							}
-						});
-						const scope = {
-							scopeKind: acknowledged.scopeKind,
-							scopeId: acknowledged.scopeId
-						};
-						requestedScopes.set(syncScopeKey(scope), scope);
-					}
-					await database.table(store).bulkDelete([...ids]);
-				}
 				for (const [store, rows] of plan.writes) {
-					const prepared = aggregateStores.has(store)
-						? rows.map((row) => importedAggregate(store, row, importedAt, originDeviceId))
-						: [...rows];
-					if (prepared.length > 0) await database.table(store).bulkPut(prepared);
-					if (aggregateStores.has(store)) {
-						await database.remoteProjectionMeta.bulkPut(
-							prepared.map((row) => ({
-								key: `portableImport:${store}:${rowId(store, row)}`,
-								refreshedAt: null,
-								decodeVersion: 1,
-								value: { state: 'neverAcknowledged', importedAt }
-							}))
-						);
-					}
 					const descriptor = descriptorByStore.get(store);
-					if (!descriptor) continue;
-					for (const row of prepared) {
-						let scopeId =
+					if (!descriptor) {
+						await database.table(store).bulkPut([...rows]);
+						continue;
+					}
+					const replaced = plan.replacements.get(store);
+					const prepared = rows.map((row) => ({ row, mutationId: uuidv7() }));
+					await database
+						.table(store)
+						.bulkPut(
+							prepared.map(({ row, mutationId }) =>
+								importedAggregate(descriptor, row, originDeviceId, mutationId)
+							)
+						);
+					for (const { row, mutationId } of prepared) {
+						const id = rowId(store, row);
+						const scopeId =
 							descriptor.scopeKind === 'user'
 								? plan.importerWorkosUserId
-								: text(row.householdId ?? row.householdId);
-						if (descriptor.entityKind === 'household') scopeId = text(row.householdId);
-						if (descriptor.entityKind === 'meal_check_in' && typeof row.mealId === 'string') {
-							scopeId = (await database.meals.get(row.mealId))?.householdId ?? '';
-						}
+								: descriptor.entityKind === 'meal_check_in'
+									? ((await database.meals.get(text(row.mealId)))?.householdId ?? '')
+									: text(row.householdId);
 						if (!scopeId) continue;
-						if (descriptor.scopeKind === 'household') {
-							const household = await database.households.get(scopeId);
-							if (household?.localOnly) continue;
+						if (
+							descriptor.scopeKind === 'household' &&
+							(await database.households.get(scopeId))?.localOnly
+						) {
+							continue;
+						}
+						// New rows reach the server through backfill, which compares event times, so an
+						// old archive never beats a newer server edit. A replacement is the user's explicit
+						// choice: it goes out as a live upsert, and the pending row keeps a pull from
+						// overwriting it before it is pushed.
+						if (replaced?.has(id)) {
+							await database.outbox.add({
+								mutationId,
+								authSlotId,
+								scopeKind: descriptor.scopeKind,
+								scopeId,
+								status: 'pending',
+								occurredAt: text(row.updatedAt) as `${string}Z`,
+								aggregateId: id,
+								entityKind: descriptor.entityKind,
+								conflictGroup: descriptor.conflictGroups[0]!,
+								operation: 'upsert',
+								originDeviceId,
+								payload: null,
+								nextAttemptAt: importedAt,
+								attempts: 0
+							});
 						}
 						await database.backfillCheckpoints.delete([
 							descriptor.scopeKind,
