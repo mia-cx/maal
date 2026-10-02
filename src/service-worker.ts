@@ -13,6 +13,12 @@ const immutableAssets = new Set(build);
 /** Unhashed precached files (manifest, icons, prerendered pages): network-first, cache when offline. */
 const shellFiles = new Set([...files, ...prerendered]);
 const installAssets = [...new Set([...build, ...shellFiles])];
+/**
+ * Marks this build as a critical update: open tabs drain local commits and reload without a prompt.
+ * Set `VITE_MAAL_CRITICAL_UPDATE=true` in the environment of the `pnpm build` that ships the fix.
+ * Vite inlines it into this worker only, and the flag describes the release being installed.
+ */
+const critical = import.meta.env.VITE_MAAL_CRITICAL_UPDATE === 'true';
 const excludedPath =
 	/^\/(?:api\/(?:auth|auth-slots|billing|households\/[^/]+\/invites|sync|recipes\/import|mcp)|mcp)(?:\/|$)/;
 
@@ -51,7 +57,7 @@ worker.addEventListener('install', (event) => {
 					includeUncontrolled: true
 				});
 				for (const client of clients) {
-					client.postMessage({ type: 'UPDATE_WAITING', version, critical: false });
+					client.postMessage({ type: 'UPDATE_WAITING', version, critical });
 				}
 			}
 		})()
@@ -82,11 +88,7 @@ worker.addEventListener('activate', (event) => {
 worker.addEventListener('message', (event) => {
 	if (!isServiceWorkerCommand(event.data)) return;
 	if (event.data.type === 'GET_VERSION') {
-		(event.source as Client | null)?.postMessage({
-			type: 'UPDATE_WAITING',
-			version,
-			critical: false
-		});
+		(event.source as Client | null)?.postMessage({ type: 'UPDATE_WAITING', version, critical });
 		return;
 	}
 	if (event.data.version === version) event.waitUntil(worker.skipWaiting());
