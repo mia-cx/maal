@@ -1129,6 +1129,58 @@ const outboxRowFor = async (database: MaalDatabase, aggregateId: string) =>
 	(await database.outbox.where('aggregateId').equals(aggregateId).toArray())[0]!;
 
 describe('user outbox recovery', () => {
+	test('keeps a pending local hard delete when a pull brings the record back', async () => {
+		const database = await openDatabase();
+		const originDeviceId = await deviceIdOf(database);
+		const remote = userUnit({ revision: 4, toBaseFactor: 9 });
+		const mutationId = uuidv7();
+		// A hard delete removes the record and leaves only its pending outbox intent.
+		await database.outbox.add({
+			mutationId,
+			authSlotId,
+			scopeKind: 'user',
+			scopeId: userId,
+			status: 'pending',
+			occurredAt: timestamp,
+			aggregateId: remote.id,
+			entityKind: 'unitUserEntry',
+			conflictGroup: 'row',
+			operation: 'delete',
+			originDeviceId,
+			payload: null,
+			nextAttemptAt: timestamp,
+			attempts: 0,
+			backfillConflictGroups: ['row'],
+			snapshot: { ...remote, deletedAt: timestamp }
+		});
+
+		await applyUserPullPage(database, userId, {
+			...emptyPull(1),
+			changes: [
+				{
+					sequence: 1,
+					mutationId: uuidv7(),
+					originDeviceId: uuidv7(),
+					entityKind: 'unitUserEntry',
+					entityId: remote.id,
+					conflictGroups: ['row'],
+					operation: 'upsert',
+					resultingRevision: 4,
+					occurredAt: timestamp,
+					receivedAt: timestamp,
+					aggregate: remote,
+					tombstoneExpiresAt: null
+				}
+			]
+		});
+
+		expect(await database.unitUserEntries.get(remote.id)).toBeUndefined();
+		expect(await database.outbox.get(mutationId)).toMatchObject({
+			status: 'pending',
+			authoritativeSnapshot: remote
+		});
+	});
+
 	test('pushes an edit followed by a delete as the delete and keeps only the newest acknowledgement', async () => {
 		const database = await openDatabase();
 		await seedPaidProfile(database);

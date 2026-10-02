@@ -67,9 +67,14 @@ export const applyUserPullPage = async (
 			}
 			await database.table(aggregate.store).put(aggregate.aggregate);
 		}
+		// Pending intent wins until acknowledged, including a hard delete that left no record.
 		for (const aggregate of decoded) {
-			const local = localIntent.get(keyFor(aggregate.entityKind, aggregate.entityId));
-			if (local !== undefined) await database.table(aggregate.store).put(local);
+			const key = keyFor(aggregate.entityKind, aggregate.entityId);
+			if (!localIntent.has(key)) continue;
+			const local = localIntent.get(key);
+			const table = database.table(aggregate.store);
+			if (local === undefined) await table.delete(aggregate.entityId);
+			else await table.put(local);
 		}
 		const current = await database.syncScopes.get(['user', workosUserId]);
 		if (

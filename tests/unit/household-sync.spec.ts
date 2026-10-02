@@ -1095,4 +1095,58 @@ describe('foreground household coordinator', () => {
 			(await database.outbox.toArray()).map(({ operation, status }) => [operation, status])
 		).toEqual([['delete', 'acknowledged']]);
 	});
+
+	test('keeps a pending local hard delete when a pull brings the meal back', async () => {
+		const database = await openDatabase('hard-delete');
+		const originDeviceId = String((await database.meta.get('deviceId'))!.value);
+		const remoteMutationId = uuidv7();
+		const remote = meal(uuidv7(), remoteMutationId, uuidv7());
+		const mutationId = uuidv7();
+		await database.outbox.add({
+			mutationId,
+			authSlotId: 'slot_alice',
+			scopeKind: 'household',
+			scopeId: householdId,
+			status: 'pending',
+			occurredAt: timestamp,
+			aggregateId: remote.id,
+			entityKind: 'meal',
+			conflictGroup: 'deletion',
+			operation: 'delete',
+			originDeviceId,
+			payload: null,
+			nextAttemptAt: timestamp,
+			attempts: 0,
+			backfillConflictGroups: ['deletion'],
+			snapshot: { ...remote, deletedAt: timestamp }
+		});
+
+		await applyHouseholdPullPage(database, householdId, {
+			protocolVersion: 1,
+			changes: [
+				{
+					sequence: 1,
+					mutationId: remoteMutationId,
+					originDeviceId: uuidv7(),
+					actorUserId: 'user_bob',
+					entityKind: 'meal',
+					entityId: remote.id,
+					conflictGroups: ['schedule'],
+					operation: 'upsert',
+					resultingRevision: 2,
+					occurredAt: timestamp,
+					receivedAt: timestamp,
+					aggregate: remote,
+					tombstoneExpiresAt: null
+				}
+			],
+			throughSequence: 1,
+			retainedFloor: 0,
+			bootstrapGeneration: 1,
+			hasMore: false
+		});
+
+		expect(await database.meals.get(remote.id)).toBeUndefined();
+		expect(await database.outbox.get(mutationId)).toMatchObject({ status: 'pending' });
+	});
 });
