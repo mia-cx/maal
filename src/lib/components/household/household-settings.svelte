@@ -16,6 +16,7 @@
 	} from '$lib/client/household-administration.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import {
+		deleteLocalHousehold,
 		forkDetachedHouseholdSnapshot,
 		updateHouseholdAppliances,
 		updateHouseholdSettings
@@ -364,6 +365,19 @@
 		}
 	};
 
+	const deleteLocalCopy = async () => {
+		pending = true;
+		message = '';
+		try {
+			await deleteLocalHousehold(database, { profileId, householdId });
+			deleteHouseholdOpen = false;
+		} catch {
+			message = 'The household could not be deleted from this device.';
+		} finally {
+			pending = false;
+		}
+	};
+
 	const deleteHousehold = async () => {
 		pending = true;
 		message = '';
@@ -499,22 +513,36 @@
 		<Dialog.Header>
 			<Dialog.Title>{m.household_delete_household_2()}</Dialog.Title>
 			<Dialog.Description>
-				Maal will cancel the subscription, issue a prorated cash refund for unused paid time, and
-				keep the remote household recoverable for 30 days. Local data remains available.
+				{#if household?.localOnly}
+					Maal will delete this household and its meals and check-ins from this device. It has no
+					copy anywhere else.
+				{:else}
+					Maal will cancel the subscription, issue a prorated cash refund for unused paid time, and
+					keep the remote household recoverable for 30 days. Local data remains available.
+				{/if}
 			</Dialog.Description>
 		</Dialog.Header>
 		<Dialog.Footer>
 			<Button type="button" variant="outline" onclick={() => (deleteHouseholdOpen = false)}
 				>{m.settings_cancel()}</Button
 			>
-			<Button
-				type="button"
-				variant="destructive"
-				disabled={pending}
-				onclick={() => void deleteHousehold()}
-			>
-				{pending ? 'Cancelling and refunding…' : m.household_delete_household()}
-			</Button>
+			{#if household?.localOnly}
+				<Button
+					type="button"
+					variant="destructive"
+					disabled={pending}
+					onclick={() => void deleteLocalCopy()}>{m.household_delete_household()}</Button
+				>
+			{:else}
+				<Button
+					type="button"
+					variant="destructive"
+					disabled={pending}
+					onclick={() => void deleteHousehold()}
+				>
+					{pending ? 'Cancelling and refunding…' : m.household_delete_household()}
+				</Button>
+			{/if}
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
@@ -831,14 +859,23 @@
 		<section class="grid gap-3 border-t border-border pt-4">
 			<h2 class="text-sm font-medium">{m.household_danger_zone()}</h2>
 			<div class="flex flex-wrap gap-2">
-				<Button
-					type="button"
-					variant="outline"
-					disabled={!canLeave}
-					title={leaveDisabledReason ?? undefined}
-					onclick={() => (leaveHouseholdOpen = true)}>{m.household_leave_household()}</Button
-				>
-				{#if canManage && !household.localOnly}
+				{#if !household.localOnly}
+					<Button
+						type="button"
+						variant="outline"
+						disabled={!canLeave}
+						title={leaveDisabledReason ?? undefined}
+						onclick={() => (leaveHouseholdOpen = true)}>{m.household_leave_household()}</Button
+					>
+				{/if}
+				{#if canManage && household.localOnly}
+					<Button
+						type="button"
+						variant="destructive"
+						disabled={pending}
+						onclick={() => (deleteHouseholdOpen = true)}>{m.household_delete_household()}</Button
+					>
+				{:else if canManage}
 					{#if household.deletionState === 'recoverable'}
 						<Button
 							type="button"
@@ -859,9 +896,10 @@
 			{#if !canLeave && leaveDisabledReason}<p class="text-xs text-muted-foreground">
 					{leaveDisabledReason}
 				</p>{/if}
-			<p class="text-xs text-muted-foreground">
-				Household deletion is available after its Maal plan is cancelled and any refund is complete.
-			</p>
+			{#if !household.localOnly}<p class="text-xs text-muted-foreground">
+					Household deletion is available after its Maal plan is cancelled and any refund is
+					complete.
+				</p>{/if}
 		</section>
 	</div>
 {:else}
