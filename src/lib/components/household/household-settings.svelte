@@ -9,6 +9,7 @@
 	import {
 		createHouseholdInvite,
 		leaveRemoteHousehold,
+		refreshRemoteHousehold,
 		removeHouseholdMember,
 		revokeHouseholdInvite,
 		updateHouseholdMemberRole,
@@ -138,6 +139,36 @@
 	] as const;
 	const roleLabel = (role: string): string =>
 		roleOptions.find((option) => option.value === role)?.label ?? role;
+	// Household administration is a permitted remote action for free users (spec §2), so this
+	// settings surface, and only this one, pulls the verified member and invite projection.
+	const canRefresh = $derived(
+		Boolean(
+			household &&
+			!household.localOnly &&
+			membership?.source === 'workos' &&
+			membership.status === 'active'
+		)
+	);
+	let refreshing = false;
+	let refreshedOnOpen = false;
+	const refreshFromServer = async () => {
+		if (refreshing || !canRefresh || !navigator.onLine) return;
+		refreshing = true;
+		try {
+			await refreshRemoteHousehold(database, profileId, householdId);
+		} catch {
+			// Opportunistic, like a sync pull: the last verified projection stays on screen, and an
+			// inactive membership has already been detached by refreshRemoteHousehold.
+		} finally {
+			refreshing = false;
+		}
+	};
+	$effect(() => {
+		if (!canRefresh || refreshedOnOpen) return;
+		refreshedOnOpen = true;
+		void refreshFromServer();
+	});
+
 	const inviteExpiryOptions = inviteExpiryDays.map((days) => ({
 		value: String(days) as '1' | '7' | '30',
 		label: m.household_invite_expiry_option({
@@ -184,16 +215,18 @@
 				authSlotId: nextAuthSlot?.authSlotId ?? null,
 				originDeviceId: typeof device?.value === 'string' ? device.value : null,
 				membership: nextMembership ?? null,
-				members: nextMembers.map((candidate) => {
-					const local = profilesByUser.get(candidate.workosUserId);
-					const attribution = attributionsByUser.get(candidate.workosUserId);
-					return {
-						...candidate,
-						name: local?.displayName ?? attribution?.displayName ?? candidate.workosUserId,
-						email: local?.email ?? attribution?.email ?? null,
-						localProfileId: local?.profileId ?? null
-					};
-				}),
+				members: nextMembers
+					.filter(({ status }) => status !== 'revoked')
+					.map((candidate) => {
+						const local = profilesByUser.get(candidate.workosUserId);
+						const attribution = attributionsByUser.get(candidate.workosUserId);
+						return {
+							...candidate,
+							name: local?.displayName ?? attribution?.displayName ?? candidate.workosUserId,
+							email: local?.email ?? attribution?.email ?? null,
+							localProfileId: local?.profileId ?? null
+						};
+					}),
 				invites: nextInvites,
 				appliances: applianceValues.map((appliance) => {
 					const stored = nextAppliances.find((candidate) => candidate.appliance === appliance);
@@ -409,6 +442,8 @@
 		}
 	};
 </script>
+
+<svelte:window onfocus={() => void refreshFromServer()} />
 
 <Dialog.Root bind:open={inviteOpen}>
 	<Dialog.Content class="sm:max-w-md">

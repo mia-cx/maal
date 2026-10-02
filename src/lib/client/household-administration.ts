@@ -2,7 +2,9 @@ import { Data, Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
 
 import {
+	HouseholdAdministrationErrorCodeSchema,
 	HouseholdAdministrationProjectionResponseSchema,
+	type HouseholdAdministrationErrorCode,
 	HouseholdInviteResponseSchema,
 	HouseholdMemberRemovalResponseSchema,
 	HouseholdMembershipResponseSchema,
@@ -38,7 +40,13 @@ export class HouseholdAdministrationUnavailable extends Data.TaggedError(
 )<{
 	readonly operation: string;
 	readonly status: number | null;
+	/** The server's `HouseholdAdministrationError` code, when the response carried one. */
+	readonly code?: HouseholdAdministrationErrorCode;
 }> {}
+
+const ErrorResponseSchema = Schema.Struct({
+	error: Schema.Struct({ code: HouseholdAdministrationErrorCodeSchema })
+});
 
 export class HouseholdAdministrationDecodeError extends Data.TaggedError(
 	'HouseholdAdministrationDecodeError'
@@ -62,7 +70,14 @@ const requestJson = async <A>(
 		throw new HouseholdAdministrationUnavailable({ operation, status: null });
 	}
 	if (!response.ok) {
-		throw new HouseholdAdministrationUnavailable({ operation, status: response.status });
+		const body = Schema.decodeUnknownOption(ErrorResponseSchema)(
+			await response.json().catch(() => null)
+		);
+		throw new HouseholdAdministrationUnavailable({
+			operation,
+			status: response.status,
+			...(body._tag === 'Some' ? { code: body.value.error.code } : {})
+		});
 	}
 	try {
 		return Schema.decodeUnknownSync(schema)(await response.json());
@@ -290,6 +305,11 @@ export const joinRemoteHousehold = async (
 	return { householdId: response.payload.household.householdId };
 };
 
+/**
+ * Replaces the local member and invite projection with the server's verified one. When the server
+ * says the profile's membership is no longer active, the household becomes a detached snapshot
+ * before the error propagates.
+ */
 export const refreshRemoteHousehold = async (
 	database: MaalDatabase,
 	profileId: string,
@@ -303,7 +323,19 @@ export const refreshRemoteHousehold = async (
 		'refresh household',
 		{ method: 'GET' },
 		HouseholdAdministrationProjectionResponseSchema
-	);
+	).catch(async (cause: unknown) => {
+		if (
+			cause instanceof HouseholdAdministrationUnavailable &&
+			cause.code === 'membership_inactive'
+		) {
+			await detachHouseholdSnapshot(database, {
+				profileId,
+				householdId,
+				denialCode: 'membership_inactive'
+			});
+		}
+		throw cause;
+	});
 	await commitHouseholdProjection(database, profileId, response.payload, false);
 	return response.payload;
 };

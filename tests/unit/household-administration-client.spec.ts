@@ -210,4 +210,79 @@ describe('household administration Dexie projection', () => {
 		await expect(database.outbox.toArray()).resolves.toMatchObject([{ status: 'quarantined' }]);
 		await expect(database.meals.get(mealId)).resolves.toBeDefined();
 	});
+
+	test('detaches the snapshot when the server reports the membership inactive', async () => {
+		database = await openMaalDatabase(`household-admin-${crypto.randomUUID()}`);
+		const alice = profile('user_alice', 'Alice Janssen');
+		const family = household('org_family', 'Canal kitchen');
+		const aliceMembership = membership('membership_alice', family.householdId, alice.workosUserId);
+		await database.profiles.put(alice);
+		await database.authSlots.put({
+			authSlotId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+			profileId: alice.profileId,
+			workosUserId: alice.workosUserId,
+			sessionState: 'authenticated',
+			lastRefreshedAt: timestamp,
+			lastVerifiedAt: timestamp,
+			nextRetryAt: null,
+			retryCount: 0
+		});
+		await database.households.put(family);
+		await database.memberships.put(aliceMembership);
+
+		const deniedFetcher: typeof fetch = vi.fn(async () =>
+			Response.json(
+				{
+					schemaVersion: 1,
+					error: { _tag: 'HouseholdAdministrationError', code: 'membership_inactive' }
+				},
+				{ status: 403 }
+			)
+		);
+		await expect(
+			refreshRemoteHousehold(database, alice.profileId, family.householdId, deniedFetcher)
+		).rejects.toMatchObject({ _tag: 'HouseholdAdministrationUnavailable', status: 403 });
+
+		await expect(database.memberships.get(aliceMembership.membershipId)).resolves.toMatchObject({
+			status: 'detached',
+			denialCode: 'membership_inactive'
+		});
+		await expect(database.households.get(family.householdId)).resolves.toEqual(family);
+	});
+
+	test('keeps the membership active when a refresh is denied for another reason', async () => {
+		database = await openMaalDatabase(`household-admin-${crypto.randomUUID()}`);
+		const alice = profile('user_alice', 'Alice Janssen');
+		const family = household('org_family', 'Canal kitchen');
+		const aliceMembership = membership('membership_alice', family.householdId, alice.workosUserId);
+		await database.profiles.put(alice);
+		await database.authSlots.put({
+			authSlotId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+			profileId: alice.profileId,
+			workosUserId: alice.workosUserId,
+			sessionState: 'authenticated',
+			lastRefreshedAt: timestamp,
+			lastVerifiedAt: timestamp,
+			nextRetryAt: null,
+			retryCount: 0
+		});
+		await database.households.put(family);
+		await database.memberships.put(aliceMembership);
+
+		const deniedFetcher: typeof fetch = vi.fn(async () =>
+			Response.json(
+				{
+					schemaVersion: 1,
+					error: { _tag: 'HouseholdAdministrationError', code: 'membership_projection_missing' }
+				},
+				{ status: 403 }
+			)
+		);
+		await expect(
+			refreshRemoteHousehold(database, alice.profileId, family.householdId, deniedFetcher)
+		).rejects.toMatchObject({ status: 403 });
+		await expect(database.memberships.get(aliceMembership.membershipId)).resolves.toMatchObject({
+			status: 'active'
+		});
+	});
 });

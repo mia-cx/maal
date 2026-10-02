@@ -164,12 +164,19 @@ const seedProfilesAndHousehold = async (page: Page) => {
 	await page.reload();
 };
 
+// Opening household settings refreshes the member and invite projection: an explicit household
+// administration request, which spec §2 permits for free users. Everything else stays local.
+const isHouseholdRefresh = (url: string): boolean =>
+	/^\/api\/auth-slots\/[a-z0-9]{32}\/households\/org_canal_kitchen$/.test(new URL(url).pathname);
+
 test('switches real local profiles with a PIN and changes household data without remote content requests', async ({
 	page
 }) => {
 	const remoteRequests: string[] = [];
 	page.on('request', (request) => {
-		if (new URL(request.url()).pathname.startsWith('/api/')) remoteRequests.push(request.url());
+		if (new URL(request.url()).pathname.startsWith('/api/') && !isHouseholdRefresh(request.url())) {
+			remoteRequests.push(request.url());
+		}
 	});
 	await seedProfilesAndHousehold(page);
 

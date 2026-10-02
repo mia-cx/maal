@@ -5,6 +5,7 @@ import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 
 import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.js';
+import type { HouseholdAdministrationProjection } from '$lib/domain/household/administration.js';
 import type { Household, Membership } from '$lib/domain/household/contracts.js';
 import HouseholdSettings from '$lib/components/household/household-settings.svelte';
 import '../../src/routes/layout.css';
@@ -12,6 +13,7 @@ import '../../src/routes/layout.css';
 const timestamp = '2026-08-21T12:00:00.000Z' as const;
 const slotId = 'a'.repeat(32);
 const householdId = 'org_canal_kitchen';
+const refreshPath = `/api/auth-slots/${slotId}/households/${householdId}`;
 const databases: MaalDatabase[] = [];
 
 afterEach(async () => {
@@ -65,6 +67,13 @@ const membership = (
 	...overrides
 });
 
+const identity = (workosUserId: string, displayName: string) => ({
+	workosUserId,
+	displayName,
+	email: `${workosUserId.slice(5)}@example.test`,
+	profilePictureUrl: null
+});
+
 const seed = async (
 	options: { household?: Household; members?: Membership[] } = {}
 ): Promise<{ database: MaalDatabase; profileId: string }> => {
@@ -106,6 +115,63 @@ const seed = async (
 	);
 	return { database, profileId };
 };
+
+/** Answers the household refresh with `projection` and fails every other request. */
+const mockRefresh = (projection: () => HouseholdAdministrationProjection) => {
+	const refreshes: string[] = [];
+	vi.spyOn(window, 'fetch').mockImplementation(async (input) => {
+		const path = new URL(String(input), window.location.origin).pathname;
+		if (path !== refreshPath) throw new TypeError(`unexpected request ${path}`);
+		refreshes.push(path);
+		return Response.json({ schemaVersion: 1, payload: projection() });
+	});
+	return refreshes;
+};
+
+test('refreshes members and invites from the server on open and when focus returns', async () => {
+	const { database, profileId } = await seed();
+	const alice = membership('user_alice', 'admin');
+	const bob = membership('user_bob', 'member');
+	let members = [{ membership: alice, user: identity('user_alice', 'Alice de Vries') }];
+	const refreshes = mockRefresh(() => ({
+		household: household(),
+		membership: alice,
+		members,
+		invites: []
+	}));
+
+	const screen = await render(HouseholdSettings, { database, profileId, householdId });
+	await expect.poll(() => refreshes.length).toBe(1);
+
+	members = [...members, { membership: bob, user: identity('user_bob', 'Bob de Vries') }];
+	// A focus event during the in-flight open refresh is deduplicated, so keep returning focus.
+	await expect
+		.poll(() => {
+			window.dispatchEvent(new FocusEvent('focus'));
+			return screen.getByText('Bob de Vries').query() !== null;
+		})
+		.toBe(true);
+	expect(refreshes.length).toBeGreaterThanOrEqual(2);
+	await expect(database.memberships.get(bob.membershipId)).resolves.toMatchObject({
+		status: 'active'
+	});
+});
+
+test('lists only members whose membership is still active', async () => {
+	const { database, profileId } = await seed({
+		members: [
+			membership('user_alice', 'admin'),
+			membership('user_bob', 'member', { status: 'revoked' })
+		]
+	});
+	await database.userAttributions.put(identity('user_bob', 'Bob de Vries'));
+	vi.spyOn(window, 'fetch').mockRejectedValue(new TypeError('offline'));
+
+	const screen = await render(HouseholdSettings, { database, profileId, householdId });
+	await expect.element(screen.getByRole('heading', { name: 'Members' })).toBeVisible();
+	await expect.element(screen.getByText('Alice de Vries')).toBeVisible();
+	await expect.element(screen.getByText('Bob de Vries')).not.toBeInTheDocument();
+});
 
 test('deletes a local-only household on this device without contacting the server', async () => {
 	const localHousehold = household({ householdId: uuidv7(), localOnly: true });
