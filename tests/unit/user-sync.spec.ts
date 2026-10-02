@@ -16,6 +16,7 @@ import {
 	type UserSyncEnvironment,
 	type UserSyncTransport
 } from '$lib/client/sync/index.js';
+import { deleteTaxonomyRecord, upsertTaxonomyRecord } from '$lib/client/taxonomy/commands.js';
 import { CURRENT_PROTOCOL_VERSION } from '$lib/domain/contracts/versions.js';
 import { UnitUserEntrySchema, type UnitUserEntry } from '$lib/domain/taxonomy/schema.js';
 import {
@@ -1067,5 +1068,180 @@ describe('server ordering and bootstrap rules', () => {
 		await expect(bootstrapUserSync(repository, userId, request)).rejects.toMatchObject({
 			_tag: 'SyncIdentityMismatch'
 		});
+	});
+});
+
+const deviceIdOf = async (database: MaalDatabase): Promise<string> =>
+	String((await database.meta.get('deviceId'))!.value);
+
+const unitDraft = (id: string, label = 'cup') => ({
+	id,
+	workosUserId: userId,
+	canonicalLabel: label,
+	baseUnitId: 'grams',
+	toBaseFactor: 3.5,
+	toBaseOffset: 0,
+	adoptionStatus: 'accepted' as const
+});
+
+const acceptingRepository = (): UserSyncRepository => {
+	let sequence = 0;
+	return {
+		readScopeState: async () => ({
+			retainedFloor: 0,
+			latestSequence: sequence,
+			bootstrapGeneration: 1
+		}),
+		pull: vi.fn(),
+		bootstrap: vi.fn(),
+		commit: async ({ mutation }) => ({
+			mutationId: mutation.mutationId,
+			status: 'accepted',
+			sequence: ++sequence,
+			resultingRevision: 1
+		}),
+		prune: vi.fn()
+	};
+};
+
+const refused = (code: string): SyncTransportError =>
+	new SyncTransportError({ code, message: 'The sync request was rejected.', retryable: false });
+
+/** Runs the real server push validation, and fails like the fetch transport does on a 400. */
+const validatingTransport = (pushes: PushRequest[] = []): UserSyncTransport => {
+	const repository = acceptingRepository();
+	return {
+		...noOpTransport(),
+		push: async (_slot, request) => {
+			pushes.push(request);
+			try {
+				return await pushUserSync(repository, userId, request);
+			} catch (error) {
+				throw refused((error as { code?: string }).code ?? 'unknown');
+			}
+		}
+	};
+};
+
+const outboxRowFor = async (database: MaalDatabase, aggregateId: string) =>
+	(await database.outbox.where('aggregateId').equals(aggregateId).toArray())[0]!;
+
+describe('user outbox recovery', () => {
+	test('pushes an edit followed by a delete as the delete and acknowledges both rows', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const context = { database, authSlotId, originDeviceId: await deviceIdOf(database) };
+		const id = uuidv7();
+		await upsertTaxonomyRecord(
+			{ ...context, occurredAt: '2026-08-21T11:00:00.000Z' },
+			'unitUserEntry',
+			unitDraft(id)
+		);
+		await deleteTaxonomyRecord(
+			{ ...context, occurredAt: '2026-08-21T11:01:00.000Z' },
+			'unitUserEntry',
+			id
+		);
+		const pushes: PushRequest[] = [];
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: validatingTransport(pushes),
+			environment: environment()
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(pushes.flatMap(({ mutations }) => mutations.map(({ operation }) => operation))).toEqual([
+			'delete'
+		]);
+		expect((await database.outbox.toArray()).map(({ status }) => status)).toEqual([
+			'acknowledged',
+			'acknowledged'
+		]);
+	});
+
+	test('rejects only the mutation the server refuses, shows its code, and commits the rest', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const context = { database, authSlotId, originDeviceId: await deviceIdOf(database) };
+		const [badId, goodId] = [uuidv7(), uuidv7()];
+		await upsertTaxonomyRecord(
+			{ ...context, occurredAt: timestamp },
+			'unitUserEntry',
+			unitDraft(badId, 'bad')
+		);
+		await upsertTaxonomyRecord(
+			{ ...context, occurredAt: timestamp },
+			'unitUserEntry',
+			unitDraft(goodId, 'good')
+		);
+		const accepting = validatingTransport();
+		let pushes = 0;
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: {
+				...accepting,
+				push: async (slot, request) => {
+					pushes += 1;
+					if (request.mutations.some(({ entityId }) => entityId === badId)) {
+						throw refused('invalid_complete_aggregate');
+					}
+					return accepting.push(slot, request);
+				}
+			},
+			environment: environment()
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(await outboxRowFor(database, badId)).toMatchObject({
+			status: 'rejected',
+			rejectionCode: 'invalid_complete_aggregate'
+		});
+		expect(await outboxRowFor(database, goodId)).toMatchObject({ status: 'acknowledged' });
+		expect((await database.syncScopes.get(['user', userId]))?.lastErrorCode).toBe(
+			'invalid_complete_aggregate'
+		);
+		const sent = pushes;
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+		expect(pushes).toBe(sent);
+	});
+
+	test('keeps rows pending when the server refuses the request itself', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const context = { database, authSlotId, originDeviceId: await deviceIdOf(database) };
+		await upsertTaxonomyRecord(
+			{ ...context, occurredAt: timestamp },
+			'unitUserEntry',
+			unitDraft(uuidv7())
+		);
+		await upsertTaxonomyRecord(
+			{ ...context, occurredAt: timestamp },
+			'unitUserEntry',
+			unitDraft(uuidv7(), 'mug')
+		);
+		const push = vi.fn(async () => {
+			throw refused('contract_mismatch');
+		});
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: { ...noOpTransport(), push },
+			environment: environment()
+		});
+
+		await expect(coordinator.syncNow()).rejects.toMatchObject({ code: 'contract_mismatch' });
+
+		expect(push).toHaveBeenCalledTimes(1);
+		expect((await database.outbox.toArray()).map(({ status }) => status)).toEqual([
+			'pending',
+			'pending'
+		]);
 	});
 });

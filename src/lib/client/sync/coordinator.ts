@@ -39,9 +39,26 @@ import {
 	buildUserSnapshotManifest
 } from './apply.js';
 import { resolveLocalUserSyncCapability, type LocalUserSyncCapability } from './capability.js';
+import {
+	byOccurrence,
+	coalesceOutbox,
+	coveredRows,
+	deletionGroupFor,
+	expandReceipts,
+	firstRejectionCode,
+	markSending,
+	PUSH_BATCH_SIZE,
+	pushIsolatingRejections,
+	requeue,
+	requeueUnanswered,
+	retryDelay,
+	scopeOutbox,
+	type CoalescedMutation,
+	type OutboxAggregate,
+	type PushOutcome
+} from './outbox.js';
 import type { UserSyncTransport } from './transport.js';
 
-const PUSH_BATCH_SIZE = 50;
 export const BACKFILL_BATCH_SIZE = 25;
 export const BACKFILL_MAX_BYTES = 256 * 1024;
 export const BACKFILL_SINGLE_RECORD_MAX_BYTES = 1024 * 1024;
@@ -125,33 +142,56 @@ const isTerminal = (error: unknown): boolean =>
 	error instanceof SyncCapabilityDenied ||
 	error instanceof SyncPermissionDenied;
 
-const retryDelay = (attempt: number): number => Math.min(60_000, 1_000 * 2 ** Math.min(attempt, 6));
-
 const backfillFlag = (record: OutboxRecord): boolean => record.backfill === true;
 
+/** Every due interactive row of the scope, oldest first. Rows of other auth slots stay put. */
 const selectInteractiveOutbox = async (
 	database: MaalDatabase,
 	authSlotId: string,
 	workosUserId: string,
 	now: Date
 ): Promise<OutboxRecord[]> =>
-	(await database.outbox.toArray())
+	(await scopeOutbox(database, 'user', workosUserId))
 		.filter(
 			(row) =>
 				row.authSlotId === authSlotId &&
-				row.scopeKind === 'user' &&
-				row.scopeId === workosUserId &&
 				!backfillFlag(row) &&
-				(row.status === 'pending' || row.status === 'sending') &&
 				Date.parse(row.nextAttemptAt) <= now.getTime()
 		)
-		.toSorted(
-			(left, right) =>
-				Date.parse(left.occurredAt) - Date.parse(right.occurredAt) ||
-				left.mutationId.localeCompare(right.mutationId)
-		)
-		.slice(0, PUSH_BATCH_SIZE);
+		.toSorted(byOccurrence);
 
+const loadAggregate = async (
+	database: MaalDatabase,
+	workosUserId: string,
+	row: OutboxRecord
+): Promise<OutboxAggregate> => {
+	const entityKind = Schema.decodeUnknownSync(UserSyncEntityKindSchema)(row.entityKind);
+	const descriptor = USER_SYNC_ENTITY_DESCRIPTORS[entityKind];
+	const source = row.snapshot ?? (await database.table(descriptor.store).get(row.aggregateId));
+	return {
+		aggregate: decodeUserSyncAggregate(entityKind, row.aggregateId, workosUserId, source).aggregate,
+		deletionGroup: deletionGroupFor(descriptor.conflictGroups)
+	};
+};
+
+const toMutation = ({
+	host,
+	conflictGroups,
+	operation,
+	aggregate
+}: CoalescedMutation): SyncMutation => ({
+	schemaVersion: CURRENT_SCHEMA_VERSION,
+	mutationId: host.mutationId,
+	originDeviceId: host.originDeviceId,
+	entityKind: Schema.decodeUnknownSync(UserSyncEntityKindSchema)(host.entityKind),
+	entityId: host.aggregateId,
+	conflictGroups,
+	operation,
+	occurredAt: host.occurredAt,
+	aggregate
+});
+
+/** Backfill rows carry their own snapshot and groups, so they are sent exactly as prepared. */
 const hydrateMutation = async (
 	database: MaalDatabase,
 	workosUserId: string,
@@ -182,35 +222,6 @@ const hydrateMutation = async (
 	};
 };
 
-const requeue = async (
-	database: MaalDatabase,
-	rows: readonly OutboxRecord[],
-	now: Date
-): Promise<void> => {
-	await database.transaction('rw', database.outbox, async () => {
-		for (const row of rows) {
-			const attempts = row.attempts + 1;
-			const delay = backfillFlag(row)
-				? Math.max(BACKFILL_INTERVAL_MS, retryDelay(attempts))
-				: retryDelay(attempts);
-			await database.outbox.update(row.mutationId, {
-				status: 'pending',
-				attempts,
-				nextAttemptAt: utc(new Date(now.getTime() + delay))
-			});
-		}
-	});
-};
-
-const markSending = async (
-	database: MaalDatabase,
-	rows: readonly OutboxRecord[]
-): Promise<void> => {
-	await database.transaction('rw', database.outbox, async () => {
-		for (const row of rows) await database.outbox.update(row.mutationId, { status: 'sending' });
-	});
-};
-
 const checkpointKey = (
 	workosUserId: string,
 	entityKind: UserSyncEntityKind
@@ -237,13 +248,8 @@ const existingBackfillRows = async (
 	authSlotId: string,
 	workosUserId: string
 ): Promise<OutboxRecord[]> =>
-	(await database.outbox.toArray()).filter(
-		(row) =>
-			row.authSlotId === authSlotId &&
-			row.scopeKind === 'user' &&
-			row.scopeId === workosUserId &&
-			backfillFlag(row) &&
-			(row.status === 'pending' || row.status === 'sending')
+	(await scopeOutbox(database, 'user', workosUserId)).filter(
+		(row) => row.authSlotId === authSlotId && backfillFlag(row)
 	);
 
 const prepareBackfill = async (
@@ -498,7 +504,8 @@ export const createUserSyncCoordinator = (
 		}
 	};
 
-	const pushInteractive = async (id: string): Promise<number | null> => {
+	/** Sends one batch of coalesced rows. Null means nothing was due. */
+	const pushInteractive = async (id: string): Promise<PushOutcome | null> => {
 		const rows = await selectInteractiveOutbox(
 			options.database,
 			options.authSlotId,
@@ -506,28 +513,33 @@ export const createUserSyncCoordinator = (
 			now()
 		);
 		if (rows.length === 0) return null;
-		const mutations = await Promise.all(
-			rows.map((row) => hydrateMutation(options.database, options.workosUserId, row))
-		);
-		await markSending(options.database, rows);
+		const planned = (
+			await coalesceOutbox(rows, (row) =>
+				loadAggregate(options.database, options.workosUserId, row)
+			)
+		).slice(0, PUSH_BATCH_SIZE);
+		const sent = coveredRows(planned);
+		await markSending(options.database, sent);
 		try {
 			const scope = await options.database.syncScopes.get(['user', options.workosUserId]);
-			const response = await options.transport.push(options.authSlotId, {
-				protocolVersion: CURRENT_PROTOCOL_VERSION,
-				deviceId: id,
-				audience: { kind: 'user', id: options.workosUserId },
-				baseCursor: scope?.cursor ?? null,
-				mutations
-			});
-			await applyUserMutationReceipts(
-				options.database,
-				options.workosUserId,
-				response.receipts,
-				now()
+			const pushed = await pushIsolatingRejections(planned.map(toMutation), (mutations) =>
+				options.transport.push(options.authSlotId, {
+					protocolVersion: CURRENT_PROTOCOL_VERSION,
+					deviceId: id,
+					audience: { kind: 'user', id: options.workosUserId },
+					baseCursor: scope?.cursor ?? null,
+					mutations: [...mutations]
+				})
 			);
-			return response.committedThrough;
+			const receipts = expandReceipts(planned, pushed.receipts);
+			await applyUserMutationReceipts(options.database, options.workosUserId, receipts, now());
+			await requeueUnanswered(options.database, sent, receipts, now(), BACKFILL_INTERVAL_MS);
+			return {
+				committedThrough: pushed.committedThrough,
+				rejectionCode: firstRejectionCode(receipts)
+			};
 		} catch (error) {
-			await requeue(options.database, rows, now());
+			await requeue(options.database, sent, now(), BACKFILL_INTERVAL_MS);
 			throw error;
 		}
 	};
@@ -573,7 +585,7 @@ export const createUserSyncCoordinator = (
 			});
 			return response.committedThrough;
 		} catch (error) {
-			await requeue(options.database, prepared.rows, now());
+			await requeue(options.database, prepared.rows, now(), BACKFILL_INTERVAL_MS);
 			throw error;
 		}
 	};
@@ -624,8 +636,8 @@ export const createUserSyncCoordinator = (
 			const id = await deviceId();
 			await pullAll(id);
 			lease = await renew(lease);
-			const pushedThrough = await pushInteractive(id);
-			if (pushedThrough !== null) await pullAll(id);
+			const pushed = await pushInteractive(id);
+			if (pushed !== null && pushed.committedThrough !== null) await pullAll(id);
 			lease = await renew(lease);
 			const backfilledThrough = await runBackfill(id);
 			if (backfilledThrough !== null) await pullAll(id);
@@ -634,7 +646,7 @@ export const createUserSyncCoordinator = (
 			await options.database.syncScopes.update(['user', options.workosUserId], {
 				state: 'idle',
 				lastSuccessAt: utc(now()),
-				lastErrorCode: null
+				lastErrorCode: pushed?.rejectionCode ?? null
 			});
 			return currentState;
 		} catch (error) {

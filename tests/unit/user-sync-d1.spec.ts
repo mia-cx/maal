@@ -1,15 +1,27 @@
+import 'fake-indexeddb/auto';
+
+import Dexie from 'dexie';
 import { Miniflare } from 'miniflare';
 import { uuidv7 } from 'uuidv7';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
+import { openMaalDatabase } from '$lib/client/local/database.js';
+import {
+	createRecipeFromEditor,
+	deleteRecipe,
+	restoreRecipe,
+	updateRecipeFromEditor
+} from '$lib/client/recipes/commands.js';
+import { createUserSyncCoordinator, type UserSyncTransport } from '$lib/client/sync/index.js';
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
 import {
 	D1UserSyncRepository,
 	d1UserSyncCapabilityAuthorizer,
-	pullUserSync
+	pullUserSync,
+	pushUserSync
 } from '$lib/server/sync/index.js';
 import type { LiveWorkOSMembership } from '$lib/server/auth-slots/adapter.js';
-import type { SyncMutation } from '$lib/sync/contracts.js';
+import { SyncTransportError, type SyncMutation } from '$lib/sync/contracts.js';
 import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js';
 
 const userId = 'user_alice';
@@ -624,5 +636,89 @@ describe('D1 user sync repository', () => {
 		await expect(
 			database.prepare('SELECT deleted_at FROM recipes WHERE id = ?').bind(entityId).first()
 		).resolves.toEqual({ deleted_at: null });
+	});
+
+	test('keeps an offline recipe edit that was trashed before it synced, through restore', async () => {
+		const repository = new D1UserSyncRepository(database);
+		const transport: UserSyncTransport = {
+			pull: (_slot, request) => pullUserSync(repository, userId, request),
+			push: async (_slot, request) => {
+				try {
+					return await pushUserSync(repository, userId, request);
+				} catch (error) {
+					throw new SyncTransportError({
+						code: (error as { code?: string }).code ?? 'unknown',
+						message: 'The sync request was rejected.',
+						retryable: false
+					});
+				}
+			},
+			bootstrap: () => Promise.reject(new Error('unused')),
+			backfill: () => Promise.reject(new Error('unused'))
+		};
+		const local = await openMaalDatabase(`user-sync-d1-${crypto.randomUUID()}`);
+		try {
+			const coordinator = createUserSyncCoordinator({
+				database: local,
+				authSlotId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+				workosUserId: userId,
+				transport,
+				capabilityResolver: async () => ({ enabled: true, stale: false, householdId: 'org_paid' }),
+				environment: {
+					isOnline: () => true,
+					isVisible: () => true,
+					isSaveDataEnabled: () => true,
+					on: () => () => undefined
+				}
+			});
+			const originDeviceId = String((await local.meta.get('deviceId'))!.value);
+			const context = (occurredAt: `${string}Z`) => ({
+				authSlotId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+				ownerUserId: userId,
+				originDeviceId,
+				occurredAt
+			});
+			const patch = {
+				title: 'Soup',
+				description: null,
+				imageUrl: null,
+				sourceUrl: null,
+				sourceSiteName: null,
+				sourceAuthorName: null,
+				sourcePublisherName: null,
+				sourceIsBasedOnUrl: null,
+				prepTimeMinutes: 5,
+				cookTimeMinutes: 20,
+				yield: 4,
+				ingredients: [{ id: null, amount: '2', unit: 'g', item: 'salt' }],
+				instructions: [{ id: null, position: 1, text: 'Simmer.' }]
+			};
+			const recipe = await createRecipeFromEditor(local, context(timestamp), patch);
+			await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+			await updateRecipeFromEditor(local, context('2026-08-21T12:01:00.000Z'), recipe.id, {
+				...patch,
+				title: 'Better soup'
+			});
+			await deleteRecipe(local, context('2026-08-21T12:02:00.000Z'), recipe.id);
+			await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+			await restoreRecipe(local, context('2026-08-21T12:03:00.000Z'), recipe.id);
+			await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+			await expect(
+				database
+					.prepare('SELECT title, deleted_at FROM recipes WHERE id = ?')
+					.bind(recipe.id)
+					.first()
+			).resolves.toEqual({ title: 'Better soup', deleted_at: null });
+			expect(await local.recipes.get(recipe.id)).toMatchObject({
+				title: 'Better soup',
+				deletedAt: null
+			});
+		} finally {
+			local.close();
+			await Dexie.delete(local.name);
+		}
 	});
 });

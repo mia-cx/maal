@@ -47,8 +47,25 @@ import {
 } from './household-capability.js';
 import type { HouseholdSyncTransport } from './household-transport.js';
 import type { UserSyncEnvironment } from './coordinator.js';
+import {
+	byOccurrence,
+	coalesceOutbox,
+	coveredRows,
+	deletionGroupFor,
+	expandReceipts,
+	firstRejectionCode,
+	markSending,
+	PUSH_BATCH_SIZE,
+	pushIsolatingRejections,
+	requeue,
+	requeueUnanswered,
+	retryDelay,
+	scopeOutbox,
+	type CoalescedMutation,
+	type OutboxAggregate,
+	type PushOutcome
+} from './outbox.js';
 
-const PUSH_BATCH_SIZE = 50;
 export const HOUSEHOLD_BACKFILL_BATCH_SIZE = 25;
 export const HOUSEHOLD_BACKFILL_MAX_BYTES = 256 * 1024;
 export const HOUSEHOLD_BACKFILL_SINGLE_RECORD_MAX_BYTES = 1024 * 1024;
@@ -123,35 +140,64 @@ const browserEnvironment = (): UserSyncEnvironment => ({
 });
 
 const utc = (date: Date): `${string}Z` => date.toISOString() as `${string}Z`;
-const retryDelay = (attempt: number): number => Math.min(60_000, 1_000 * 2 ** Math.min(attempt, 6));
 const backfillFlag = (record: OutboxRecord): boolean => record.backfill === true;
 const isHouseholdEntityKind = (kind: string): kind is HouseholdSyncEntityKind =>
 	(HOUSEHOLD_SYNC_ENTITY_KINDS as readonly string[]).includes(kind);
 
+/** Every due interactive row of the household, oldest first. Rows of other auth slots stay put. */
 const selectInteractiveOutbox = async (
 	database: MaalDatabase,
 	authSlotId: string,
 	householdId: string,
 	now: Date
 ): Promise<OutboxRecord[]> =>
-	(await database.outbox.toArray())
+	(await scopeOutbox(database, 'household', householdId))
 		.filter(
 			(row) =>
 				row.authSlotId === authSlotId &&
-				row.scopeKind === 'household' &&
-				row.scopeId === householdId &&
 				isHouseholdEntityKind(row.entityKind) &&
 				!backfillFlag(row) &&
-				(row.status === 'pending' || row.status === 'sending') &&
 				Date.parse(row.nextAttemptAt) <= now.getTime()
 		)
-		.toSorted(
-			(left, right) =>
-				Date.parse(left.occurredAt) - Date.parse(right.occurredAt) ||
-				left.mutationId.localeCompare(right.mutationId)
-		)
-		.slice(0, PUSH_BATCH_SIZE);
+		.toSorted(byOccurrence);
 
+const loadAggregate = async (
+	database: MaalDatabase,
+	householdId: string,
+	workosUserId: string,
+	row: OutboxRecord
+): Promise<OutboxAggregate> => {
+	const entityKind = Schema.decodeUnknownSync(HouseholdSyncEntityKindSchema)(row.entityKind);
+	const descriptor = HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS[entityKind];
+	const source = row.snapshot ?? (await database.table(descriptor.store).get(row.aggregateId));
+	const { aggregate } = decodeHouseholdSyncAggregate(
+		entityKind,
+		row.aggregateId,
+		householdId,
+		source
+	);
+	assertHouseholdMutationActor(entityKind, workosUserId, aggregate);
+	return { aggregate, deletionGroup: deletionGroupFor(descriptor.conflictGroups) };
+};
+
+const toMutation = ({
+	host,
+	conflictGroups,
+	operation,
+	aggregate
+}: CoalescedMutation): HouseholdSyncMutation => ({
+	schemaVersion: CURRENT_SCHEMA_VERSION,
+	mutationId: host.mutationId,
+	originDeviceId: host.originDeviceId,
+	entityKind: Schema.decodeUnknownSync(HouseholdSyncEntityKindSchema)(host.entityKind),
+	entityId: host.aggregateId,
+	conflictGroups,
+	operation,
+	occurredAt: host.occurredAt,
+	aggregate
+});
+
+/** Backfill rows carry their own snapshot and groups, so they are sent exactly as prepared. */
 const hydrateMutation = async (
 	database: MaalDatabase,
 	householdId: string,
@@ -196,35 +242,6 @@ const hydrateMutation = async (
 		occurredAt: row.occurredAt,
 		aggregate: decoded.aggregate
 	};
-};
-
-const markSending = async (
-	database: MaalDatabase,
-	rows: readonly OutboxRecord[]
-): Promise<void> => {
-	await database.transaction('rw', database.outbox, async () => {
-		for (const row of rows) await database.outbox.update(row.mutationId, { status: 'sending' });
-	});
-};
-
-const requeue = async (
-	database: MaalDatabase,
-	rows: readonly OutboxRecord[],
-	now: Date
-): Promise<void> => {
-	await database.transaction('rw', database.outbox, async () => {
-		for (const row of rows) {
-			const attempts = row.attempts + 1;
-			const delay = backfillFlag(row)
-				? Math.max(HOUSEHOLD_BACKFILL_INTERVAL_MS, retryDelay(attempts))
-				: retryDelay(attempts);
-			await database.outbox.update(row.mutationId, {
-				status: 'pending',
-				attempts,
-				nextAttemptAt: utc(new Date(now.getTime() + delay))
-			});
-		}
-	});
 };
 
 const priorityKeyFor = (
@@ -285,13 +302,8 @@ const prepareBackfill = async (
 	deviceId: string,
 	now: Date
 ): Promise<{ rows: OutboxRecord[]; checkpoint: HouseholdBackfillCheckpoint } | null> => {
-	const existing = (await database.outbox.toArray()).filter(
-		(row) =>
-			row.authSlotId === authSlotId &&
-			row.scopeKind === 'household' &&
-			row.scopeId === householdId &&
-			backfillFlag(row) &&
-			(row.status === 'pending' || row.status === 'sending')
+	const existing = (await scopeOutbox(database, 'household', householdId)).filter(
+		(row) => row.authSlotId === authSlotId && backfillFlag(row)
 	);
 	if (existing.length > 0) {
 		const due = existing
@@ -566,7 +578,8 @@ export const createHouseholdSyncCoordinator = (
 		}
 	};
 
-	const pushInteractive = async (id: string): Promise<number | null> => {
+	/** Sends one batch of coalesced rows. Null means nothing was due. */
+	const pushInteractive = async (id: string): Promise<PushOutcome | null> => {
 		const rows = await selectInteractiveOutbox(
 			options.database,
 			options.authSlotId,
@@ -574,30 +587,39 @@ export const createHouseholdSyncCoordinator = (
 			now()
 		);
 		if (rows.length === 0) return null;
-		const mutations = await Promise.all(
-			rows.map((row) =>
-				hydrateMutation(options.database, options.householdId, options.workosUserId, row)
+		const planned = (
+			await coalesceOutbox(rows, (row) =>
+				loadAggregate(options.database, options.householdId, options.workosUserId, row)
 			)
-		);
-		await markSending(options.database, rows);
+		).slice(0, PUSH_BATCH_SIZE);
+		const sent = coveredRows(planned);
+		await markSending(options.database, sent);
 		try {
 			const scope = await options.database.syncScopes.get(['household', options.householdId]);
-			const response = await options.transport.push(options.authSlotId, {
-				protocolVersion: CURRENT_PROTOCOL_VERSION,
-				deviceId: id,
-				audience: { kind: 'household', id: options.householdId },
-				baseCursor: scope?.cursor ?? null,
-				mutations
-			});
-			await applyHouseholdMutationReceipts(
-				options.database,
-				options.householdId,
-				response.receipts,
-				now()
+			const pushed = await pushIsolatingRejections(planned.map(toMutation), (mutations) =>
+				options.transport.push(options.authSlotId, {
+					protocolVersion: CURRENT_PROTOCOL_VERSION,
+					deviceId: id,
+					audience: { kind: 'household', id: options.householdId },
+					baseCursor: scope?.cursor ?? null,
+					mutations: [...mutations]
+				})
 			);
-			return response.committedThrough;
+			const receipts = expandReceipts(planned, pushed.receipts);
+			await applyHouseholdMutationReceipts(options.database, options.householdId, receipts, now());
+			await requeueUnanswered(
+				options.database,
+				sent,
+				receipts,
+				now(),
+				HOUSEHOLD_BACKFILL_INTERVAL_MS
+			);
+			return {
+				committedThrough: pushed.committedThrough,
+				rejectionCode: firstRejectionCode(receipts)
+			};
 		} catch (error) {
-			await requeue(options.database, rows, now());
+			await requeue(options.database, sent, now(), HOUSEHOLD_BACKFILL_INTERVAL_MS);
 			throw error;
 		}
 	};
@@ -646,7 +668,7 @@ export const createHouseholdSyncCoordinator = (
 			});
 			return response.committedThrough;
 		} catch (error) {
-			await requeue(options.database, prepared.rows, now());
+			await requeue(options.database, prepared.rows, now(), HOUSEHOLD_BACKFILL_INTERVAL_MS);
 			throw error;
 		}
 	};
@@ -670,18 +692,12 @@ export const createHouseholdSyncCoordinator = (
 						updatedAt: detachedAt
 					});
 				}
-				for (const row of await options.database.outbox.toArray()) {
-					if (
-						row.authSlotId === options.authSlotId &&
-						row.scopeKind === 'household' &&
-						row.scopeId === options.householdId &&
-						(row.status === 'pending' || row.status === 'sending')
-					) {
-						await options.database.outbox.update(row.mutationId, {
-							status: 'quarantined',
-							rejectionCode: code
-						});
-					}
+				for (const row of await scopeOutbox(options.database, 'household', options.householdId)) {
+					if (row.authSlotId !== options.authSlotId) continue;
+					await options.database.outbox.update(row.mutationId, {
+						status: 'quarantined',
+						rejectionCode: code
+					});
 				}
 			}
 		);
@@ -738,9 +754,11 @@ export const createHouseholdSyncCoordinator = (
 				lease = await renew(lease);
 			};
 			await pullAll(id, renewCurrentLease);
-			const pushedThrough = await pushInteractive(id);
+			const pushed = await pushInteractive(id);
 			await renewCurrentLease();
-			if (pushedThrough !== null) await pullAll(id, renewCurrentLease);
+			if (pushed !== null && pushed.committedThrough !== null) {
+				await pullAll(id, renewCurrentLease);
+			}
 			const backfilledThrough = await runBackfill(id);
 			await renewCurrentLease();
 			if (backfilledThrough !== null) {
@@ -752,7 +770,7 @@ export const createHouseholdSyncCoordinator = (
 			await options.database.syncScopes.update(['household', options.householdId], {
 				state: 'idle',
 				lastSuccessAt: utc(now()),
-				lastErrorCode: null
+				lastErrorCode: pushed?.rejectionCode ?? null
 			});
 			return currentState;
 		} catch (error) {

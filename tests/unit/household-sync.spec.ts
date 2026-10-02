@@ -19,7 +19,8 @@ import {
 } from '$lib/client/sync/index.js';
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
 import { MealAggregateSchema, type MealAggregate } from '$lib/domain/meals/schema.js';
-import { SyncPermissionDenied } from '$lib/sync/contracts.js';
+import { deleteMeal } from '$lib/client/meals/commands.js';
+import { SyncPermissionDenied, SyncTransportError } from '$lib/sync/contracts.js';
 import type {
 	HouseholdBackfillRequest,
 	HouseholdPullRequest,
@@ -1003,5 +1004,98 @@ describe('foreground household coordinator', () => {
 			'quarantined'
 		);
 		expect(outbox.find(({ authSlotId }) => authSlotId === 'slot_bob')?.status).toBe('pending');
+	});
+
+	test('pushes a schedule edit and a later delete as an upsert then the delete', async () => {
+		const database = await openDatabase('edit-delete');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: true
+		});
+		const originDeviceId = String((await database.meta.get('deviceId'))!.value);
+		const mealId = uuidv7();
+		await addLocalMealIntent(database, {
+			mealId,
+			mutationId: uuidv7(),
+			authSlotId: 'slot_alice',
+			originDeviceId,
+			date: '2026-08-25'
+		});
+		await deleteMeal(
+			database,
+			{
+				authSlotId: 'slot_alice',
+				householdId,
+				reporterUserId: 'user_alice',
+				originDeviceId,
+				occurredAt: '2026-08-21T12:01:00.000Z'
+			},
+			mealId
+		);
+		let sequence = 0;
+		const repository: HouseholdSyncRepository = {
+			readScopeState: async () => ({
+				retainedFloor: 0,
+				latestSequence: sequence,
+				bootstrapGeneration: 1
+			}),
+			pull: vi.fn(),
+			bootstrap: vi.fn(),
+			commit: async ({ mutation }) => ({
+				mutationId: mutation.mutationId,
+				status: 'accepted',
+				sequence: ++sequence,
+				resultingRevision: 1
+			}),
+			prune: vi.fn()
+		};
+		const pushes: HouseholdSyncMutation[][] = [];
+		const transport: HouseholdSyncTransport = {
+			...new MemoryHouseholdServer().transport('user_alice'),
+			push: async (_slot, request) => {
+				pushes.push([...request.mutations]);
+				try {
+					return await pushHouseholdSync(repository, householdId, 'user_alice', request);
+				} catch (error) {
+					throw new SyncTransportError({
+						code: (error as { code?: string }).code ?? 'unknown',
+						message: 'The sync request was rejected.',
+						retryable: false
+					});
+				}
+			}
+		};
+		const coordinator = createHouseholdSyncCoordinator({
+			database,
+			authSlotId: 'slot_alice',
+			workosUserId: 'user_alice',
+			householdId,
+			transport,
+			environment: environment()
+		});
+		vi.setSystemTime(new Date('2026-08-21T12:05:00.000Z'));
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(
+			pushes
+				.flat()
+				.map(({ operation, conflictGroups, aggregate }) => [
+					operation,
+					conflictGroups,
+					(aggregate as { deletedAt: string | null }).deletedAt
+				])
+		).toEqual([
+			['upsert', ['schedule'], null],
+			['delete', ['deletion'], '2026-08-21T12:01:00.000Z']
+		]);
+		expect(
+			(await database.outbox.toArray()).map(({ operation, status }) => [operation, status])
+		).toEqual([
+			['upsert', 'acknowledged'],
+			['delete', 'acknowledged']
+		]);
 	});
 });
