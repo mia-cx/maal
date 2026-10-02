@@ -7,12 +7,14 @@
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import HouseholdOnboarding from '$lib/components/household/household-onboarding.svelte';
 	import HouseholdSettings from '$lib/components/household/household-settings.svelte';
+	import PortableDataDialog from '$lib/components/portable-data-dialog.svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 
 	let database = $state<MaalDatabase | null>(null);
 	let activeProfileId = $state<string | null>(null);
 	let activeHouseholdId = $state<string | null>(null);
 	let error = $state<string | null>(null);
+	let exportOpen = $state(false);
 
 	onMount(() => {
 		let unsubscribe: (() => void) | null = null;
@@ -59,7 +61,15 @@
 	</header>
 	<div class="h-[calc(100svh-52px)] min-h-0 overflow-y-auto">
 		{#if activeProfileId && activeHouseholdId}
-			<HouseholdSettings {database} profileId={activeProfileId} householdId={activeHouseholdId} />
+			<PortableDataDialog {database} profileId={activeProfileId} bind:open={exportOpen} />
+			<HouseholdSettings
+				{database}
+				profileId={activeProfileId}
+				householdId={activeHouseholdId}
+				onexport={() => {
+					exportOpen = true;
+				}}
+			/>
 		{:else if activeProfileId}
 			<HouseholdOnboarding {database} profileId={activeProfileId} />
 		{:else}

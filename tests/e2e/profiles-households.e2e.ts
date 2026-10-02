@@ -396,6 +396,11 @@ test('leaves through the auth-slot client path while preserving both local profi
 	await expect(page.getByRole('heading', { name: 'Detached household snapshot' })).toBeVisible();
 	expect(leaveRequests).toBe(1);
 
+	await page.getByRole('button', { name: 'Export snapshot' }).click();
+	const exportDialog = page.getByRole('dialog', { name: 'Import or export data' });
+	await expect(exportDialog.getByRole('button', { name: 'Export Maal archive' })).toBeEnabled();
+	await page.keyboard.press('Escape');
+
 	await page.getByRole('button', { name: /AD Alice de Vries alice@example\.test/ }).click();
 	await page.getByRole('menuitem', { name: /Bob de Vries/ }).click();
 	await expect(
