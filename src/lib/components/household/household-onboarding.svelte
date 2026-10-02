@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import { untrack } from 'svelte';
+	import { uuidv7 } from 'uuidv7';
 
 	import {
 		createRemoteHousehold,
@@ -20,11 +21,15 @@
 	let inviteCode = $state('');
 	let busy = $state(false);
 	let error = $state<string | null>(null);
+	// One idempotency key per submitted name, so retrying after a lost response reuses it.
+	let createIntent: { name: string; idempotencyKey: string } | null = null;
 
 	const createHousehold = async (event: SubmitEvent) => {
 		event.preventDefault();
 		const name = householdName.trim();
 		if (!name || busy) return;
+		if (createIntent?.name !== name) createIntent = { name, idempotencyKey: uuidv7() };
+		const { idempotencyKey } = createIntent;
 		busy = true;
 		error = null;
 		try {
@@ -33,8 +38,10 @@
 			await createRemoteHousehold(database, profileId, {
 				name,
 				locale: profile.locale,
-				timezone: profile.timezone
+				timezone: profile.timezone,
+				idempotencyKey
 			});
+			createIntent = null;
 		} catch {
 			error = m.household_could_not_create_try_again();
 		} finally {

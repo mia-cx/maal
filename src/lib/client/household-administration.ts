@@ -1,5 +1,4 @@
 import { Data, Schema } from 'effect';
-import { uuidv7 } from 'uuidv7';
 
 import {
 	HouseholdAdministrationErrorCodeSchema,
@@ -261,10 +260,17 @@ export interface CreatedHouseholdInvite {
 	readonly invite: HouseholdInviteSummary;
 }
 
+/**
+ * Creates the WorkOS organization for a new household. `idempotencyKey` identifies one submit
+ * intent: reuse it when retrying the same request so a lost response cannot create a duplicate.
+ */
 export const createRemoteHousehold = async (
 	database: MaalDatabase,
 	profileId: string,
-	input: { name: string; locale: string; timezone: string | null },
+	{
+		idempotencyKey,
+		...input
+	}: { name: string; locale: string; timezone: string | null; idempotencyKey: string },
 	fetcher: Fetch = globalThis.fetch
 ): Promise<{ householdId: string }> => {
 	const slot = await profileSlot(database, profileId);
@@ -274,7 +280,7 @@ export const createRemoteHousehold = async (
 		'create household',
 		{
 			method: 'POST',
-			headers: { 'content-type': 'application/json', 'idempotency-key': uuidv7() },
+			headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
 			body: JSON.stringify(input)
 		},
 		CreateJoinResponseSchema

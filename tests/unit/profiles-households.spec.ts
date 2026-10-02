@@ -517,11 +517,12 @@ describe('offline households and cached authority', () => {
 			{ household: createdHousehold, membership: createdMembership },
 			{ household: joinedHousehold, membership: joinedMembership }
 		];
-		const requests: Array<{ url: string; body: unknown }> = [];
+		const requests: Array<{ url: string; body: unknown; idempotencyKey: string | null }> = [];
 		const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			requests.push({
 				url: String(input),
-				body: init?.body ? JSON.parse(String(init.body)) : null
+				body: init?.body ? JSON.parse(String(init.body)) : null,
+				idempotencyKey: new Headers(init?.headers).get('idempotency-key')
 			});
 			const payload = responses.shift();
 			if (!payload) throw new Error('Unexpected request');
@@ -532,7 +533,12 @@ describe('offline households and cached authority', () => {
 			createRemoteHousehold(
 				database,
 				alice.profileId,
-				{ name: 'Created home', locale: 'en-NL', timezone: 'Europe/Amsterdam' },
+				{
+					name: 'Created home',
+					locale: 'en-NL',
+					timezone: 'Europe/Amsterdam',
+					idempotencyKey: 'create-intent-1'
+				},
 				fetcher as typeof fetch
 			)
 		).resolves.toEqual({ householdId: createdHousehold.householdId });
@@ -543,7 +549,8 @@ describe('offline households and cached authority', () => {
 		expect(requests).toEqual([
 			expect.objectContaining({
 				url: `/api/auth-slots/${'a'.repeat(32)}/households`,
-				body: { name: 'Created home', locale: 'en-NL', timezone: 'Europe/Amsterdam' }
+				body: { name: 'Created home', locale: 'en-NL', timezone: 'Europe/Amsterdam' },
+				idempotencyKey: 'create-intent-1'
 			}),
 			expect.objectContaining({
 				url: `/api/auth-slots/${'a'.repeat(32)}/households/join`,
