@@ -36,6 +36,9 @@
 	let statistics = $state.raw<ReadonlyMap<string, RecipeMenuStats>>(new Map());
 	let activeOwnerUserId = $state<string | null>(null);
 	let loadError = $state<string | null>(null);
+	// A failed statistics query has stopped; library emissions must not clear its error.
+	let statisticsError = $state<string | null>(null);
+	const visibleError = $derived(loadError ?? statisticsError);
 
 	const toMenuItem = (recipe: RecipeAggregate) =>
 		recipeAggregateToMenuItem(recipe, statistics.get(recipe.id));
@@ -165,7 +168,7 @@
 						statistics = next;
 					},
 					error: () => {
-						loadError = 'Your local recipe library could not be read.';
+						statisticsError = 'Your local recipe library could not be read.';
 					}
 				});
 			})
@@ -181,9 +184,9 @@
 	});
 </script>
 
-{#if loadError}
+{#if visibleError}
 	<div role="alert" class="grid gap-1 p-4 text-sm text-destructive">
-		<p>{loadError}</p>
+		<p>{visibleError}</p>
 		<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
 		<a class="underline underline-offset-4" href="/recovery">Open local recovery</a>
 	</div>
