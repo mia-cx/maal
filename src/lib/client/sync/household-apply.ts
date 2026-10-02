@@ -14,7 +14,13 @@ import {
 	type DecodedHouseholdSyncAggregate
 } from '$lib/sync/household-entities.js';
 
-import { pruneAcknowledgedOutbox, scopeOutbox } from './outbox.js';
+import { pruneAcknowledgedOutbox, recordServerChanges, scopeOutbox } from './outbox.js';
+
+/** The auth slot and household a coordinator applies server changes for. */
+export interface HouseholdApplyScope {
+	readonly authSlotId: string;
+	readonly householdId: string;
+}
 
 const keyFor = (entityKind: string, entityId: string): string => `${entityKind}\u0000${entityId}`;
 
@@ -96,10 +102,11 @@ const detachMealCheckIns = async (database: MaalDatabase, mealId: string): Promi
 
 export const applyHouseholdPullPage = async (
 	database: MaalDatabase,
-	householdId: string,
+	scope: HouseholdApplyScope,
 	response: HouseholdPullResponse,
 	now = new Date()
 ): Promise<void> => {
+	const { householdId } = scope;
 	const decoded = decodeChanges(householdId, response.changes, true);
 	if (response.changes.some(({ sequence }) => sequence > response.throughSequence)) {
 		throw new TypeError('A sync page cannot advance behind one of its changes.');
@@ -143,6 +150,12 @@ export const applyHouseholdPullPage = async (
 				if (local === undefined) await table.delete(aggregate.entityId);
 				else await table.put(local);
 			}
+			await recordServerChanges(
+				database,
+				{ authSlotId: scope.authSlotId, scopeKind: 'household', scopeId: householdId },
+				response.changes,
+				now
+			);
 			const current = await database.syncScopes.get(['household', householdId]);
 			if (
 				current?.cursor !== null &&
@@ -242,10 +255,11 @@ export const applyHouseholdMutationReceipts = async (
 
 export const applyHouseholdBootstrap = async (
 	database: MaalDatabase,
-	householdId: string,
+	scope: HouseholdApplyScope,
 	response: HouseholdBootstrapResponse,
 	now = new Date()
 ): Promise<void> => {
+	const { householdId } = scope;
 	// Bootstrap pages are sorted by stable entity key for pagination, not by commit sequence.
 	const decoded = decodeChanges(householdId, response.aggregates, false);
 	const tables = [...new Set(decoded.map(({ store }) => database.table(store)))];
@@ -291,6 +305,12 @@ export const applyHouseholdBootstrap = async (
 					await detachMealCheckIns(database, instruction.entityId);
 				}
 			}
+			await recordServerChanges(
+				database,
+				{ authSlotId: scope.authSlotId, scopeKind: 'household', scopeId: householdId },
+				response.aggregates,
+				now
+			);
 			const current = await database.syncScopes.get(['household', householdId]);
 			await database.syncScopes.put({
 				scopeKind: 'household',

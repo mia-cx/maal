@@ -16,6 +16,7 @@ import {
 	applyHouseholdBootstrap,
 	applyHouseholdMutationReceipts,
 	applyHouseholdPullPage,
+	buildHouseholdSnapshotManifest,
 	createHouseholdSyncCoordinator,
 	type HouseholdSyncTransport,
 	type UserSyncEnvironment
@@ -33,6 +34,7 @@ import type {
 import { pushHouseholdSync, type HouseholdSyncRepository } from '$lib/server/sync/index.js';
 
 const householdId = 'org_family';
+const householdScope = { authSlotId: 'slot_alice', householdId };
 const timestamp = '2026-08-21T12:00:00.000Z' as const;
 const databases: MaalDatabase[] = [];
 
@@ -491,7 +493,7 @@ describe('foreground household coordinator', () => {
 		const [firstId, secondId] = [uuidv7(), uuidv7()].toSorted();
 		const first = meal(firstId, uuidv7(), deviceId);
 		const second = meal(secondId, uuidv7(), deviceId);
-		await applyHouseholdBootstrap(database, householdId, {
+		await applyHouseholdBootstrap(database, householdScope, {
 			protocolVersion: 1,
 			aggregates: [
 				{
@@ -778,7 +780,7 @@ describe('foreground household coordinator', () => {
 				attempts: 0
 			}))
 		);
-		await applyHouseholdPullPage(database, householdId, {
+		await applyHouseholdPullPage(database, householdScope, {
 			protocolVersion: 1,
 			changes: [
 				{
@@ -1237,7 +1239,7 @@ describe('foreground household coordinator', () => {
 			snapshot: { ...remote, deletedAt: timestamp }
 		});
 
-		await applyHouseholdPullPage(database, householdId, {
+		await applyHouseholdPullPage(database, householdScope, {
 			protocolVersion: 1,
 			changes: [
 				{
@@ -1369,7 +1371,7 @@ describe('foreground household coordinator', () => {
 			};
 			if (replacement === 'pull') {
 				// Repeated changes for one key must not replace its saved intent with the first remote value.
-				await applyHouseholdPullPage(database, householdId, {
+				await applyHouseholdPullPage(database, householdScope, {
 					...page,
 					throughSequence: 3,
 					changes: [...remote, { ...remote[0]!, sequence: 3 }]
@@ -1394,7 +1396,7 @@ describe('foreground household coordinator', () => {
 					}))
 				);
 			} else {
-				await applyHouseholdBootstrap(database, householdId, {
+				await applyHouseholdBootstrap(database, householdScope, {
 					...page,
 					throughSequence: 2,
 					aggregates: replacement === 'bootstrap' ? remote : [],
@@ -1448,7 +1450,7 @@ describe('foreground household coordinator', () => {
 					'cooked'
 				);
 				expect(local.date).toBe('2026-08-25');
-				await applyHouseholdPullPage(database, householdId, {
+				await applyHouseholdPullPage(database, householdScope, {
 					...page,
 					throughSequence: 4,
 					changes: [{ ...remote[0]!, sequence: 4 }]
@@ -1583,4 +1585,45 @@ describe('foreground household coordinator', () => {
 			).toBe(false);
 		}
 	);
+	test('counts a bootstrapped meal as server-acknowledged under the applying auth slot', async () => {
+		const database = await openDatabase('bootstrap-ack');
+		const mutationId = uuidv7();
+		const remote = meal(uuidv7(), mutationId, uuidv7());
+
+		await applyHouseholdBootstrap(database, householdScope, {
+			protocolVersion: 1,
+			aggregates: [
+				{
+					sequence: 4,
+					mutationId,
+					originDeviceId: uuidv7(),
+					actorUserId: 'user_bob',
+					entityKind: 'meal',
+					entityId: remote.id,
+					conflictGroups: ['schedule'],
+					operation: 'upsert',
+					resultingRevision: 1,
+					occurredAt: timestamp,
+					receivedAt: timestamp,
+					aggregate: remote,
+					tombstoneExpiresAt: null
+				}
+			],
+			instructions: [],
+			throughSequence: 4,
+			retainedFloor: 0,
+			bootstrapGeneration: 1,
+			hasMore: false,
+			nextEntityKey: null
+		});
+
+		expect(await buildHouseholdSnapshotManifest(database, householdId)).toEqual([
+			expect.objectContaining({ entityId: remote.id, previousServerAck: true })
+		]);
+		expect(await database.outbox.get(mutationId)).toMatchObject({
+			authSlotId: 'slot_alice',
+			status: 'acknowledged',
+			acknowledgedSequence: 4
+		});
+	});
 });

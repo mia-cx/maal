@@ -10,7 +10,13 @@ import type {
 	UserSyncEntityKind
 } from '$lib/sync/contracts.js';
 
-import { pruneAcknowledgedOutbox, scopeOutbox } from './outbox.js';
+import { pruneAcknowledgedOutbox, recordServerChanges, scopeOutbox } from './outbox.js';
+
+/** The auth slot and user a coordinator applies server changes for. */
+export interface UserApplyScope {
+	readonly authSlotId: string;
+	readonly workosUserId: string;
+}
 
 const keyFor = (entityKind: string, entityId: string): string => `${entityKind}\u0000${entityId}`;
 
@@ -39,10 +45,11 @@ const decodedChanges = (
 
 export const applyUserPullPage = async (
 	database: MaalDatabase,
-	workosUserId: string,
+	scope: UserApplyScope,
 	response: PullResponse,
 	now = new Date()
 ): Promise<void> => {
+	const { workosUserId } = scope;
 	const decoded = decodedChanges(workosUserId, response.changes, true);
 	if (response.changes.some(({ sequence }) => sequence > response.throughSequence)) {
 		throw new TypeError('A sync page cannot advance behind one of its changes.');
@@ -76,6 +83,12 @@ export const applyUserPullPage = async (
 			if (local === undefined) await table.delete(aggregate.entityId);
 			else await table.put(local);
 		}
+		await recordServerChanges(
+			database,
+			{ authSlotId: scope.authSlotId, scopeKind: 'user', scopeId: workosUserId },
+			response.changes,
+			now
+		);
 		const current = await database.syncScopes.get(['user', workosUserId]);
 		if (
 			current?.cursor !== null &&
@@ -165,10 +178,11 @@ export const applyUserMutationReceipts = async (
 
 export const applyUserBootstrap = async (
 	database: MaalDatabase,
-	workosUserId: string,
+	scope: UserApplyScope,
 	response: BootstrapResponse,
 	now = new Date()
 ): Promise<void> => {
+	const { workosUserId } = scope;
 	// Bootstrap pages use a stable entity-key order for pagination, not commit order.
 	const decoded = decodedChanges(workosUserId, response.aggregates, false);
 	const tables = [...new Set(decoded.map(({ store }) => database.table(store)))];
@@ -196,6 +210,12 @@ export const applyUserBootstrap = async (
 						.delete(instruction.entityId);
 				}
 			}
+			await recordServerChanges(
+				database,
+				{ authSlotId: scope.authSlotId, scopeKind: 'user', scopeId: workosUserId },
+				response.aggregates,
+				now
+			);
 			const current = await database.syncScopes.get(['user', workosUserId]);
 			await database.syncScopes.put({
 				scopeKind: 'user',

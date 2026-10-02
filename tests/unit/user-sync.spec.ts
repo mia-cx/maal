@@ -14,6 +14,7 @@ import {
 	FOREGROUND_PULL_INTERVAL_MS,
 	applyUserMutationReceipts,
 	applyUserPullPage,
+	buildUserSnapshotManifest,
 	createUserSyncCoordinator,
 	applyUserBootstrap,
 	startDeviceSync,
@@ -53,6 +54,7 @@ const databases: MaalDatabase[] = [];
 const timestamp = '2026-08-21T12:00:00.000Z' as const;
 const userId = 'user_alice';
 const authSlotId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const userScope = { authSlotId, workosUserId: userId };
 
 beforeEach(() => {
 	// Pin subscription validity without intercepting Dexie or coordinator timers.
@@ -193,7 +195,7 @@ describe('foreground user coordinator', () => {
 		const first = userUnit({ id: firstId, canonicalLabel: 'first spoon' });
 		const second = userUnit({ id: secondId, canonicalLabel: 'second spoon' });
 
-		await applyUserBootstrap(database, userId, {
+		await applyUserBootstrap(database, userScope, {
 			protocolVersion: 1,
 			aggregates: [
 				{
@@ -511,7 +513,7 @@ describe('foreground user coordinator', () => {
 				attempts: 0
 			}))
 		);
-		await applyUserPullPage(database, userId, {
+		await applyUserPullPage(database, userScope, {
 			...emptyPull(1),
 			changes: [
 				{
@@ -1228,7 +1230,7 @@ describe('user outbox recovery', () => {
 			snapshot: { ...remote, deletedAt: timestamp }
 		});
 
-		await applyUserPullPage(database, userId, {
+		await applyUserPullPage(database, userScope, {
 			...emptyPull(1),
 			changes: [
 				{
@@ -1560,5 +1562,48 @@ describe('user sync scheduling', () => {
 			manager.stop();
 			vi.unstubAllGlobals();
 		}
+	});
+});
+
+/** A server change carrying a complete unit entry, as pull and bootstrap return it. */
+const unitChange = (unit: UnitUserEntry, sequence: number): SyncChange => {
+	const mutationId = uuidv7();
+	return {
+		sequence,
+		mutationId,
+		originDeviceId: uuidv7(),
+		entityKind: 'unitUserEntry',
+		entityId: unit.id,
+		conflictGroups: ['row'],
+		operation: 'upsert',
+		resultingRevision: sequence,
+		occurredAt: timestamp,
+		receivedAt: timestamp,
+		aggregate: {
+			...unit,
+			revision: sequence,
+			conflictClocks: { row: { occurredAt: timestamp, originDeviceId: uuidv7(), mutationId } }
+		},
+		tombstoneExpiresAt: null
+	};
+};
+
+describe('bootstrap reconciliation', () => {
+	test('counts a pulled record as server-acknowledged, so its later absence deletes it', async () => {
+		const database = await openDatabase();
+		const unit = userUnit();
+
+		await applyUserPullPage(database, userScope, {
+			...emptyPull(1),
+			changes: [unitChange(unit, 1)]
+		});
+
+		const manifest = await buildUserSnapshotManifest(database, userId);
+		expect(manifest).toEqual([
+			expect.objectContaining({ entityId: unit.id, previousServerAck: true })
+		]);
+		expect(reconciliationInstructions(manifest, new Set())).toEqual([
+			{ entityKind: 'unitUserEntry', entityId: unit.id, action: 'delete_acknowledged_absence' }
+		]);
 	});
 });

@@ -522,6 +522,7 @@ export const createHouseholdSyncCoordinator = (
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let timerDueAt = 0;
 	let unsubscribe: (() => void)[] = [];
+	const applyScope = { authSlotId: options.authSlotId, householdId: options.householdId };
 
 	const deviceId = async (): Promise<string> => {
 		const record = await options.database.meta.get('deviceId');
@@ -551,7 +552,7 @@ export const createHouseholdSyncCoordinator = (
 					after: scope?.cursor ?? 0,
 					limit: PULL_PAGE_SIZE
 				});
-				await applyHouseholdPullPage(options.database, options.householdId, response, now());
+				await applyHouseholdPullPage(options.database, applyScope, response, now());
 				await renewLease();
 				if (!response.hasMore) return;
 			} catch (error) {
@@ -570,7 +571,7 @@ export const createHouseholdSyncCoordinator = (
 						afterEntityKey,
 						limit: PULL_PAGE_SIZE
 					});
-					await applyHouseholdBootstrap(options.database, options.householdId, response, now());
+					await applyHouseholdBootstrap(options.database, applyScope, response, now());
 					await renewLease();
 					afterEntityKey = response.nextEntityKey;
 				} while (afterEntityKey !== null);

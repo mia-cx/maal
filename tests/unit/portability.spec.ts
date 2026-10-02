@@ -789,33 +789,37 @@ describe('portable imports and sync', () => {
 		);
 
 		const remoteClock = { occurredAt: at(11), originDeviceId: uuidv7(), mutationId: uuidv7() };
-		await applyUserPullPage(target, 'user_alice', {
-			protocolVersion: CURRENT_PROTOCOL_VERSION,
-			changes: [
-				{
-					sequence: 1,
-					mutationId: remoteClock.mutationId,
-					originDeviceId: remoteClock.originDeviceId,
-					entityKind: 'userFoodPreference',
-					entityId: archived.id,
-					conflictGroups: ['row'],
-					operation: 'upsert',
-					resultingRevision: 4,
-					occurredAt: at(11),
-					receivedAt: at(11),
-					aggregate: Schema.encodeSync(UserFoodPreferenceSchema)({
-						...local,
-						revision: 4,
-						conflictClocks: { row: remoteClock }
-					}),
-					tombstoneExpiresAt: null
-				}
-			],
-			throughSequence: 1,
-			retainedFloor: 0,
-			bootstrapGeneration: 1,
-			hasMore: false
-		});
+		await applyUserPullPage(
+			target,
+			{ authSlotId: 'slot-target', workosUserId: 'user_alice' },
+			{
+				protocolVersion: CURRENT_PROTOCOL_VERSION,
+				changes: [
+					{
+						sequence: 1,
+						mutationId: remoteClock.mutationId,
+						originDeviceId: remoteClock.originDeviceId,
+						entityKind: 'userFoodPreference',
+						entityId: archived.id,
+						conflictGroups: ['row'],
+						operation: 'upsert',
+						resultingRevision: 4,
+						occurredAt: at(11),
+						receivedAt: at(11),
+						aggregate: Schema.encodeSync(UserFoodPreferenceSchema)({
+							...local,
+							revision: 4,
+							conflictClocks: { row: remoteClock }
+						}),
+						tombstoneExpiresAt: null
+					}
+				],
+				throughSequence: 1,
+				retainedFloor: 0,
+				bootstrapGeneration: 1,
+				hasMore: false
+			}
+		);
 		await expect(target.userFoodPreferences.get(archived.id)).resolves.toMatchObject({
 			preference: 'like'
 		});

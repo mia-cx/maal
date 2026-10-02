@@ -84,6 +84,8 @@ export const startDeviceSync = (
 
 	const notifyOutbox = (_primaryKey: unknown, record: unknown): void => {
 		if (typeof record !== 'object' || record === null || !('authSlotId' in record)) return;
+		// Rows recording changes received from the server are not local intent to push.
+		if ((record as { status?: unknown }).status !== 'pending') return;
 		const authSlotId = (record as { authSlotId?: unknown }).authSlotId;
 		if (typeof authSlotId !== 'string') return;
 		const scopeKind = (record as { scopeKind?: unknown }).scopeKind;

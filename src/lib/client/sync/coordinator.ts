@@ -455,6 +455,7 @@ export const createUserSyncCoordinator = (
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let timerDueAt = 0;
 	let unsubscribe: (() => void)[] = [];
+	const applyScope = { authSlotId: options.authSlotId, workosUserId: options.workosUserId };
 
 	const deviceId = async (): Promise<string> => {
 		const record = await options.database.meta.get('deviceId');
@@ -485,7 +486,7 @@ export const createUserSyncCoordinator = (
 					after: scope?.cursor ?? 0,
 					limit: PULL_PAGE_SIZE
 				});
-				await applyUserPullPage(options.database, options.workosUserId, response, now());
+				await applyUserPullPage(options.database, applyScope, response, now());
 				if (!response.hasMore) return;
 			} catch (error) {
 				if (!(error instanceof SyncBootstrapRequired)) throw error;
@@ -500,7 +501,7 @@ export const createUserSyncCoordinator = (
 						afterEntityKey,
 						limit: PULL_PAGE_SIZE
 					});
-					await applyUserBootstrap(options.database, options.workosUserId, response, now());
+					await applyUserBootstrap(options.database, applyScope, response, now());
 					afterEntityKey = response.nextEntityKey;
 				} while (afterEntityKey !== null);
 			}
