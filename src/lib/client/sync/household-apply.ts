@@ -13,20 +13,15 @@ import {
 	HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS
 } from '$lib/sync/household-entities.js';
 
+import { pruneAcknowledgedOutbox, scopeOutbox } from './outbox.js';
+
 const keyFor = (entityKind: string, entityId: string): string => `${entityKind}\u0000${entityId}`;
 
-const pendingHouseholdOutbox = async (
+const pendingHouseholdOutbox = (
 	database: MaalDatabase,
 	householdId: string
 ): Promise<OutboxRecord[]> =>
-	(await database.outbox.toArray()).filter(
-		(record) =>
-			record.scopeKind === 'household' &&
-			record.scopeId === householdId &&
-			(record.status === 'pending' ||
-				record.status === 'sending' ||
-				record.status === 'quarantined')
-	);
+	scopeOutbox(database, 'household', householdId, ['pending', 'sending', 'quarantined']);
 
 const decodeChanges = (
 	householdId: string,
@@ -156,6 +151,7 @@ export const applyHouseholdMutationReceipts = async (
 				string,
 				NonNullable<(typeof resolved)[number]['authoritative']>
 			>();
+			const acknowledged: OutboxRecord[] = [];
 			for (const { receipt, row, authoritative } of resolved) {
 				if (!row) continue;
 				if (receipt.status === 'accepted' || receipt.status === 'duplicate') {
@@ -164,6 +160,7 @@ export const applyHouseholdMutationReceipts = async (
 						acknowledgedSequence: receipt.sequence,
 						acknowledgedAt: now.toISOString()
 					});
+					acknowledged.push(row);
 					continue;
 				}
 				if (!('errorCode' in receipt)) continue;
@@ -175,6 +172,7 @@ export const applyHouseholdMutationReceipts = async (
 				if (authoritative)
 					restorations.set(keyFor(authoritative.entityKind, authoritative.entityId), authoritative);
 			}
+			await pruneAcknowledgedOutbox(database, acknowledged);
 			const unresolvedKeys = new Set(
 				(await pendingHouseholdOutbox(database, householdId)).map((row) =>
 					keyFor(row.entityKind, row.aggregateId)
@@ -255,13 +253,17 @@ const belongsToHousehold = async (
 		const meal = await database.meals.get(record.mealId);
 		return meal?.householdId === householdId;
 	}
-	return (await database.outbox.toArray()).some(
-		(row) =>
-			row.scopeKind === 'household' &&
-			row.scopeId === householdId &&
-			row.entityKind === entityKind &&
-			row.aggregateId === record.id
-	);
+	const row = await database.outbox
+		.where('aggregateId')
+		.equals(String(record.id))
+		.filter(
+			(candidate) =>
+				candidate.scopeKind === 'household' &&
+				candidate.scopeId === householdId &&
+				candidate.entityKind === entityKind
+		)
+		.first();
+	return row !== undefined;
 };
 
 export const buildHouseholdSnapshotManifest = async (
@@ -269,14 +271,9 @@ export const buildHouseholdSnapshotManifest = async (
 	householdId: string
 ): Promise<HouseholdSnapshotManifestEntry[]> => {
 	const acknowledged = new Set(
-		(await database.outbox.toArray())
-			.filter(
-				(row) =>
-					row.scopeKind === 'household' &&
-					row.scopeId === householdId &&
-					row.status === 'acknowledged'
-			)
-			.map((row) => keyFor(row.entityKind, row.aggregateId))
+		(await scopeOutbox(database, 'household', householdId, ['acknowledged'])).map((row) =>
+			keyFor(row.entityKind, row.aggregateId)
+		)
 	);
 	const manifest: HouseholdSnapshotManifestEntry[] = [];
 	for (const [entityKind, descriptor] of Object.entries(HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS) as [

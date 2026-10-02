@@ -251,3 +251,46 @@ export const requeueUnanswered = async (
 	const unanswered = sent.filter(({ mutationId }) => !answered.has(mutationId));
 	if (unanswered.length > 0) await requeue(database, unanswered, now, backfillIntervalMs);
 };
+
+const acknowledgedOrder = (left: OutboxRecord, right: OutboxRecord): number =>
+	Number(right.acknowledgedSequence ?? -1) - Number(left.acknowledgedSequence ?? -1) ||
+	byOccurrence(right, left);
+
+/**
+ * Keeps one acknowledged row per aggregate, the newest, without its payload or snapshots. That row
+ * is the device's record that the server has the aggregate: bootstrap manifests, recipe retention
+ * and archive import read it. Older acknowledged rows add nothing. Call inside a transaction that
+ * includes the outbox.
+ */
+export const pruneAcknowledgedOutbox = async (
+	database: MaalDatabase,
+	acknowledged: readonly OutboxRecord[]
+): Promise<void> => {
+	const aggregates = new Map(
+		acknowledged.map((row) => [
+			`${row.scopeKind}\u0000${row.scopeId}\u0000${row.entityKind}\u0000${row.aggregateId}`,
+			row
+		])
+	);
+	for (const { scopeKind, scopeId, entityKind, aggregateId } of aggregates.values()) {
+		const rows = await database.outbox
+			.where('aggregateId')
+			.equals(aggregateId)
+			.filter(
+				(row) =>
+					row.status === 'acknowledged' &&
+					row.scopeKind === scopeKind &&
+					row.scopeId === scopeId &&
+					row.entityKind === entityKind
+			)
+			.toArray();
+		const [newest, ...older] = rows.toSorted(acknowledgedOrder);
+		if (!newest) continue;
+		await database.outbox.bulkDelete(older.map(({ mutationId }) => mutationId));
+		await database.outbox.update(newest.mutationId, {
+			payload: null,
+			snapshot: undefined,
+			authoritativeSnapshot: undefined
+		});
+	}
+};

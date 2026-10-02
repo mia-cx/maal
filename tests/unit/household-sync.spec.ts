@@ -1093,9 +1093,6 @@ describe('foreground household coordinator', () => {
 		]);
 		expect(
 			(await database.outbox.toArray()).map(({ operation, status }) => [operation, status])
-		).toEqual([
-			['upsert', 'acknowledged'],
-			['delete', 'acknowledged']
-		]);
+		).toEqual([['delete', 'acknowledged']]);
 	});
 });

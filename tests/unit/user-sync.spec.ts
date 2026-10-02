@@ -1127,7 +1127,7 @@ const outboxRowFor = async (database: MaalDatabase, aggregateId: string) =>
 	(await database.outbox.where('aggregateId').equals(aggregateId).toArray())[0]!;
 
 describe('user outbox recovery', () => {
-	test('pushes an edit followed by a delete as the delete and acknowledges both rows', async () => {
+	test('pushes an edit followed by a delete as the delete and keeps only the newest acknowledgement', async () => {
 		const database = await openDatabase();
 		await seedPaidProfile(database);
 		const context = { database, authSlotId, originDeviceId: await deviceIdOf(database) };
@@ -1156,10 +1156,32 @@ describe('user outbox recovery', () => {
 		expect(pushes.flatMap(({ mutations }) => mutations.map(({ operation }) => operation))).toEqual([
 			'delete'
 		]);
-		expect((await database.outbox.toArray()).map(({ status }) => status)).toEqual([
-			'acknowledged',
-			'acknowledged'
-		]);
+		const rows = await database.outbox.toArray();
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({ operation: 'delete', status: 'acknowledged', payload: null });
+	});
+
+	test('reads the outbox only through its indexes during a sync run', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const context = { database, authSlotId, originDeviceId: await deviceIdOf(database) };
+		await upsertTaxonomyRecord(
+			{ ...context, occurredAt: timestamp },
+			'unitUserEntry',
+			unitDraft(uuidv7())
+		);
+		const scan = vi.spyOn(database.outbox, 'toArray');
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: validatingTransport(),
+			environment: environment()
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(scan).not.toHaveBeenCalled();
 	});
 
 	test('rejects only the mutation the server refuses, shows its code, and commits the rest', async () => {
