@@ -219,6 +219,28 @@ describe('MCP request authorization', () => {
 		expect(await response.text()).not.toContain(querySecret);
 	});
 
+	test('tells unauthenticated clients how to get a bearer key', async () => {
+		const response = mcpAuthorizationResponse(
+			await authorizeMcpRequest({
+				request: requestFor(),
+				environment: environment(),
+				now: MCP_TEST_NOW,
+				membershipProvider: { listActiveMemberships: async () => [membership()] }
+			}).catch((cause: unknown) => cause)
+		);
+		expect(response.status).toBe(401);
+		expect(await response.json()).toEqual({
+			error: 'invalid_mcp_key',
+			authentication: {
+				type: 'bearer',
+				scheme: 'Bearer',
+				header: 'Authorization',
+				format: 'Authorization: Bearer <Maal MCP key>',
+				instructions: 'Create a Maal MCP key in Settings → MCP keys, then use it as a bearer token.'
+			}
+		});
+	});
+
 	test.each([
 		['missing', requestFor()],
 		['malformed', requestFor('not-an-mcp-key')],
