@@ -1588,7 +1588,59 @@ const unitChange = (unit: UnitUserEntry, sequence: number): SyncChange => {
 	};
 };
 
+const backfilledIds = (requests: readonly BackfillRequest[]): string[] =>
+	requests.flatMap(({ mutations }) => mutations.map(({ entityId }) => entityId));
+
+/** A backfill endpoint that records each request and commits nothing. */
+const recordingBackfill =
+	(requests: BackfillRequest[]): UserSyncTransport['backfill'] =>
+	async (_slot, request) => {
+		requests.push(request);
+		return {
+			protocolVersion: 1,
+			receipts: [],
+			committedThrough: 0,
+			checkpoint: request.checkpoint
+		};
+	};
+
 describe('bootstrap reconciliation', () => {
+	test('backfills only records the server has never acknowledged', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const [pulled, pushed, localOnly] = ['pulled', 'pushed', 'local'].map((canonicalLabel) =>
+			userUnit({ canonicalLabel })
+		) as [UnitUserEntry, UnitUserEntry, UnitUserEntry];
+		await applyUserPullPage(database, userScope, {
+			...emptyPull(1),
+			changes: [unitChange(pulled, 1)]
+		});
+		const context = { database, authSlotId, originDeviceId: await deviceIdOf(database) };
+		await upsertTaxonomyRecord(
+			{ ...context, occurredAt: timestamp },
+			'unitUserEntry',
+			unitDraft(pushed.id)
+		);
+		// Imported or pre-outbox data: present locally, with no outbox history at all.
+		await database.unitUserEntries.put(localOnly);
+		const backfills: BackfillRequest[] = [];
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: {
+				...validatingTransport(),
+				pull: async (_slot, request) => emptyPull(Math.max(1, request.after)),
+				backfill: recordingBackfill(backfills)
+			},
+			environment: environment({ saveData: false })
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(backfilledIds(backfills)).toEqual([localOnly.id]);
+	});
+
 	test('counts a pulled record as server-acknowledged, so its later absence deletes it', async () => {
 		const database = await openDatabase();
 		const unit = userUnit();

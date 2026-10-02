@@ -45,6 +45,7 @@ import {
 	resolveLocalHouseholdSyncCapability,
 	type LocalHouseholdSyncCapability
 } from './household-capability.js';
+import { backfillIneligibleKeys } from './backfill.js';
 import type { HouseholdSyncTransport } from './household-transport.js';
 import { FOREGROUND_PULL_INTERVAL_MS, type UserSyncEnvironment } from './coordinator.js';
 import {
@@ -282,8 +283,11 @@ const recordsForBackfill = async (
 ): Promise<{ record: Record<string, unknown>; priorityKey: string }[]> => {
 	const descriptor = HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS[entityKind];
 	const rows = (await database.table(descriptor.store).toArray()) as Record<string, unknown>[];
+	const ineligible = await backfillIneligibleKeys(database, 'household', householdId);
 	const selected: { record: Record<string, unknown>; priorityKey: string }[] = [];
 	for (const record of rows) {
+		const entityId = entityKind === 'household' ? record.householdId : record.id;
+		if (ineligible.has(`${entityKind}\u0000${String(entityId)}`)) continue;
 		if (!(await belongsToHousehold(database, householdId, workosUserId, entityKind, record)))
 			continue;
 		const priorityKey = priorityKeyFor(entityKind, record, now);

@@ -9,7 +9,7 @@ import {
 } from '$lib/client/local/leases.js';
 import type { MaalDatabase } from '$lib/client/local/database.js';
 import { markProfileReauthRequired } from '$lib/client/local/profiles.js';
-import type { BackfillCheckpointRecord, OutboxRecord } from '$lib/client/local/records.js';
+import type { OutboxRecord } from '$lib/client/local/records.js';
 import {
 	CURRENT_PROTOCOL_VERSION,
 	CURRENT_SCHEMA_VERSION
@@ -56,6 +56,7 @@ import {
 	type OutboxAggregate,
 	type PushOutcome
 } from './outbox.js';
+import { backfillIneligibleKeys } from './backfill.js';
 import type { UserSyncTransport } from './transport.js';
 
 export const BACKFILL_BATCH_SIZE = 25;
@@ -228,18 +229,22 @@ const checkpointKey = (
 	entityKind: UserSyncEntityKind
 ): [string, string, string] => ['user', workosUserId, entityKind];
 
+/**
+ * The owned records still to backfill, by ID. Records the server already has, or that a push or
+ * earlier backfill already carries, are skipped, so a pass always moves forward.
+ */
 const recordsForBackfill = async (
 	database: MaalDatabase,
 	workosUserId: string,
-	entityKind: UserSyncEntityKind,
-	checkpoint: BackfillCheckpointRecord | undefined
+	entityKind: UserSyncEntityKind
 ): Promise<Record<string, unknown>[]> => {
 	const descriptor = USER_SYNC_ENTITY_DESCRIPTORS[entityKind];
 	const rows = (await database.table(descriptor.store).toArray()) as Record<string, unknown>[];
+	const ineligible = await backfillIneligibleKeys(database, 'user', workosUserId);
 	return rows
 		.filter((row) => {
 			const owner = row.ownerUserId ?? row.workosUserId;
-			return owner === workosUserId && String(row.id) > (checkpoint?.lastAggregateId ?? '');
+			return owner === workosUserId && !ineligible.has(`${entityKind}\u0000${String(row.id)}`);
 		})
 		.toSorted((left, right) => String(left.id).localeCompare(String(right.id)));
 };
@@ -285,7 +290,7 @@ const prepareBackfill = async (
 		) {
 			return null;
 		}
-		const records = await recordsForBackfill(database, workosUserId, entityKind, checkpoint);
+		const records = await recordsForBackfill(database, workosUserId, entityKind);
 		if (records.length === 0) {
 			await database.backfillCheckpoints.put({
 				scopeKind: 'user',
