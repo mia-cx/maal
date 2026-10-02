@@ -1606,4 +1606,82 @@ describe('bootstrap reconciliation', () => {
 			{ entityKind: 'unitUserEntry', entityId: unit.id, action: 'delete_acknowledged_absence' }
 		]);
 	});
+
+	test('keeps an edit committed between bootstrap pages', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const [first, second] = [
+			userUnit({ canonicalLabel: 'first' }),
+			userUnit({ canonicalLabel: 'second' })
+		].toSorted((left, right) => left.id.localeCompare(right.id));
+		const log: SyncChange[] = [unitChange(first, 1), unitChange(second, 2)];
+		const latest = () =>
+			[...Map.groupBy(log, ({ entityId }) => entityId).values()].map((changes) => changes.at(-1)!);
+		const repository: UserSyncRepository = {
+			...acceptingRepository(),
+			bootstrap: async (_workosUserId, page) => {
+				const held = latest().toSorted((left, right) =>
+					syncEntityKey(left.entityKind, left.entityId).localeCompare(
+						syncEntityKey(right.entityKind, right.entityId)
+					)
+				);
+				const start = held.findIndex(
+					(change) =>
+						syncEntityKey(change.entityKind, change.entityId) > (page.afterEntityKey ?? '')
+				);
+				const selected = held.slice(start < 0 ? 0 : start, (start < 0 ? 0 : start) + page.limit);
+				const last = selected.at(-1);
+				return {
+					retainedFloor: 0,
+					bootstrapGeneration: 1,
+					latestSequence: log.at(-1)!.sequence,
+					aggregates: selected,
+					authoritativeIds: new Set(
+						latest().map((change) => syncEntityKey(change.entityKind, change.entityId))
+					),
+					nextEntityKey:
+						last && (start < 0 ? 0 : start) + selected.length < held.length
+							? syncEntityKey(last.entityKind, last.entityId)
+							: null
+				};
+			}
+		};
+		let pulls = 0;
+		let bootstrapPages = 0;
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: {
+				...noOpTransport(),
+				pull: async (_slot, request) => {
+					pulls += 1;
+					if (pulls === 1) {
+						throw new SyncBootstrapRequired({
+							code: 'cursor_expired',
+							message: 'expired',
+							retainedFloor: 1,
+							bootstrapGeneration: 1
+						});
+					}
+					const changes = log.filter(({ sequence }) => sequence > request.after);
+					return { ...emptyPull(log.at(-1)!.sequence), changes };
+				},
+				bootstrap: async (_slot, request) => {
+					const page = await bootstrapUserSync(repository, userId, { ...request, limit: 1 });
+					bootstrapPages += 1;
+					// Another device edits the first entity while this device is still paging.
+					if (bootstrapPages === 1) log.push(unitChange({ ...first, toBaseFactor: 99 }, 3));
+					return page;
+				}
+			},
+			environment: environment()
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(bootstrapPages).toBe(2);
+		expect((await database.unitUserEntries.get(first.id))?.toBaseFactor).toBe(99);
+		expect((await database.syncScopes.get(['user', userId]))?.cursor).toBe(3);
+	});
 });

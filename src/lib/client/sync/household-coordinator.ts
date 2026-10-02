@@ -562,6 +562,9 @@ export const createHouseholdSyncCoordinator = (
 					options.householdId
 				);
 				let afterEntityKey: string | null = null;
+				// Each page is a fresh snapshot, so an edit committed between pages can sit below the
+				// last page's sequence. The cursor stays at the first page's so the next pull gets it.
+				let throughSequence = Number.POSITIVE_INFINITY;
 				do {
 					const response = await options.transport.bootstrap(options.authSlotId, {
 						protocolVersion: CURRENT_PROTOCOL_VERSION,
@@ -571,7 +574,13 @@ export const createHouseholdSyncCoordinator = (
 						afterEntityKey,
 						limit: PULL_PAGE_SIZE
 					});
-					await applyHouseholdBootstrap(options.database, applyScope, response, now());
+					throughSequence = Math.min(throughSequence, response.throughSequence);
+					await applyHouseholdBootstrap(
+						options.database,
+						applyScope,
+						{ ...response, throughSequence },
+						now()
+					);
 					await renewLease();
 					afterEntityKey = response.nextEntityKey;
 				} while (afterEntityKey !== null);
