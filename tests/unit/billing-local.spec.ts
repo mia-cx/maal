@@ -20,6 +20,7 @@ import type {
 	BillingCapability,
 	BillingProjectionEnvelope
 } from '$lib/domain/billing/contracts.js';
+import type { Membership } from '$lib/domain/household/contracts.js';
 
 let database: MaalDatabase | null = null;
 
@@ -77,18 +78,18 @@ const neverPaid = (householdId: string): BillingCapability => ({
 	source: 'stripe-d1'
 });
 
-const membershipIn = (householdId: string, roleSlug: 'admin' | 'member' = 'admin') => ({
+const membershipIn = (householdId: string, roleSlug: 'admin' | 'member' = 'admin'): Membership => ({
 	membershipId: `membership_${householdId}`,
 	householdId,
 	workosUserId: 'user_alice',
 	roleSlug,
 	permissions: ['recipes:read', 'recipes:write', 'meals:read', 'meals:write'],
-	status: 'active' as const,
+	status: 'active',
 	directoryManaged: false,
 	workosCreatedAt: '2026-08-21T12:00:00.000Z',
 	lastVerifiedAt: '2026-08-21T12:00:00.000Z',
 	updatedAt: '2026-08-21T12:00:00.000Z',
-	source: 'workos' as const,
+	source: 'workos',
 	detachedAt: null,
 	denialCode: null
 });
