@@ -6,10 +6,12 @@
 	import { decodePortableArchive } from '$lib/client/portability/archive.js';
 	import { downloadPortableArchive } from '$lib/client/portability/download.js';
 	import {
+		bulkResolutions,
 		commitPortableImport,
 		planPortableImport,
 		type ImportResolution,
-		type PortableImportPlan
+		type PortableImportPlan,
+		type PortableImportStore
 	} from '$lib/client/portability/import.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import type { PortableArchive } from '$lib/domain/portability/schema.js';
@@ -35,6 +37,39 @@
 	const totalWrites = $derived(
 		plan ? Object.values(plan.summary).reduce((total, count) => total + count, 0) : 0
 	);
+	const canCopyAny = $derived(
+		plan?.collisions.some(({ allowedResolutions }) =>
+			allowedResolutions.includes('import-as-copy')
+		) ?? false
+	);
+
+	const recordKind: Record<PortableImportStore, string> = {
+		households: 'Household',
+		memberships: 'Membership',
+		householdAppliances: 'Appliance',
+		recipes: 'Recipe',
+		meals: 'Meal',
+		mealCheckIns: 'Check-in',
+		userAttributions: 'Person',
+		foods: 'Food',
+		foodAliases: 'Food name',
+		foodUserAliases: 'Food name',
+		foodHouseholdAliases: 'Food name',
+		foodUserEntries: 'Food',
+		foodHouseholdEntries: 'Food',
+		units: 'Unit',
+		unitAliases: 'Unit name',
+		unitUserAliases: 'Unit name',
+		unitHouseholdAliases: 'Unit name',
+		unitUserEntries: 'Unit',
+		unitHouseholdEntries: 'Unit',
+		userFoodPreferences: 'Food preference',
+		userFoodDisplayPreferences: 'Food display',
+		householdFoodDisplayPreferences: 'Food display',
+		userUnitDisplayPreferences: 'Unit display',
+		householdUnitDisplayPreferences: 'Unit display',
+		remoteProjectionMeta: 'Sync record'
+	};
 
 	const errorMessage = (error: unknown): string =>
 		error instanceof Error ? error.message : 'That operation could not be completed.';
@@ -99,19 +134,9 @@
 		}
 	};
 
-	const resolveCollisionKind = async (
-		kind: 'primary-id' | 'natural-key',
-		resolution: 'keep-local' | 'replace'
-	) => {
+	const resolveAll = async (resolution: ImportResolution) => {
 		if (!archive || !plan) return;
-		resolutions = {
-			...resolutions,
-			...Object.fromEntries(
-				plan.collisions
-					.filter((collision) => collision.kind === kind)
-					.map(({ collisionId }) => [collisionId, resolution])
-			)
-		};
+		resolutions = { ...resolutions, ...bulkResolutions(plan.collisions, resolution) };
 		pending = true;
 		message = '';
 		failed = false;
@@ -206,44 +231,44 @@
 					<div class="grid gap-2">
 						<div class="flex flex-wrap items-center justify-between gap-2">
 							<h4 class="text-xs font-medium">Choose how to handle matching records</h4>
-							<div class="flex gap-1">
+							<div class="flex flex-wrap gap-1">
 								<Button
 									size="xs"
 									variant="ghost"
 									disabled={pending}
-									onclick={() => void resolveCollisionKind('primary-id', 'keep-local')}
-									>Keep same-ID local</Button
+									onclick={() => void resolveAll('keep-local')}>Keep all local</Button
 								>
 								<Button
 									size="xs"
 									variant="ghost"
 									disabled={pending}
-									onclick={() => void resolveCollisionKind('primary-id', 'replace')}
-									>Replace same-ID</Button
+									onclick={() => void resolveAll('replace')}>Replace all</Button
 								>
-								<Button
-									size="xs"
-									variant="ghost"
-									disabled={pending}
-									onclick={() => void resolveCollisionKind('natural-key', 'keep-local')}
-									>Keep same-name local</Button
-								>
-								<Button
-									size="xs"
-									variant="ghost"
-									disabled={pending}
-									onclick={() => void resolveCollisionKind('natural-key', 'replace')}
-									>Replace same-name</Button
-								>
+								{#if canCopyAny}
+									<Button
+										size="xs"
+										variant="ghost"
+										disabled={pending}
+										onclick={() => void resolveAll('import-as-copy')}>Import all as copies</Button
+									>
+								{/if}
 							</div>
 						</div>
 						{#each plan.collisions as collision (collision.collisionId)}
 							<div class="flex items-center justify-between gap-3 rounded-md bg-muted/50 p-2">
-								<p class="min-w-0 truncate text-xs">
-									{collision.store} · {collision.kind === 'primary-id' ? 'same ID' : 'same name'}
-								</p>
+								<div class="grid min-w-0 text-xs">
+									<p class="truncate font-medium">
+										{collision.label || recordKind[collision.store]}
+									</p>
+									<p class="truncate text-muted-foreground">
+										{recordKind[collision.store]} · {collision.kind === 'primary-id'
+											? 'same ID'
+											: 'same name'}
+									</p>
+								</div>
 								<NativeSelect.Root
 									class="w-36 shrink-0"
+									aria-label={`What to do with ${collision.label || recordKind[collision.store]}`}
 									value={resolutions[collision.collisionId] ?? ''}
 									onchange={(event) =>
 										void resolveCollision(
