@@ -22,6 +22,7 @@ import { D1UserSyncRepository } from '$lib/server/sync/d1-repository.js';
 import { bootstrapUserSync } from '$lib/server/sync/service.js';
 
 import {
+	MCP_TEST_DEVICE,
 	MCP_TEST_HOUSEHOLD,
 	MCP_TEST_USER,
 	createMcpTestDatabase,
@@ -157,7 +158,7 @@ const seedRecipes = async (count: number): Promise<RecipeAggregate[]> => {
 /** Measures each household operation against the current dataset. */
 const householdCosts = async (meals: readonly MealAggregate[]) => {
 	const { database: countedDatabase, measure } = counted(database);
-	const port = new D1RemoteDomainPort(countedDatabase);
+	const port = new D1RemoteDomainPort(countedDatabase, MCP_TEST_DEVICE);
 	const target = meals[0]!;
 	// The newest meal has no check-in yet, so each measurement creates one.
 	const checkInTarget = meals.at(-1)!;
@@ -214,7 +215,7 @@ const householdCosts = async (meals: readonly MealAggregate[]) => {
 
 const userCosts = async (recipes: readonly RecipeAggregate[]) => {
 	const { database: countedDatabase, measure } = counted(database);
-	const port = new D1RemoteDomainPort(countedDatabase);
+	const port = new D1RemoteDomainPort(countedDatabase, MCP_TEST_DEVICE);
 	const target = (await port.getUserRecipe(MCP_TEST_USER, recipes[0]!.id))!;
 	return {
 		getRecipe: await measure(() => port.getUserRecipe(MCP_TEST_USER, target.id)),
@@ -275,7 +276,7 @@ describe('D1 read cost', { timeout: SEEDED_TEST_TIMEOUT_MS }, () => {
 describe('D1 bootstrap paging', () => {
 	test('walks every household entity exactly once in entity-key order', async () => {
 		const meals = await seedMeals(7);
-		const port = new D1RemoteDomainPort(database);
+		const port = new D1RemoteDomainPort(database, MCP_TEST_DEVICE);
 		for (const meal of meals.slice(0, 3)) {
 			await port.writeMealCheckIn({
 				actorUserId: MCP_TEST_USER,
@@ -374,9 +375,9 @@ const racingBatches = (target: D1Database) => {
 describe('D1 concurrent commits', () => {
 	test('two live edits to different meal groups both survive', async () => {
 		const [meal] = await seedMeals(1);
-		const port = new D1RemoteDomainPort(database);
+		const port = new D1RemoteDomainPort(database, MCP_TEST_DEVICE);
 		const base = (await port.getHouseholdMeal(MCP_TEST_HOUSEHOLD, meal!.id))!;
-		const racing = new D1RemoteDomainPort(racingBatches(database));
+		const racing = new D1RemoteDomainPort(racingBatches(database), MCP_TEST_DEVICE);
 
 		await Promise.all([
 			racing.writeHouseholdMeal({
@@ -405,9 +406,9 @@ describe('D1 concurrent commits', () => {
 
 	test('two live edits to different recipe groups both survive', async () => {
 		const [seeded] = await seedRecipes(1);
-		const port = new D1RemoteDomainPort(database);
+		const port = new D1RemoteDomainPort(database, MCP_TEST_DEVICE);
 		const base = (await port.getUserRecipe(MCP_TEST_USER, seeded!.id))!;
-		const racing = new D1RemoteDomainPort(racingBatches(database));
+		const racing = new D1RemoteDomainPort(racingBatches(database), MCP_TEST_DEVICE);
 
 		await Promise.all([
 			racing.writeUserRecipe({

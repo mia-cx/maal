@@ -93,7 +93,7 @@ export const handleMcpPost = async (input: {
 	}
 	const handler = createMaalMcpHandler({
 		principal,
-		domain: input.domain ?? new D1RemoteDomainPort(input.environment.DB),
+		domain: input.domain ?? new D1RemoteDomainPort(input.environment.DB, principal.keyId),
 		limiter,
 		administration:
 			input.administration ?? createMcpHouseholdAdministrationPort(principal, input.environment),

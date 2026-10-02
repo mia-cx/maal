@@ -139,11 +139,18 @@ const FOOD_PROFILE_KINDS = [
 	'userUnitDisplayPreference'
 ] as const;
 
+/**
+ * Runs MCP domain commands against D1. Every write is attributed to `deviceId`, so pass one
+ * stable ID per caller (the MCP key ID) to keep `sync_devices` to one row per key.
+ */
 export class D1RemoteDomainPort implements RemoteDomainPort {
 	private readonly users: D1UserSyncRepository;
 	private readonly households: D1HouseholdSyncRepository;
 
-	constructor(private readonly database: D1Database) {
+	constructor(
+		private readonly database: D1Database,
+		private readonly deviceId: string
+	) {
 		this.users = new D1UserSyncRepository(database);
 		this.households = new D1HouseholdSyncRepository(database);
 	}
@@ -188,11 +195,11 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		const now = new Date().toISOString() as `${string}Z`;
 		const { receipt, aggregate } = await this.users.commitWithResult({
 			actorUserId: input.actorUserId,
-			deviceId: uuidv7(),
+			deviceId: this.deviceId,
 			mutation: {
 				schemaVersion: CURRENT_SCHEMA_VERSION,
 				mutationId: uuidv7(),
-				originDeviceId: uuidv7(),
+				originDeviceId: this.deviceId,
 				entityKind: 'recipe',
 				entityId: input.aggregate.id,
 				conflictGroups: [...input.conflictGroups] as [string, ...string[]],
@@ -237,11 +244,11 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		const { receipt, aggregate } = await this.households.commitWithResult({
 			householdId: input.householdId,
 			actorUserId: input.actorUserId,
-			deviceId: uuidv7(),
+			deviceId: this.deviceId,
 			mutation: {
 				schemaVersion: CURRENT_SCHEMA_VERSION,
 				mutationId: uuidv7(),
-				originDeviceId: uuidv7(),
+				originDeviceId: this.deviceId,
 				entityKind: 'meal',
 				entityId: input.aggregate.id,
 				conflictGroups: [...input.conflictGroups] as [string, ...string[]],
@@ -313,11 +320,11 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		const { receipt, aggregate } = await this.households.commitWithResult({
 			householdId: input.householdId,
 			actorUserId: input.actorUserId,
-			deviceId: uuidv7(),
+			deviceId: this.deviceId,
 			mutation: {
 				schemaVersion: CURRENT_SCHEMA_VERSION,
 				mutationId: uuidv7(),
-				originDeviceId: uuidv7(),
+				originDeviceId: this.deviceId,
 				entityKind: 'meal_check_in',
 				entityId: input.aggregate.id,
 				conflictGroups: ['response'],
@@ -422,11 +429,11 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		const now = new Date().toISOString() as `${string}Z`;
 		const { receipt, aggregate } = await this.users.commitWithResult({
 			actorUserId: input.actorUserId,
-			deviceId: uuidv7(),
+			deviceId: this.deviceId,
 			mutation: {
 				schemaVersion: CURRENT_SCHEMA_VERSION,
 				mutationId: uuidv7(),
-				originDeviceId: uuidv7(),
+				originDeviceId: this.deviceId,
 				entityKind: 'userFoodPreference',
 				entityId: input.aggregate.id,
 				conflictGroups: ['row'],
