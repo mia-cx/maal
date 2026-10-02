@@ -9,16 +9,31 @@ import type {
 import { decodeHouseholdSyncAggregate } from '$lib/sync/household-entities.js';
 import { pruneSyncRetentionBatch } from '$lib/server/maintenance/sync-retention.js';
 
+import {
+	JSON_IDENTITIES,
+	JSON_IDS,
+	assertIdentifier,
+	camelize,
+	groupBy,
+	heldManifestKeys,
+	identitiesJson,
+	kindLiteral,
+	listHeldIdentities,
+	queryAll,
+	readSidecars,
+	type CommitResult,
+	type EntityIdentity,
+	type SqlValue
+} from './d1-snapshot.js';
 import { incomingWinsHistoricalConflict, type WinningClock } from './reconciliation.js';
 import {
 	householdSyncEntityKey,
-	type HouseholdServerBootstrapSnapshot,
+	type HouseholdServerBootstrapPage,
+	type HouseholdServerBootstrapPageRequest,
 	type HouseholdServerSyncPage,
 	type HouseholdServerSyncScopeState,
 	type HouseholdSyncRepository
 } from './household-repository.js';
-
-type SqlValue = string | number | null | ArrayBuffer;
 
 interface ScopeRow {
 	bootstrap_generation: number;
@@ -265,13 +280,6 @@ const MEAL_SIDE_CARS = [
 
 const camelToSnake = (value: string): string =>
 	value.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-const snakeToCamel = (value: string): string =>
-	value.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
-
-const assertIdentifier = (value: string): string => {
-	if (!/^[a-z_][a-z0-9_]*$/.test(value)) throw new TypeError('Unsafe SQL identifier.');
-	return `"${value}"`;
-};
 
 const sqlValue = (value: unknown): SqlValue => {
 	if (value === undefined) return null;
@@ -309,18 +317,6 @@ const upsert = (
 		ON CONFLICT (${conflictColumns.map(assertIdentifier).join(', ')}) DO UPDATE SET
 		${updates.map((column) => `${assertIdentifier(column)} = excluded.${assertIdentifier(column)}`).join(', ')}`;
 	return database.prepare(sql).bind(...columns.map((column) => row[column]!));
-};
-
-const camelize = (
-	row: Record<string, unknown>,
-	omitted: readonly string[] = []
-): Record<string, unknown> => {
-	const omit = new Set(omitted);
-	return Object.fromEntries(
-		Object.entries(row)
-			.filter(([key]) => !omit.has(key))
-			.map(([key, value]) => [snakeToCamel(key), value])
-	);
 };
 
 const decodeStoredPayload = (encoded: string): StoredChangePayload => {
@@ -562,124 +558,170 @@ const conflictClocks = (versions: readonly VersionRow[]) =>
 		])
 	);
 
-const readLatestChangedAggregate = async (
-	database: D1Database,
-	householdId: string,
-	entityKind: HouseholdSyncEntityKind,
-	entityId: string
-): Promise<unknown | null> => {
-	const row = await database
-		.prepare(
-			`SELECT payload FROM sync_changes
-			 WHERE audience_kind = 'household' AND audience_id = ? AND entity_kind = ? AND entity_id = ?
-			 ORDER BY seq DESC LIMIT 1`
-		)
-		.bind(householdId, entityKind, entityId)
-		.first<{ payload: string }>();
-	return row ? decodeStoredPayload(row.payload).payload.aggregate : null;
-};
+/** Every household entity kind and the normalized table that holds its current row. */
+const ENTITY_TABLES = {
+	...HOUSEHOLD_TABLES,
+	meal: 'meals',
+	meal_check_in: 'meal_check_ins'
+} as const satisfies Record<HouseholdSyncEntityKind, string>;
 
-const readNormalizedAggregate = async (
+export type HouseholdEntityIdentity = EntityIdentity<HouseholdSyncEntityKind>;
+
+const audience = (householdId: string) => ({ kind: 'household' as const, id: householdId });
+
+/**
+ * SQL that is true when the household still holds a readable aggregate for the version row `v`.
+ * A normalized row or any retained change makes it readable; `?1` must bind the household ID.
+ */
+const HELD_ENTITY_SQL = `(
+	(v.entity_kind = 'household' AND EXISTS (SELECT 1 FROM households WHERE household_id = ?1))
+	OR (v.entity_kind <> 'household' AND (
+		EXISTS (SELECT 1 FROM sync_changes c WHERE c.audience_kind = 'household' AND c.audience_id = ?1
+			AND c.entity_kind = v.entity_kind AND c.entity_id = v.entity_id)
+		OR CASE v.entity_kind ${Object.entries(ENTITY_TABLES)
+			.filter(([kind]) => kind !== 'household')
+			.map(
+				([kind, table]) =>
+					`WHEN ${kindLiteral(kind)} THEN EXISTS (SELECT 1 FROM ${assertIdentifier(table)} r
+						WHERE r.id = v.entity_id AND r.household_id = ?1)`
+			)
+			.join(' ')} ELSE 0 END
+	))
+)`;
+
+/**
+ * Reads the current snapshot change for each held identity in a fixed number of statements:
+ * versions, one row query per kind, the meal sidecars, and fallbacks for rows that are gone.
+ * Identities the household does not hold are left out. Results keep the input order.
+ */
+const readSnapshotChanges = async (
 	database: D1Database,
 	householdId: string,
-	entityKind: HouseholdSyncEntityKind,
-	entityId: string
-): Promise<unknown | null> => {
-	const versions = await readVersions(database, householdId, entityKind, entityId);
-	if (entityKind === 'household') {
-		const row = await database
-			.prepare('SELECT * FROM households WHERE household_id = ?')
-			.bind(householdId)
-			.first<Record<string, unknown>>();
-		return row
-			? {
-					...camelize(row),
-					deletionState: 'active',
-					localOnly: false,
-					conflictClocks: conflictClocks(versions)
-				}
-			: null;
-	}
-	if (entityKind === 'meal_check_in') {
-		const row = await database
-			.prepare('SELECT * FROM meal_check_ins WHERE id = ? AND household_id = ?')
-			.bind(entityId, householdId)
-			.first<Record<string, unknown>>();
-		return row
-			? { ...camelize(row, ['household_id']), conflictClocks: conflictClocks(versions) }
-			: readLatestChangedAggregate(database, householdId, entityKind, entityId);
-	}
-	if (entityKind !== 'meal') {
-		const table = HOUSEHOLD_TABLES[entityKind];
-		const row = await database
-			.prepare(`SELECT * FROM ${assertIdentifier(table)} WHERE id = ? AND household_id = ?`)
-			.bind(entityId, householdId)
-			.first<Record<string, unknown>>();
-		if (!row) return readLatestChangedAggregate(database, householdId, entityKind, entityId);
-		const result = camelize(row);
-		if (entityKind === 'householdAppliance') result.available = result.available === 1;
-		return { ...result, conflictClocks: conflictClocks(versions) };
-	}
-	const row = await database
-		.prepare('SELECT * FROM meals WHERE id = ? AND household_id = ?')
-		.bind(entityId, householdId)
-		.first<Record<string, unknown>>();
-	if (!row) return readLatestChangedAggregate(database, householdId, entityKind, entityId);
-	const query = async (sql: string, ...values: SqlValue[]) =>
-		(
-			await database
-				.prepare(sql)
-				.bind(...values)
-				.all<Record<string, unknown>>()
-		).results;
-	const [
-		ingredients,
-		instructions,
-		instructionEvents,
-		applianceRequirements,
-		classifications,
-		media,
-		nutritionFacts
-	] = await Promise.all([
-		query('SELECT * FROM meal_ingredients WHERE meal_id = ? ORDER BY line_index', entityId),
-		query('SELECT * FROM meal_instructions WHERE meal_id = ? ORDER BY step_index', entityId),
-		query(
-			'SELECT e.* FROM meal_instruction_events e JOIN meal_instructions i ON i.id = e.meal_instruction_id WHERE i.meal_id = ?',
-			entityId
+	identities: readonly HouseholdEntityIdentity[]
+): Promise<HouseholdSyncChange[]> => {
+	if (identities.length === 0) return [];
+	const idsByKind = groupBy(identities, ({ entityKind }) => entityKind);
+	const mealIds = idsByKind.get('meal')?.map(({ entityId }) => entityId) ?? [];
+	const [versionRows, rowGroups, sidecars, household] = await Promise.all([
+		queryAll<VersionRow & { entity_kind: string; entity_id: string }>(
+			database,
+			`SELECT entity_kind, entity_id, conflict_group, revision, last_sequence, winning_occurred_at,
+			 winning_origin_device_id, winning_mutation_id, winning_actor_user_id, winning_received_at
+			 FROM sync_entity_versions
+			 WHERE audience_kind = 'household' AND audience_id = ?
+			 AND (entity_kind, entity_id) IN (${JSON_IDENTITIES})`,
+			householdId,
+			identitiesJson(identities)
 		),
-		query('SELECT * FROM meal_appliance_requirements WHERE meal_id = ?', entityId),
-		query('SELECT * FROM meal_classifications WHERE meal_id = ?', entityId),
-		query('SELECT * FROM meal_media WHERE meal_id = ? ORDER BY position', entityId),
-		query('SELECT * FROM meal_nutrition_facts WHERE meal_id = ?', entityId)
+		Promise.all(
+			[...idsByKind.entries()].map(async ([kind, group]) => {
+				const table = assertIdentifier(ENTITY_TABLES[kind as HouseholdSyncEntityKind]);
+				const rows =
+					kind === 'household'
+						? await queryAll(database, `SELECT * FROM ${table} WHERE household_id = ?`, householdId)
+						: await queryAll(
+								database,
+								`SELECT * FROM ${table} WHERE household_id = ? AND id IN (${JSON_IDS})`,
+								householdId,
+								JSON.stringify(group.map(({ entityId }) => entityId))
+							);
+				return rows.map((row) => ({
+					key: householdSyncEntityKey(
+						kind as HouseholdSyncEntityKind,
+						String(kind === 'household' ? row.household_id : row.id)
+					),
+					row
+				}));
+			})
+		),
+		mealIds.length > 0 ? readSidecars(database, 'meal', mealIds) : new Map(),
+		database
+			.prepare('SELECT created_by_user_id FROM households WHERE household_id = ?')
+			.bind(householdId)
+			.first<{ created_by_user_id: string | null }>()
 	]);
-	const booleanize = (record: Record<string, unknown>, keys: readonly string[]) => {
-		const result = camelize(record, ['meal_id']);
-		for (const key of keys) if (key in result) result[key] = result[key] === 1;
-		return result;
-	};
-	return {
-		...camelize(row),
-		conflictClocks: conflictClocks(versions),
-		ingredients: ingredients.map((item) => booleanize(item, ['optional'])),
-		instructions: instructions.map((item) => camelize(item, ['meal_id'])),
-		instructionEvents: instructionEvents.map((item) => camelize(item)),
-		applianceRequirements: applianceRequirements.map((item) => booleanize(item, ['required'])),
-		classifications: classifications.map((item) => camelize(item, ['meal_id'])),
-		media: media.map((item) => camelize(item, ['meal_id'])),
-		nutritionFacts: nutritionFacts.map((item) => camelize(item, ['meal_id']))
-	};
+	const versionsByKey = groupBy(versionRows, (row) =>
+		householdSyncEntityKey(row.entity_kind as HouseholdSyncEntityKind, row.entity_id)
+	);
+	const rowsByKey = new Map(rowGroups.flat().map(({ key, row }) => [key, row]));
+	const missing = identities.filter(
+		(identity) =>
+			identity.entityKind !== 'household' &&
+			!rowsByKey.has(householdSyncEntityKey(identity.entityKind, identity.entityId))
+	);
+	const latestPayloads = new Map(
+		missing.length === 0
+			? []
+			: (
+					await queryAll<{
+						entity_kind: HouseholdSyncEntityKind;
+						entity_id: string;
+						payload: string;
+					}>(
+						database,
+						`SELECT entity_kind, entity_id, payload, MAX(seq) AS seq FROM sync_changes
+						 WHERE audience_kind = 'household' AND audience_id = ?
+						 AND (entity_kind, entity_id) IN (${JSON_IDENTITIES})
+						 GROUP BY entity_kind, entity_id`,
+						householdId,
+						identitiesJson(missing)
+					)
+				).map((row) => [
+					householdSyncEntityKey(row.entity_kind, row.entity_id),
+					decodeStoredPayload(row.payload).payload.aggregate
+				])
+	);
+
+	const changes: HouseholdSyncChange[] = [];
+	for (const { entityKind, entityId } of identities) {
+		const key = householdSyncEntityKey(entityKind, entityId);
+		const versions = versionsByKey.get(key);
+		if (!versions) continue;
+		const row = rowsByKey.get(key);
+		const clocks = conflictClocks(versions);
+		let aggregate: unknown;
+		if (!row) {
+			if (!latestPayloads.has(key)) continue;
+			aggregate = latestPayloads.get(key);
+		} else if (entityKind === 'household') {
+			aggregate = {
+				...camelize(row),
+				deletionState: 'active',
+				localOnly: false,
+				conflictClocks: clocks
+			};
+		} else if (entityKind === 'meal_check_in') {
+			aggregate = { ...camelize(row, ['household_id']), conflictClocks: clocks };
+		} else if (entityKind === 'meal') {
+			aggregate = { ...camelize(row), conflictClocks: clocks, ...sidecars.get(entityId) };
+		} else {
+			const record = camelize(row);
+			if (entityKind === 'householdAppliance') record.available = record.available === 1;
+			aggregate = { ...record, conflictClocks: clocks };
+		}
+		changes.push(
+			syntheticChange(
+				householdId,
+				entityKind,
+				entityId,
+				aggregate,
+				versions,
+				household?.created_by_user_id ?? null
+			)
+		);
+	}
+	return changes;
 };
 
-const syntheticChange = async (
-	database: D1Database,
+const syntheticChange = (
 	householdId: string,
 	entityKind: HouseholdSyncEntityKind,
 	entityId: string,
-	aggregate: unknown
-): Promise<HouseholdSyncChange | null> => {
-	const versions = await readVersions(database, householdId, entityKind, entityId);
-	const winner = versions.toSorted((left, right) => right.last_sequence - left.last_sequence)[0];
-	if (!winner) return null;
+	aggregate: unknown,
+	versions: readonly VersionRow[],
+	householdCreatorId: string | null
+): HouseholdSyncChange => {
+	const winner = versions.toSorted((left, right) => right.last_sequence - left.last_sequence)[0]!;
 	const record = aggregate as { deletedAt?: string | null; purgedAt?: string };
 	let actorUserId = winner.winning_actor_user_id;
 	if (!actorUserId && entityKind === 'meal_check_in') {
@@ -687,13 +729,7 @@ const syntheticChange = async (
 		if (typeof reporterUserId === 'string' && reporterUserId.length > 0)
 			actorUserId = reporterUserId;
 	}
-	if (!actorUserId) {
-		const household = await database
-			.prepare('SELECT created_by_user_id FROM households WHERE household_id = ?')
-			.bind(householdId)
-			.first<{ created_by_user_id: string | null }>();
-		actorUserId = household?.created_by_user_id ?? `household:${householdId}`;
-	}
+	actorUserId ??= householdCreatorId ?? `household:${householdId}`;
 	return {
 		sequence: winner.last_sequence,
 		mutationId: winner.winning_mutation_id,
@@ -711,11 +747,29 @@ const syntheticChange = async (
 	};
 };
 
+type HouseholdCommitInput = Parameters<HouseholdSyncRepository['commit']>[0];
+
 export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 	constructor(private readonly database: D1Database) {}
 
 	readScopeState(householdId: string) {
 		return scopeState(this.database, householdId);
+	}
+
+	/** Reads the held aggregates for these identities, in input order, at a fixed statement cost. */
+	readEntities(householdId: string, identities: readonly HouseholdEntityIdentity[]) {
+		return readSnapshotChanges(this.database, householdId, identities);
+	}
+
+	/** Reads every held aggregate of these kinds, in entity-key order. */
+	async readEntitiesOfKinds(householdId: string, kinds: readonly HouseholdSyncEntityKind[]) {
+		const identities = await listHeldIdentities(
+			this.database,
+			audience(householdId),
+			HELD_ENTITY_SQL,
+			{ kinds }
+		);
+		return readSnapshotChanges(this.database, householdId, identities);
 	}
 
 	async pull(householdId: string, after: number, limit: number): Promise<HouseholdServerSyncPage> {
@@ -740,40 +794,31 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 		};
 	}
 
-	async bootstrap(householdId: string): Promise<HouseholdServerBootstrapSnapshot> {
-		const state = await scopeState(this.database, householdId);
-		const identities = (
-			await this.database
-				.prepare(
-					`SELECT DISTINCT entity_kind, entity_id FROM sync_entity_versions
-					 WHERE audience_kind = 'household' AND audience_id = ?`
-				)
-				.bind(householdId)
-				.all<{ entity_kind: HouseholdSyncEntityKind; entity_id: string }>()
-		).results;
-		const aggregates: HouseholdSyncChange[] = [];
-		const authoritativeIds = new Set<string>();
-		for (const identity of identities) {
-			const aggregate = await readNormalizedAggregate(
+	async bootstrap(
+		householdId: string,
+		page: HouseholdServerBootstrapPageRequest
+	): Promise<HouseholdServerBootstrapPage> {
+		const [state, identities, authoritativeIds] = await Promise.all([
+			scopeState(this.database, householdId),
+			listHeldIdentities<HouseholdSyncEntityKind>(
 				this.database,
-				householdId,
-				identity.entity_kind,
-				identity.entity_id
-			);
-			if (aggregate === null) continue;
-			const change = await syntheticChange(
-				this.database,
-				householdId,
-				identity.entity_kind,
-				identity.entity_id,
-				aggregate
-			);
-			if (!change) continue;
-			aggregates.push(change);
-			authoritativeIds.add(householdSyncEntityKey(identity.entity_kind, identity.entity_id));
-		}
-		aggregates.sort((left, right) => left.sequence - right.sequence);
-		return { ...state, aggregates, authoritativeIds };
+				audience(householdId),
+				HELD_ENTITY_SQL,
+				{ afterEntityKey: page.afterEntityKey, limit: page.limit + 1 }
+			),
+			heldManifestKeys(this.database, audience(householdId), HELD_ENTITY_SQL, page.manifest)
+		]);
+		const selected = identities.slice(0, page.limit);
+		const last = selected.at(-1);
+		return {
+			...state,
+			aggregates: await readSnapshotChanges(this.database, householdId, selected),
+			authoritativeIds,
+			nextEntityKey:
+				identities.length > page.limit && last
+					? householdSyncEntityKey(last.entityKind, last.entityId)
+					: null
+		};
 	}
 
 	private async reject(input: {
@@ -809,19 +854,23 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 		};
 	}
 
-	async commit(input: {
-		householdId: string;
-		actorUserId: string;
-		deviceId: string;
-		mutation: HouseholdSyncMutation;
-		mode: 'live' | 'backfill';
-		receivedAt: string;
-	}): Promise<MutationReceipt> {
+	async commit(input: HouseholdCommitInput): Promise<MutationReceipt> {
+		return (await this.commitWithResult(input)).receipt;
+	}
+
+	/** Commits one mutation and returns the aggregate it stored. */
+	async commitWithResult(input: HouseholdCommitInput): Promise<CommitResult> {
 		const existingReceipt = await this.database
 			.prepare('SELECT * FROM sync_mutation_receipts WHERE mutation_id = ?')
 			.bind(input.mutation.mutationId)
 			.first<ReceiptRow>();
-		if (existingReceipt) return receiptFromRow(existingReceipt, true);
+		if (existingReceipt) {
+			return { receipt: receiptFromRow(existingReceipt, true), aggregate: null };
+		}
+		const rejected = async (code: string) => ({
+			receipt: await this.reject({ ...input, code }),
+			aggregate: null
+		});
 
 		const decodedIncoming = decodeHouseholdSyncAggregate(
 			input.mutation.entityKind,
@@ -836,7 +885,7 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 					.prepare('SELECT 1 AS present FROM meals WHERE id = ? AND household_id = ?')
 					.bind(mealId, input.householdId)
 					.first<{ present: number }>();
-				if (!ownedMeal) return this.reject({ ...input, code: 'meal_household_mismatch' });
+				if (!ownedMeal) return rejected('meal_household_mismatch');
 			}
 		}
 		if (
@@ -852,7 +901,7 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 					)
 					.bind(input.householdId, plannedCookUserId)
 					.first<{ present: number }>();
-				if (!currentMember) return this.reject({ ...input, code: 'planned_cook_not_member' });
+				if (!currentMember) return rejected('planned_cook_not_member');
 			}
 		}
 		const activeTombstone = await this.database
@@ -864,7 +913,7 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 			.bind(input.householdId, input.mutation.entityKind, input.mutation.entityId, input.receivedAt)
 			.first<{ present: number }>();
 		if (activeTombstone && input.mutation.operation === 'upsert') {
-			return this.reject({ ...input, code: 'tombstoned_entity' });
+			return rejected('tombstoned_entity');
 		}
 
 		const versions = await readVersions(
@@ -891,15 +940,13 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 						);
 					});
 		if (acceptedGroups.length === 0) {
-			return this.reject({ ...input, code: 'historical_loser' });
+			return rejected('historical_loser');
 		}
 
-		const current = await readNormalizedAggregate(
-			this.database,
-			input.householdId,
-			input.mutation.entityKind,
-			input.mutation.entityId
-		);
+		const [currentChange] = await readSnapshotChanges(this.database, input.householdId, [
+			{ entityKind: input.mutation.entityKind, entityId: input.mutation.entityId }
+		]);
+		const current = currentChange?.aggregate ?? null;
 		const revision = Math.max(0, ...versions.map(({ revision }) => revision)) + 1;
 		const clock = {
 			occurredAt: input.mutation.occurredAt,
@@ -1096,7 +1143,7 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 			.bind(input.mutation.mutationId)
 			.first<ReceiptRow>();
 		if (!receipt) throw new TypeError('The committed mutation has no receipt.');
-		return receiptFromRow(receipt);
+		return { receipt: receiptFromRow(receipt), aggregate: decodedResult.aggregate };
 	}
 
 	async prune(input: { now: string; changeCutoff: string }): Promise<void> {

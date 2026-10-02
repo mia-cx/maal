@@ -14,6 +14,7 @@ import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js
 
 const userId = 'user_alice';
 const timestamp = '2026-08-21T12:00:00.000Z' as const;
+const FIRST_PAGE = { afterEntityKey: null, limit: 100, manifest: [] };
 let miniflare: Miniflare;
 let database: D1Database;
 const liveMembership = (overrides: Partial<LiveWorkOSMembership> = {}): LiveWorkOSMembership => ({
@@ -418,7 +419,7 @@ describe('D1 user sync repository', () => {
 		).rejects.toMatchObject({
 			_tag: 'SyncBootstrapRequired'
 		});
-		const snapshot = await repository.bootstrap(userId);
+		const snapshot = await repository.bootstrap(userId, FIRST_PAGE);
 		expect(snapshot.aggregates).toHaveLength(1);
 		expect(snapshot.aggregates[0]).toMatchObject({
 			entityKind: 'unitUserEntry',
@@ -459,7 +460,7 @@ describe('D1 user sync repository', () => {
 				.bind(entityId)
 				.first()
 		).resolves.toEqual({ original_text: '2 g salt' });
-		const createdSnapshot = await repository.bootstrap(userId);
+		const createdSnapshot = await repository.bootstrap(userId, FIRST_PAGE);
 		expect(createdSnapshot.aggregates[0]?.aggregate).toMatchObject({
 			title: 'Soup',
 			ingredients: [{ originalText: '2 g salt', optional: false }]
@@ -508,7 +509,7 @@ describe('D1 user sync repository', () => {
 				.bind(entityId)
 				.first()
 		).resolves.toEqual({ deletion_sequence: 2 });
-		const deletedSnapshot = await repository.bootstrap(userId);
+		const deletedSnapshot = await repository.bootstrap(userId, FIRST_PAGE);
 		expect(deletedSnapshot.aggregates).toContainEqual(
 			expect.objectContaining({
 				entityId,

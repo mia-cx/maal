@@ -1001,7 +1001,8 @@ describe('server ordering and bootstrap rules', () => {
 				latestSequence: 8,
 				bootstrapGeneration: 3,
 				aggregates: [],
-				authoritativeIds: new Set<string>()
+				authoritativeIds: new Set<string>(),
+				nextEntityKey: null
 			}),
 			commit: vi.fn(),
 			prune: vi.fn()

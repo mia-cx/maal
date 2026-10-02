@@ -17,7 +17,6 @@ import {
 	ServerSyncMalformedRequest
 } from './errors.js';
 import { reconciliationInstructions, type UserSyncRepository } from './repository.js';
-import { syncEntityKey } from './repository.js';
 
 const assertUserAudience = (workosUserId: string, audience: { kind: 'user'; id: string }): void => {
 	if (audience.id !== workosUserId) {
@@ -117,34 +116,23 @@ export const bootstrapUserSync = async (
 	request: BootstrapRequest
 ): Promise<BootstrapResponse> => {
 	assertUserAudience(workosUserId, request.audience);
-	const snapshot = await repository.bootstrap(workosUserId);
-	const ordered = [...snapshot.aggregates].toSorted((left, right) =>
-		syncEntityKey(left.entityKind, left.entityId).localeCompare(
-			syncEntityKey(right.entityKind, right.entityId)
-		)
-	);
-	const remaining =
-		request.afterEntityKey === null
-			? ordered
-			: ordered.filter(
-					(change) => syncEntityKey(change.entityKind, change.entityId) > request.afterEntityKey!
-				);
-	const aggregates = remaining.slice(0, request.limit);
-	const hasMore = remaining.length > aggregates.length;
+	const firstPage = request.afterEntityKey === null;
+	const page = await repository.bootstrap(workosUserId, {
+		afterEntityKey: request.afterEntityKey,
+		limit: request.limit,
+		manifest: firstPage ? request.manifest : []
+	});
 	return {
 		protocolVersion: CURRENT_PROTOCOL_VERSION,
-		aggregates,
-		instructions:
-			request.afterEntityKey === null
-				? reconciliationInstructions(request.manifest, snapshot.authoritativeIds)
-				: [],
-		throughSequence: snapshot.latestSequence,
-		retainedFloor: snapshot.retainedFloor,
-		bootstrapGeneration: snapshot.bootstrapGeneration,
-		hasMore,
-		nextEntityKey: hasMore
-			? syncEntityKey(aggregates.at(-1)!.entityKind, aggregates.at(-1)!.entityId)
-			: null
+		aggregates: [...page.aggregates],
+		instructions: firstPage
+			? reconciliationInstructions(request.manifest, page.authoritativeIds)
+			: [],
+		throughSequence: page.latestSequence,
+		retainedFloor: page.retainedFloor,
+		bootstrapGeneration: page.bootstrapGeneration,
+		hasMore: page.nextEntityKey !== null,
+		nextEntityKey: page.nextEntityKey
 	};
 };
 

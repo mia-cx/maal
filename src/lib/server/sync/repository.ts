@@ -18,9 +18,20 @@ export interface ServerSyncPage extends ServerSyncScopeState {
 	readonly hasMore: boolean;
 }
 
-export interface ServerBootstrapSnapshot extends ServerSyncScopeState {
+export interface ServerBootstrapPageRequest {
+	readonly afterEntityKey: string | null;
+	readonly limit: number;
+	/** Local identities to check against the server; only the first page carries them. */
+	readonly manifest: readonly Pick<SnapshotManifestEntry, 'entityKind' | 'entityId'>[];
+}
+
+export interface ServerBootstrapPage extends ServerSyncScopeState {
+	/** At most `limit` held aggregates after `afterEntityKey`, in entity-key order. */
 	readonly aggregates: readonly SyncChange[];
+	/** The keys of the requested manifest entries the user still holds. */
 	readonly authoritativeIds: ReadonlySet<string>;
+	/** The key to request the next page after, or null on the last page. */
+	readonly nextEntityKey: string | null;
 }
 
 export type SyncCommitMode = 'live' | 'backfill';
@@ -28,7 +39,7 @@ export type SyncCommitMode = 'live' | 'backfill';
 export interface UserSyncRepository {
 	readScopeState(workosUserId: string): Promise<ServerSyncScopeState>;
 	pull(workosUserId: string, after: number, limit: number): Promise<ServerSyncPage>;
-	bootstrap(workosUserId: string): Promise<ServerBootstrapSnapshot>;
+	bootstrap(workosUserId: string, page: ServerBootstrapPageRequest): Promise<ServerBootstrapPage>;
 	commit(input: {
 		readonly actorUserId: string;
 		readonly deviceId: string;

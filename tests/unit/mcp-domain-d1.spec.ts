@@ -19,6 +19,7 @@ import {
 	seedMcpHousehold
 } from './mcp-test-helpers.js';
 
+const FIRST_PAGE = { afterEntityKey: null, limit: 100, manifest: [] };
 let miniflare: Miniflare;
 let database: D1Database;
 
@@ -48,7 +49,10 @@ describe('shared remote D1 domain port', () => {
 			conflictGroups: allRecipeConflictGroups,
 			operation: 'upsert'
 		});
-		const userBootstrap = await new D1UserSyncRepository(database).bootstrap(MCP_TEST_USER);
+		const userBootstrap = await new D1UserSyncRepository(database).bootstrap(
+			MCP_TEST_USER,
+			FIRST_PAGE
+		);
 		expect(userBootstrap.aggregates).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
@@ -72,7 +76,8 @@ describe('shared remote D1 domain port', () => {
 			operation: 'upsert'
 		});
 		const householdBootstrap = await new D1HouseholdSyncRepository(database).bootstrap(
-			MCP_TEST_HOUSEHOLD
+			MCP_TEST_HOUSEHOLD,
+			FIRST_PAGE
 		);
 		expect(householdBootstrap.aggregates).toEqual(
 			expect.arrayContaining([

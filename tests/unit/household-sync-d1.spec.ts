@@ -21,6 +21,7 @@ const aliceId = 'user_alice';
 const bobId = 'user_bob';
 const timestamp = '2026-08-21T12:00:00.000Z' as const;
 const deviceId = uuidv7();
+const FIRST_PAGE = { afterEntityKey: null, limit: 100, manifest: [] };
 let miniflare: Miniflare;
 let database: D1Database;
 const liveMembership = (overrides: Partial<LiveWorkOSMembership> = {}): LiveWorkOSMembership => ({
@@ -241,7 +242,7 @@ describe('D1 household sync', () => {
 				receivedAt: timestamp
 			})
 		).resolves.toMatchObject({ status: 'accepted' });
-		await expect(repository.bootstrap(householdId)).resolves.toMatchObject({
+		await expect(repository.bootstrap(householdId, FIRST_PAGE)).resolves.toMatchObject({
 			aggregates: [
 				expect.objectContaining({
 					entityKind: 'household',
@@ -578,7 +579,7 @@ describe('D1 household sync', () => {
 			receivedAt: '2026-08-23T12:00:01.000Z'
 		});
 		expect(resurrection).toMatchObject({ status: 'rejected', errorCode: 'tombstoned_entity' });
-		const snapshot = await repository.bootstrap(householdId);
+		const snapshot = await repository.bootstrap(householdId, FIRST_PAGE);
 		expect(
 			snapshot.aggregates.find(({ entityId }) => entityId === mealId)?.aggregate
 		).toMatchObject({
@@ -629,7 +630,7 @@ describe('D1 household sync', () => {
 			changeCutoff: '2027-08-22T12:00:00.000Z'
 		});
 
-		const snapshot = await repository.bootstrap(householdId);
+		const snapshot = await repository.bootstrap(householdId, FIRST_PAGE);
 		expect(snapshot.aggregates).toHaveLength(1);
 		expect(snapshot.aggregates[0]).toMatchObject({
 			actorUserId: bobId,

@@ -20,7 +20,6 @@ import {
 import { ServerSyncBootstrapRequired, ServerSyncMalformedRequest } from './errors.js';
 import {
 	householdReconciliationInstructions,
-	householdSyncEntityKey,
 	type HouseholdSyncRepository
 } from './household-repository.js';
 
@@ -114,35 +113,23 @@ export const bootstrapHouseholdSync = async (
 	householdId: string,
 	request: HouseholdBootstrapRequest
 ): Promise<HouseholdBootstrapResponse> => {
-	const snapshot = await repository.bootstrap(householdId);
-	const ordered = [...snapshot.aggregates].toSorted((left, right) =>
-		householdSyncEntityKey(left.entityKind, left.entityId).localeCompare(
-			householdSyncEntityKey(right.entityKind, right.entityId)
-		)
-	);
-	const remaining =
-		request.afterEntityKey === null
-			? ordered
-			: ordered.filter(
-					(change) =>
-						householdSyncEntityKey(change.entityKind, change.entityId) > request.afterEntityKey!
-				);
-	const aggregates = remaining.slice(0, request.limit);
-	const hasMore = remaining.length > aggregates.length;
+	const firstPage = request.afterEntityKey === null;
+	const page = await repository.bootstrap(householdId, {
+		afterEntityKey: request.afterEntityKey,
+		limit: request.limit,
+		manifest: firstPage ? request.manifest : []
+	});
 	return {
 		protocolVersion: CURRENT_PROTOCOL_VERSION,
-		aggregates,
-		instructions:
-			request.afterEntityKey === null
-				? householdReconciliationInstructions(request.manifest, snapshot.authoritativeIds)
-				: [],
-		throughSequence: snapshot.latestSequence,
-		retainedFloor: snapshot.retainedFloor,
-		bootstrapGeneration: snapshot.bootstrapGeneration,
-		hasMore,
-		nextEntityKey: hasMore
-			? householdSyncEntityKey(aggregates.at(-1)!.entityKind, aggregates.at(-1)!.entityId)
-			: null
+		aggregates: [...page.aggregates],
+		instructions: firstPage
+			? householdReconciliationInstructions(request.manifest, page.authoritativeIds)
+			: [],
+		throughSequence: page.latestSequence,
+		retainedFloor: page.retainedFloor,
+		bootstrapGeneration: page.bootstrapGeneration,
+		hasMore: page.nextEntityKey !== null,
+		nextEntityKey: page.nextEntityKey
 	};
 };
 
