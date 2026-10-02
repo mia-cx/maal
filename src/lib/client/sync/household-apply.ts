@@ -17,11 +17,27 @@ import { pruneAcknowledgedOutbox, scopeOutbox } from './outbox.js';
 
 const keyFor = (entityKind: string, entityId: string): string => `${entityKind}\u0000${entityId}`;
 
-const pendingHouseholdOutbox = (
+/**
+ * Unacknowledged household intent from auth slots that still exist. Rows queued under a slot that is
+ * gone (`signed-out:<profileId>`, waiting for that profile to sign in again) are not pushed by anyone
+ * here, so they must not mask other profiles' pulls of the same household. Needs `authSlots` in the
+ * surrounding transaction.
+ */
+const pendingHouseholdOutbox = async (
 	database: MaalDatabase,
 	householdId: string
-): Promise<OutboxRecord[]> =>
-	scopeOutbox(database, 'household', householdId, ['pending', 'sending', 'quarantined']);
+): Promise<OutboxRecord[]> => {
+	const rows = await scopeOutbox(database, 'household', householdId, [
+		'pending',
+		'sending',
+		'quarantined'
+	]);
+	const slots = await database.authSlots.bulkGet([
+		...new Set(rows.map(({ authSlotId }) => authSlotId))
+	]);
+	const live = new Set(slots.flatMap((slot) => (slot ? [slot.authSlotId] : [])));
+	return rows.filter(({ authSlotId }) => live.has(authSlotId));
+};
 
 const decodeChanges = (
 	householdId: string,
@@ -61,7 +77,7 @@ export const applyHouseholdPullPage = async (
 	const tables = [...new Set(decoded.map(({ store }) => database.table(store)))];
 	await database.transaction(
 		'rw',
-		[...tables, database.mealCheckIns, database.outbox, database.syncScopes],
+		[...tables, database.mealCheckIns, database.outbox, database.authSlots, database.syncScopes],
 		async () => {
 			const pending = await pendingHouseholdOutbox(database, householdId);
 			const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));
@@ -150,7 +166,7 @@ export const applyHouseholdMutationReceipts = async (
 	);
 	await database.transaction(
 		'rw',
-		[...new Set(tables), database.mealCheckIns, database.outbox],
+		[...new Set(tables), database.mealCheckIns, database.outbox, database.authSlots],
 		async () => {
 			const restorations = new Map<
 				string,
@@ -208,7 +224,13 @@ export const applyHouseholdBootstrap = async (
 	}
 	await database.transaction(
 		'rw',
-		[...new Set(tables), database.mealCheckIns, database.outbox, database.syncScopes],
+		[
+			...new Set(tables),
+			database.mealCheckIns,
+			database.outbox,
+			database.authSlots,
+			database.syncScopes
+		],
 		async () => {
 			const pending = await pendingHouseholdOutbox(database, householdId);
 			const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));

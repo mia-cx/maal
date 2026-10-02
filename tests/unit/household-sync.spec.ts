@@ -643,6 +643,12 @@ describe('foreground household coordinator', () => {
 
 	test('keeps a newer pending meal until every mutation masking the remote meal is rejected', async () => {
 		const database = await openDatabase('multiple-rejected-masked-pull');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: false
+		});
 		const mealId = uuidv7();
 		const firstMutationId = uuidv7();
 		const secondMutationId = uuidv7();
@@ -1098,6 +1104,12 @@ describe('foreground household coordinator', () => {
 
 	test('keeps a pending local hard delete when a pull brings the meal back', async () => {
 		const database = await openDatabase('hard-delete');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: false
+		});
 		const originDeviceId = String((await database.meta.get('deviceId'))!.value);
 		const remoteMutationId = uuidv7();
 		const remote = meal(uuidv7(), remoteMutationId, uuidv7());
@@ -1148,5 +1160,57 @@ describe('foreground household coordinator', () => {
 
 		expect(await database.meals.get(remote.id)).toBeUndefined();
 		expect(await database.outbox.get(mutationId)).toMatchObject({ status: 'pending' });
+	});
+
+	test("does not let a signed-out profile's queued rows mask another profile's pull", async () => {
+		const database = await openDatabase('signed-out');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: true
+		});
+		const mealId = uuidv7();
+		await addLocalMealIntent(database, {
+			mealId,
+			mutationId: uuidv7(),
+			authSlotId: 'signed-out:profile_bob',
+			originDeviceId: String((await database.meta.get('deviceId'))!.value),
+			date: '2026-08-25'
+		});
+		const remoteMutationId = uuidv7();
+		const remote = meal(mealId, remoteMutationId, uuidv7(), { title: 'Remote soup' });
+
+		await applyHouseholdPullPage(database, householdId, {
+			protocolVersion: 1,
+			changes: [
+				{
+					sequence: 1,
+					mutationId: remoteMutationId,
+					originDeviceId: uuidv7(),
+					actorUserId: 'user_carol',
+					entityKind: 'meal',
+					entityId: mealId,
+					conflictGroups: ['header'],
+					operation: 'upsert',
+					resultingRevision: 2,
+					occurredAt: timestamp,
+					receivedAt: timestamp,
+					aggregate: remote,
+					tombstoneExpiresAt: null
+				}
+			],
+			throughSequence: 1,
+			retainedFloor: 0,
+			bootstrapGeneration: 1,
+			hasMore: false
+		});
+
+		expect((await database.meals.get(mealId))?.title).toBe('Remote soup');
+		expect(
+			(await database.outbox.where('aggregateId').equals(mealId).toArray()).map(
+				({ authSlotId, status }) => [authSlotId, status]
+			)
+		).toEqual([['signed-out:profile_bob', 'pending']]);
 	});
 });
