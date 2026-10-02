@@ -251,12 +251,39 @@ export const customMealFromArgs = (input: {
 	return Schema.decodeUnknownSync(MealAggregateSchema)(meal);
 };
 
+/** The meal conflict group each patchable field belongs to. */
+const MEAL_PATCH_GROUPS = [
+	['header', ['title', 'description', 'cookTimeMinutes']],
+	[
+		'schedule',
+		['date', 'time', 'sortOrder', 'plannedCookUserId', 'servingsPlanned', 'plannedYield']
+	],
+	['status', ['status']],
+	['ingredients', ['ingredients']],
+	['instructions', ['instructions']]
+] as const;
+
+/** Lists the conflict groups a meal patch touches, so untouched groups keep their clocks. */
+export const mealPatchConflictGroups = (patch: Record<string, unknown>): string[] =>
+	MEAL_PATCH_GROUPS.filter(([, fields]) => fields.some((field) => patch[field] !== undefined)).map(
+		([group]) => group
+	);
+
+/** Applies an MCP meal patch. Ingredient and instruction lists replace the meal's copies. */
 export const patchMeal = (
 	meal: MealAggregate,
 	patch: Record<string, unknown>,
 	now = new Date().toISOString() as `${string}Z`
 ): MealAggregate => {
 	const status = patch.status;
+	const replacementLines = candidateFromToolRecipe(
+		{
+			title: meal.title,
+			...(patch.ingredients !== undefined ? { ingredients: patch.ingredients } : {}),
+			...(patch.instructions !== undefined ? { instructions: patch.instructions } : {})
+		},
+		now
+	);
 	return Schema.decodeUnknownSync(MealAggregateSchema)({
 		...meal,
 		...(patch.date !== undefined ? { date: patch.date } : {}),
@@ -276,6 +303,10 @@ export const patchMeal = (
 		...(patch.description !== undefined ? { description: text(patch.description) } : {}),
 		...(patch.cookTimeMinutes !== undefined
 			? { cookTimeMinutes: optionalNumber(patch.cookTimeMinutes, 'cookTimeMinutes') }
+			: {}),
+		...(patch.ingredients !== undefined ? { ingredients: replacementLines.ingredients } : {}),
+		...(patch.instructions !== undefined
+			? { instructions: replacementLines.instructions, instructionEvents: [] }
 			: {}),
 		updatedAt: now
 	});

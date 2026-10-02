@@ -62,8 +62,13 @@ class SpyDomain implements RemoteDomainPort {
 		this.calls.push('getHouseholdMeal');
 		return this.meal;
 	}
-	async writeHouseholdMeal(input: { aggregate: MealAggregate }): Promise<MealAggregate> {
+	readonly mealWrites: { aggregate: MealAggregate; conflictGroups: readonly string[] }[] = [];
+	async writeHouseholdMeal(input: {
+		aggregate: MealAggregate;
+		conflictGroups: readonly string[];
+	}): Promise<MealAggregate> {
 		this.calls.push('writeHouseholdMeal');
+		this.mealWrites.push(input);
 		this.meal = input.aggregate;
 		return this.meal;
 	}
@@ -443,5 +448,91 @@ describe('MCP tool adapters', () => {
 			tools.find((tool) => tool.name === name)!.handler(context, args)
 		).rejects.toMatchObject({ code: 'insufficient_role_permission' });
 		expect(domain.calls).toEqual([]);
+	});
+});
+
+const runTool = (domain: SpyDomain, name: (typeof tools)[number]['name'], args: object) =>
+	tools.find((tool) => tool.name === name)!.handler(contextFor(domain), { ...args });
+
+describe('MCP tool parity with the prototype', () => {
+	test('update_household_meal replaces ingredients and instructions and writes only patched groups', async () => {
+		const domain = new SpyDomain();
+		domain.meal = {
+			...existingMeal,
+			instructionEvents: [
+				{
+					id: '01900000-0000-7000-8000-000000000001',
+					mealInstructionId: existingMeal.instructions[0]!.id,
+					kind: 'action',
+					appliance: null,
+					sourceText: 'Simmer',
+					value: null,
+					unitId: null,
+					baseValue: null,
+					baseUnitId: null,
+					confidence: 1,
+					createdAt: existingMeal.createdAt
+				}
+			]
+		};
+		const result = (await runTool(domain, 'update_household_meal', {
+			mealId: existingMeal.id,
+			patch: { ingredients: ['2 leeks'], instructions: ['Roast.'] }
+		})) as { meal: MealAggregate };
+
+		expect(result.meal.ingredients.map(({ originalText }) => originalText)).toEqual(['2 leeks']);
+		expect(result.meal.instructions.map(({ text }) => text)).toEqual(['Roast.']);
+		expect(result.meal.instructionEvents).toEqual([]);
+		expect(domain.mealWrites.at(-1)?.conflictGroups).toEqual(['ingredients', 'instructions']);
+	});
+
+	test('update_household_meal maps schedule and header fields to their own groups', async () => {
+		const domain = new SpyDomain();
+		await runTool(domain, 'update_household_meal', {
+			mealId: existingMeal.id,
+			patch: { date: '2026-08-30', title: 'Renamed soup' }
+		});
+		expect(domain.mealWrites.at(-1)?.conflictGroups).toEqual(['header', 'schedule']);
+	});
+
+	test.each([
+		['a member who was not the planned cook', 'user_bob', true],
+		['a skipped meal', ownerUserId, false]
+	])('create_meal_check_in ignores cook time from %s', async (_case, plannedCookUserId, cooked) => {
+		const domain = new SpyDomain();
+		domain.meal = { ...existingMeal, plannedCookUserId };
+		const result = (await runTool(domain, 'create_meal_check_in', {
+			mealId: existingMeal.id,
+			verdict: 'repeat',
+			cooked,
+			cookTime: 40
+		})) as { checkIn: MealCheckIn };
+		expect(result.checkIn.cookTimeMinutes).toBeNull();
+	});
+
+	test('create_meal_check_in keeps cook time from the planned cook who cooked', async () => {
+		const domain = new SpyDomain();
+		domain.meal = { ...existingMeal, plannedCookUserId: ownerUserId };
+		const result = (await runTool(domain, 'create_meal_check_in', {
+			mealId: existingMeal.id,
+			verdict: 'repeat',
+			cookTime: 40
+		})) as { checkIn: MealCheckIn };
+		expect(result.checkIn.cookTimeMinutes).toBe(40);
+	});
+
+	test('create_household_meals reports each item with its real reason and title', async () => {
+		const result = (await runTool(new SpyDomain(), 'create_household_meals', {
+			meals: [{ userRecipeId: 'missing', customMeal: { title: 'Both sources' } }]
+		})) as { errors: unknown[] };
+		expect(result.errors).toEqual([
+			{
+				index: 0,
+				meal: 'Both sources',
+				url: null,
+				code: 'create_failed',
+				message: 'Pass exactly one meal source: url, userRecipeId, recipe, or customMeal.'
+			}
+		]);
 	});
 });
