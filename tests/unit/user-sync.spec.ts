@@ -14,6 +14,7 @@ import {
 	applyUserPullPage,
 	createUserSyncCoordinator,
 	applyUserBootstrap,
+	startDeviceSync,
 	type UserSyncEnvironment,
 	type UserSyncTransport
 } from '$lib/client/sync/index.js';
@@ -1162,29 +1163,6 @@ describe('user outbox recovery', () => {
 		expect(rows[0]).toMatchObject({ operation: 'delete', status: 'acknowledged', payload: null });
 	});
 
-	test('reads the outbox only through its indexes during a sync run', async () => {
-		const database = await openDatabase();
-		await seedPaidProfile(database);
-		const context = { database, authSlotId, originDeviceId: await deviceIdOf(database) };
-		await upsertTaxonomyRecord(
-			{ ...context, occurredAt: timestamp },
-			'unitUserEntry',
-			unitDraft(uuidv7())
-		);
-		const scan = vi.spyOn(database.outbox, 'toArray');
-		const coordinator = createUserSyncCoordinator({
-			database,
-			authSlotId,
-			workosUserId: userId,
-			transport: validatingTransport(),
-			environment: environment()
-		});
-
-		await expect(coordinator.syncNow()).resolves.toBe('complete');
-
-		expect(scan).not.toHaveBeenCalled();
-	});
-
 	test('rejects only the mutation the server refuses, shows its code, and commits the rest', async () => {
 		const database = await openDatabase();
 		await seedPaidProfile(database);
@@ -1298,6 +1276,29 @@ describe('user outbox recovery', () => {
 				.count()
 		).toBe(0);
 	});
+
+	test('reads the outbox only through its indexes during a sync run', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const context = { database, authSlotId, originDeviceId: await deviceIdOf(database) };
+		await upsertTaxonomyRecord(
+			{ ...context, occurredAt: timestamp },
+			'unitUserEntry',
+			unitDraft(uuidv7())
+		);
+		const scan = vi.spyOn(database.outbox, 'toArray');
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: validatingTransport(),
+			environment: environment()
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(scan).not.toHaveBeenCalled();
+	});
 });
 
 describe('user sync scheduling', () => {
@@ -1341,6 +1342,51 @@ describe('user sync scheduling', () => {
 			expect(pulls.free).toBe(0);
 		} finally {
 			for (const coordinator of coordinators) coordinator.stop();
+		}
+	});
+
+	test('resumes after a plan denial clears, and leaves other households alone', async () => {
+		vi.stubGlobal('navigator', { onLine: true });
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const otherHousehold = {
+			...(await database.billingCapabilities.get('household_paid'))!,
+			householdId: 'household_other',
+			subscriberUserId: 'user_bob'
+		};
+		await database.billingCapabilities.put(otherHousehold);
+		let pulls = 0;
+		const transport: UserSyncTransport = {
+			...noOpTransport(),
+			pull: async (_slot, request) => {
+				pulls += 1;
+				if (pulls === 1) {
+					throw new SyncCapabilityDenied({ code: 'maal_plan_required', message: 'lapsed' });
+				}
+				return emptyPull(request.after);
+			}
+		};
+		const manager = startDeviceSync(database, transport);
+		try {
+			await vi.waitFor(async () =>
+				expect((await database.syncScopes.get(['user', userId]))?.state).toBe('blocked')
+			);
+			expect((await database.billingCapabilities.get('household_paid'))?.stale).toBe(true);
+			expect((await database.billingCapabilities.get('household_other'))?.stale).toBe(false);
+			// The stale write itself must not retry the denied request.
+			await new Promise((resolve) => setTimeout(resolve, 300));
+			expect(pulls).toBe(1);
+
+			// A plan refresh writes a fresh, enabled capability.
+			await database.billingCapabilities.update('household_paid', {
+				stale: false,
+				validUntil: '2026-10-21T12:00:00.000Z'
+			});
+
+			await vi.waitFor(() => expect(pulls).toBe(2), { timeout: 2_000 });
+		} finally {
+			manager.stop();
+			vi.unstubAllGlobals();
 		}
 	});
 });

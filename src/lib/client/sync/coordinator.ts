@@ -451,6 +451,7 @@ export const createUserSyncCoordinator = (
 	let active: Promise<UserSyncRunState> | null = null;
 	let started = false;
 	let terminalBlocked = false;
+	let deniedCapability: string | null = null;
 	let retryAttempt = 0;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let unsubscribe: (() => void)[] = [];
@@ -592,21 +593,42 @@ export const createUserSyncCoordinator = (
 		}
 	};
 
+	/**
+	 * The memberships and billing rows the user capability is decided from. A server denial holds
+	 * until these change, so a plan refresh resumes sync and an unchanged retry costs no request.
+	 */
+	const capabilityInputs = async (): Promise<{ householdIds: string[]; fingerprint: string }> => {
+		const memberships = (
+			await options.database.memberships
+				.where('[workosUserId+status]')
+				.equals([options.workosUserId, 'active'])
+				.toArray()
+		)
+			.filter(({ permissions }) => permissions.includes('recipes:read'))
+			.toSorted((left, right) => left.householdId.localeCompare(right.householdId));
+		const householdIds = memberships.map(({ householdId }) => householdId);
+		const capabilities = await options.database.billingCapabilities.bulkGet(householdIds);
+		return {
+			householdIds,
+			fingerprint: JSON.stringify([memberships.map(({ permissions }) => permissions), capabilities])
+		};
+	};
+
 	const markTerminal = async (error: unknown): Promise<void> => {
-		terminalBlocked = true;
 		if (error instanceof SyncUnauthenticated) {
+			terminalBlocked = true;
 			currentState = 'reauthRequired';
 			await markProfileReauthRequired(options.database, options.authSlotId);
 		} else {
 			currentState = 'blocked';
-			const capabilities = await options.database.billingCapabilities.toArray();
+			// Only this user's households decide this scope; other profiles' households are untouched.
+			const { householdIds } = await capabilityInputs();
 			await options.database.transaction('rw', options.database.billingCapabilities, async () => {
-				for (const capability of capabilities) {
-					await options.database.billingCapabilities.update(capability.householdId, {
-						stale: true
-					});
+				for (const householdId of householdIds) {
+					await options.database.billingCapabilities.update(householdId, { stale: true });
 				}
 			});
+			deniedCapability = (await capabilityInputs()).fingerprint;
 		}
 		await options.database.syncScopes.update(['user', options.workosUserId], {
 			state: 'blocked',
@@ -623,6 +645,12 @@ export const createUserSyncCoordinator = (
 		if (!environment.isVisible()) return (currentState = 'hidden');
 		const capability = await resolveCapability(options.database, options.workosUserId, now());
 		if (!capability.enabled) return (currentState = 'disabled');
+		if (deniedCapability !== null) {
+			if ((await capabilityInputs()).fingerprint === deniedCapability) {
+				return (currentState = 'blocked');
+			}
+			deniedCapability = null;
+		}
 		const acquired = await acquireSyncLease(options.database, {
 			scopeKind: 'user',
 			scopeId: options.workosUserId,
@@ -720,7 +748,6 @@ export const createUserSyncCoordinator = (
 			schedule(250);
 		},
 		resumeAfterCapabilityRefresh() {
-			terminalBlocked = false;
 			retryAttempt = 0;
 			schedule();
 		},
