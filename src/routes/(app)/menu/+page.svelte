@@ -36,7 +36,7 @@
 	let statistics = $state.raw<ReadonlyMap<string, RecipeMenuStats>>(new Map());
 	let activeOwnerUserId = $state<string | null>(null);
 	let loadError = $state<string | null>(null);
-	// A failed statistics query has stopped; library emissions must not clear its error.
+	// Only a successful statistics emission may clear its error, not library updates.
 	let statisticsError = $state<string | null>(null);
 	const visibleError = $derived(loadError ?? statisticsError);
 
@@ -166,6 +166,7 @@
 				statisticsSubscription = liveRecipeStatistics(opened).subscribe({
 					next: (next) => {
 						statistics = next;
+						statisticsError = null;
 					},
 					error: () => {
 						statisticsError = 'Your local recipe library could not be read.';

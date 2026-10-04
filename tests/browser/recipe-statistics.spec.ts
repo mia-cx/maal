@@ -113,6 +113,17 @@ test('recipe counters follow local meal and check-in changes', async () => {
 	await expect.element(page.getByText('1 planned')).toBeVisible();
 	await expect.element(page.getByText('0 cooked')).toBeVisible();
 
+	// A malformed meal fails only the statistics query; library updates must not hide it.
+	await database.meals.update(meal.id, { date: 'invalid' });
+	await expect.element(page.getByRole('alert')).toBeVisible();
+	await database.recipes.update(recipe.id, { title: 'Weekday soup' });
+	await expect.element(page.getByRole('button', { name: 'Open Weekday soup' })).toBeVisible();
+	await expect.element(page.getByRole('alert')).toBeVisible();
+
+	await database.meals.update(meal.id, { date: '2026-08-22' });
+	await expect.element(page.getByRole('alert')).not.toBeInTheDocument();
+	await expect.element(page.getByText('1 planned')).toBeVisible();
+
 	await saveMealCheckIn(database, context, meal.id, { status: 'cooked', verdict: 'repeat' });
 	await expect.element(page.getByText('1 cooked')).toBeVisible();
 	await expect.element(page.getByText('1 reviews')).toBeVisible();
