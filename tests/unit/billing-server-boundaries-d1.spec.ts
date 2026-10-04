@@ -371,6 +371,39 @@ describe('Stripe grace projection', () => {
 		}
 	);
 
+	test.each(['payment-between-failures', 'failures-before-payment'] as const)(
+		'a late recovery payment restarts grace at the first failure after it: %s',
+		async (order) => {
+			const repository = new BillingRepository(database);
+			const { stripe, subscriptions } = fakeStripe();
+			subscriptions.set('sub_a', sub('sub_a', 'past_due'));
+			const deliver = (event: Stripe.Event) =>
+				processStripeWebhook({ stripe, repository, event, receivedAt: iso(event.created) });
+			// F0 at t0, payment at t0+500, next failure F1 at t0+600, and a much later
+			// status-preserving update U at t0+86400: the new window starts at F1, not U.
+			const f0 = subscriptionEvent('evt_failed_0', t0, 'sub_a');
+			const paid = invoicePaidEvent('evt_paid', t0 + 500, 'sub_a');
+			const f1 = subscriptionEvent('evt_failed_1', t0 + 600, 'sub_a');
+			const update = subscriptionEvent('evt_update', t0 + 86_400, 'sub_a');
+			await deliver(f0);
+			if (order === 'payment-between-failures') {
+				await deliver(paid);
+				await deliver(f1);
+				await deliver(update);
+			} else {
+				await deliver(f1);
+				await deliver(update);
+				await deliver(paid);
+			}
+			expect(await billingRow()).toMatchObject({
+				status: 'past_due',
+				interruption_started_at: iso(t0 + 600),
+				grace_until: iso(t0 + 600 + 30 * 86_400),
+				last_successful_payment_at: iso(t0 + 500)
+			});
+		}
+	);
+
 	test('a paid invoice older than a newer failure keeps the newer grace window', async () => {
 		const repository = new BillingRepository(database);
 		const { stripe, subscriptions } = fakeStripe();

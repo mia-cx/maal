@@ -97,12 +97,19 @@ export const stripeEvents = sqliteTable(
 		attempts: integer('attempts').notNull().default(0),
 		receivedAt: text('received_at').notNull(),
 		processedAt: text('processed_at'),
-		safeErrorCode: text('safe_error_code')
+		safeErrorCode: text('safe_error_code'),
+		stripeSubscriptionId: text('stripe_subscription_id'),
+		stripeCreatedAt: text('stripe_created_at'),
+		projectedStatus: text('projected_status')
 	},
 	(table) => [
 		enumCheck('stripe_events_state_check', table.state, stripeEventStateValues),
 		check('stripe_events_attempts_nonnegative', nonNegative(table.attempts)),
-		index('stripe_events_processing_idx').on(table.state, table.receivedAt)
+		index('stripe_events_processing_idx').on(table.state, table.receivedAt),
+		index('stripe_events_subscription_created_idx').on(
+			table.stripeSubscriptionId,
+			table.stripeCreatedAt
+		)
 	]
 );
 

@@ -360,9 +360,17 @@ export class BillingRepository {
 			...(paidAt ? [this.paymentResetStatement(projection, paidAt)] : []),
 			this.database
 				.prepare(
-					`UPDATE stripe_events SET state = 'processed', processed_at = ?, safe_error_code = NULL WHERE stripe_event_id = ?`
+					`UPDATE stripe_events SET state = 'processed', processed_at = ?, safe_error_code = NULL,
+						stripe_subscription_id = ?, stripe_created_at = ?, projected_status = ?
+					 WHERE stripe_event_id = ?`
 				)
-				.bind(processedAt, eventId)
+				.bind(
+					processedAt,
+					projection.stripeSubscriptionId,
+					projection.eventCreatedAt,
+					projection.status,
+					eventId
+				)
 		]);
 	}
 
@@ -615,11 +623,12 @@ export class BillingRepository {
 
 	/**
 	 * A successful payment is a monotonic fact, so it applies outside the event-recency guard. On
-	 * an interrupted row an interruption at or before the payment is over: if a later event (the
-	 * next failure) already projected, the window restarts at that event's time, otherwise it opens
-	 * provisionally at the payment time — either way it reads as ended for the next failure event,
-	 * which replaces it with a fresh start. Uninterrupted rows only keep a newer interruption.
-	 * All SET expressions read pre-update values.
+	 * an interrupted row an interruption at or before the payment is over: the window restarts at
+	 * the first projected event after the payment that left the subscription interrupted — read
+	 * from stripe_events, so a later update cannot smuggle in its own timestamp — or, when none
+	 * has been projected yet, provisionally at the payment time, which the next failure replaces.
+	 * Uninterrupted rows only keep a newer interruption. SET expressions read pre-update values;
+	 * the paid event itself is excluded by `stripe_created_at > paidAt`.
 	 */
 	private paymentResetStatement(
 		projection: SubscriptionProjectionWrite,
@@ -633,8 +642,12 @@ export class BillingRepository {
 						WHEN status IN ('past_due', 'paused') THEN CASE
 							WHEN interruption_started_at IS NOT NULL AND interruption_started_at > ?1
 								THEN interruption_started_at
-							WHEN last_stripe_event_created_at > ?1 THEN last_stripe_event_created_at
-							ELSE ?1 END
+							ELSE COALESCE(
+								(SELECT MIN(stripe_created_at) FROM stripe_events
+									WHERE stripe_subscription_id = ?3 AND state = 'processed'
+										AND projected_status IN ('past_due', 'paused')
+										AND stripe_created_at > ?1),
+								?1) END
 						WHEN interruption_started_at IS NULL OR interruption_started_at > ?1
 							THEN interruption_started_at
 						ELSE NULL END,
@@ -642,9 +655,12 @@ export class BillingRepository {
 						WHEN status IN ('past_due', 'paused') THEN CASE
 							WHEN interruption_started_at IS NOT NULL AND interruption_started_at > ?1
 								THEN grace_until
-							WHEN last_stripe_event_created_at > ?1
-								THEN strftime('%Y-%m-%dT%H:%M:%fZ', last_stripe_event_created_at, '+${BILLING_GRACE_DAYS} days')
-							ELSE strftime('%Y-%m-%dT%H:%M:%fZ', ?1, '+${BILLING_GRACE_DAYS} days') END
+							ELSE strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(
+								(SELECT MIN(stripe_created_at) FROM stripe_events
+									WHERE stripe_subscription_id = ?3 AND state = 'processed'
+										AND projected_status IN ('past_due', 'paused')
+										AND stripe_created_at > ?1),
+								?1), '+${BILLING_GRACE_DAYS} days') END
 						WHEN interruption_started_at IS NULL OR interruption_started_at > ?1 THEN grace_until
 						ELSE NULL END
 				 WHERE household_id = ?2 AND stripe_subscription_id = ?3`
