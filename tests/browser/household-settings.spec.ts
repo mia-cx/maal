@@ -199,10 +199,10 @@ test('preserves appliance drafts across focus refreshes and saves them', async (
 	await expect
 		.poll(() => {
 			window.dispatchEvent(new FocusEvent('focus'));
-			return refreshes.length;
+			return screen.getByText('Bob de Vries').query() !== null;
 		})
-		.toBeGreaterThanOrEqual(2);
-	await expect.element(screen.getByText('Bob de Vries')).toBeVisible();
+		.toBe(true);
+	expect(refreshes.length).toBeGreaterThanOrEqual(2);
 	await expect.element(oven).toBeChecked();
 	await screen.getByRole('button', { name: 'Save appliances' }).click();
 	await expect
