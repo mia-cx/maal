@@ -415,6 +415,61 @@ describe('Stripe grace projection', () => {
 		}
 	);
 
+	test.each(['past_due', 'paused'] as const)(
+		'a recovery payment restores expired grace while the next failure snapshot is pending: %s',
+		async (status) => {
+			const repository = new BillingRepository(database);
+			const { stripe, subscriptions } = fakeStripe();
+			subscriptions.set('sub_a', sub('sub_a', status));
+			const paidAt = t0 + 31 * 86_400;
+			const failedAt = paidAt + 100;
+			const now = iso(failedAt + 100);
+			const deliver = (event: Stripe.Event) =>
+				processStripeWebhook({ stripe, repository, event, receivedAt: now });
+
+			await deliver(
+				subscriptionEvent('evt_failed_0', t0, 'sub_a', 'customer.subscription.updated', status)
+			);
+			await deliver({
+				...invoicePaidEvent('evt_failed_invoice', failedAt, 'sub_a'),
+				type: 'invoice.payment_failed'
+			} as Stripe.Event);
+			await expect(authorizeHousehold(now)).rejects.toMatchObject({
+				code: 'maal_plan_required'
+			});
+
+			await deliver(invoicePaidEvent('evt_paid', paidAt, 'sub_a'));
+			expect(await billingRow()).toMatchObject({
+				status,
+				interruption_started_at: iso(paidAt),
+				grace_until: iso(paidAt + 30 * 86_400),
+				last_successful_payment_at: iso(paidAt)
+			});
+			await expect(authorizeHousehold(now)).resolves.toBeTruthy();
+			await expect(authorizeHousehold(iso(paidAt + 30 * 86_400 + 1))).rejects.toMatchObject({
+				code: 'maal_plan_required'
+			});
+
+			// The stale snapshot must replace the provisional payment-time window with exact evidence.
+			await deliver(
+				subscriptionEvent(
+					'evt_failed_1',
+					failedAt,
+					'sub_a',
+					'customer.subscription.updated',
+					status
+				)
+			);
+			expect(await billingRow()).toMatchObject({
+				status,
+				interruption_started_at: iso(failedAt),
+				grace_until: iso(failedAt + 30 * 86_400),
+				last_successful_payment_at: iso(paidAt)
+			});
+			await expect(authorizeHousehold(now)).resolves.toBeTruthy();
+		}
+	);
+
 	test.each(['payment-between-failures', 'failures-before-payment'] as const)(
 		'a late recovery payment restarts grace at the first failure after it: %s',
 		async (order) => {

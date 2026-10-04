@@ -650,10 +650,9 @@ export class BillingRepository {
 
 	/**
 	 * A successful payment is a monotonic fact, so it applies outside the event-recency guard: the
-	 * payment timestamp only moves forward, and an open (active/trialing) row drops an
-	 * interruption the payment ended. Interrupted rows keep their timestamps here; the
-	 * interruption recompute — which runs after this statement in the same batch — derives them
-	 * purely from the recorded events, in any delivery order.
+	 * payment timestamp only moves forward, and an open row drops an interruption it ended.
+	 * Interrupted rows provisionally restart an ended window at payment time; the recompute
+	 * later in the same batch replaces it with recorded failure evidence when available.
 	 */
 	private paymentResetStatement(
 		projection: SubscriptionProjectionWrite,
@@ -664,12 +663,16 @@ export class BillingRepository {
 				`UPDATE billing_subscriptions SET
 					last_successful_payment_at = MAX(COALESCE(last_successful_payment_at, ?1), ?1),
 					interruption_started_at = CASE
-						WHEN status IN ('past_due', 'paused') THEN interruption_started_at
+						WHEN status IN ('past_due', 'paused') THEN CASE
+							WHEN interruption_started_at > ?1 THEN interruption_started_at
+							ELSE ?1 END
 						WHEN interruption_started_at IS NULL OR interruption_started_at > ?1
 							THEN interruption_started_at
 						ELSE NULL END,
 					grace_until = CASE
-						WHEN status IN ('past_due', 'paused') THEN grace_until
+						WHEN status IN ('past_due', 'paused') THEN CASE
+							WHEN interruption_started_at > ?1 THEN grace_until
+							ELSE strftime('%Y-%m-%dT%H:%M:%fZ', ?1, '+${BILLING_GRACE_DAYS} days') END
 						WHEN interruption_started_at IS NULL OR interruption_started_at > ?1 THEN grace_until
 						ELSE NULL END
 				 WHERE household_id = ?2 AND stripe_subscription_id = ?3`
