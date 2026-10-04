@@ -564,9 +564,10 @@ export class BillingRepository {
 	}
 
 	/**
-	 * A successful payment is a monotonic fact, so it applies outside the event-recency guard: any
-	 * interruption that began at or before the payment is over. If Stripe already reports a newer
-	 * interruption, its window restarts no earlier than the newest projected event.
+	 * A successful payment is a monotonic fact, so it applies outside the event-recency guard. For
+	 * an interrupted row the window is left untouched: its timestamps stay at or before the new
+	 * last_successful_payment_at, which marks them ended for the next failure event. For an
+	 * uninterrupted row only a stale interruption newer than the payment is kept.
 	 */
 	private paymentResetStatement(
 		projection: SubscriptionProjectionWrite,
@@ -577,14 +578,13 @@ export class BillingRepository {
 				`UPDATE billing_subscriptions SET
 					last_successful_payment_at = MAX(COALESCE(last_successful_payment_at, ?1), ?1),
 					interruption_started_at = CASE
+						WHEN status IN ('past_due', 'paused') THEN interruption_started_at
 						WHEN interruption_started_at IS NULL OR interruption_started_at > ?1
 							THEN interruption_started_at
-						WHEN status IN ('past_due', 'paused') THEN last_stripe_event_created_at
 						ELSE NULL END,
 					grace_until = CASE
+						WHEN status IN ('past_due', 'paused') THEN grace_until
 						WHEN interruption_started_at IS NULL OR interruption_started_at > ?1 THEN grace_until
-						WHEN status IN ('past_due', 'paused')
-							THEN strftime('%Y-%m-%dT%H:%M:%fZ', last_stripe_event_created_at, '+${BILLING_GRACE_DAYS} days')
 						ELSE NULL END
 				 WHERE household_id = ?2 AND stripe_subscription_id = ?3`
 			)

@@ -55,9 +55,18 @@ export const projectionFromStripeSubscription = (input: {
 	if (!customerId || !priceId || !currentPeriodEnd) throw new BillingProjectionError();
 	const status = effectiveStripeStatus(input.subscription);
 	const sameSubscription = input.existing?.stripeSubscriptionId === input.subscription.id;
+	// An interruption that began at or before the last successful payment is over, so a paid
+	// event delivered before its failure event cannot anchor the new grace window.
+	const priorInterruption = sameSubscription
+		? (input.existing?.interruptionStartedAt ?? null)
+		: null;
+	const interruptionIsOver =
+		priorInterruption !== null &&
+		input.existing?.lastSuccessfulPaymentAt != null &&
+		priorInterruption <= input.existing.lastSuccessfulPaymentAt;
 	const grace = graceWindowForStatus(
 		status,
-		sameSubscription ? (input.existing?.interruptionStartedAt ?? null) : null,
+		interruptionIsOver ? null : priorInterruption,
 		input.eventCreatedAt,
 		// A paid invoice for an earlier period does not end an interruption Stripe still reports.
 		input.paidPeriodSucceeded && (status === 'active' || status === 'trialing')

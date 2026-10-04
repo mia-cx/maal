@@ -277,6 +277,28 @@ describe('Stripe grace projection', () => {
 		await expect(authorizeHousehold(iso(t0 + 3_500_001))).resolves.toBeTruthy();
 	});
 
+	test.each(['paid-then-failed', 'failed-then-paid'] as const)(
+		'a payment and its failure open the same grace window in either delivery order: %s',
+		async (order) => {
+			const repository = new BillingRepository(database);
+			const { stripe, subscriptions } = fakeStripe();
+			subscriptions.set('sub_a', sub('sub_a', 'past_due'));
+			const deliver = (event: Stripe.Event) =>
+				processStripeWebhook({ stripe, repository, event, receivedAt: iso(event.created) });
+			const paid = invoicePaidEvent('evt_paid', t0, 'sub_a');
+			const failed = subscriptionEvent('evt_failed', t0 + 500, 'sub_a');
+			for (const event of order === 'paid-then-failed' ? [paid, failed] : [failed, paid]) {
+				await deliver(event);
+			}
+			expect(await billingRow()).toMatchObject({
+				status: 'past_due',
+				interruption_started_at: iso(t0 + 500),
+				grace_until: iso(t0 + 500 + 30 * 86_400),
+				last_successful_payment_at: iso(t0)
+			});
+		}
+	);
+
 	test('a paid invoice older than a newer failure keeps the newer grace window', async () => {
 		const repository = new BillingRepository(database);
 		const { stripe, subscriptions } = fakeStripe();
