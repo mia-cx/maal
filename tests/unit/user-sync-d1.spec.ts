@@ -26,6 +26,7 @@ import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js
 
 const userId = 'user_alice';
 const timestamp = '2026-08-21T12:00:00.000Z' as const;
+const FIRST_PAGE = { afterEntityKey: null, limit: 100, manifest: [] };
 let miniflare: Miniflare;
 let database: D1Database;
 const liveMembership = (overrides: Partial<LiveWorkOSMembership> = {}): LiveWorkOSMembership => ({
@@ -430,13 +431,73 @@ describe('D1 user sync repository', () => {
 		).rejects.toMatchObject({
 			_tag: 'SyncBootstrapRequired'
 		});
-		const snapshot = await repository.bootstrap(userId);
+		const snapshot = await repository.bootstrap(userId, FIRST_PAGE);
 		expect(snapshot.aggregates).toHaveLength(1);
 		expect(snapshot.aggregates[0]).toMatchObject({
 			entityKind: 'unitUserEntry',
 			entityId,
 			aggregate: { toBaseFactor: 8 }
 		});
+	});
+
+	test('a commit landing after the watermark read still reaches the bootstrap page', async () => {
+		const concurrent = new D1UserSyncRepository(database);
+		const entityId = uuidv7();
+		let injected = false;
+		// Resolve the scope-state read, then commit a new entity before the
+		// identity listing runs — the page must contain it (or the watermark
+		// must not cover it).
+		const intercepted: D1Database = new Proxy(database, {
+			get(target, property) {
+				if (property !== 'prepare') {
+					const value = Reflect.get(target, property);
+					return typeof value === 'function' ? value.bind(target) : value;
+				}
+				return (sql: string) => {
+					const statement = target.prepare(sql);
+					if (!sql.includes('FROM sync_scope_state')) return statement;
+					return new Proxy(statement, {
+						get(inner, innerProperty) {
+							if (innerProperty !== 'bind') {
+								const value = Reflect.get(inner, innerProperty);
+								return typeof value === 'function' ? value.bind(inner) : value;
+							}
+							return (...args: unknown[]) => {
+								const bound = (inner.bind as (...a: unknown[]) => D1PreparedStatement)(...args);
+								return new Proxy(bound, {
+									get(boundTarget, boundProperty) {
+										if (boundProperty !== 'first') {
+											const value = Reflect.get(boundTarget, boundProperty);
+											return typeof value === 'function' ? value.bind(boundTarget) : value;
+										}
+										return async () => {
+											const result = await bound.first();
+											if (!injected) {
+												injected = true;
+												await concurrent.commit({
+													actorUserId: userId,
+													deviceId,
+													mutation: mutation(entityId, uuidv7(), '2026-08-22T12:00:00.000Z', 3),
+													mode: 'live',
+													receivedAt: '2026-08-22T12:00:00.000Z'
+												});
+											}
+											return result;
+										};
+									}
+								});
+							};
+						}
+					});
+				};
+			}
+		});
+		const repository = new D1UserSyncRepository(intercepted);
+		const snapshot = await repository.bootstrap(userId, FIRST_PAGE);
+		expect(injected).toBe(true);
+		expect(snapshot.aggregates).toEqual(
+			expect.arrayContaining([expect.objectContaining({ entityId })])
+		);
 	});
 
 	test('writes and rehydrates complete normalized recipe aggregates and retained purge tombstones', async () => {
@@ -471,7 +532,7 @@ describe('D1 user sync repository', () => {
 				.bind(entityId)
 				.first()
 		).resolves.toEqual({ original_text: '2 g salt' });
-		const createdSnapshot = await repository.bootstrap(userId);
+		const createdSnapshot = await repository.bootstrap(userId, FIRST_PAGE);
 		expect(createdSnapshot.aggregates[0]?.aggregate).toMatchObject({
 			title: 'Soup',
 			ingredients: [{ originalText: '2 g salt', optional: false }]
@@ -520,7 +581,7 @@ describe('D1 user sync repository', () => {
 				.bind(entityId)
 				.first()
 		).resolves.toEqual({ deletion_sequence: 2 });
-		const deletedSnapshot = await repository.bootstrap(userId);
+		const deletedSnapshot = await repository.bootstrap(userId, FIRST_PAGE);
 		expect(deletedSnapshot.aggregates).toContainEqual(
 			expect.objectContaining({
 				entityId,

@@ -1,24 +1,44 @@
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
 import { isRecipeAggregate, type StoredRecipe } from '$lib/domain/recipes/schema.js';
-import type {
-	MutationReceipt,
-	SyncChange,
-	SyncMutation,
-	UserSyncEntityKind
+import {
+	USER_SYNC_ENTITY_KINDS,
+	type MutationReceipt,
+	type SyncChange,
+	type SyncMutation,
+	type UserSyncEntityKind
 } from '$lib/sync/contracts.js';
 import { decodeUserSyncAggregate } from '$lib/sync/user-entities.js';
 import { pruneSyncRetentionBatch } from '$lib/server/maintenance/sync-retention.js';
 
+import {
+	COMMIT_RACED,
+	JSON_IDENTITIES,
+	JSON_IDS,
+	MAX_COMMIT_ATTEMPTS,
+	assertIdentifier,
+	camelize,
+	entityHeadSql,
+	groupBy,
+	heldManifestKeys,
+	identitiesJson,
+	kindLiteral,
+	listHeldIdentities,
+	queryAll,
+	readSidecars,
+	type CommitResult,
+	type EntityIdentity,
+	type SqlValue
+} from './d1-snapshot.js';
+import { ServerSyncUnavailable } from './errors.js';
 import { incomingWinsHistoricalConflict, type WinningClock } from './reconciliation.js';
 import {
 	syncEntityKey,
-	type ServerBootstrapSnapshot,
+	type ServerBootstrapPage,
+	type ServerBootstrapPageRequest,
 	type ServerSyncPage,
 	type ServerSyncScopeState,
 	type UserSyncRepository
 } from './repository.js';
-
-type SqlValue = string | number | null | ArrayBuffer;
 
 interface ScopeRow {
 	bootstrap_generation: number;
@@ -232,13 +252,6 @@ const SIDE_CARS = [
 
 const camelToSnake = (value: string): string =>
 	value.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-const snakeToCamel = (value: string): string =>
-	value.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
-
-const assertIdentifier = (value: string): string => {
-	if (!/^[a-z_][a-z0-9_]*$/.test(value)) throw new TypeError('Unsafe SQL identifier.');
-	return `"${value}"`;
-};
 
 const sqlValue = (value: unknown): SqlValue => {
 	if (value === undefined) return null;
@@ -275,18 +288,6 @@ const upsert = (
 		ON CONFLICT (${conflictColumns.map(assertIdentifier).join(', ')}) DO UPDATE SET
 		${updates.map((column) => `${assertIdentifier(column)} = excluded.${assertIdentifier(column)}`).join(', ')}`;
 	return database.prepare(sql).bind(...columns.map((column) => row[column]!));
-};
-
-const camelize = (
-	row: Record<string, unknown>,
-	omitted: readonly string[] = []
-): Record<string, unknown> => {
-	const omit = new Set(omitted);
-	return Object.fromEntries(
-		Object.entries(row)
-			.filter(([key]) => !omit.has(key))
-			.map(([key, value]) => [snakeToCamel(key), value])
-	);
 };
 
 const decodeStoredPayload = (encoded: string): StoredChangePayload => {
@@ -558,82 +559,158 @@ const conflictClocks = (versions: readonly VersionRow[]) =>
 		])
 	);
 
-const readNormalizedAggregate = async (
+/** The normalized table and owner column that hold a user entity kind's current row. */
+const entityTable = (kind: UserSyncEntityKind): readonly [table: string, owner: string] =>
+	kind === 'recipe' ? ['recipes', 'owner_user_id'] : [USER_TABLES[kind], 'workos_user_id'];
+
+export type UserEntityIdentity = EntityIdentity<UserSyncEntityKind>;
+
+const audience = (workosUserId: string) => ({ kind: 'user' as const, id: workosUserId });
+
+/**
+ * SQL that is true when the user still holds a readable aggregate for the version row `v`: a
+ * normalized row, a retained recipe change, or a tombstone change. `?1` must bind the user ID.
+ */
+const HELD_ENTITY_SQL = `(
+	CASE v.entity_kind ${USER_SYNC_ENTITY_KINDS.map((kind) => {
+		const [table, owner] = entityTable(kind);
+		return `WHEN ${kindLiteral(kind)} THEN EXISTS (SELECT 1 FROM ${assertIdentifier(table)} r
+			WHERE r.id = v.entity_id AND r.${assertIdentifier(owner)} = ?1)`;
+	}).join(' ')} ELSE 0 END
+	OR (v.entity_kind = 'recipe' AND EXISTS (SELECT 1 FROM sync_changes c
+		WHERE c.audience_kind = 'user' AND c.audience_id = ?1
+		AND c.entity_kind = v.entity_kind AND c.entity_id = v.entity_id))
+	OR EXISTS (SELECT 1 FROM sync_tombstones t JOIN sync_changes c ON c.seq = t.deletion_sequence
+		WHERE t.audience_kind = 'user' AND t.audience_id = ?1
+		AND t.entity_kind = v.entity_kind AND t.entity_id = v.entity_id)
+)`;
+
+/**
+ * Reads the current snapshot change for each held identity in a fixed number of statements:
+ * versions, one row query per kind, the recipe sidecars, and fallbacks for rows that are gone.
+ * Identities the user does not hold are left out. Results keep the input order.
+ */
+const readSnapshotChanges = async (
 	database: D1Database,
 	workosUserId: string,
-	entityKind: UserSyncEntityKind,
-	entityId: string
-): Promise<unknown | null> => {
-	const versions = await readVersions(database, workosUserId, entityKind, entityId);
-	if (entityKind !== 'recipe') {
-		const table = USER_TABLES[entityKind];
-		const row = await database
-			.prepare(`SELECT * FROM ${assertIdentifier(table)} WHERE id = ? AND workos_user_id = ?`)
-			.bind(entityId, workosUserId)
-			.first<Record<string, unknown>>();
-		return row ? { ...camelize(row), conflictClocks: conflictClocks(versions) } : null;
-	}
-	const row = await database
-		.prepare('SELECT * FROM recipes WHERE id = ? AND owner_user_id = ?')
-		.bind(entityId, workosUserId)
-		.first<Record<string, unknown>>();
-	if (!row) return readLatestChangedAggregate(database, workosUserId, entityKind, entityId);
-	const query = async (sql: string, ...values: SqlValue[]) =>
-		(
-			await database
-				.prepare(sql)
-				.bind(...values)
-				.all<Record<string, unknown>>()
-		).results;
-	const [
-		ingredients,
-		instructions,
-		instructionEvents,
-		applianceRequirements,
-		classifications,
-		media,
-		nutritionFacts
-	] = await Promise.all([
-		query('SELECT * FROM recipe_ingredients WHERE recipe_id = ? ORDER BY line_index', entityId),
-		query('SELECT * FROM recipe_instructions WHERE recipe_id = ? ORDER BY step_index', entityId),
-		query(
-			'SELECT e.* FROM recipe_instruction_events e JOIN recipe_instructions i ON i.id = e.recipe_instruction_id WHERE i.recipe_id = ?',
-			entityId
+	identities: readonly UserEntityIdentity[]
+): Promise<SyncChange[]> => {
+	if (identities.length === 0) return [];
+	const idsByKind = groupBy(identities, ({ entityKind }) => entityKind);
+	const recipeIds = idsByKind.get('recipe')?.map(({ entityId }) => entityId) ?? [];
+	const [versionRows, rowGroups, sidecars] = await Promise.all([
+		queryAll<VersionRow & { entity_kind: UserSyncEntityKind; entity_id: string }>(
+			database,
+			`SELECT entity_kind, entity_id, conflict_group, revision, last_sequence, winning_occurred_at,
+			 winning_origin_device_id, winning_mutation_id, winning_actor_user_id, winning_received_at
+			 FROM sync_entity_versions
+			 WHERE audience_kind = 'user' AND audience_id = ?
+			 AND (entity_kind, entity_id) IN (${JSON_IDENTITIES})`,
+			workosUserId,
+			identitiesJson(identities)
 		),
-		query('SELECT * FROM recipe_appliance_requirements WHERE recipe_id = ?', entityId),
-		query('SELECT * FROM recipe_classifications WHERE recipe_id = ?', entityId),
-		query('SELECT * FROM recipe_media WHERE recipe_id = ? ORDER BY position', entityId),
-		query('SELECT * FROM recipe_nutrition_facts WHERE recipe_id = ?', entityId)
+		Promise.all(
+			[...idsByKind.entries()].map(async ([kind, group]) => {
+				const [table, owner] = entityTable(kind as UserSyncEntityKind);
+				const rows = await queryAll(
+					database,
+					`SELECT * FROM ${assertIdentifier(table)}
+					 WHERE ${assertIdentifier(owner)} = ? AND id IN (${JSON_IDS})`,
+					workosUserId,
+					JSON.stringify(group.map(({ entityId }) => entityId))
+				);
+				return rows.map((row) => ({
+					key: syncEntityKey(kind as UserSyncEntityKind, String(row.id)),
+					row
+				}));
+			})
+		),
+		recipeIds.length > 0 ? readSidecars(database, 'recipe', recipeIds) : new Map()
 	]);
-	const booleanize = (record: Record<string, unknown>, keys: readonly string[]) => {
-		const result = camelize(record, ['recipe_id']);
-		for (const key of keys) if (key in result) result[key] = result[key] === 1;
-		return result;
-	};
-	return {
-		...camelize(row),
-		conflictClocks: conflictClocks(versions),
-		searchTokens: [],
-		ingredients: ingredients.map((item) => booleanize(item, ['optional'])),
-		instructions: instructions.map((item) => camelize(item, ['recipe_id'])),
-		instructionEvents: instructionEvents.map((item) => camelize(item)),
-		applianceRequirements: applianceRequirements.map((item) => booleanize(item, ['required'])),
-		classifications: classifications.map((item) => camelize(item, ['recipe_id'])),
-		media: media.map((item) => camelize(item, ['recipe_id'])),
-		nutritionFacts: nutritionFacts.map((item) => camelize(item, ['recipe_id']))
-	};
+	const versionsByKey = groupBy(versionRows, (row) =>
+		syncEntityKey(row.entity_kind, row.entity_id)
+	);
+	const rowsByKey = new Map(rowGroups.flat().map(({ key, row }) => [key, row]));
+	const missing = identities.filter(
+		({ entityKind, entityId }) => !rowsByKey.has(syncEntityKey(entityKind, entityId))
+	);
+	const missingRecipes = missing.filter(({ entityKind }) => entityKind === 'recipe');
+	const [latestRecipeRows, tombstoneRows] =
+		missing.length === 0
+			? [[], []]
+			: await Promise.all([
+					missingRecipes.length === 0
+						? []
+						: queryAll<{ entity_id: string; payload: string }>(
+								database,
+								`SELECT entity_id, payload, MAX(seq) AS seq FROM sync_changes
+								 WHERE audience_kind = 'user' AND audience_id = ? AND entity_kind = 'recipe'
+								 AND entity_id IN (${JSON_IDS})
+								 GROUP BY entity_id`,
+								workosUserId,
+								JSON.stringify(missingRecipes.map(({ entityId }) => entityId))
+							),
+					queryAll<ChangeRow>(
+						database,
+						`SELECT c.* FROM sync_tombstones t
+						 JOIN sync_changes c ON c.seq = t.deletion_sequence
+						 WHERE t.audience_kind = 'user' AND t.audience_id = ?
+						 AND (t.entity_kind, t.entity_id) IN (${JSON_IDENTITIES})`,
+						workosUserId,
+						identitiesJson(missing)
+					)
+				]);
+	const latestRecipes = new Map(
+		latestRecipeRows.map((row) => [
+			syncEntityKey('recipe', row.entity_id),
+			decodeStoredPayload(row.payload).payload.aggregate
+		])
+	);
+	const tombstones = new Map(
+		tombstoneRows.map((row) => [
+			syncEntityKey(row.entity_kind as UserSyncEntityKind, row.entity_id),
+			changeFromRow(row)
+		])
+	);
+
+	const changes: SyncChange[] = [];
+	for (const { entityKind, entityId } of identities) {
+		const key = syncEntityKey(entityKind, entityId);
+		const versions = versionsByKey.get(key);
+		const row = rowsByKey.get(key);
+		if (versions && row) {
+			const clocks = conflictClocks(versions);
+			changes.push(
+				syntheticChange(
+					entityKind,
+					entityId,
+					entityKind === 'recipe'
+						? {
+								...camelize(row),
+								conflictClocks: clocks,
+								searchTokens: [],
+								...sidecars.get(entityId)
+							}
+						: { ...camelize(row), conflictClocks: clocks },
+					versions
+				)
+			);
+		} else if (versions && latestRecipes.has(key)) {
+			changes.push(syntheticChange(entityKind, entityId, latestRecipes.get(key), versions));
+		} else if (tombstones.has(key)) {
+			changes.push(tombstones.get(key)!);
+		}
+	}
+	return changes;
 };
 
-const syntheticChange = async (
-	database: D1Database,
-	workosUserId: string,
+const syntheticChange = (
 	entityKind: UserSyncEntityKind,
 	entityId: string,
-	aggregate: unknown
-): Promise<SyncChange | null> => {
-	const versions = await readVersions(database, workosUserId, entityKind, entityId);
-	const winner = versions.toSorted((left, right) => right.last_sequence - left.last_sequence)[0];
-	if (!winner) return null;
+	aggregate: unknown,
+	versions: readonly VersionRow[]
+): SyncChange => {
+	const winner = versions.toSorted((left, right) => right.last_sequence - left.last_sequence)[0]!;
 	const record = aggregate as { deletedAt?: string | null };
 	return {
 		sequence: winner.last_sequence,
@@ -650,6 +727,10 @@ const syntheticChange = async (
 		tombstoneExpiresAt: null
 	};
 };
+
+const ENTITY_HEAD_SQL = entityHeadSql('user');
+
+type UserCommitInput = Parameters<UserSyncRepository['commit']>[0];
 
 export class D1UserSyncRepository implements UserSyncRepository {
 	constructor(private readonly database: D1Database) {}
@@ -680,80 +761,129 @@ export class D1UserSyncRepository implements UserSyncRepository {
 		};
 	}
 
-	async bootstrap(workosUserId: string): Promise<ServerBootstrapSnapshot> {
-		const state = await scopeState(this.database, workosUserId);
-		const aggregates: SyncChange[] = [];
-		const authoritativeIds = new Set<string>();
-		const kinds: readonly UserSyncEntityKind[] = [
-			'recipe',
-			...(Object.keys(USER_TABLES) as (keyof typeof USER_TABLES)[])
-		];
-		for (const entityKind of kinds) {
-			const table = entityKind === 'recipe' ? 'recipes' : USER_TABLES[entityKind];
-			const ownerColumn = entityKind === 'recipe' ? 'owner_user_id' : 'workos_user_id';
-			const ids = (
-				await this.database
-					.prepare(
-						`SELECT id FROM ${assertIdentifier(table)} WHERE ${assertIdentifier(ownerColumn)} = ?`
-					)
-					.bind(workosUserId)
-					.all<{ id: string }>()
-			).results;
-			for (const { id } of ids) {
-				const aggregate = await readNormalizedAggregate(
-					this.database,
-					workosUserId,
-					entityKind,
-					id
-				);
-				if (aggregate === null) continue;
-				const change = await syntheticChange(
-					this.database,
-					workosUserId,
-					entityKind,
-					id,
-					aggregate
-				);
-				if (!change) continue;
-				aggregates.push(change);
-				authoritativeIds.add(syncEntityKey(entityKind, id));
-			}
-		}
-		const tombstones = (
-			await this.database
-				.prepare(
-					`SELECT c.* FROM sync_changes c
-			 JOIN sync_tombstones t ON t.audience_kind = c.audience_kind AND t.audience_id = c.audience_id
-			   AND t.entity_kind = c.entity_kind AND t.entity_id = c.entity_id
-			 WHERE c.audience_kind = 'user' AND c.audience_id = ? AND c.seq = t.deletion_sequence`
-				)
-				.bind(workosUserId)
-				.all<ChangeRow>()
-		).results;
-		for (const row of tombstones) {
-			const change = changeFromRow(row);
-			const key = syncEntityKey(change.entityKind, change.entityId);
-			if (!authoritativeIds.has(key)) {
-				aggregates.push(change);
-				authoritativeIds.add(key);
-			}
-		}
-		aggregates.sort((left, right) => left.sequence - right.sequence);
-		return { ...state, aggregates, authoritativeIds };
+	/** Reads the held aggregates for these identities, in input order, at a fixed statement cost. */
+	readEntities(workosUserId: string, identities: readonly UserEntityIdentity[]) {
+		return readSnapshotChanges(this.database, workosUserId, identities);
 	}
 
-	async commit(input: {
-		actorUserId: string;
-		deviceId: string;
-		mutation: SyncMutation;
-		mode: 'live' | 'backfill';
-		receivedAt: string;
-	}): Promise<MutationReceipt> {
+	/** Reads every held aggregate of these kinds, in entity-key order. */
+	async readEntitiesOfKinds(workosUserId: string, kinds: readonly UserSyncEntityKind[]) {
+		const identities = await listHeldIdentities(
+			this.database,
+			audience(workosUserId),
+			HELD_ENTITY_SQL,
+			{ kinds }
+		);
+		return readSnapshotChanges(this.database, workosUserId, identities);
+	}
+
+	async bootstrap(
+		workosUserId: string,
+		page: ServerBootstrapPageRequest
+	): Promise<ServerBootstrapPage> {
+		// Read the watermark before the listing: a commit landing between them then
+		// appears on the page instead of being skipped above throughSequence.
+		const state = await scopeState(this.database, workosUserId);
+		const identities = await listHeldIdentities<UserSyncEntityKind>(
+			this.database,
+			audience(workosUserId),
+			HELD_ENTITY_SQL,
+			{ afterEntityKey: page.afterEntityKey, limit: page.limit + 1 }
+		);
+		const authoritativeIds = await heldManifestKeys(
+			this.database,
+			audience(workosUserId),
+			HELD_ENTITY_SQL,
+			page.manifest
+		);
+		const selected = identities.slice(0, page.limit);
+		const last = selected.at(-1);
+		return {
+			...state,
+			aggregates: await readSnapshotChanges(this.database, workosUserId, selected),
+			authoritativeIds,
+			nextEntityKey:
+				identities.length > page.limit && last
+					? syncEntityKey(last.entityKind, last.entityId)
+					: null
+		};
+	}
+
+	async commit(input: UserCommitInput): Promise<MutationReceipt> {
+		return (await this.commitWithResult(input)).receipt;
+	}
+
+	/**
+	 * Commits one mutation and returns the aggregate it stored. The merge base is read before the
+	 * write batch, so the batch only applies while the entity head is unchanged; a concurrent
+	 * commit makes it retry against the new head instead of overwriting the other edit.
+	 */
+	async commitWithResult(input: UserCommitInput): Promise<CommitResult> {
+		for (let attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt += 1) {
+			const result = await this.attemptCommit(input);
+			if (result !== COMMIT_RACED) return result;
+		}
+		throw new ServerSyncUnavailable({
+			code: 'commit_contention',
+			message: 'The entity kept changing while this mutation was committed.'
+		});
+	}
+
+	/** True when another commit moved the entity head or stored this mutation first. */
+	private async raced(input: UserCommitInput, head: number): Promise<boolean> {
+		const row = await this.database
+			.prepare(
+				`SELECT ${ENTITY_HEAD_SQL} AS head,
+				 EXISTS (SELECT 1 FROM sync_mutation_receipts WHERE mutation_id = ?) AS stored`
+			)
+			.bind(
+				input.actorUserId,
+				input.mutation.entityKind,
+				input.mutation.entityId,
+				input.mutation.mutationId
+			)
+			.first<{ head: number; stored: number }>();
+		return row !== null && (row.head !== head || row.stored === 1);
+	}
+
+	private async attemptCommit(input: UserCommitInput): Promise<CommitResult | typeof COMMIT_RACED> {
 		const existingReceipt = await this.database
 			.prepare('SELECT * FROM sync_mutation_receipts WHERE mutation_id = ?')
 			.bind(input.mutation.mutationId)
 			.first<ReceiptRow>();
-		if (existingReceipt) return receiptFromRow(existingReceipt, true);
+		if (existingReceipt) {
+			const receipt = receiptFromRow(existingReceipt, true);
+			// A batch that committed but threw retries here; the write did land, so
+			// return the stored aggregate instead of null.
+			const aggregate =
+				receipt.status === 'accepted' || receipt.status === 'duplicate'
+					? ((await readLatestChangedAggregate(
+							this.database,
+							input.actorUserId,
+							input.mutation.entityKind,
+							input.mutation.entityId
+						)) ??
+						(
+							await readSnapshotChanges(this.database, input.actorUserId, [
+								{
+									entityKind: input.mutation.entityKind,
+									entityId: input.mutation.entityId
+								}
+							])
+						)[0]?.aggregate)
+					: null;
+			return { receipt, aggregate: aggregate ?? null };
+		}
+		const rejected = async (code: string) => ({
+			receipt: await rejectMutation(
+				this.database,
+				input.actorUserId,
+				input.mutation,
+				input.receivedAt,
+				code
+			),
+			aggregate: null
+		});
 
 		const decodedIncoming = decodeUserSyncAggregate(
 			input.mutation.entityKind,
@@ -780,15 +910,7 @@ export class D1UserSyncRepository implements UserSyncRepository {
 				isRecipeAggregate(deletedAggregate as StoredRecipe) &&
 				isRecipeAggregate(decodedIncoming.aggregate as StoredRecipe) &&
 				decodedIncoming.aggregate.deletedAt === null;
-			if (!intentionalSoftDeleteRestore) {
-				return rejectMutation(
-					this.database,
-					input.actorUserId,
-					input.mutation,
-					input.receivedAt,
-					'tombstoned_entity'
-				);
-			}
+			if (!intentionalSoftDeleteRestore) return rejected('tombstoned_entity');
 		}
 		const versions = await readVersions(
 			this.database,
@@ -816,16 +938,9 @@ export class D1UserSyncRepository implements UserSyncRepository {
 		const receiptRetainUntil = new Date(
 			Date.parse(input.receivedAt) + 365 * 86_400_000
 		).toISOString();
-		if (acceptedGroups.length === 0) {
-			return rejectMutation(
-				this.database,
-				input.actorUserId,
-				input.mutation,
-				input.receivedAt,
-				'historical_loser'
-			);
-		}
+		if (acceptedGroups.length === 0) return rejected('historical_loser');
 
+		const head = Math.max(0, ...versions.map(({ last_sequence }) => last_sequence));
 		const current =
 			(await readLatestChangedAggregate(
 				this.database,
@@ -833,12 +948,12 @@ export class D1UserSyncRepository implements UserSyncRepository {
 				input.mutation.entityKind,
 				input.mutation.entityId
 			)) ??
-			(await readNormalizedAggregate(
-				this.database,
-				input.actorUserId,
-				input.mutation.entityKind,
-				input.mutation.entityId
-			));
+			(
+				await readSnapshotChanges(this.database, input.actorUserId, [
+					{ entityKind: input.mutation.entityKind, entityId: input.mutation.entityId }
+				])
+			)[0]?.aggregate ??
+			null;
 		const revision = Math.max(0, ...versions.map(({ revision }) => revision)) + 1;
 		const clock = {
 			occurredAt: input.mutation.occurredAt,
@@ -882,7 +997,8 @@ export class D1UserSyncRepository implements UserSyncRepository {
 				 (mutation_id, actor_user_id, origin_device_id, audience_kind, audience_id, entity_kind,
 				  entity_id, conflict_group, operation, resulting_revision, occurred_at, received_at,
 				  payload, tombstone_expires_at)
-				 VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				 VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?,
+				  CASE WHEN ${ENTITY_HEAD_SQL} = ? THEN ? END, ?)`
 				)
 				.bind(
 					input.mutation.mutationId,
@@ -896,6 +1012,11 @@ export class D1UserSyncRepository implements UserSyncRepository {
 					revision,
 					input.mutation.occurredAt,
 					input.receivedAt,
+					// A moved head leaves the payload NULL, which fails NOT NULL and rolls the batch back.
+					input.actorUserId,
+					input.mutation.entityKind,
+					input.mutation.entityId,
+					head,
 					payload,
 					tombstoneExpiresAt
 				)
@@ -1003,13 +1124,18 @@ export class D1UserSyncRepository implements UserSyncRepository {
 					.bind(input.actorUserId, input.mutation.entityKind, input.mutation.entityId)
 			);
 		}
-		await this.database.batch(statements);
+		try {
+			await this.database.batch(statements);
+		} catch (error) {
+			if (await this.raced(input, head)) return COMMIT_RACED;
+			throw error;
+		}
 		const receipt = await this.database
 			.prepare('SELECT * FROM sync_mutation_receipts WHERE mutation_id = ?')
 			.bind(input.mutation.mutationId)
 			.first<ReceiptRow>();
 		if (!receipt) throw new TypeError('The committed mutation has no receipt.');
-		return receiptFromRow(receipt);
+		return { receipt: receiptFromRow(receipt), aggregate: decodedResult.aggregate };
 	}
 
 	async prune(input: { now: string; changeCutoff: string }): Promise<void> {

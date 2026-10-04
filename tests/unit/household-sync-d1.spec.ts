@@ -21,6 +21,7 @@ const aliceId = 'user_alice';
 const bobId = 'user_bob';
 const timestamp = '2026-08-21T12:00:00.000Z' as const;
 const deviceId = uuidv7();
+const FIRST_PAGE = { afterEntityKey: null, limit: 100, manifest: [] };
 let miniflare: Miniflare;
 let database: D1Database;
 const liveMembership = (overrides: Partial<LiveWorkOSMembership> = {}): LiveWorkOSMembership => ({
@@ -241,7 +242,7 @@ describe('D1 household sync', () => {
 				receivedAt: timestamp
 			})
 		).resolves.toMatchObject({ status: 'accepted' });
-		await expect(repository.bootstrap(householdId)).resolves.toMatchObject({
+		await expect(repository.bootstrap(householdId, FIRST_PAGE)).resolves.toMatchObject({
 			aggregates: [
 				expect.objectContaining({
 					entityKind: 'household',
@@ -578,7 +579,7 @@ describe('D1 household sync', () => {
 			receivedAt: '2026-08-23T12:00:01.000Z'
 		});
 		expect(resurrection).toMatchObject({ status: 'rejected', errorCode: 'tombstoned_entity' });
-		const snapshot = await repository.bootstrap(householdId);
+		const snapshot = await repository.bootstrap(householdId, FIRST_PAGE);
 		expect(
 			snapshot.aggregates.find(({ entityId }) => entityId === mealId)?.aggregate
 		).toMatchObject({
@@ -613,6 +614,66 @@ describe('D1 household sync', () => {
 		).rejects.toMatchObject({ _tag: 'SyncBootstrapRequired', code: 'cursor_expired' });
 	});
 
+	test('a commit landing after the watermark read still reaches the bootstrap page', async () => {
+		const concurrent = new D1HouseholdSyncRepository(database);
+		const mealId = uuidv7();
+		let injected = false;
+		// Resolve the scope-state read, then commit a new meal before the
+		// identity listing runs — the page must contain it.
+		const intercepted: D1Database = new Proxy(database, {
+			get(target, property) {
+				if (property !== 'prepare') {
+					const value = Reflect.get(target, property);
+					return typeof value === 'function' ? value.bind(target) : value;
+				}
+				return (sql: string) => {
+					const statement = target.prepare(sql);
+					if (!sql.includes('FROM sync_scope_state')) return statement;
+					return new Proxy(statement, {
+						get(inner, innerProperty) {
+							if (innerProperty !== 'bind') {
+								const value = Reflect.get(inner, innerProperty);
+								return typeof value === 'function' ? value.bind(inner) : value;
+							}
+							return (...args: unknown[]) => {
+								const bound = (inner.bind as (...a: unknown[]) => D1PreparedStatement)(...args);
+								return new Proxy(bound, {
+									get(boundTarget, boundProperty) {
+										if (boundProperty !== 'first') {
+											const value = Reflect.get(boundTarget, boundProperty);
+											return typeof value === 'function' ? value.bind(boundTarget) : value;
+										}
+										return async () => {
+											const result = await bound.first();
+											if (!injected) {
+												injected = true;
+												await concurrent.commit({
+													householdId,
+													actorUserId: aliceId,
+													deviceId,
+													mutation: mealMutation(mealId, uuidv7(), '2026-08-22T12:00:00.000Z'),
+													mode: 'live',
+													receivedAt: '2026-08-22T12:00:00.000Z'
+												});
+											}
+											return result;
+										};
+									}
+								});
+							};
+						}
+					});
+				};
+			}
+		});
+		const repository = new D1HouseholdSyncRepository(intercepted);
+		const snapshot = await repository.bootstrap(householdId, FIRST_PAGE);
+		expect(injected).toBe(true);
+		expect(snapshot.aggregates).toEqual(
+			expect.arrayContaining([expect.objectContaining({ entityId: mealId })])
+		);
+	});
+
 	test('rebuilds bootstrap with its winning actor after ordinary changes are pruned', async () => {
 		const repository = new D1HouseholdSyncRepository(database);
 		const mealId = uuidv7();
@@ -629,7 +690,7 @@ describe('D1 household sync', () => {
 			changeCutoff: '2027-08-22T12:00:00.000Z'
 		});
 
-		const snapshot = await repository.bootstrap(householdId);
+		const snapshot = await repository.bootstrap(householdId, FIRST_PAGE);
 		expect(snapshot.aggregates).toHaveLength(1);
 		expect(snapshot.aggregates[0]).toMatchObject({
 			actorUserId: bobId,

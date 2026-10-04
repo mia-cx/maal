@@ -18,15 +18,29 @@ export interface HouseholdServerSyncPage extends HouseholdServerSyncScopeState {
 	readonly hasMore: boolean;
 }
 
-export interface HouseholdServerBootstrapSnapshot extends HouseholdServerSyncScopeState {
+export interface HouseholdServerBootstrapPageRequest {
+	readonly afterEntityKey: string | null;
+	readonly limit: number;
+	/** Local identities to check against the server; only the first page carries them. */
+	readonly manifest: readonly Pick<HouseholdSnapshotManifestEntry, 'entityKind' | 'entityId'>[];
+}
+
+export interface HouseholdServerBootstrapPage extends HouseholdServerSyncScopeState {
+	/** At most `limit` held aggregates after `afterEntityKey`, in entity-key order. */
 	readonly aggregates: readonly HouseholdSyncChange[];
+	/** The keys of the requested manifest entries the household still holds. */
 	readonly authoritativeIds: ReadonlySet<string>;
+	/** The key to request the next page after, or null on the last page. */
+	readonly nextEntityKey: string | null;
 }
 
 export interface HouseholdSyncRepository {
 	readScopeState(householdId: string): Promise<HouseholdServerSyncScopeState>;
 	pull(householdId: string, after: number, limit: number): Promise<HouseholdServerSyncPage>;
-	bootstrap(householdId: string): Promise<HouseholdServerBootstrapSnapshot>;
+	bootstrap(
+		householdId: string,
+		page: HouseholdServerBootstrapPageRequest
+	): Promise<HouseholdServerBootstrapPage>;
 	commit(input: {
 		readonly householdId: string;
 		readonly actorUserId: string;

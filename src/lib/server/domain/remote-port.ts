@@ -107,14 +107,37 @@ export class RemoteDomainError extends Error {
 	}
 }
 
-const mealFromSnapshot = (value: unknown): MealAggregate | null => {
+/** Decodes a stored aggregate, or null when it is missing or does not match its contract. */
+const fromSnapshot = <A, I>(schema: Schema.Schema<A, I>, value: unknown): A | null => {
 	try {
-		const decoded = Schema.decodeUnknownSync(MealAggregateSchema)(value);
-		return decoded.deletedAt === null ? decoded : null;
+		return Schema.decodeUnknownSync(schema)(value);
 	} catch {
 		return null;
 	}
 };
+
+const recipeFromSnapshot = (value: unknown): RecipeAggregate | null =>
+	fromSnapshot(RecipeAggregateSchema, value);
+
+const mealFromSnapshot = (value: unknown): MealAggregate | null => {
+	const decoded = fromSnapshot(MealAggregateSchema, value);
+	return decoded?.deletedAt === null ? decoded : null;
+};
+
+const checkInFromSnapshot = (value: unknown): MealCheckIn | null => {
+	const decoded = fromSnapshot(MealCheckInSchema, value);
+	return decoded?.deletedAt === null ? decoded : null;
+};
+
+const FOOD_PROFILE_KINDS = [
+	'foodUserAlias',
+	'foodUserEntry',
+	'unitUserAlias',
+	'unitUserEntry',
+	'userFoodPreference',
+	'userFoodDisplayPreference',
+	'userUnitDisplayPreference'
+] as const;
 
 export class D1RemoteDomainPort implements RemoteDomainPort {
 	private readonly users: D1UserSyncRepository;
@@ -143,22 +166,17 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 	}
 
 	async listUserRecipes(ownerUserId: string): Promise<readonly RecipeAggregate[]> {
-		const snapshot = await this.users.bootstrap(ownerUserId);
-		return snapshot.aggregates
-			.filter(({ entityKind }) => entityKind === 'recipe')
-			.map(({ aggregate }) => {
-				try {
-					const decoded = Schema.decodeUnknownSync(RecipeAggregateSchema)(aggregate);
-					return decoded;
-				} catch {
-					return null;
-				}
-			})
+		const changes = await this.users.readEntitiesOfKinds(ownerUserId, ['recipe']);
+		return changes
+			.map(({ aggregate }) => recipeFromSnapshot(aggregate))
 			.filter((recipe): recipe is RecipeAggregate => recipe !== null);
 	}
 
 	async getUserRecipe(ownerUserId: string, recipeId: string): Promise<RecipeAggregate | null> {
-		return (await this.listUserRecipes(ownerUserId)).find(({ id }) => id === recipeId) ?? null;
+		const [change] = await this.users.readEntities(ownerUserId, [
+			{ entityKind: 'recipe', entityId: recipeId }
+		]);
+		return change ? recipeFromSnapshot(change.aggregate) : null;
 	}
 
 	async writeUserRecipe(input: {
@@ -168,7 +186,7 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		operation: 'upsert' | 'delete';
 	}): Promise<RecipeAggregate> {
 		const now = new Date().toISOString() as `${string}Z`;
-		const receipt = await this.users.commit({
+		const { receipt, aggregate } = await this.users.commitWithResult({
 			actorUserId: input.actorUserId,
 			deviceId: uuidv7(),
 			mutation: {
@@ -189,21 +207,23 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 			throw new RemoteDomainError('write_rejected', 'The recipe command was rejected.');
 		}
 		if (input.operation === 'delete') return input.aggregate;
-		const result = await this.getUserRecipe(input.actorUserId, input.aggregate.id);
+		const result = recipeFromSnapshot(aggregate);
 		if (!result) throw new RemoteDomainError('not_found', 'The written recipe was not found.');
 		return result;
 	}
 
 	async listHouseholdMeals(householdId: string): Promise<readonly MealAggregate[]> {
-		const snapshot = await this.households.bootstrap(householdId);
-		return snapshot.aggregates
-			.filter(({ entityKind }) => entityKind === 'meal')
+		const changes = await this.households.readEntitiesOfKinds(householdId, ['meal']);
+		return changes
 			.map(({ aggregate }) => mealFromSnapshot(aggregate))
 			.filter((meal): meal is MealAggregate => meal !== null);
 	}
 
 	async getHouseholdMeal(householdId: string, mealId: string): Promise<MealAggregate | null> {
-		return (await this.listHouseholdMeals(householdId)).find(({ id }) => id === mealId) ?? null;
+		const [change] = await this.households.readEntities(householdId, [
+			{ entityKind: 'meal', entityId: mealId }
+		]);
+		return change ? mealFromSnapshot(change.aggregate) : null;
 	}
 
 	async writeHouseholdMeal(input: {
@@ -214,7 +234,7 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		operation: 'upsert' | 'delete';
 	}): Promise<MealAggregate> {
 		const now = new Date().toISOString() as `${string}Z`;
-		const receipt = await this.households.commit({
+		const { receipt, aggregate } = await this.households.commitWithResult({
 			householdId: input.householdId,
 			actorUserId: input.actorUserId,
 			deviceId: uuidv7(),
@@ -236,7 +256,7 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 			throw new RemoteDomainError('write_rejected', 'The meal command was rejected.');
 		}
 		if (input.operation === 'delete') return input.aggregate;
-		const result = await this.getHouseholdMeal(input.householdId, input.aggregate.id);
+		const result = mealFromSnapshot(aggregate);
 		if (!result) throw new RemoteDomainError('not_found', 'The written meal was not found.');
 		return result;
 	}
@@ -246,39 +266,41 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		mealId: string,
 		reporterUserId: string
 	): Promise<MealCheckIn | null> {
-		const snapshot = await this.households.bootstrap(householdId);
-		for (const change of snapshot.aggregates) {
-			if (change.entityKind !== 'meal_check_in') continue;
-			try {
-				const row = Schema.decodeUnknownSync(MealCheckInSchema)(change.aggregate);
-				if (
-					row.mealId === mealId &&
-					row.reporterUserId === reporterUserId &&
-					row.deletedAt === null
-				) {
-					return row;
-				}
-			} catch {
-				// A corrupt unrelated row cannot widen or satisfy the query.
-			}
-		}
-		return null;
+		const [checkIn] = await this.readMealCheckIns(householdId, { mealId, reporterUserId });
+		return checkIn ?? null;
 	}
 
-	async listMealCheckIns(householdId: string, mealId?: string): Promise<readonly MealCheckIn[]> {
-		const snapshot = await this.households.bootstrap(householdId);
-		return snapshot.aggregates
-			.filter(({ entityKind }) => entityKind === 'meal_check_in')
-			.map(({ aggregate }) => {
-				try {
-					return Schema.decodeUnknownSync(MealCheckInSchema)(aggregate);
-				} catch {
-					return null;
-				}
-			})
+	listMealCheckIns(householdId: string, mealId?: string): Promise<readonly MealCheckIn[]> {
+		return this.readMealCheckIns(householdId, { mealId });
+	}
+
+	/** Finds live check-in IDs in the normalized table, then reads only those aggregates. */
+	private async readMealCheckIns(
+		householdId: string,
+		filter: { mealId?: string; reporterUserId?: string }
+	): Promise<MealCheckIn[]> {
+		const { results } = await this.database
+			.prepare(
+				`SELECT id FROM meal_check_ins
+				 WHERE household_id = ?1 AND deleted_at IS NULL
+				 AND (?2 IS NULL OR meal_id = ?2) AND (?3 IS NULL OR reporter_user_id = ?3)
+				 ORDER BY id`
+			)
+			.bind(householdId, filter.mealId ?? null, filter.reporterUserId ?? null)
+			.all<{ id: string }>();
+		const changes = await this.households.readEntities(
+			householdId,
+			results.map(({ id }) => ({ entityKind: 'meal_check_in' as const, entityId: id }))
+		);
+		return changes
+			.map(({ aggregate }) => checkInFromSnapshot(aggregate))
 			.filter(
 				(row): row is MealCheckIn =>
-					row !== null && row.deletedAt === null && (!mealId || row.mealId === mealId)
+					row !== null &&
+					// Re-apply the filters: the check-in may have moved between the
+					// ID listing and this aggregate read.
+					(filter.mealId === undefined || row.mealId === filter.mealId) &&
+					(filter.reporterUserId === undefined || row.reporterUserId === filter.reporterUserId)
 			);
 	}
 
@@ -288,7 +310,7 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		aggregate: MealCheckIn;
 	}): Promise<MealCheckIn> {
 		const now = new Date().toISOString() as `${string}Z`;
-		const receipt = await this.households.commit({
+		const { receipt, aggregate } = await this.households.commitWithResult({
 			householdId: input.householdId,
 			actorUserId: input.actorUserId,
 			deviceId: uuidv7(),
@@ -309,11 +331,7 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		if (receipt.status === 'rejected') {
 			throw new RemoteDomainError('write_rejected', 'The check-in command was rejected.');
 		}
-		const result = await this.getMealCheckIn(
-			input.householdId,
-			input.aggregate.mealId ?? '',
-			input.actorUserId
-		);
+		const result = checkInFromSnapshot(aggregate);
 		if (!result) throw new RemoteDomainError('not_found', 'The written check-in was not found.');
 		return result;
 	}
@@ -336,8 +354,8 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 			userFoodDisplayPreferences: [],
 			userUnitDisplayPreferences: []
 		};
-		const snapshot = await this.users.bootstrap(ownerUserId);
-		for (const change of snapshot.aggregates) {
+		const changes = await this.users.readEntitiesOfKinds(ownerUserId, FOOD_PROFILE_KINDS);
+		for (const change of changes) {
 			try {
 				switch (change.entityKind) {
 					case 'foodUserAlias':
@@ -402,7 +420,7 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		aggregate: UserFoodPreference;
 	}): Promise<UserFoodPreference> {
 		const now = new Date().toISOString() as `${string}Z`;
-		const receipt = await this.users.commit({
+		const { receipt, aggregate } = await this.users.commitWithResult({
 			actorUserId: input.actorUserId,
 			deviceId: uuidv7(),
 			mutation: {
@@ -422,10 +440,8 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		if (receipt.status === 'rejected') {
 			throw new RemoteDomainError('write_rejected', 'The food preference command was rejected.');
 		}
-		const result = (await this.getUserFoodProfile(input.actorUserId)).userFoodPreferences.find(
-			({ id }) => id === input.aggregate.id
-		);
-		if (!result)
+		const result = fromSnapshot(UserFoodPreferenceSchema, aggregate);
+		if (result?.deletedAt !== null)
 			throw new RemoteDomainError('not_found', 'The written food preference was not found.');
 		return result;
 	}
