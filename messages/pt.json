@@ -472,5 +472,12 @@
 	"menu_url_import_rate_limited": "Too many imports. Try again in a minute.",
 	"menu_url_import_page_unreachable": "Maal couldn't open that page. Check the URL and try again.",
 	"menu_url_import_no_recipe": "Maal couldn't find a recipe on that page.",
-	"menu_url_import_unavailable": "URL import isn't available right now. Try again later."
+	"menu_url_import_unavailable": "URL import isn't available right now. Try again later.",
+	"settings_mcp_keys_could_not_load": "Could not load MCP keys. Try again.",
+	"settings_mcp_key_could_not_create": "Could not create the MCP key. Try again.",
+	"settings_mcp_key_could_not_reroll": "Could not reroll the MCP key. Try again.",
+	"settings_mcp_key_could_not_revoke": "Could not revoke the MCP key. Try again.",
+	"settings_mcp_key_limit_reached": "You have reached the MCP key limit. Revoke an unused key, or try again tomorrow.",
+	"settings_mcp_keys_sign_in_again": "Sign in to this profile again to manage MCP keys.",
+	"settings_mcp_keys_need_active_subscription": "MCP keys need a household with an active subscription."
 }

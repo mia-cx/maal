@@ -4,6 +4,8 @@ import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js
 export const MCP_TEST_NOW = '2026-08-22T12:00:00.000Z';
 export const MCP_TEST_USER = 'user_alice';
 export const MCP_TEST_HOUSEHOLD = 'org_family';
+/** Stands in for the MCP key ID the domain port attributes writes to. */
+export const MCP_TEST_DEVICE = '0198d3bc-e600-7000-8000-0000000000ff';
 export const MCP_TEST_PERMISSIONS = [
 	'households:write',
 	'recipes:read',

@@ -21,6 +21,7 @@ import {
 	isRecord,
 	makeCheckIn,
 	optionalNumber,
+	mealPatchConflictGroups,
 	patchMeal,
 	patchRecipe,
 	requiredText,
@@ -33,7 +34,7 @@ import {
 	resolveUserDataProof,
 	resolveUserRecipeProof
 } from './context.js';
-import { toolError } from './results.js';
+import { isToolError, toolError } from './results.js';
 import {
 	createRecipeShape,
 	emptyInput,
@@ -89,6 +90,15 @@ const dateRange = (args: Record<string, unknown>): { startDate: string; endDate:
 		endDate: (parsedEnd > maxEnd ? maxEnd : parsedEnd).toISOString().slice(0, 10)
 	};
 };
+
+/** Names a failed batch item by its title first, so the agent can tell items apart. */
+const mealFailureLabel = (args: Record<string, unknown>, index: number): string =>
+	text(args.title) ??
+	(isRecord(args.customMeal) ? text(args.customMeal.title) : null) ??
+	(isRecord(args.recipe) ? text(args.recipe.title) : null) ??
+	text(args.url) ??
+	text(args.userRecipeId) ??
+	`Meal ${index + 1}`;
 
 const createMeal = async (
 	context: McpContext,
@@ -414,10 +424,13 @@ export const tools: readonly ToolDefinition[] = [
 				} catch (cause) {
 					errors.push({
 						index,
-						meal: text(value.url) ?? text(value.userRecipeId) ?? `Meal ${index + 1}`,
+						meal: mealFailureLabel(value, index),
 						url: text(value.url),
 						code: text(value.url) ? 'import_or_create_failed' : 'create_failed',
-						message: cause instanceof Error ? cause.message : 'Could not create this meal.'
+						message:
+							isToolError(cause) || cause instanceof Error
+								? cause.message
+								: 'Could not create this meal.'
 					});
 				}
 			}
@@ -459,12 +472,14 @@ export const tools: readonly ToolDefinition[] = [
 				household.householdId,
 				requiredText(args.mealId, 'mealId')
 			);
+			const conflictGroups = mealPatchConflictGroups(args.patch);
+			if (conflictGroups.length === 0) return { meal };
 			return {
 				meal: await context.domain.writeHouseholdMeal({
 					actorUserId: context.principal.ownerUserId,
 					householdId: household.householdId,
 					aggregate: patchMeal(meal, args.patch),
-					conflictGroups: ['header', 'schedule', 'status'],
+					conflictGroups,
 					operation: 'upsert'
 				})
 			};
@@ -517,8 +532,13 @@ export const tools: readonly ToolDefinition[] = [
 				mealId,
 				context.principal.ownerUserId
 			);
+			const cooked = args.cooked !== false;
+			// Only the planned cook can report how long cooking took, as in the check-in dialog.
+			const reportsCookTime = cooked && meal.plannedCookUserId === context.principal.ownerUserId;
 			const rawCookTime = args.cookTimeMinutes ?? args.cookTime;
-			const cookTime = optionalNumber(rawCookTime, 'cookTimeMinutes') ?? null;
+			const cookTime = reportsCookTime
+				? (optionalNumber(rawCookTime, 'cookTimeMinutes') ?? null)
+				: null;
 			const checkIn = await context.domain.writeMealCheckIn({
 				actorUserId: context.principal.ownerUserId,
 				householdId: household.householdId,
@@ -531,7 +551,7 @@ export const tools: readonly ToolDefinition[] = [
 					reason: text(args.reason)
 				})
 			});
-			const status = args.cooked === false ? 'skipped' : 'cooked';
+			const status = cooked ? 'cooked' : 'skipped';
 			const updatedMeal = await context.domain.writeHouseholdMeal({
 				actorUserId: context.principal.ownerUserId,
 				householdId: household.householdId,

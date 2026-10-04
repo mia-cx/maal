@@ -16,6 +16,7 @@ import { D1HouseholdSyncRepository } from '$lib/server/sync/household-d1-reposit
 import { D1UserSyncRepository } from '$lib/server/sync/d1-repository.js';
 
 import {
+	MCP_TEST_DEVICE,
 	MCP_TEST_HOUSEHOLD,
 	MCP_TEST_USER,
 	createMcpTestDatabase,
@@ -37,7 +38,7 @@ afterEach(async () => {
 
 describe('shared remote D1 domain port', () => {
 	test('writes the same normalized recipe and meal state exposed by sync bootstrap', async () => {
-		const port = new D1RemoteDomainPort(database);
+		const port = new D1RemoteDomainPort(database, MCP_TEST_DEVICE);
 		const recipe = createRecipeAggregate({
 			ownerUserId: MCP_TEST_USER,
 			candidate: candidateFromToolRecipe({
@@ -142,7 +143,7 @@ describe('shared remote D1 domain port', () => {
 	});
 
 	test('returns the committed aggregate when the write batch throws after committing', async () => {
-		const port = new D1RemoteDomainPort(database);
+		const port = new D1RemoteDomainPort(database, MCP_TEST_DEVICE);
 		const meal = await port.writeHouseholdMeal({
 			actorUserId: MCP_TEST_USER,
 			householdId: MCP_TEST_HOUSEHOLD,
@@ -191,7 +192,7 @@ describe('shared remote D1 domain port', () => {
 				};
 			}
 		});
-		const flakyPort = new D1RemoteDomainPort(flaky);
+		const flakyPort = new D1RemoteDomainPort(flaky, MCP_TEST_DEVICE);
 		await expect(
 			flakyPort.writeMealCheckIn({
 				actorUserId: MCP_TEST_USER,
@@ -205,7 +206,7 @@ describe('shared remote D1 domain port', () => {
 	});
 
 	test('does not return a check-in moved to another meal between the ID listing and the aggregate read', async () => {
-		const port = new D1RemoteDomainPort(database);
+		const port = new D1RemoteDomainPort(database, MCP_TEST_DEVICE);
 		const recipe = await port.writeUserRecipe({
 			actorUserId: MCP_TEST_USER,
 			aggregate: createRecipeAggregate({
@@ -305,7 +306,7 @@ describe('shared remote D1 domain port', () => {
 				};
 			}
 		});
-		const interceptedPort = new D1RemoteDomainPort(intercepted);
+		const interceptedPort = new D1RemoteDomainPort(intercepted, MCP_TEST_DEVICE);
 		await expect(
 			interceptedPort.getMealCheckIn(MCP_TEST_HOUSEHOLD, mealA.id, MCP_TEST_USER)
 		).resolves.toBeNull();
@@ -317,8 +318,39 @@ describe('shared remote D1 domain port', () => {
 		).resolves.toMatchObject({ id: checkIn.id });
 	});
 
+	test('attributes every write from one MCP key to one stable sync device', async () => {
+		const keyDeviceId = '0198d3bc-e600-7000-8000-0000000000aa';
+		const port = new D1RemoteDomainPort(database, keyDeviceId);
+		const recipe = await port.writeUserRecipe({
+			actorUserId: MCP_TEST_USER,
+			aggregate: createRecipeAggregate({
+				ownerUserId: MCP_TEST_USER,
+				candidate: candidateFromToolRecipe({ title: 'Device soup' })
+			}),
+			conflictGroups: allRecipeConflictGroups,
+			operation: 'upsert'
+		});
+		await port.writeHouseholdMeal({
+			actorUserId: MCP_TEST_USER,
+			householdId: MCP_TEST_HOUSEHOLD,
+			aggregate: cloneRecipeAsMeal({ recipe, householdId: MCP_TEST_HOUSEHOLD }),
+			conflictGroups: allMealConflictGroups,
+			operation: 'upsert'
+		});
+
+		const devices = await database
+			.prepare('SELECT device_id FROM sync_devices WHERE workos_user_id = ?')
+			.bind(MCP_TEST_USER)
+			.all<{ device_id: string }>();
+		expect(devices.results).toEqual([{ device_id: keyDeviceId }]);
+		const origins = await database
+			.prepare('SELECT DISTINCT origin_device_id FROM sync_changes')
+			.all<{ origin_device_id: string }>();
+		expect(origins.results).toEqual([{ origin_device_id: keyDeviceId }]);
+	});
+
 	test('reads only active normalized households', async () => {
-		const port = new D1RemoteDomainPort(database);
+		const port = new D1RemoteDomainPort(database, MCP_TEST_DEVICE);
 		await expect(port.listHouseholds([MCP_TEST_HOUSEHOLD])).resolves.toEqual([
 			{
 				id: MCP_TEST_HOUSEHOLD,

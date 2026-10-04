@@ -26,6 +26,7 @@
 	import type { AuthSlotRecord } from '$lib/client/local/records.js';
 	import AccountSettingsSection from '$lib/components/settings/account-settings-section.svelte';
 	import BillingSettingsSection from '$lib/components/settings/billing-settings-section.svelte';
+	import { mcpKeyErrorMessage, mcpKeyLabelError } from '$lib/components/settings/mcp-key-errors.js';
 	import McpSettingsSection from '$lib/components/settings/mcp-settings-section.svelte';
 	import SecuritySettingsSection from '$lib/components/settings/security-settings-section.svelte';
 	import SettingsCategoryNav from '$lib/components/settings/settings-category-nav.svelte';
@@ -33,6 +34,7 @@
 	import DeleteConfirmDialog from '$lib/components/delete-confirm-dialog.svelte';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import type { BillingCapability } from '$lib/domain/billing/contracts.js';
+	import * as m from '$lib/paraglide/messages';
 	import type { Household, Membership, Profile } from '$lib/domain/household/contracts.js';
 	import {
 		filterMcpHouseholds,
@@ -352,7 +354,9 @@
 			mcpKeys = await listMcpKeys(database, view.activeProfile.profileId);
 			mcpKeysLoaded = true;
 		} catch (cause) {
-			mcpError = cause instanceof Error ? cause.message : 'Could not load MCP keys.';
+			mcpError = mcpKeyErrorMessage(cause, m.settings_mcp_keys_could_not_load);
+			// Stop the effect's retry loop so this error stays visible; Refresh retries explicitly.
+			mcpKeysLoaded = true;
 		} finally {
 			mcpKeysBusy = false;
 		}
@@ -383,9 +387,10 @@
 
 	const createMcpAccessKey = async () => {
 		if (!view.activeProfile) return;
-		mcpKeyCreating = true;
 		mcpMessage = null;
-		mcpError = null;
+		mcpError = mcpKeyLabelError(mcpKeyLabel);
+		if (mcpError) return;
+		mcpKeyCreating = true;
 		createdMcpKey = null;
 		try {
 			const created = await createMcpKey(database, view.activeProfile.profileId, {
@@ -403,7 +408,7 @@
 			mcpKeyFormOpen = false;
 			mcpMessage = 'MCP key created. Copy it now. It will not be shown again.';
 		} catch (cause) {
-			mcpError = cause instanceof Error ? cause.message : 'Could not create MCP key.';
+			mcpError = mcpKeyErrorMessage(cause, m.settings_mcp_key_could_not_create);
 		} finally {
 			mcpKeyCreating = false;
 		}
@@ -428,7 +433,7 @@
 			];
 			mcpMessage = 'MCP key rerolled. Copy the new key now. It will not be shown again.';
 		} catch (cause) {
-			mcpError = cause instanceof Error ? cause.message : 'Could not reroll MCP key.';
+			mcpError = mcpKeyErrorMessage(cause, m.settings_mcp_key_could_not_reroll);
 		} finally {
 			rerollingMcpKeyId = null;
 		}
@@ -463,7 +468,7 @@
 			mcpKeyToRevoke = null;
 			mcpMessage = 'MCP key revoked.';
 		} catch (cause) {
-			mcpError = cause instanceof Error ? cause.message : 'Could not revoke MCP key.';
+			mcpError = mcpKeyErrorMessage(cause, m.settings_mcp_key_could_not_revoke);
 		} finally {
 			revokingMcpKeyId = null;
 		}

@@ -196,10 +196,19 @@ export const authorizeMcpRequest = async (input: {
 	};
 };
 
+/** Tells an MCP client without a valid key how to authenticate, as the prototype did. */
+const MCP_BEARER_AUTHENTICATION = {
+	type: 'bearer',
+	scheme: 'Bearer',
+	header: 'Authorization',
+	format: 'Authorization: Bearer <Maal MCP key>',
+	instructions: 'Create a Maal MCP key in Settings → MCP keys, then use it as a bearer token.'
+} as const;
+
 export const mcpAuthorizationResponse = (cause: unknown): Response => {
 	if (cause instanceof McpAuthenticationError) {
 		return Response.json(
-			{ error: 'invalid_mcp_key' },
+			{ error: 'invalid_mcp_key', authentication: MCP_BEARER_AUTHENTICATION },
 			{
 				status: 401,
 				headers: {
