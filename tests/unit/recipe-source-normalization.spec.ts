@@ -133,6 +133,18 @@ describe('URL import', () => {
 		expect(candidate.instructionEvents[0]?.baseValue).toBeCloseTo(176.67, 2);
 	});
 
+	test('decodes degree entities in imported instruction text', async () => {
+		const candidate = await importRecipe(
+			['flour'],
+			['Preheat to 350&deg;F.', 'Then bake at 200&#176;C or 180&#xB0;C.']
+		);
+		expect(candidate.instructionEvents).toEqual([
+			expect.objectContaining({ sourceText: '350°F', value: 350, unitId: 'fahrenheit' }),
+			expect.objectContaining({ sourceText: '200°C', value: 200, unitId: 'celsius' }),
+			expect.objectContaining({ sourceText: '180°C', value: 180, unitId: 'celsius' })
+		]);
+	});
+
 	test('parses a spaced Unicode mixed fraction', async () => {
 		const candidate = await importRecipe(['1 ½ cups flour', '2 ¾  teaspoons salt'], ['Mix.']);
 		expect(candidate.ingredients).toEqual([

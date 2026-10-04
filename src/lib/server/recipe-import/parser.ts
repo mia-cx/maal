@@ -31,6 +31,7 @@ const clean = (value: string): string =>
 		.replaceAll('&amp;', '&')
 		.replaceAll('&quot;', '"')
 		.replaceAll('&#39;', "'")
+		.replace(/&deg;|&#0*176;|&#x0*b0;/gi, '°')
 		.replace(/\s+/g, ' ')
 		.trim();
 
