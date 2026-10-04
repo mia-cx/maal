@@ -585,7 +585,7 @@ export const createUserSyncCoordinator = (
 		}
 	};
 
-	const runBackfill = async (id: string): Promise<number | null> => {
+	const runBackfill = async (id: string): Promise<number | 'waiting' | null> => {
 		if (environment.isSaveDataEnabled()) return null;
 		const prepared = await prepareBackfill(
 			options.database,
@@ -595,8 +595,9 @@ export const createUserSyncCoordinator = (
 			now()
 		);
 		if (!prepared) return null;
-		// Prepared rows wait for the next run when another scope holds the device's slot.
-		if (!(await claimBackfillSlot(options.database, now()))) return null;
+		if (!(await claimBackfillSlot(options.database, 'user', options.workosUserId, now()))) {
+			return 'waiting';
+		}
 		const mutations = await Promise.all(
 			prepared.rows.map((row) => hydrateMutation(options.database, options.workosUserId, row))
 		);
@@ -720,7 +721,7 @@ export const createUserSyncCoordinator = (
 			if (pushed) await pullAll(id);
 			lease = await renew(lease);
 			const backfilledThrough = await runBackfill(id);
-			if (backfilledThrough !== null) await pullAll(id);
+			if (typeof backfilledThrough === 'number') await pullAll(id);
 			currentState = 'complete';
 			retryAttempt = 0;
 			await options.database.syncScopes.update(['user', options.workosUserId], {
