@@ -44,6 +44,7 @@
 		error: loadError = null,
 		onplanrecipe,
 		onmealchange,
+		onmealsreorder,
 		onmealdelete,
 		onmealcheckin,
 		oncreaterecipe,
@@ -63,6 +64,8 @@
 		error?: string | null;
 		onplanrecipe?: (recipe: RecipeMenuItem, date?: string) => Promise<Meal>;
 		onmealchange?: (meal: Meal, previous?: Meal) => void | Promise<void>;
+		/** Drag gesture touching several meals: one call so the route can commit it atomically. */
+		onmealsreorder?: (moves: { meal: Meal; previous?: Meal }[]) => void | Promise<void>;
 		onmealdelete?: (meal: Meal) => void | Promise<void>;
 		onmealcheckin?: (payload: MealCheckInPayload) => Promise<Meal>;
 		oncreaterecipe?: (recipe: RecipeMenuItem, date?: string) => Promise<Meal>;
@@ -374,7 +377,13 @@
 		});
 		scheduleMeals = nextMeals;
 		try {
-			for (const meal of changed) await onmealchange?.(meal, previousById.get(meal.id));
+			if (onmealsreorder) {
+				await onmealsreorder(
+					changed.map((meal) => ({ meal, previous: previousById.get(meal.id) }))
+				);
+			} else {
+				for (const meal of changed) await onmealchange?.(meal, previousById.get(meal.id));
+			}
 			mealWriteError = null;
 		} catch (error) {
 			rollBackMealWrite(error);

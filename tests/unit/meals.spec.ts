@@ -15,6 +15,7 @@ import {
 	readMealCalendarRange,
 	readMealPool,
 	readScheduleUiState,
+	reorderMeals,
 	saveMealCheckIn,
 	updateMealSchedule,
 	writeScheduleUiState,
@@ -485,6 +486,41 @@ describe('household meal pool', () => {
 		expect(emissions[1]).toEqual([alicePool.id, bobPool.id, scheduled.id].toSorted());
 		expect((await readMealPool(database, 'org_family')).meals).toHaveLength(3);
 		subscription.unsubscribe();
+	});
+});
+
+describe('atomic meal reorder', () => {
+	test('commits every move of one gesture together or not at all', async () => {
+		const database = await openDatabase();
+		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
+		const first = await planRecipeAsMeal(database, mealContext(), recipe.id, {
+			date: '2026-08-23',
+			sortOrder: 1
+		});
+		const second = await planRecipeAsMeal(database, mealContext(), recipe.id, {
+			date: '2026-08-23',
+			sortOrder: 2
+		});
+
+		const reordered = await reorderMeals(database, mealContext(at(23)), [
+			{ mealId: first.id, patch: { date: '2026-08-23', time: null, sortOrder: 2 } },
+			{ mealId: second.id, patch: { date: '2026-08-23', time: null, sortOrder: 1 } }
+		]);
+		expect(reordered.map(({ sortOrder }) => sortOrder)).toEqual([2, 1]);
+
+		// The second move names a meal that does not exist: no sort order or outbox row survives.
+		const outboxBefore = await database.outbox.count();
+		await expect(
+			reorderMeals(database, mealContext(at(24)), [
+				{ mealId: first.id, patch: { date: '2026-08-24', time: null, sortOrder: 1 } },
+				{ mealId: uuidv7(), patch: { date: '2026-08-24', time: null, sortOrder: 2 } }
+			])
+		).rejects.toThrow();
+		expect(await database.meals.get(first.id)).toMatchObject({
+			date: '2026-08-23',
+			sortOrder: 2
+		});
+		expect(await database.outbox.count()).toBe(outboxBefore);
 	});
 });
 

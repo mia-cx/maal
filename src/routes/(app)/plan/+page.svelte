@@ -13,6 +13,7 @@
 		planRecipeAsMeal,
 		readScheduleUiState,
 		recipeAggregateToPickerItem,
+		reorderMeals,
 		saveMealCheckIn,
 		updateMealSchedule,
 		writeScheduleUiState,
@@ -116,6 +117,25 @@
 			plannedCookUserId: meal.plannedCookWorkosUserId ?? null,
 			plannedYield: meal.servingsPlanned ?? null
 		});
+	};
+
+	const reorderMealsInOneCommit = async (moves: { meal: Meal }[]): Promise<void> => {
+		if (!database) throw new Error('Local meal storage is still opening.');
+		const context = await commandContext();
+		await reorderMeals(
+			database,
+			context,
+			moves.map(({ meal }) => ({
+				mealId: meal.id,
+				patch: {
+					date: meal.date ?? null,
+					time: meal.time ?? null,
+					sortOrder: meal.sortOrder ?? null,
+					plannedCookUserId: meal.plannedCookWorkosUserId ?? null,
+					plannedYield: meal.servingsPlanned ?? null
+				}
+			}))
+		);
 	};
 
 	const removeMeal = async (meal: Meal): Promise<void> => {
@@ -314,6 +334,7 @@
 					{error}
 					onplanrecipe={planRecipe}
 					onmealchange={changeMeal}
+					onmealsreorder={reorderMealsInOneCommit}
 					onmealdelete={removeMeal}
 					onmealcheckin={checkIn}
 					oncreaterecipe={createRecipeAndMeal}
