@@ -532,6 +532,7 @@
 	"billing_transfer": "Transfer",
 	"billing_refresh_failed": "Billing could not be refreshed. Local meal planning is still available.",
 	"billing_checkout_failed": "Checkout could not be opened.",
+	"billing_checkout_already_subscribed": "This household already has a subscription.",
 	"billing_trial_failed": "This user or household has already used a trial, or the trial could not be started.",
 	"billing_portal_failed": "The billing portal could not be opened.",
 	"billing_transfer_failed": "Billing ownership could not be transferred to that household manager.",

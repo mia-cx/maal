@@ -37,7 +37,8 @@ const paidCapability: BillingCapability = {
 /** Renders the section for Bob, signed in with the given household permissions. */
 const renderForBob = async (
 	permissions: readonly HouseholdPermission[],
-	capability: BillingCapability | null
+	capability: BillingCapability | null,
+	seed: (database: MaalDatabase) => Promise<unknown> = async () => {}
 ) => {
 	const database = await openMaalDatabase(`billing-settings-${crypto.randomUUID()}`);
 	databases.push(database);
@@ -68,6 +69,7 @@ const renderForBob = async (
 		denialCode: null
 	});
 	if (capability) await database.billingCapabilities.put(capability);
+	await seed(database);
 	return render(BillingSettingsSection, {
 		database,
 		profileId,
@@ -90,6 +92,73 @@ test('offers the billing portal to a billing owner whose plan lapsed', async () 
 
 	await expect.element(screen.getByText('No active plan')).toBeVisible();
 	await expect.element(screen.getByRole('button', { name: /Manage subscription/ })).toBeVisible();
+});
+
+const monthlyPrice = {
+	id: 'price_monthly',
+	lookupKey: 'maal_monthly_v1',
+	amountMinor: 500,
+	currency: 'eur',
+	interval: 'month',
+	intervalCount: 1
+} as const;
+
+/** Stripe still retries the old subscription, so the Worker refuses a second checkout. */
+const stubOpenSubscription = () => {
+	const fetcher = vi.fn<typeof fetch>(async (input) =>
+		String(input).endsWith('/billing/checkout')
+			? Response.json(
+					{ error: { _tag: 'BillingConflictError', reason: 'already_subscribed' } },
+					{ status: 409 }
+				)
+			: Response.json({ error: { _tag: 'BillingUnavailable' } }, { status: 503 })
+	);
+	vi.stubGlobal('fetch', fetcher);
+	return fetcher;
+};
+
+const lapsedCapability = (subscriberUserId: string): BillingCapability => ({
+	...paidCapability,
+	state: 'disabled',
+	stripeStatus: 'past_due',
+	subscriberUserId,
+	validUntil: null
+});
+
+const cachePrices = (database: MaalDatabase) =>
+	database.remoteProjectionMeta.put({
+		key: 'billing:org_kitchen',
+		refreshedAt: timestamp,
+		decodeVersion: 1,
+		value: { prices: [monthlyPrice], trialAvailable: false, trialUnavailableReason: null }
+	});
+
+test('sends a billing owner to the portal when Stripe still holds their subscription', async () => {
+	const fetcher = stubOpenSubscription();
+	const screen = await renderForBob(
+		['households:write', 'meals:read'],
+		lapsedCapability('user_bob'),
+		cachePrices
+	);
+
+	await screen.getByRole('button', { name: 'Start subscription' }).click();
+
+	await expect
+		.poll(() => fetcher.mock.calls.map(([input]) => String(input).split('/billing/')[1]))
+		.toEqual(['checkout', 'portal']);
+});
+
+test('tells a manager who does not own billing why checkout is refused', async () => {
+	stubOpenSubscription();
+	const screen = await renderForBob(
+		['households:write', 'meals:read'],
+		lapsedCapability('user_alice'),
+		cachePrices
+	);
+
+	await screen.getByRole('button', { name: 'Start subscription' }).click();
+
+	await expect.element(screen.getByText(/already has a subscription/)).toBeVisible();
 });
 
 test('lets a member refresh plan status without offering checkout', async () => {
