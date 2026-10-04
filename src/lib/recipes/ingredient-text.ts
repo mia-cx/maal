@@ -358,15 +358,6 @@ export const canonicalIngredientUnit = (value: string | undefined): string | und
 
 export type IngredientUnitAliases = Record<string, string>;
 
-const canonicalIngredientUnitFromAliases = (
-	value: string | undefined,
-	unitAliases: IngredientUnitAliases = {}
-): string | undefined => {
-	if (!value) return;
-	const normalized = normalizedUnit(value);
-	return canonicalUnits.get(normalized) ?? unitAliases[normalized];
-};
-
 export const parseQuantity = (value: string): number | null => {
 	const trimmed = value.trim();
 	const mixedFraction = /^(\d+)\s+(\d+)\/(\d+)$/.exec(trimmed);
@@ -428,17 +419,22 @@ export const parseIngredientLine = (
 	if (!match) return { amount: '', item: trimmed };
 
 	const quantity = match[1].trim();
-	const candidateUnit = match[2]?.trim();
-	const remainder = match[3].trim();
-	const unit = canonicalIngredientUnitFromAliases(candidateUnit, unitAliases);
-	if (unit) {
-		return { amount: quantity, unit, item: remainder };
+	// Unit aliases can span several tokens ("fl oz", "fluid ounce"); try the longest first so a
+	// multi-word unit wins over its first token alone.
+	const remainder = [match[2], match[3]].filter(Boolean).join(' ');
+	const tokens = remainder.split(/\s+/u).filter(Boolean);
+	const normalizedTokens = tokens.map(normalizedUnit);
+	const unitKeys = [...canonicalUnits.keys(), ...Object.keys(unitAliases)];
+	const maxTokens = unitKeys.reduce((longest, key) => Math.max(longest, key.split(' ').length), 1);
+	for (let count = Math.min(tokens.length, maxTokens); count >= 1; count -= 1) {
+		const candidate = normalizedTokens.slice(0, count).join(' ');
+		const unit = canonicalUnits.get(candidate) ?? unitAliases[candidate];
+		if (unit) {
+			return { amount: quantity, unit, item: tokens.slice(count).join(' ') };
+		}
 	}
 
-	return {
-		amount: quantity,
-		item: [candidateUnit, remainder].filter(Boolean).join(' ')
-	};
+	return { amount: quantity, item: remainder };
 };
 
 const toMetricAmount = (quantity: number, unit: string | undefined) => {

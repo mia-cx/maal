@@ -133,6 +133,35 @@ describe('URL import', () => {
 		expect(candidate.instructionEvents[0]?.baseValue).toBeCloseTo(176.67, 2);
 	});
 
+	test('resolves multi-word unit aliases by longest match', async () => {
+		const candidate = await importRecipe(
+			['8 fl oz milk', '1 fluid ounce cream', '16 fluid ounces broth'],
+			['Mix.']
+		);
+		expect(candidate.ingredients).toEqual([
+			expect.objectContaining({
+				sourceAmountText: '8',
+				sourceQuantity: 8,
+				sourceUnitLabel: 'fl oz',
+				sourceFoodLabel: 'milk',
+				baseUnitId: 'fluid_ounces',
+				baseUnitFamilyId: 'milliliters'
+			}),
+			expect.objectContaining({
+				sourceQuantity: 1,
+				sourceUnitLabel: 'fl oz',
+				sourceFoodLabel: 'cream',
+				baseUnitId: 'fluid_ounces'
+			}),
+			expect.objectContaining({
+				sourceQuantity: 16,
+				sourceUnitLabel: 'fl oz',
+				sourceFoodLabel: 'broth',
+				baseUnitId: 'fluid_ounces'
+			})
+		]);
+	});
+
 	test('an amount-only edit keeps the resolved food link', () => {
 		const ingredient = {
 			id: uuidv7(),
