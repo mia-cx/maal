@@ -1,6 +1,5 @@
-import type { RecipeEditorPatch } from '$lib/client/recipes/commands.js';
+import { reconcileRecipeLines, type RecipeEditorPatch } from '$lib/client/recipes/commands.js';
 import type { RecipeAggregate, RecipeImportedCandidate } from '$lib/domain/recipes/schema.js';
-import { uuidv7 } from 'uuidv7';
 
 import { emptyRecipeMenuStats, type RecipeMenuStats } from './recipe-defaults.js';
 import type { RecipeMenuItem } from './menu-types.js';
@@ -99,62 +98,6 @@ export const mergeEditorIntoImportedCandidate = (
 	recipe: RecipeMenuItem
 ): RecipeImportedCandidate => {
 	const patch = recipeMenuItemToEditorPatch(recipe);
-	const ingredientById = new Map(
-		candidate.ingredients.map((ingredient) => [ingredient.id, ingredient])
-	);
-	const instructionById = new Map(
-		candidate.instructions.map((instruction) => [instruction.id, instruction])
-	);
-	const ingredients = patch.ingredients
-		.filter(({ item }) => item.trim().length > 0)
-		.map((edit, lineIndex) => {
-			const existing = edit.id ? ingredientById.get(edit.id) : undefined;
-			if (existing) {
-				return {
-					...existing,
-					lineIndex,
-					originalText: [edit.amount, edit.unit, edit.item].filter(Boolean).join(' '),
-					sourceAmountText: edit.amount || null,
-					sourceUnitLabel: edit.unit || null,
-					sourceFoodLabel: edit.item
-				};
-			}
-			const quantity = Number(edit.amount);
-			return {
-				id: uuidv7(),
-				lineIndex,
-				originalText: [edit.amount, edit.unit, edit.item].filter(Boolean).join(' '),
-				sourceAmountText: edit.amount || null,
-				sourceQuantity: Number.isFinite(quantity) ? quantity : null,
-				sourceUnitLabel: edit.unit || null,
-				sourceFoodLabel: edit.item,
-				baseFoodId: null,
-				baseQuantity: null,
-				baseUnitId: null,
-				baseUnitFamilyId: null,
-				optional: false,
-				confidence: 1,
-				createdAt: candidate.sourceImportedAt
-			};
-		});
-	const instructions = patch.instructions
-		.filter(({ text }) => text.trim().length > 0)
-		.toSorted((left, right) => left.position - right.position)
-		.map((edit, stepIndex) => {
-			const existing = edit.id ? instructionById.get(edit.id) : undefined;
-			if (existing) return { ...existing, stepIndex, text: edit.text };
-			return {
-				id: uuidv7(),
-				stepIndex,
-				sectionName: null,
-				text: edit.text,
-				durationMinutes: null,
-				confidence: 1,
-				createdAt: candidate.sourceImportedAt,
-				updatedAt: candidate.sourceImportedAt
-			};
-		});
-	const retainedInstructionIds = new Set(instructions.map(({ id }) => id));
 	return {
 		...candidate,
 		title: patch.title,
@@ -168,10 +111,6 @@ export const mergeEditorIntoImportedCandidate = (
 		prepTimeMinutes: patch.prepTimeMinutes,
 		cookTimeMinutes: patch.cookTimeMinutes,
 		yield: patch.yield,
-		ingredients,
-		instructions,
-		instructionEvents: candidate.instructionEvents.filter(({ recipeInstructionId }) =>
-			retainedInstructionIds.has(recipeInstructionId)
-		)
+		...reconcileRecipeLines(candidate, patch, candidate.sourceImportedAt)
 	};
 };
