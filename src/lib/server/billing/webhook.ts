@@ -108,11 +108,22 @@ export const processStripeWebhook = async (input: {
 			await input.repository.finishStripeEventWithoutProjection(input.event.id, input.receivedAt);
 			return 'ignored';
 		}
+		// Even when the event does not project, the interruption recompute reads its recorded row.
+		const eventDetail = {
+			householdId,
+			stripeSubscriptionId: subscription.id,
+			stripeCreatedAt: utcFromSeconds(input.event.created),
+			eventStatus: statusReportedByEvent(input.event)
+		};
 		// A purged household has no rows to project onto; its late webhooks finish quietly so
 		// Stripe stops retrying them.
 		const deletion = await input.repository.deletionRequest(householdId);
 		if (deletion?.state === 'purged' || !(await input.repository.householdExists(householdId))) {
-			await input.repository.finishStripeEventWithoutProjection(input.event.id, input.receivedAt);
+			await input.repository.finishStripeEventWithoutProjection(
+				input.event.id,
+				input.receivedAt,
+				eventDetail
+			);
 			return 'processed';
 		}
 		// An event for a different subscription than the projected row is normally a superseded
@@ -128,7 +139,11 @@ export const processStripeWebhook = async (input: {
 		) {
 			const displaced = await input.stripe.subscriptions.retrieve(row.stripeSubscriptionId);
 			if (displaced && subscriptionIsOpen(effectiveStripeStatus(displaced))) {
-				await input.repository.finishStripeEventWithoutProjection(input.event.id, input.receivedAt);
+				await input.repository.finishStripeEventWithoutProjection(
+					input.event.id,
+					input.receivedAt,
+					eventDetail
+				);
 				return 'processed';
 			}
 			replacesEndedSubscriptionId = row.stripeSubscriptionId;

@@ -331,13 +331,38 @@ export class BillingRepository {
 		return 'acquired';
 	}
 
-	async finishStripeEventWithoutProjection(eventId: string, processedAt: string): Promise<void> {
-		await this.database
-			.prepare(
-				`UPDATE stripe_events SET state = 'processed', processed_at = ?, safe_error_code = NULL WHERE stripe_event_id = ?`
-			)
-			.bind(processedAt, eventId)
-			.run();
+	/**
+	 * Marks an event processed without projecting it. Events that describe a subscription still
+	 * record it — the interruption recompute reads event rows even when the projection was stale.
+	 */
+	async finishStripeEventWithoutProjection(
+		eventId: string,
+		processedAt: string,
+		detail: {
+			householdId: string | null;
+			stripeSubscriptionId: string | null;
+			stripeCreatedAt: string | null;
+			eventStatus: StripeSubscriptionStatus | null;
+		} = { householdId: null, stripeSubscriptionId: null, stripeCreatedAt: null, eventStatus: null }
+	): Promise<void> {
+		await this.database.batch([
+			this.database
+				.prepare(
+					`UPDATE stripe_events SET state = 'processed', processed_at = ?, safe_error_code = NULL,
+						stripe_subscription_id = ?, stripe_created_at = ?, event_status = ?
+					 WHERE stripe_event_id = ?`
+				)
+				.bind(
+					processedAt,
+					detail.stripeSubscriptionId,
+					detail.stripeCreatedAt,
+					detail.eventStatus,
+					eventId
+				),
+			...(detail.householdId && detail.stripeSubscriptionId
+				? [this.interruptionRecomputeStatement(detail.householdId, detail.stripeSubscriptionId)]
+				: [])
+		]);
 	}
 
 	/**
@@ -371,7 +396,8 @@ export class BillingRepository {
 					projection.eventCreatedAt,
 					eventStatus,
 					eventId
-				)
+				),
+			this.interruptionRecomputeStatement(projection.householdId, projection.stripeSubscriptionId)
 		]);
 	}
 
@@ -623,13 +649,11 @@ export class BillingRepository {
 	}
 
 	/**
-	 * A successful payment is a monotonic fact, so it applies outside the event-recency guard. On
-	 * an interrupted row an interruption at or before the payment is over: the window restarts at
-	 * the first projected event after the payment that left the subscription interrupted — read
-	 * from stripe_events, so a later update cannot smuggle in its own timestamp — or, when none
-	 * has been projected yet, provisionally at the payment time, which the next failure replaces.
-	 * Uninterrupted rows only keep a newer interruption. SET expressions read pre-update values;
-	 * the paid event itself is excluded by `stripe_created_at > paidAt`.
+	 * A successful payment is a monotonic fact, so it applies outside the event-recency guard: the
+	 * payment timestamp only moves forward, and an open (active/trialing) row drops an
+	 * interruption the payment ended. Interrupted rows keep their timestamps here; the
+	 * interruption recompute — which runs after this statement in the same batch — derives them
+	 * purely from the recorded events, in any delivery order.
 	 */
 	private paymentResetStatement(
 		projection: SubscriptionProjectionWrite,
@@ -640,33 +664,54 @@ export class BillingRepository {
 				`UPDATE billing_subscriptions SET
 					last_successful_payment_at = MAX(COALESCE(last_successful_payment_at, ?1), ?1),
 					interruption_started_at = CASE
-						WHEN status IN ('past_due', 'paused') THEN CASE
-							WHEN interruption_started_at IS NOT NULL AND interruption_started_at > ?1
-								THEN interruption_started_at
-							ELSE COALESCE(
-								(SELECT MIN(stripe_created_at) FROM stripe_events
-									WHERE stripe_subscription_id = ?3 AND state = 'processed'
-										AND event_status IN ('past_due', 'paused')
-										AND stripe_created_at > ?1),
-								?1) END
+						WHEN status IN ('past_due', 'paused') THEN interruption_started_at
 						WHEN interruption_started_at IS NULL OR interruption_started_at > ?1
 							THEN interruption_started_at
 						ELSE NULL END,
 					grace_until = CASE
-						WHEN status IN ('past_due', 'paused') THEN CASE
-							WHEN interruption_started_at IS NOT NULL AND interruption_started_at > ?1
-								THEN grace_until
-							ELSE strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(
-								(SELECT MIN(stripe_created_at) FROM stripe_events
-									WHERE stripe_subscription_id = ?3 AND state = 'processed'
-										AND event_status IN ('past_due', 'paused')
-										AND stripe_created_at > ?1),
-								?1), '+${BILLING_GRACE_DAYS} days') END
+						WHEN status IN ('past_due', 'paused') THEN grace_until
 						WHEN interruption_started_at IS NULL OR interruption_started_at > ?1 THEN grace_until
 						ELSE NULL END
 				 WHERE household_id = ?2 AND stripe_subscription_id = ?3`
 			)
 			.bind(paidAt, projection.householdId, projection.stripeSubscriptionId);
+	}
+
+	/**
+	 * Derives the interruption window purely from recorded facts: the first processed event after
+	 * the last successful payment that reported the subscription interrupted. Runs last in every
+	 * batch that writes an event row, so ordering cannot matter — a stale snapshot landing after
+	 * the payment it precedes still back-dates the window to the first failure. When no
+	 * interrupted event is recorded yet, the current (possibly provisional payment-time) start
+	 * and grace are kept. Open rows are left alone; a payment clears their stale interruption.
+	 */
+	private interruptionRecomputeStatement(
+		householdId: string,
+		stripeSubscriptionId: string
+	): D1PreparedStatement {
+		return this.database
+			.prepare(
+				`UPDATE billing_subscriptions SET
+					interruption_started_at = COALESCE(
+						(SELECT MIN(stripe_created_at) FROM stripe_events
+							WHERE stripe_subscription_id = ?2 AND state = 'processed'
+								AND event_status IN ('past_due', 'paused')
+								AND stripe_created_at > COALESCE(
+									billing_subscriptions.last_successful_payment_at, '')),
+						interruption_started_at),
+					grace_until = strftime('%Y-%m-%dT%H:%M:%fZ',
+						COALESCE(
+							(SELECT MIN(stripe_created_at) FROM stripe_events
+								WHERE stripe_subscription_id = ?2 AND state = 'processed'
+									AND event_status IN ('past_due', 'paused')
+									AND stripe_created_at > COALESCE(
+										billing_subscriptions.last_successful_payment_at, '')),
+							interruption_started_at),
+						'+${BILLING_GRACE_DAYS} days')
+				 WHERE household_id = ?1 AND stripe_subscription_id = ?2
+					AND status IN ('past_due', 'paused')`
+			)
+			.bind(householdId, stripeSubscriptionId);
 	}
 
 	private subscriptionUpsertStatement(

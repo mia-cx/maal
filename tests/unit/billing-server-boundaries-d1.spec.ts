@@ -586,6 +586,99 @@ describe('Stripe grace projection', () => {
 		}
 	);
 
+	test('a stale failure snapshot landing last still anchors grace at that failure', async () => {
+		const repository = new BillingRepository(database);
+		const { stripe, subscriptions } = fakeStripe();
+		subscriptions.set('sub_a', sub('sub_a', 'past_due'));
+		const deliver = (event: Stripe.Event) =>
+			processStripeWebhook({ stripe, repository, event, receivedAt: iso(event.created) });
+		// F1's failure invoice at t0+600, an interrupted update U at t0+86400, the delayed
+		// recovery payment P at t0+500, then F1's subscription snapshot delivered last. The
+		// snapshot is too stale to project, but its recorded row must still anchor grace at F1.
+		await deliver({
+			...invoicePaidEvent('evt_failed_invoice', t0 + 600, 'sub_a'),
+			type: 'invoice.payment_failed'
+		} as Stripe.Event);
+		await deliver(
+			subscriptionEvent(
+				'evt_update',
+				t0 + 86_400,
+				'sub_a',
+				'customer.subscription.updated',
+				'past_due'
+			)
+		);
+		await deliver(invoicePaidEvent('evt_paid', t0 + 500, 'sub_a'));
+		await deliver(
+			subscriptionEvent(
+				'evt_snapshot',
+				t0 + 600,
+				'sub_a',
+				'customer.subscription.updated',
+				'past_due'
+			)
+		);
+		expect(await billingRow()).toMatchObject({
+			status: 'past_due',
+			interruption_started_at: iso(t0 + 600),
+			grace_until: iso(t0 + 600 + 30 * 86_400),
+			last_successful_payment_at: iso(t0 + 500)
+		});
+	});
+
+	test('every delivery order of the same events lands the same interruption window', async () => {
+		const permutations = <T>(items: T[]): T[][] =>
+			items.length < 2
+				? [items]
+				: items.flatMap((item, index) =>
+						permutations([...items.slice(0, index), ...items.slice(index + 1)]).map((rest) => [
+							item,
+							...rest
+						])
+					);
+		const events = (): Stripe.Event[] => [
+			subscriptionEvent('evt_failed_0', t0, 'sub_a', 'customer.subscription.updated', 'past_due'),
+			invoicePaidEvent('evt_paid', t0 + 500, 'sub_a'),
+			subscriptionEvent(
+				'evt_failed_1',
+				t0 + 600,
+				'sub_a',
+				'customer.subscription.updated',
+				'past_due'
+			),
+			subscriptionEvent(
+				'evt_update',
+				t0 + 86_400,
+				'sub_a',
+				'customer.subscription.updated',
+				'past_due'
+			)
+		];
+		for (const order of permutations(events())) {
+			await database.prepare('DELETE FROM billing_subscriptions').run();
+			await database.prepare('DELETE FROM stripe_events').run();
+			const repository = new BillingRepository(database);
+			const { stripe, subscriptions } = fakeStripe();
+			subscriptions.set('sub_a', sub('sub_a', 'past_due'));
+			for (const event of order) {
+				await processStripeWebhook({
+					stripe,
+					repository,
+					event,
+					receivedAt: iso(event.created)
+				});
+			}
+			expect(await billingRow(), `order ${order.map((event) => event.id).join(',')}`).toMatchObject(
+				{
+					status: 'past_due',
+					interruption_started_at: iso(t0 + 600),
+					grace_until: iso(t0 + 600 + 30 * 86_400),
+					last_successful_payment_at: iso(t0 + 500)
+				}
+			);
+		}
+	});
+
 	test('a paid invoice older than a newer failure keeps the newer grace window', async () => {
 		const repository = new BillingRepository(database);
 		const { stripe, subscriptions } = fakeStripe();
