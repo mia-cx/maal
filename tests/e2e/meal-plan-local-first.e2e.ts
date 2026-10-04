@@ -254,6 +254,37 @@ const planRecipeOn = async (page: Page, date: string) => {
 	return { targetDay };
 };
 
+test('renders the first-visit plan with an error when the saved schedule state cannot be read', async ({
+	page
+}) => {
+	// Every uiState read except the schedule row still works, so the plan itself loads.
+	await page.addInitScript(() => {
+		const original = IDBObjectStore.prototype.get;
+		IDBObjectStore.prototype.get = function (key: IDBValidKey | IDBKeyRange) {
+			if (this.name === 'uiState' && typeof key === 'string' && key.startsWith('schedule:'))
+				throw new DOMException('Injected schedule-state read failure.');
+			return original.call(this, key);
+		};
+	});
+	await page.goto('/');
+	await page.evaluate(resetDatabase);
+	await page.goto('/plan');
+	await expect
+		.poll(() =>
+			page.evaluate(async () => {
+				const databases = await indexedDB.databases();
+				return databases.some(
+					({ name, version }) => name === 'maal-v1:production' && version === 50
+				);
+			})
+		)
+		.toBe(true);
+	await page.evaluate(seedPlan);
+	await page.reload();
+	await expect(mealPool(page).getByRole('button', { name: 'Add meal' })).toBeVisible();
+	await expect(page.getByText('Your local meal plan could not be read.')).toBeVisible();
+});
+
 test('plans while offline and reloads from Dexie without content API requests', async ({
 	context,
 	page

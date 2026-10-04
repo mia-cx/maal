@@ -7,6 +7,7 @@
 		deleteMeal,
 		liveMealCalendarRange,
 		liveMealPool,
+		defaultScheduleUiState,
 		mealAggregateToScheduleMeal,
 		membershipsToHouseholdMembers,
 		planRecipeAsMeal,
@@ -250,7 +251,10 @@
 				if (current) uiState = { scope: readScope, state };
 			},
 			() => {
-				if (current) error = readError;
+				if (!current) return;
+				error = readError;
+				// Render the first-visit state anyway; the failed read may succeed next scope change.
+				uiState = { scope: readScope, state: defaultScheduleUiState(householdTimeZone) };
 			}
 		);
 		return () => {
