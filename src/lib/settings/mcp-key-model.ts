@@ -1,0 +1,166 @@
+import * as m from '$lib/paraglide/messages';
+import type { SettingsHousehold } from './types';
+
+export const MAAL_API_SCOPES = [
+	'households:read',
+	'households:write',
+	'recipes:read',
+	'recipes:write',
+	'meals:read',
+	'meals:write',
+	'check_ins:read',
+	'check_ins:write',
+	'food_profile:read',
+	'food_profile:write'
+] as const;
+export type McpScope = (typeof MAAL_API_SCOPES)[number];
+export const MCP_KEY_PRESETS = ['read_only_planner', 'meal_planner', 'full_access'] as const;
+export type McpKeyPreset = (typeof MCP_KEY_PRESETS)[number];
+export type McpScopeLevel = 'none' | 'read' | 'write';
+export type McpScopeGroupId = 'households' | 'recipes' | 'meals' | 'checkIns' | 'foodProfile';
+export type McpScopeLevels = Partial<Record<McpScopeGroupId, McpScopeLevel>>;
+export type McpScopeGroup = {
+	id: McpScopeGroupId;
+	label: () => string;
+	description: () => string;
+	read?: McpScope;
+	write?: McpScope;
+};
+
+export type McpKey = {
+	id: string;
+	label: string;
+	householdScope: { kind: 'all' } | { kind: 'households'; householdIds: string[] };
+	scopes: McpScope[];
+	preset?: McpKeyPreset;
+	createdAt: string;
+	expiresAt?: string | null;
+	revokedAt?: string | null;
+	lastUsedAt?: string | null;
+	households?: SettingsHousehold[];
+};
+
+export const mcpScopeGroups = [
+	{
+		id: 'households',
+		label: m.settings_households,
+		description: m.settings_read_or_manage_household_membership_and_sett,
+		read: 'households:read',
+		write: 'households:write'
+	},
+	{
+		id: 'recipes',
+		label: m.settings_recipes,
+		description: m.settings_read_create_and_update_saved_recipes,
+		read: 'recipes:read',
+		write: 'recipes:write'
+	},
+	{
+		id: 'meals',
+		label: m.settings_meal_plan,
+		description: m.settings_read_and_manage_planned_meals,
+		read: 'meals:read',
+		write: 'meals:write'
+	},
+	{
+		id: 'checkIns',
+		label: m.settings_check_ins,
+		description: m.settings_record_meal_feedback_after_cooking,
+		read: 'check_ins:read',
+		write: 'check_ins:write'
+	},
+	{
+		id: 'foodProfile',
+		label: m.settings_food_profile,
+		description: m.settings_read_or_update_taxonomy_preferences,
+		read: 'food_profile:read',
+		write: 'food_profile:write'
+	}
+] satisfies McpScopeGroup[];
+
+const isMcpScopeGroupId = (groupId: string): groupId is McpScopeGroupId =>
+	mcpScopeGroups.some((group) => group.id === groupId);
+
+export const presetLabel = (preset?: McpKeyPreset): string => {
+	if (preset === 'read_only_planner') return m.settings_read_only_planner();
+	if (preset === 'meal_planner') return m.settings_meal_planner();
+	if (preset === 'full_access') return m.settings_full_access();
+	return m.settings_custom();
+};
+
+export const scopesForPreset = (preset: McpKeyPreset): McpScope[] => {
+	if (preset === 'read_only_planner') {
+		return ['households:read', 'recipes:read', 'meals:read'];
+	}
+	if (preset === 'meal_planner') {
+		return ['households:read', 'recipes:read', 'meals:read', 'meals:write', 'check_ins:write'];
+	}
+	return [...MAAL_API_SCOPES];
+};
+
+export const scopeLevelsForScopes = (scopes: readonly McpScope[]): McpScopeLevels =>
+	Object.fromEntries(
+		mcpScopeGroups.map((group) => {
+			if (group.write && scopes.includes(group.write)) return [group.id, 'write'];
+			if (group.read && scopes.includes(group.read)) return [group.id, 'read'];
+			return [group.id, 'none'];
+		})
+	) as McpScopeLevels;
+
+export const selectedMcpScopesForLevels = (scopeLevels: McpScopeLevels): McpScope[] =>
+	mcpScopeGroups.flatMap((group) => {
+		const level = scopeLevels[group.id] ?? 'none';
+		if (level === 'none') return [];
+		if (level === 'read') return group.read ? [group.read] : [];
+		return [group.read, group.write].filter((scope): scope is McpScope => Boolean(scope));
+	});
+
+export const selectedMcpHouseholds = (
+	households: SettingsHousehold[],
+	householdIds: string[]
+): SettingsHousehold[] => households.filter((household) => householdIds.includes(household.id));
+
+export const mcpHouseholdPickerLabel = (households: SettingsHousehold[]): string => {
+	if (households.length === 0) return m.settings_select_households();
+	if (households.length === 1) return households[0].name;
+	return m.settings_households_selected({ count: households.length });
+};
+
+export const filterMcpHouseholds = (
+	households: SettingsHousehold[],
+	query: string
+): SettingsHousehold[] => {
+	const normalizedQuery = query.trim().toLowerCase();
+	return normalizedQuery
+		? households.filter((household) => household.name.toLowerCase().includes(normalizedQuery))
+		: households;
+};
+
+export const toggleMcpHouseholdId = (
+	householdIds: string[],
+	householdId: string,
+	checked: boolean
+): string[] =>
+	checked
+		? [...new Set([...householdIds, householdId])]
+		: householdIds.filter((id) => id !== householdId);
+
+export const setMcpScopeReadLevel = (
+	scopeLevels: McpScopeLevels,
+	groupId: McpScopeGroupId,
+	checked: boolean
+): McpScopeLevels => {
+	if (!isMcpScopeGroupId(groupId)) return scopeLevels;
+	const currentLevel = scopeLevels[groupId] ?? 'none';
+	if (currentLevel === 'write') return scopeLevels;
+	return { ...scopeLevels, [groupId]: checked ? 'read' : 'none' };
+};
+
+export const setMcpScopeWriteLevel = (
+	scopeLevels: McpScopeLevels,
+	groupId: McpScopeGroupId,
+	checked: boolean
+): McpScopeLevels => {
+	if (!isMcpScopeGroupId(groupId)) return scopeLevels;
+	return { ...scopeLevels, [groupId]: checked ? 'write' : 'read' };
+};

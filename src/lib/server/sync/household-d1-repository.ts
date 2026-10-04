@@ -1,0 +1,1226 @@
+import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
+import { isMealAggregate, type MealAggregate } from '$lib/domain/meals/schema.js';
+import type { MutationReceipt } from '$lib/sync/contracts.js';
+import type {
+	HouseholdSyncChange,
+	HouseholdSyncEntityKind,
+	HouseholdSyncMutation
+} from '$lib/sync/household-contracts.js';
+import { decodeHouseholdSyncAggregate } from '$lib/sync/household-entities.js';
+import { pruneSyncRetentionBatch } from '$lib/server/maintenance/sync-retention.js';
+
+import {
+	COMMIT_RACED,
+	JSON_IDENTITIES,
+	JSON_IDS,
+	MAX_COMMIT_ATTEMPTS,
+	assertIdentifier,
+	camelize,
+	entityHeadSql,
+	groupBy,
+	heldManifestKeys,
+	identitiesJson,
+	kindLiteral,
+	listHeldIdentities,
+	queryAll,
+	readSidecars,
+	type CommitResult,
+	type EntityIdentity,
+	type SqlValue
+} from './d1-snapshot.js';
+import { ServerSyncUnavailable } from './errors.js';
+import { incomingWinsHistoricalConflict, type WinningClock } from './reconciliation.js';
+import {
+	householdSyncEntityKey,
+	type HouseholdServerBootstrapPage,
+	type HouseholdServerBootstrapPageRequest,
+	type HouseholdServerSyncPage,
+	type HouseholdServerSyncScopeState,
+	type HouseholdSyncRepository
+} from './household-repository.js';
+
+interface ScopeRow {
+	bootstrap_generation: number;
+	earliest_retained_sequence: number;
+	latest_sequence: number;
+}
+
+interface ChangeRow {
+	seq: number;
+	mutation_id: string;
+	actor_user_id: string;
+	origin_device_id: string;
+	entity_kind: string;
+	entity_id: string;
+	conflict_group: string;
+	operation: 'upsert' | 'delete';
+	resulting_revision: number;
+	occurred_at: string;
+	received_at: string;
+	payload: string;
+	tombstone_expires_at: string | null;
+}
+
+interface ReceiptRow {
+	mutation_id: string;
+	status: 'accepted' | 'rejected';
+	sequence: number | null;
+	resulting_revision: number | null;
+	error_code: string | null;
+}
+
+interface VersionRow {
+	conflict_group: string;
+	revision: number;
+	last_sequence: number;
+	winning_occurred_at: string;
+	winning_origin_device_id: string;
+	winning_mutation_id: string;
+	winning_actor_user_id: string | null;
+	winning_received_at: string | null;
+}
+
+interface StoredChangePayload {
+	schemaVersion: 1;
+	payload: { conflictGroups: string[]; aggregate: unknown };
+}
+
+const HOUSEHOLD_TABLES = {
+	household: 'households',
+	householdAppliance: 'household_appliances',
+	foodHouseholdAlias: 'food_household_aliases',
+	foodHouseholdEntry: 'food_household_entries',
+	unitHouseholdAlias: 'unit_household_aliases',
+	unitHouseholdEntry: 'unit_household_entries',
+	householdFoodDisplayPreference: 'household_food_display_overrides',
+	householdUnitDisplayPreference: 'household_unit_display_overrides'
+} as const;
+
+const HOUSEHOLD_TABLE_COLUMNS = {
+	household: [
+		'householdId',
+		'name',
+		'locale',
+		'timezone',
+		'weekStartsOn',
+		'defaultPlannedYield',
+		'preferredDinnerTime',
+		'createdByUserId',
+		'schemaVersion',
+		'revision',
+		'createdAt',
+		'updatedAt',
+		'deletedAt'
+	],
+	householdAppliance: [
+		'id',
+		'householdId',
+		'appliance',
+		'available',
+		'notes',
+		'schemaVersion',
+		'revision',
+		'createdAt',
+		'updatedAt',
+		'deletedAt'
+	],
+	foodHouseholdAlias: [
+		'id',
+		'householdId',
+		'foodId',
+		'alias',
+		'locale',
+		'sourceDomain',
+		'adoptionStatus',
+		'defaultMeasureUnitId',
+		'defaultMeasureBaseUnitId',
+		'schemaVersion',
+		'revision',
+		'createdAt',
+		'updatedAt',
+		'deletedAt'
+	],
+	foodHouseholdEntry: [
+		'id',
+		'householdId',
+		'canonicalLabel',
+		'defaultMeasureUnitId',
+		'defaultMeasureBaseUnitId',
+		'adoptionStatus',
+		'schemaVersion',
+		'revision',
+		'createdAt',
+		'updatedAt',
+		'deletedAt'
+	],
+	unitHouseholdAlias: [
+		'id',
+		'householdId',
+		'unitId',
+		'baseUnitId',
+		'alias',
+		'pluralAlias',
+		'locale',
+		'sourceDomain',
+		'adoptionStatus',
+		'schemaVersion',
+		'revision',
+		'createdAt',
+		'updatedAt',
+		'deletedAt'
+	],
+	unitHouseholdEntry: [
+		'id',
+		'householdId',
+		'canonicalLabel',
+		'baseUnitId',
+		'toBaseFactor',
+		'toBaseOffset',
+		'adoptionStatus',
+		'schemaVersion',
+		'revision',
+		'createdAt',
+		'updatedAt',
+		'deletedAt'
+	],
+	householdFoodDisplayPreference: [
+		'id',
+		'householdId',
+		'preferredFoodAliasScope',
+		'foodId',
+		'locale',
+		'preferredFoodAliasId',
+		'preferredMeasureUnitId',
+		'preferredMeasureBaseUnitId',
+		'schemaVersion',
+		'revision',
+		'createdAt',
+		'updatedAt',
+		'deletedAt'
+	],
+	householdUnitDisplayPreference: [
+		'id',
+		'householdId',
+		'preferredUnitAliasScope',
+		'baseUnitId',
+		'locale',
+		'preferredUnitId',
+		'preferredUnitAliasId',
+		'schemaVersion',
+		'revision',
+		'createdAt',
+		'updatedAt',
+		'deletedAt'
+	]
+} as const satisfies Record<keyof typeof HOUSEHOLD_TABLES, readonly string[]>;
+
+const MEAL_PARENT_COLUMNS = [
+	'id',
+	'householdId',
+	'sourceRecipeId',
+	'title',
+	'description',
+	'imageUrl',
+	'date',
+	'time',
+	'sortOrder',
+	'plannedCookUserId',
+	'yield',
+	'plannedYield',
+	'status',
+	'prepTimeMinutes',
+	'cookTimeMinutes',
+	'totalTimeMinutes',
+	'sourceYieldText',
+	'sourceDatePublished',
+	'sourceDateModified',
+	'sourceLanguage',
+	'sourceUrl',
+	'sourceSiteName',
+	'sourceAuthorName',
+	'sourcePublisherName',
+	'sourceIsBasedOnUrl',
+	'sourceImportedAt',
+	'sourceHtmlHash',
+	'sourceRatingValue',
+	'sourceRatingCount',
+	'sourceReviewCount',
+	'sourceClaimedMinutes',
+	'parseConfidence',
+	'ingredientConfidence',
+	'instructionConfidence',
+	'nutritionConfidence',
+	'notes',
+	'schemaVersion',
+	'revision',
+	'createdAt',
+	'updatedAt',
+	'deletedAt'
+] as const;
+
+const CHECK_IN_COLUMNS = [
+	'id',
+	'reporterUserId',
+	'mealId',
+	'cookTimeMinutes',
+	'verdict',
+	'reason',
+	'schemaVersion',
+	'revision',
+	'createdAt',
+	'updatedAt',
+	'deletedAt'
+] as const;
+
+const MEAL_SIDE_CARS = [
+	['ingredients', 'meal_ingredients', 'mealId'],
+	['instructions', 'meal_instructions', 'mealId'],
+	['instructionEvents', 'meal_instruction_events', null],
+	['applianceRequirements', 'meal_appliance_requirements', 'mealId'],
+	['classifications', 'meal_classifications', 'mealId'],
+	['media', 'meal_media', 'mealId'],
+	['nutritionFacts', 'meal_nutrition_facts', 'mealId']
+] as const;
+
+const camelToSnake = (value: string): string =>
+	value.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+
+const sqlValue = (value: unknown): SqlValue => {
+	if (value === undefined) return null;
+	if (
+		value === null ||
+		typeof value === 'string' ||
+		typeof value === 'number' ||
+		value instanceof ArrayBuffer
+	) {
+		return value;
+	}
+	if (typeof value === 'boolean') return value ? 1 : 0;
+	throw new TypeError('A normalized D1 column received a non-scalar value.');
+};
+
+const pickSnake = (
+	source: Record<string, unknown>,
+	keys: readonly string[]
+): Record<string, SqlValue> =>
+	Object.fromEntries(keys.map((key) => [camelToSnake(key), sqlValue(source[key])])) as Record<
+		string,
+		SqlValue
+	>;
+
+const upsert = (
+	database: D1Database,
+	table: string,
+	row: Record<string, SqlValue>,
+	conflictColumns: readonly string[] = ['id']
+): D1PreparedStatement => {
+	const columns = Object.keys(row);
+	const updates = columns.filter((column) => !conflictColumns.includes(column));
+	const sql = `INSERT INTO ${assertIdentifier(table)} (${columns.map(assertIdentifier).join(', ')})
+		VALUES (${columns.map(() => '?').join(', ')})
+		ON CONFLICT (${conflictColumns.map(assertIdentifier).join(', ')}) DO UPDATE SET
+		${updates.map((column) => `${assertIdentifier(column)} = excluded.${assertIdentifier(column)}`).join(', ')}`;
+	return database.prepare(sql).bind(...columns.map((column) => row[column]!));
+};
+
+const decodeStoredPayload = (encoded: string): StoredChangePayload => {
+	const value: unknown = JSON.parse(encoded);
+	if (
+		typeof value !== 'object' ||
+		value === null ||
+		(value as { schemaVersion?: unknown }).schemaVersion !== CURRENT_SCHEMA_VERSION
+	) {
+		throw new TypeError('Unsupported persisted sync payload.');
+	}
+	const payload = (value as { payload?: unknown }).payload;
+	if (typeof payload !== 'object' || payload === null) {
+		throw new TypeError('Malformed persisted sync payload.');
+	}
+	const candidate = payload as { conflictGroups?: unknown; aggregate?: unknown };
+	if (
+		!Array.isArray(candidate.conflictGroups) ||
+		!candidate.conflictGroups.every((group) => typeof group === 'string')
+	) {
+		throw new TypeError('Malformed persisted conflict groups.');
+	}
+	return {
+		schemaVersion: CURRENT_SCHEMA_VERSION,
+		payload: { conflictGroups: candidate.conflictGroups, aggregate: candidate.aggregate }
+	};
+};
+
+const changeFromRow = (row: ChangeRow): HouseholdSyncChange => {
+	const stored = decodeStoredPayload(row.payload);
+	return {
+		sequence: row.seq,
+		mutationId: row.mutation_id,
+		originDeviceId: row.origin_device_id,
+		actorUserId: row.actor_user_id,
+		entityKind: row.entity_kind as HouseholdSyncEntityKind,
+		entityId: row.entity_id,
+		conflictGroups: stored.payload.conflictGroups as [string, ...string[]],
+		operation: row.operation,
+		resultingRevision: row.resulting_revision,
+		occurredAt: row.occurred_at as `${string}Z`,
+		receivedAt: row.received_at as `${string}Z`,
+		aggregate: stored.payload.aggregate,
+		tombstoneExpiresAt: row.tombstone_expires_at as `${string}Z` | null
+	};
+};
+
+const receiptFromRow = (row: ReceiptRow, duplicate = false): MutationReceipt => {
+	if (row.status === 'accepted' && row.sequence !== null && row.resulting_revision !== null) {
+		return {
+			mutationId: row.mutation_id,
+			status: duplicate ? 'duplicate' : 'accepted',
+			sequence: row.sequence,
+			resultingRevision: row.resulting_revision
+		};
+	}
+	return {
+		mutationId: row.mutation_id,
+		status: 'rejected',
+		sequence: null,
+		resultingRevision: null,
+		errorCode: row.error_code ?? 'rejected'
+	};
+};
+
+const mergeMeal = (
+	currentInput: unknown | null,
+	incomingInput: unknown,
+	acceptedGroups: readonly string[],
+	revision: number,
+	clock: WinningClock
+): unknown => {
+	const incoming = incomingInput as MealAggregate;
+	const current = currentInput as MealAggregate | null;
+	if (current === null || !isMealAggregate(current) || !isMealAggregate(incoming)) {
+		return { ...incoming, revision, updatedAt: clock.occurredAt };
+	}
+	const next: Record<string, unknown> = { ...current };
+	const incomingRecord: Record<string, unknown> = { ...incoming };
+	const header = [
+		'sourceRecipeId',
+		'title',
+		'description',
+		'imageUrl',
+		'yield',
+		'prepTimeMinutes',
+		'cookTimeMinutes',
+		'totalTimeMinutes',
+		'sourceYieldText',
+		'sourceDatePublished',
+		'sourceDateModified',
+		'sourceLanguage',
+		'sourceUrl',
+		'sourceSiteName',
+		'sourceAuthorName',
+		'sourcePublisherName',
+		'sourceIsBasedOnUrl',
+		'sourceImportedAt',
+		'sourceHtmlHash',
+		'sourceRatingValue',
+		'sourceRatingCount',
+		'sourceReviewCount',
+		'sourceClaimedMinutes',
+		'parseConfidence',
+		'ingredientConfidence',
+		'instructionConfidence',
+		'nutritionConfidence',
+		'notes'
+	];
+	const groupFields: Record<string, readonly string[]> = {
+		header,
+		schedule: ['date', 'time', 'sortOrder', 'plannedCookUserId', 'plannedYield'],
+		status: ['status'],
+		ingredients: ['ingredients'],
+		instructions: ['instructions', 'instructionEvents'],
+		appliances: ['applianceRequirements'],
+		classifications: ['classifications'],
+		media: ['media'],
+		nutrition: ['nutritionFacts'],
+		deletion: ['deletedAt']
+	};
+	for (const group of acceptedGroups) {
+		for (const field of groupFields[group] ?? header) next[field] = incomingRecord[field];
+	}
+	const clocks = { ...current.conflictClocks };
+	for (const group of acceptedGroups) clocks[group] = clock;
+	return { ...next, revision, updatedAt: clock.occurredAt, conflictClocks: clocks };
+};
+
+const normalizedStatements = (
+	database: D1Database,
+	householdId: string,
+	entityKind: HouseholdSyncEntityKind,
+	aggregate: Record<string, unknown>
+): D1PreparedStatement[] => {
+	if (entityKind === 'meal') {
+		const mealId = String(aggregate.id);
+		if ('purgedAt' in aggregate) {
+			return [
+				database
+					.prepare('DELETE FROM meals WHERE id = ? AND household_id = ?')
+					.bind(mealId, householdId)
+			];
+		}
+		const statements = [upsert(database, 'meals', pickSnake(aggregate, MEAL_PARENT_COLUMNS))];
+		statements.push(
+			database
+				.prepare(
+					'DELETE FROM meal_instruction_events WHERE meal_instruction_id IN (SELECT id FROM meal_instructions WHERE meal_id = ?)'
+				)
+				.bind(mealId),
+			database.prepare('DELETE FROM meal_ingredients WHERE meal_id = ?').bind(mealId),
+			database.prepare('DELETE FROM meal_instructions WHERE meal_id = ?').bind(mealId),
+			database.prepare('DELETE FROM meal_appliance_requirements WHERE meal_id = ?').bind(mealId),
+			database.prepare('DELETE FROM meal_classifications WHERE meal_id = ?').bind(mealId),
+			database.prepare('DELETE FROM meal_media WHERE meal_id = ?').bind(mealId),
+			database.prepare('DELETE FROM meal_nutrition_facts WHERE meal_id = ?').bind(mealId)
+		);
+		for (const [property, table, ownerKey] of MEAL_SIDE_CARS) {
+			const records = aggregate[property];
+			if (!Array.isArray(records)) continue;
+			for (const input of records) {
+				const source = input as Record<string, unknown>;
+				const row = Object.fromEntries(
+					Object.entries(source).map(([key, value]) => [camelToSnake(key), sqlValue(value)])
+				) as Record<string, SqlValue>;
+				if (ownerKey) row[camelToSnake(ownerKey)] = mealId;
+				statements.push(upsert(database, table, row));
+			}
+		}
+		return statements;
+	}
+	if (entityKind === 'meal_check_in') {
+		return [
+			upsert(database, 'meal_check_ins', {
+				...pickSnake(aggregate, CHECK_IN_COLUMNS),
+				household_id: householdId
+			})
+		];
+	}
+	if (entityKind === 'household') {
+		return [
+			upsert(database, 'households', pickSnake(aggregate, HOUSEHOLD_TABLE_COLUMNS.household), [
+				'household_id'
+			])
+		];
+	}
+	const table = HOUSEHOLD_TABLES[entityKind];
+	return [upsert(database, table, pickSnake(aggregate, HOUSEHOLD_TABLE_COLUMNS[entityKind]))];
+};
+
+const scopeState = async (
+	database: D1Database,
+	householdId: string
+): Promise<HouseholdServerSyncScopeState> => {
+	const row = await database
+		.prepare(
+			`SELECT bootstrap_generation, earliest_retained_sequence, latest_sequence
+			 FROM sync_scope_state WHERE audience_kind = 'household' AND audience_id = ?`
+		)
+		.bind(householdId)
+		.first<ScopeRow>();
+	return row
+		? {
+				retainedFloor: row.earliest_retained_sequence,
+				latestSequence: row.latest_sequence,
+				bootstrapGeneration: row.bootstrap_generation
+			}
+		: { retainedFloor: 0, latestSequence: 0, bootstrapGeneration: 1 };
+};
+
+const readVersions = async (
+	database: D1Database,
+	householdId: string,
+	entityKind: HouseholdSyncEntityKind,
+	entityId: string
+): Promise<VersionRow[]> =>
+	(
+		await database
+			.prepare(
+				`SELECT conflict_group, revision, last_sequence, winning_occurred_at,
+				 winning_origin_device_id, winning_mutation_id, winning_actor_user_id, winning_received_at
+				 FROM sync_entity_versions
+				 WHERE audience_kind = 'household' AND audience_id = ? AND entity_kind = ? AND entity_id = ?`
+			)
+			.bind(householdId, entityKind, entityId)
+			.all<VersionRow>()
+	).results;
+
+const conflictClocks = (versions: readonly VersionRow[]) =>
+	Object.fromEntries(
+		versions.map((version) => [
+			version.conflict_group,
+			{
+				occurredAt: version.winning_occurred_at,
+				originDeviceId: version.winning_origin_device_id,
+				mutationId: version.winning_mutation_id
+			}
+		])
+	);
+
+/** Every household entity kind and the normalized table that holds its current row. */
+const ENTITY_TABLES = {
+	...HOUSEHOLD_TABLES,
+	meal: 'meals',
+	meal_check_in: 'meal_check_ins'
+} as const satisfies Record<HouseholdSyncEntityKind, string>;
+
+export type HouseholdEntityIdentity = EntityIdentity<HouseholdSyncEntityKind>;
+
+const audience = (householdId: string) => ({ kind: 'household' as const, id: householdId });
+
+/**
+ * SQL that is true when the household still holds a readable aggregate for the version row `v`.
+ * A normalized row or any retained change makes it readable; `?1` must bind the household ID.
+ */
+const HELD_ENTITY_SQL = `(
+	(v.entity_kind = 'household' AND EXISTS (SELECT 1 FROM households WHERE household_id = ?1))
+	OR (v.entity_kind <> 'household' AND (
+		EXISTS (SELECT 1 FROM sync_changes c WHERE c.audience_kind = 'household' AND c.audience_id = ?1
+			AND c.entity_kind = v.entity_kind AND c.entity_id = v.entity_id)
+		OR CASE v.entity_kind ${Object.entries(ENTITY_TABLES)
+			.filter(([kind]) => kind !== 'household')
+			.map(
+				([kind, table]) =>
+					`WHEN ${kindLiteral(kind)} THEN EXISTS (SELECT 1 FROM ${assertIdentifier(table)} r
+						WHERE r.id = v.entity_id AND r.household_id = ?1)`
+			)
+			.join(' ')} ELSE 0 END
+	))
+)`;
+
+/**
+ * Reads the current snapshot change for each held identity in a fixed number of statements:
+ * versions, one row query per kind, the meal sidecars, and fallbacks for rows that are gone.
+ * Identities the household does not hold are left out. Results keep the input order.
+ */
+const readSnapshotChanges = async (
+	database: D1Database,
+	householdId: string,
+	identities: readonly HouseholdEntityIdentity[]
+): Promise<HouseholdSyncChange[]> => {
+	if (identities.length === 0) return [];
+	const idsByKind = groupBy(identities, ({ entityKind }) => entityKind);
+	const mealIds = idsByKind.get('meal')?.map(({ entityId }) => entityId) ?? [];
+	const [versionRows, rowGroups, sidecars, household] = await Promise.all([
+		queryAll<VersionRow & { entity_kind: string; entity_id: string }>(
+			database,
+			`SELECT entity_kind, entity_id, conflict_group, revision, last_sequence, winning_occurred_at,
+			 winning_origin_device_id, winning_mutation_id, winning_actor_user_id, winning_received_at
+			 FROM sync_entity_versions
+			 WHERE audience_kind = 'household' AND audience_id = ?
+			 AND (entity_kind, entity_id) IN (${JSON_IDENTITIES})`,
+			householdId,
+			identitiesJson(identities)
+		),
+		Promise.all(
+			[...idsByKind.entries()].map(async ([kind, group]) => {
+				const table = assertIdentifier(ENTITY_TABLES[kind as HouseholdSyncEntityKind]);
+				const rows =
+					kind === 'household'
+						? await queryAll(database, `SELECT * FROM ${table} WHERE household_id = ?`, householdId)
+						: await queryAll(
+								database,
+								`SELECT * FROM ${table} WHERE household_id = ? AND id IN (${JSON_IDS})`,
+								householdId,
+								JSON.stringify(group.map(({ entityId }) => entityId))
+							);
+				return rows.map((row) => ({
+					key: householdSyncEntityKey(
+						kind as HouseholdSyncEntityKind,
+						String(kind === 'household' ? row.household_id : row.id)
+					),
+					row
+				}));
+			})
+		),
+		mealIds.length > 0 ? readSidecars(database, 'meal', mealIds) : new Map(),
+		database
+			.prepare('SELECT created_by_user_id FROM households WHERE household_id = ?')
+			.bind(householdId)
+			.first<{ created_by_user_id: string | null }>()
+	]);
+	const versionsByKey = groupBy(versionRows, (row) =>
+		householdSyncEntityKey(row.entity_kind as HouseholdSyncEntityKind, row.entity_id)
+	);
+	const rowsByKey = new Map(rowGroups.flat().map(({ key, row }) => [key, row]));
+	const missing = identities.filter(
+		(identity) =>
+			identity.entityKind !== 'household' &&
+			!rowsByKey.has(householdSyncEntityKey(identity.entityKind, identity.entityId))
+	);
+	const latestPayloads = new Map(
+		missing.length === 0
+			? []
+			: (
+					await queryAll<{
+						entity_kind: HouseholdSyncEntityKind;
+						entity_id: string;
+						payload: string;
+					}>(
+						database,
+						`SELECT entity_kind, entity_id, payload, MAX(seq) AS seq FROM sync_changes
+						 WHERE audience_kind = 'household' AND audience_id = ?
+						 AND (entity_kind, entity_id) IN (${JSON_IDENTITIES})
+						 GROUP BY entity_kind, entity_id`,
+						householdId,
+						identitiesJson(missing)
+					)
+				).map((row) => [
+					householdSyncEntityKey(row.entity_kind, row.entity_id),
+					decodeStoredPayload(row.payload).payload.aggregate
+				])
+	);
+
+	const changes: HouseholdSyncChange[] = [];
+	for (const { entityKind, entityId } of identities) {
+		const key = householdSyncEntityKey(entityKind, entityId);
+		const versions = versionsByKey.get(key);
+		if (!versions) continue;
+		const row = rowsByKey.get(key);
+		const clocks = conflictClocks(versions);
+		let aggregate: unknown;
+		if (!row) {
+			if (!latestPayloads.has(key)) continue;
+			aggregate = latestPayloads.get(key);
+		} else if (entityKind === 'household') {
+			aggregate = {
+				...camelize(row),
+				deletionState: 'active',
+				localOnly: false,
+				conflictClocks: clocks
+			};
+		} else if (entityKind === 'meal_check_in') {
+			aggregate = { ...camelize(row, ['household_id']), conflictClocks: clocks };
+		} else if (entityKind === 'meal') {
+			aggregate = { ...camelize(row), conflictClocks: clocks, ...sidecars.get(entityId) };
+		} else {
+			const record = camelize(row);
+			if (entityKind === 'householdAppliance') record.available = record.available === 1;
+			aggregate = { ...record, conflictClocks: clocks };
+		}
+		changes.push(
+			syntheticChange(
+				householdId,
+				entityKind,
+				entityId,
+				aggregate,
+				versions,
+				household?.created_by_user_id ?? null
+			)
+		);
+	}
+	return changes;
+};
+
+const syntheticChange = (
+	householdId: string,
+	entityKind: HouseholdSyncEntityKind,
+	entityId: string,
+	aggregate: unknown,
+	versions: readonly VersionRow[],
+	householdCreatorId: string | null
+): HouseholdSyncChange => {
+	const winner = versions.toSorted((left, right) => right.last_sequence - left.last_sequence)[0]!;
+	const record = aggregate as { deletedAt?: string | null; purgedAt?: string };
+	let actorUserId = winner.winning_actor_user_id;
+	if (!actorUserId && entityKind === 'meal_check_in') {
+		const reporterUserId = (aggregate as { reporterUserId?: unknown }).reporterUserId;
+		if (typeof reporterUserId === 'string' && reporterUserId.length > 0)
+			actorUserId = reporterUserId;
+	}
+	actorUserId ??= householdCreatorId ?? `household:${householdId}`;
+	return {
+		sequence: winner.last_sequence,
+		mutationId: winner.winning_mutation_id,
+		originDeviceId: winner.winning_origin_device_id,
+		actorUserId,
+		entityKind,
+		entityId,
+		conflictGroups: versions.map(({ conflict_group }) => conflict_group) as [string, ...string[]],
+		operation: record.deletedAt || record.purgedAt ? 'delete' : 'upsert',
+		resultingRevision: Math.max(...versions.map(({ revision }) => revision)),
+		occurredAt: winner.winning_occurred_at as `${string}Z`,
+		receivedAt: (winner.winning_received_at ?? winner.winning_occurred_at) as `${string}Z`,
+		aggregate,
+		tombstoneExpiresAt: null
+	};
+};
+
+const ENTITY_HEAD_SQL = entityHeadSql('household');
+
+type HouseholdCommitInput = Parameters<HouseholdSyncRepository['commit']>[0];
+
+export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
+	constructor(private readonly database: D1Database) {}
+
+	readScopeState(householdId: string) {
+		return scopeState(this.database, householdId);
+	}
+
+	/** Reads the held aggregates for these identities, in input order, at a fixed statement cost. */
+	readEntities(householdId: string, identities: readonly HouseholdEntityIdentity[]) {
+		return readSnapshotChanges(this.database, householdId, identities);
+	}
+
+	/** Reads every held aggregate of these kinds, in entity-key order. */
+	async readEntitiesOfKinds(householdId: string, kinds: readonly HouseholdSyncEntityKind[]) {
+		const identities = await listHeldIdentities(
+			this.database,
+			audience(householdId),
+			HELD_ENTITY_SQL,
+			{ kinds }
+		);
+		return readSnapshotChanges(this.database, householdId, identities);
+	}
+
+	async pull(householdId: string, after: number, limit: number): Promise<HouseholdServerSyncPage> {
+		const state = await scopeState(this.database, householdId);
+		const rows = (
+			await this.database
+				.prepare(
+					`SELECT * FROM sync_changes
+					 WHERE audience_kind = 'household' AND audience_id = ? AND seq > ?
+					 ORDER BY seq LIMIT ?`
+				)
+				.bind(householdId, after, limit + 1)
+				.all<ChangeRow>()
+		).results;
+		const hasMore = rows.length > limit;
+		const selected = rows.slice(0, limit);
+		return {
+			...state,
+			changes: selected.map(changeFromRow),
+			throughSequence: selected.at(-1)?.seq ?? Math.min(after, state.latestSequence),
+			hasMore
+		};
+	}
+
+	async bootstrap(
+		householdId: string,
+		page: HouseholdServerBootstrapPageRequest
+	): Promise<HouseholdServerBootstrapPage> {
+		// Read the watermark before the listing: a commit landing between them then
+		// appears on the page instead of being skipped above throughSequence.
+		const state = await scopeState(this.database, householdId);
+		const identities = await listHeldIdentities<HouseholdSyncEntityKind>(
+			this.database,
+			audience(householdId),
+			HELD_ENTITY_SQL,
+			{ afterEntityKey: page.afterEntityKey, limit: page.limit + 1 }
+		);
+		const authoritativeIds = await heldManifestKeys(
+			this.database,
+			audience(householdId),
+			HELD_ENTITY_SQL,
+			page.manifest
+		);
+		const selected = identities.slice(0, page.limit);
+		const last = selected.at(-1);
+		return {
+			...state,
+			aggregates: await readSnapshotChanges(this.database, householdId, selected),
+			authoritativeIds,
+			nextEntityKey:
+				identities.length > page.limit && last
+					? householdSyncEntityKey(last.entityKind, last.entityId)
+					: null
+		};
+	}
+
+	private async reject(input: {
+		householdId: string;
+		mutation: HouseholdSyncMutation;
+		receivedAt: string;
+		code: string;
+	}): Promise<MutationReceipt> {
+		const retainUntil = new Date(Date.parse(input.receivedAt) + 365 * 86_400_000).toISOString();
+		await this.database
+			.prepare(
+				`INSERT INTO sync_mutation_receipts
+				 (mutation_id, audience_kind, audience_id, entity_kind, entity_id, status, sequence,
+				  resulting_revision, error_code, created_at, retain_until)
+				 VALUES (?, 'household', ?, ?, ?, 'rejected', NULL, NULL, ?, ?, ?)`
+			)
+			.bind(
+				input.mutation.mutationId,
+				input.householdId,
+				input.mutation.entityKind,
+				input.mutation.entityId,
+				input.code,
+				input.receivedAt,
+				retainUntil
+			)
+			.run();
+		return {
+			mutationId: input.mutation.mutationId,
+			status: 'rejected',
+			sequence: null,
+			resultingRevision: null,
+			errorCode: input.code
+		};
+	}
+
+	async commit(input: HouseholdCommitInput): Promise<MutationReceipt> {
+		return (await this.commitWithResult(input)).receipt;
+	}
+
+	/**
+	 * Commits one mutation and returns the aggregate it stored. The merge base is read before the
+	 * write batch, so the batch only applies while the entity head is unchanged; a concurrent
+	 * commit makes it retry against the new head instead of overwriting the other edit.
+	 */
+	async commitWithResult(input: HouseholdCommitInput): Promise<CommitResult> {
+		for (let attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt += 1) {
+			const result = await this.attemptCommit(input);
+			if (result !== COMMIT_RACED) return result;
+		}
+		throw new ServerSyncUnavailable({
+			code: 'commit_contention',
+			message: 'The entity kept changing while this mutation was committed.'
+		});
+	}
+
+	private async attemptCommit(
+		input: HouseholdCommitInput
+	): Promise<CommitResult | typeof COMMIT_RACED> {
+		const existingReceipt = await this.database
+			.prepare('SELECT * FROM sync_mutation_receipts WHERE mutation_id = ?')
+			.bind(input.mutation.mutationId)
+			.first<ReceiptRow>();
+		if (existingReceipt) {
+			const receipt = receiptFromRow(existingReceipt, true);
+			// A batch that committed but threw retries here; the write did land, so
+			// return the stored aggregate instead of null.
+			const aggregate =
+				receipt.status === 'accepted' || receipt.status === 'duplicate'
+					? ((
+							await readSnapshotChanges(this.database, input.householdId, [
+								{
+									entityKind: input.mutation.entityKind,
+									entityId: input.mutation.entityId
+								}
+							])
+						)[0]?.aggregate ?? null)
+					: null;
+			return { receipt, aggregate };
+		}
+		const rejected = async (code: string) => ({
+			receipt: await this.reject({ ...input, code }),
+			aggregate: null
+		});
+
+		const decodedIncoming = decodeHouseholdSyncAggregate(
+			input.mutation.entityKind,
+			input.mutation.entityId,
+			input.householdId,
+			input.mutation.aggregate
+		);
+		if (input.mutation.entityKind === 'meal_check_in') {
+			const mealId = decodedIncoming.aggregate.mealId;
+			if (typeof mealId === 'string') {
+				const ownedMeal = await this.database
+					.prepare('SELECT 1 AS present FROM meals WHERE id = ? AND household_id = ?')
+					.bind(mealId, input.householdId)
+					.first<{ present: number }>();
+				if (!ownedMeal) return rejected('meal_household_mismatch');
+			}
+		}
+		if (
+			input.mutation.entityKind === 'meal' &&
+			input.mutation.conflictGroups.includes('schedule')
+		) {
+			const plannedCookUserId = decodedIncoming.aggregate.plannedCookUserId;
+			if (typeof plannedCookUserId === 'string') {
+				const currentMember = await this.database
+					.prepare(
+						`SELECT 1 AS present FROM household_memberships
+						 WHERE household_id = ? AND workos_user_id = ? AND status = 'active'`
+					)
+					.bind(input.householdId, plannedCookUserId)
+					.first<{ present: number }>();
+				if (!currentMember) return rejected('planned_cook_not_member');
+			}
+		}
+		const activeTombstone = await this.database
+			.prepare(
+				`SELECT 1 AS present FROM sync_tombstones
+				 WHERE audience_kind = 'household' AND audience_id = ? AND entity_kind = ? AND entity_id = ?
+				 AND expires_at > ?`
+			)
+			.bind(input.householdId, input.mutation.entityKind, input.mutation.entityId, input.receivedAt)
+			.first<{ present: number }>();
+		if (activeTombstone && input.mutation.operation === 'upsert') {
+			return rejected('tombstoned_entity');
+		}
+
+		const versions = await readVersions(
+			this.database,
+			input.householdId,
+			input.mutation.entityKind,
+			input.mutation.entityId
+		);
+		const versionByGroup = new Map(versions.map((version) => [version.conflict_group, version]));
+		const acceptedGroups =
+			input.mode === 'live'
+				? [...input.mutation.conflictGroups]
+				: input.mutation.conflictGroups.filter((group) => {
+						const version = versionByGroup.get(group);
+						return incomingWinsHistoricalConflict(
+							version
+								? {
+										occurredAt: version.winning_occurred_at,
+										originDeviceId: version.winning_origin_device_id,
+										mutationId: version.winning_mutation_id
+									}
+								: null,
+							input.mutation
+						);
+					});
+		if (acceptedGroups.length === 0) {
+			return rejected('historical_loser');
+		}
+
+		const head = Math.max(0, ...versions.map(({ last_sequence }) => last_sequence));
+		const [currentChange] = await readSnapshotChanges(this.database, input.householdId, [
+			{ entityKind: input.mutation.entityKind, entityId: input.mutation.entityId }
+		]);
+		const current = currentChange?.aggregate ?? null;
+		const revision = Math.max(0, ...versions.map(({ revision }) => revision)) + 1;
+		const clock = {
+			occurredAt: input.mutation.occurredAt,
+			originDeviceId: input.mutation.originDeviceId,
+			mutationId: input.mutation.mutationId
+		};
+		const tombstoneExpiresAt =
+			input.mutation.operation === 'delete'
+				? new Date(Date.parse(input.receivedAt) + 365 * 86_400_000).toISOString()
+				: null;
+		const result =
+			input.mutation.operation === 'delete' && input.mutation.entityKind === 'meal'
+				? {
+						schemaVersion: CURRENT_SCHEMA_VERSION,
+						revision,
+						createdAt: decodedIncoming.aggregate.createdAt,
+						updatedAt: input.mutation.occurredAt,
+						deletedAt: input.mutation.occurredAt,
+						conflictClocks: { deletion: clock },
+						id: input.mutation.entityId,
+						householdId: input.householdId,
+						purgedAt: input.receivedAt,
+						retainUntil: tombstoneExpiresAt!
+					}
+				: input.mutation.entityKind === 'meal'
+					? mergeMeal(current, decodedIncoming.aggregate, acceptedGroups, revision, clock)
+					: {
+							...decodedIncoming.aggregate,
+							revision,
+							updatedAt: input.mutation.occurredAt,
+							conflictClocks: {
+								...((current as { conflictClocks?: Record<string, unknown> } | null)
+									?.conflictClocks ?? {}),
+								...Object.fromEntries(acceptedGroups.map((group) => [group, clock]))
+							}
+						};
+		const decodedResult = decodeHouseholdSyncAggregate(
+			input.mutation.entityKind,
+			input.mutation.entityId,
+			input.householdId,
+			result
+		);
+		const payload = JSON.stringify({
+			schemaVersion: CURRENT_SCHEMA_VERSION,
+			payload: { conflictGroups: acceptedGroups, aggregate: decodedResult.aggregate }
+		});
+		const receiptRetainUntil = new Date(
+			Date.parse(input.receivedAt) + 365 * 86_400_000
+		).toISOString();
+		const statements = [
+			this.database
+				.prepare(
+					`INSERT INTO users (workos_user_id, schema_version, revision, created_at, updated_at)
+					 VALUES (?, 1, 1, ?, ?) ON CONFLICT(workos_user_id) DO NOTHING`
+				)
+				.bind(input.actorUserId, input.receivedAt, input.receivedAt),
+			...normalizedStatements(
+				this.database,
+				input.householdId,
+				input.mutation.entityKind,
+				decodedResult.aggregate
+			),
+			this.database
+				.prepare(
+					`INSERT INTO sync_changes
+					 (mutation_id, actor_user_id, origin_device_id, audience_kind, audience_id, entity_kind,
+					  entity_id, conflict_group, operation, resulting_revision, occurred_at, received_at,
+					  payload, tombstone_expires_at)
+					 VALUES (?, ?, ?, 'household', ?, ?, ?, ?, ?, ?, ?, ?,
+					  CASE WHEN ${ENTITY_HEAD_SQL} = ? THEN ? END, ?)`
+				)
+				.bind(
+					input.mutation.mutationId,
+					input.actorUserId,
+					input.mutation.originDeviceId,
+					input.householdId,
+					input.mutation.entityKind,
+					input.mutation.entityId,
+					acceptedGroups.join(','),
+					input.mutation.operation,
+					revision,
+					input.mutation.occurredAt,
+					input.receivedAt,
+					// A moved head leaves the payload NULL, which fails NOT NULL and rolls the batch back.
+					input.householdId,
+					input.mutation.entityKind,
+					input.mutation.entityId,
+					head,
+					payload,
+					tombstoneExpiresAt
+				)
+		];
+		for (const group of acceptedGroups) {
+			statements.push(
+				this.database
+					.prepare(
+						`INSERT INTO sync_entity_versions
+						 (audience_kind, audience_id, entity_kind, entity_id, conflict_group, revision,
+						  last_sequence, winning_occurred_at, winning_origin_device_id, winning_mutation_id,
+						  winning_actor_user_id, winning_received_at)
+						 VALUES ('household', ?, ?, ?, ?, ?,
+						  (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?, ?, ?, ?, ?)
+						 ON CONFLICT(audience_kind, audience_id, entity_kind, entity_id, conflict_group)
+						 DO UPDATE SET revision = excluded.revision, last_sequence = excluded.last_sequence,
+						  winning_occurred_at = excluded.winning_occurred_at,
+						  winning_origin_device_id = excluded.winning_origin_device_id,
+						  winning_mutation_id = excluded.winning_mutation_id,
+						  winning_actor_user_id = excluded.winning_actor_user_id,
+						  winning_received_at = excluded.winning_received_at`
+					)
+					.bind(
+						input.householdId,
+						input.mutation.entityKind,
+						input.mutation.entityId,
+						group,
+						revision,
+						input.mutation.mutationId,
+						input.mutation.occurredAt,
+						input.mutation.originDeviceId,
+						input.mutation.mutationId,
+						input.actorUserId,
+						input.receivedAt
+					)
+			);
+		}
+		statements.push(
+			this.database
+				.prepare(
+					`INSERT INTO sync_scope_state
+					 (audience_kind, audience_id, bootstrap_generation, earliest_retained_sequence,
+					  latest_sequence, updated_at)
+					 VALUES ('household', ?, 1, 0, (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?)
+					 ON CONFLICT(audience_kind, audience_id) DO UPDATE SET
+					  latest_sequence = excluded.latest_sequence, updated_at = excluded.updated_at`
+				)
+				.bind(input.householdId, input.mutation.mutationId, input.receivedAt),
+			this.database
+				.prepare(
+					`INSERT INTO sync_devices
+					 (device_id, workos_user_id, created_at, last_seen_at, last_app_version, last_protocol_version)
+					 VALUES (?, ?, ?, ?, 'v1', 1)
+					 ON CONFLICT(device_id, workos_user_id) DO UPDATE SET last_seen_at = excluded.last_seen_at,
+					  last_app_version = excluded.last_app_version,
+					  last_protocol_version = excluded.last_protocol_version`
+				)
+				.bind(input.deviceId, input.actorUserId, input.receivedAt, input.receivedAt),
+			this.database
+				.prepare(
+					`INSERT INTO sync_mutation_receipts
+					 (mutation_id, audience_kind, audience_id, entity_kind, entity_id, status, sequence,
+					  resulting_revision, error_code, created_at, retain_until)
+					 VALUES (?, 'household', ?, ?, ?, 'accepted',
+					  (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?, NULL, ?, ?)`
+				)
+				.bind(
+					input.mutation.mutationId,
+					input.householdId,
+					input.mutation.entityKind,
+					input.mutation.entityId,
+					input.mutation.mutationId,
+					revision,
+					input.receivedAt,
+					receiptRetainUntil
+				)
+		);
+		if (tombstoneExpiresAt) {
+			statements.push(
+				this.database
+					.prepare(
+						`INSERT INTO sync_tombstones
+						 (audience_kind, audience_id, entity_kind, entity_id, deletion_sequence, deleted_at,
+						  expires_at, previous_server_ack)
+						 VALUES ('household', ?, ?, ?, (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?, ?, 1)
+						 ON CONFLICT(audience_kind, audience_id, entity_kind, entity_id) DO UPDATE SET
+						  deletion_sequence = excluded.deletion_sequence, deleted_at = excluded.deleted_at,
+						  expires_at = excluded.expires_at, previous_server_ack = 1`
+					)
+					.bind(
+						input.householdId,
+						input.mutation.entityKind,
+						input.mutation.entityId,
+						input.mutation.mutationId,
+						input.mutation.occurredAt,
+						tombstoneExpiresAt
+					)
+			);
+		} else {
+			statements.push(
+				this.database
+					.prepare(
+						`DELETE FROM sync_tombstones WHERE audience_kind = 'household' AND audience_id = ?
+						 AND entity_kind = ? AND entity_id = ?`
+					)
+					.bind(input.householdId, input.mutation.entityKind, input.mutation.entityId)
+			);
+		}
+		try {
+			await this.database.batch(statements);
+		} catch (error) {
+			if (await this.raced(input, head)) return COMMIT_RACED;
+			throw error;
+		}
+		const receipt = await this.database
+			.prepare('SELECT * FROM sync_mutation_receipts WHERE mutation_id = ?')
+			.bind(input.mutation.mutationId)
+			.first<ReceiptRow>();
+		if (!receipt) throw new TypeError('The committed mutation has no receipt.');
+		return { receipt: receiptFromRow(receipt), aggregate: decodedResult.aggregate };
+	}
+
+	/** True when another commit moved the entity head or stored this mutation first. */
+	private async raced(input: HouseholdCommitInput, head: number): Promise<boolean> {
+		const row = await this.database
+			.prepare(
+				`SELECT ${ENTITY_HEAD_SQL} AS head,
+				 EXISTS (SELECT 1 FROM sync_mutation_receipts WHERE mutation_id = ?) AS stored`
+			)
+			.bind(
+				input.householdId,
+				input.mutation.entityKind,
+				input.mutation.entityId,
+				input.mutation.mutationId
+			)
+			.first<{ head: number; stored: number }>();
+		return row !== null && (row.head !== head || row.stored === 1);
+	}
+
+	async prune(input: { now: string; changeCutoff: string }): Promise<void> {
+		await pruneSyncRetentionBatch(this.database, {
+			audienceKind: 'household',
+			...input
+		});
+	}
+}

@@ -1,0 +1,755 @@
+import 'fake-indexeddb/auto';
+
+import Dexie from 'dexie';
+import { Schema } from 'effect';
+import { uuidv7 } from 'uuidv7';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+
+import {
+	addOrUpdateLocalProfile,
+	clearProfilePin,
+	deleteLocalHousehold,
+	detachHouseholdSnapshot,
+	forkDetachedHouseholdSnapshot,
+	listHouseholdsForProfile,
+	lockProfile,
+	openMaalDatabase,
+	readLockedActiveProfile,
+	removeProfileFromDevice,
+	requestProfilePinReset,
+	setActiveHousehold,
+	setProfilePin,
+	switchActiveProfile,
+	updateHouseholdAppliances,
+	updateHouseholdSettings,
+	type MaalDatabase
+} from '$lib/client/local/index.js';
+import {
+	createHouseholdInvite,
+	createRemoteHousehold,
+	joinRemoteHousehold,
+	updateHouseholdMemberRole
+} from '$lib/client/household-administration.js';
+import { signOutLocalProfile } from '$lib/client/profile-sessions.js';
+import {
+	HouseholdSchema,
+	MembershipSchema,
+	ProfileSchema,
+	hashInviteCode,
+	type Household,
+	type Membership,
+	type Profile
+} from '$lib/domain/household/index.js';
+
+const databases: MaalDatabase[] = [];
+const timestamp = '2026-08-21T12:00:00.000Z' as const;
+
+const openDatabase = async (): Promise<MaalDatabase> => {
+	const database = await openMaalDatabase(`profiles-${crypto.randomUUID()}`);
+	databases.push(database);
+	return database;
+};
+
+afterEach(async () => {
+	for (const database of databases) {
+		const name = database.name;
+		database.close();
+		await Dexie.delete(name);
+	}
+	databases.length = 0;
+});
+
+const profile = (overrides: Partial<Profile> = {}): Profile =>
+	Schema.decodeUnknownSync(ProfileSchema)({
+		profileId: uuidv7(),
+		workosUserId: `user_${crypto.randomUUID()}`,
+		displayName: 'Alice',
+		email: 'alice@example.test',
+		profilePictureUrl: null,
+		locale: 'en-NL',
+		timezone: 'Europe/Amsterdam',
+		pinSalt: null,
+		pinVerifier: null,
+		lockPolicy: 'none',
+		lastUsedAt: timestamp,
+		authState: 'authenticated',
+		...overrides
+	});
+
+const household = (overrides: Partial<Household> = {}): Household =>
+	Schema.decodeUnknownSync(HouseholdSchema)({
+		schemaVersion: 1,
+		revision: 1,
+		createdAt: timestamp,
+		updatedAt: timestamp,
+		deletedAt: null,
+		conflictClocks: {},
+		householdId: 'org_household',
+		name: 'Canal kitchen',
+		locale: 'en-NL',
+		timezone: 'Europe/Amsterdam',
+		weekStartsOn: 1,
+		defaultPlannedYield: 4,
+		preferredDinnerTime: '18:30',
+		createdByUserId: 'user_alice',
+		deletionState: 'active',
+		localOnly: false,
+		...overrides
+	});
+
+const membership = (overrides: Partial<Membership> = {}): Membership =>
+	Schema.decodeUnknownSync(MembershipSchema)({
+		membershipId: `membership_${crypto.randomUUID()}`,
+		householdId: 'org_household',
+		workosUserId: 'user_alice',
+		roleSlug: 'admin',
+		permissions: ['households:write', 'recipes:read', 'recipes:write', 'meals:read', 'meals:write'],
+		status: 'active',
+		directoryManaged: false,
+		workosCreatedAt: timestamp,
+		lastVerifiedAt: timestamp,
+		updatedAt: timestamp,
+		detachedAt: null,
+		denialCode: null,
+		source: 'workos',
+		...overrides
+	});
+
+const addAuthSlot = async (database: MaalDatabase, value: Profile, suffix = 'a') => {
+	await database.authSlots.add({
+		authSlotId: suffix.repeat(32),
+		profileId: value.profileId,
+		workosUserId: value.workosUserId,
+		sessionState: 'authenticated',
+		lastRefreshedAt: timestamp,
+		lastVerifiedAt: timestamp,
+		nextRetryAt: null,
+		retryCount: 0
+	});
+};
+
+describe('device-local profile lifecycle', () => {
+	test.each(['unlock', 'change', 'remove'])(
+		'cancels an abandoned PIN-reset request after a valid PIN %s',
+		async (action) => {
+			const database = await openDatabase();
+			const alice = profile();
+			await database.profiles.add(alice);
+			await switchActiveProfile(database, alice.profileId);
+			await setProfilePin(database, alice.profileId, '4826');
+			await lockProfile(database, alice.profileId);
+			await requestProfilePinReset(database, alice.profileId);
+			await expect(switchActiveProfile(database, alice.profileId, '1111')).rejects.toMatchObject({
+				_tag: 'ProfilePinInvalid'
+			});
+			await expect(database.uiState.get(`pinReset:${alice.profileId}`)).resolves.toBeDefined();
+
+			if (action === 'unlock') await switchActiveProfile(database, alice.profileId, '4826');
+			if (action === 'change') await setProfilePin(database, alice.profileId, '1234', '4826');
+			if (action === 'remove') await clearProfilePin(database, alice.profileId, '4826');
+
+			await expect(database.uiState.get(`pinReset:${alice.profileId}`)).resolves.toBeUndefined();
+		}
+	);
+
+	test('switches profiles and unlocks a PIN without touching either retained auth slot', async () => {
+		const database = await openDatabase();
+		const alice = profile({ workosUserId: 'user_alice' });
+		const bob = profile({
+			workosUserId: 'user_bob',
+			displayName: 'Bob',
+			email: 'bob@example.test'
+		});
+		await database.profiles.bulkAdd([alice, bob]);
+		await addAuthSlot(database, alice, 'a');
+		await addAuthSlot(database, bob, 'b');
+		await switchActiveProfile(database, alice.profileId);
+		await setProfilePin(database, alice.profileId, '4826');
+		await switchActiveProfile(database, bob.profileId);
+
+		await expect(switchActiveProfile(database, alice.profileId)).rejects.toMatchObject({
+			_tag: 'ProfilePinRequired'
+		});
+		await expect(switchActiveProfile(database, alice.profileId, '1111')).rejects.toMatchObject({
+			_tag: 'ProfilePinInvalid'
+		});
+		await expect(switchActiveProfile(database, alice.profileId, '4826')).resolves.toMatchObject({
+			profileId: alice.profileId
+		});
+		await expect(database.authSlots.count()).resolves.toBe(2);
+		await expect(database.authSlots.toArray()).resolves.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ authSlotId: 'a'.repeat(32), sessionState: 'authenticated' }),
+				expect.objectContaining({ authSlotId: 'b'.repeat(32), sessionState: 'authenticated' })
+			])
+		);
+	});
+
+	test('gates a locked active profile and needs the current PIN to change or remove it', async () => {
+		const database = await openDatabase();
+		const alice = profile();
+		await database.profiles.add(alice);
+		await switchActiveProfile(database, alice.profileId);
+		await setProfilePin(database, alice.profileId, '4826');
+		await expect(readLockedActiveProfile(database)).resolves.toBeNull();
+
+		await lockProfile(database, alice.profileId);
+		await expect(readLockedActiveProfile(database)).resolves.toMatchObject({
+			profileId: alice.profileId
+		});
+		await switchActiveProfile(database, alice.profileId, '4826');
+		await expect(readLockedActiveProfile(database)).resolves.toBeNull();
+
+		await expect(setProfilePin(database, alice.profileId, '1234')).rejects.toMatchObject({
+			_tag: 'ProfilePinRequired'
+		});
+		await expect(setProfilePin(database, alice.profileId, '1234', '0000')).rejects.toMatchObject({
+			_tag: 'ProfilePinInvalid'
+		});
+		await expect(clearProfilePin(database, alice.profileId)).rejects.toMatchObject({
+			_tag: 'ProfilePinRequired'
+		});
+		await setProfilePin(database, alice.profileId, '1234', '4826');
+		await expect(clearProfilePin(database, alice.profileId, '4826')).rejects.toMatchObject({
+			_tag: 'ProfilePinInvalid'
+		});
+		await clearProfilePin(database, alice.profileId, '1234');
+		await expect(database.profiles.get(alice.profileId)).resolves.toMatchObject({
+			lockPolicy: 'none',
+			pinVerifier: null
+		});
+	});
+
+	test('removes every mutation the profile queued, including work queued while signed out', async () => {
+		const database = await openDatabase();
+		const alice = profile({ workosUserId: 'user_alice' });
+		const bob = profile({ workosUserId: 'user_bob' });
+		await database.profiles.bulkAdd([alice, bob]);
+		await addAuthSlot(database, alice, 'a');
+		await addAuthSlot(database, bob, 'b');
+		await database.households.add(household());
+		await database.memberships.bulkAdd([
+			membership({ workosUserId: alice.workosUserId }),
+			membership({ workosUserId: bob.workosUserId, roleSlug: 'member' })
+		]);
+		const queued = (authSlotId: string) => ({
+			mutationId: uuidv7(),
+			authSlotId,
+			scopeKind: 'household' as const,
+			scopeId: 'org_household',
+			status: 'pending' as const,
+			occurredAt: timestamp,
+			aggregateId: uuidv7(),
+			entityKind: 'meal',
+			conflictGroup: 'meal',
+			operation: 'upsert' as const,
+			originDeviceId: 'device',
+			payload: {},
+			nextAttemptAt: timestamp,
+			attempts: 0
+		});
+		const bobRow = queued('b'.repeat(32));
+		await database.outbox.bulkAdd([
+			queued('a'.repeat(32)),
+			queued(`signed-out:${alice.profileId}`),
+			bobRow
+		]);
+
+		const removed = await removeProfileFromDevice(database, alice.profileId);
+
+		expect(removed.retainedHouseholdIds).toEqual(['org_household']);
+		await expect(database.outbox.toArray()).resolves.toEqual([bobRow]);
+	});
+
+	test('caps retained authenticated profiles at eight while keeping signed-out profiles usable', async () => {
+		const database = await openDatabase();
+		for (let index = 0; index < 8; index += 1) {
+			await addOrUpdateLocalProfile(
+				database,
+				profile({ workosUserId: `user_${index}`, displayName: `Cook ${index}` })
+			);
+		}
+		await expect(
+			addOrUpdateLocalProfile(database, profile({ workosUserId: 'user_nine' }))
+		).rejects.toMatchObject({ _tag: 'LocalProfileCapacityExceeded', maximum: 8 });
+
+		const first = await database.profiles.orderBy('lastUsedAt').first();
+		expect(first).toBeDefined();
+		await database.profiles.update(first!.profileId, { authState: 'signedOut' });
+		await expect(
+			addOrUpdateLocalProfile(database, profile({ workosUserId: 'user_nine' }))
+		).resolves.toBeUndefined();
+		await expect(database.profiles.count()).resolves.toBe(9);
+	});
+
+	test('keeps offline data on sign-out but removes private state only on device removal', async () => {
+		const database = await openDatabase();
+		const alice = profile({ workosUserId: 'user_alice' });
+		const bob = profile({ workosUserId: 'user_bob' });
+		const home = household({ createdByUserId: alice.workosUserId });
+		await database.profiles.bulkAdd([alice, bob]);
+		await addAuthSlot(database, alice, 'a');
+		await addAuthSlot(database, bob, 'b');
+		await database.households.add(home);
+		await database.memberships.bulkAdd([
+			membership({ workosUserId: alice.workosUserId }),
+			membership({ workosUserId: bob.workosUserId, roleSlug: 'member' })
+		]);
+		const recipeId = uuidv7();
+		await database.recipes.add({
+			id: recipeId,
+			ownerUserId: alice.workosUserId,
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+			deletedAt: null,
+			conflictClocks: {}
+		});
+		const retainedMealId = uuidv7();
+		const retainedCheckInId = uuidv7();
+		await database.meals.add({
+			id: retainedMealId,
+			householdId: home.householdId,
+			date: '2026-08-22',
+			status: 'cooked',
+			sortOrder: 1000,
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+			deletedAt: null,
+			conflictClocks: {}
+		});
+		await database.mealCheckIns.add({
+			id: retainedCheckInId,
+			mealId: retainedMealId,
+			reporterUserId: alice.workosUserId,
+			verdict: 'repeat',
+			cookTimeMinutes: 30,
+			reason: null,
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+			deletedAt: null,
+			conflictClocks: {}
+		});
+
+		const revoke = vi.fn(async () => new Response(null, { status: 204 }));
+		await signOutLocalProfile(database, alice.profileId, revoke as typeof fetch);
+		expect(revoke).toHaveBeenCalledWith(`/api/auth-slots/${'a'.repeat(32)}/`, {
+			method: 'DELETE'
+		});
+		await expect(database.recipes.get(recipeId)).resolves.toBeDefined();
+		await expect(database.profiles.get(alice.profileId)).resolves.toMatchObject({
+			authState: 'signedOut'
+		});
+
+		const removed = await removeProfileFromDevice(database, alice.profileId);
+		expect(removed.retainedHouseholdIds).toEqual([home.householdId]);
+		await expect(database.recipes.get(recipeId)).resolves.toBeUndefined();
+		await expect(database.households.get(home.householdId)).resolves.toBeDefined();
+		await expect(database.mealCheckIns.get(retainedCheckInId)).resolves.toMatchObject({
+			reporterUserId: alice.workosUserId,
+			mealId: retainedMealId
+		});
+		await expect(
+			database.authSlots.where('profileId').equals(alice.profileId).count()
+		).resolves.toBe(0);
+		await expect(database.authSlots.where('profileId').equals(bob.profileId).count()).resolves.toBe(
+			1
+		);
+	});
+});
+
+describe('offline households and cached authority', () => {
+	test('shares one household between profiles and changes settings/appliances with local outbox writes only', async () => {
+		const database = await openDatabase();
+		const alice = profile({ workosUserId: 'user_alice' });
+		const bob = profile({ workosUserId: 'user_bob' });
+		const home = household();
+		await database.profiles.bulkAdd([alice, bob]);
+		await addAuthSlot(database, alice, 'a');
+		await addAuthSlot(database, bob, 'b');
+		await database.households.add(home);
+		await database.memberships.bulkAdd([
+			membership({ workosUserId: alice.workosUserId }),
+			membership({
+				workosUserId: bob.workosUserId,
+				roleSlug: 'member',
+				permissions: ['recipes:read', 'recipes:write', 'meals:read', 'meals:write']
+			})
+		]);
+
+		await expect(listHouseholdsForProfile(database, alice.profileId)).resolves.toMatchObject([
+			{ household: { householdId: home.householdId }, detached: false }
+		]);
+		await expect(listHouseholdsForProfile(database, bob.profileId)).resolves.toMatchObject([
+			{ household: { householdId: home.householdId }, detached: false }
+		]);
+		await setActiveHousehold(database, alice.profileId, home.householdId);
+		await updateHouseholdSettings(database, {
+			profileId: alice.profileId,
+			householdId: home.householdId,
+			patch: { name: 'Friday table', defaultPlannedYield: 6 },
+			occurredAt: timestamp
+		});
+		const applianceId = uuidv7();
+		const secondApplianceId = uuidv7();
+		await updateHouseholdAppliances(database, {
+			profileId: alice.profileId,
+			householdId: home.householdId,
+			occurredAt: timestamp,
+			appliances: [
+				{ id: applianceId, appliance: 'oven', available: true, notes: null },
+				{
+					id: secondApplianceId,
+					appliance: 'stovetop',
+					available: true,
+					notes: 'Induction'
+				}
+			]
+		});
+
+		await expect(database.households.get(home.householdId)).resolves.toMatchObject({
+			name: 'Friday table',
+			defaultPlannedYield: 6
+		});
+		await expect(database.householdAppliances.get(applianceId)).resolves.toMatchObject({
+			appliance: 'oven',
+			available: true
+		});
+		expect(
+			(await database.outbox.toArray()).map(({ entityKind, aggregateId, conflictGroup }) => ({
+				entityKind,
+				aggregateId,
+				conflictGroup
+			}))
+		).toEqual([
+			{
+				entityKind: 'household',
+				aggregateId: home.householdId,
+				conflictGroup: 'settings'
+			},
+			{
+				entityKind: 'householdAppliance',
+				aggregateId: applianceId,
+				conflictGroup: 'row'
+			},
+			{
+				entityKind: 'householdAppliance',
+				aggregateId: secondApplianceId,
+				conflictGroup: 'row'
+			}
+		]);
+		await expect(
+			updateHouseholdSettings(database, {
+				profileId: bob.profileId,
+				householdId: home.householdId,
+				patch: { name: 'Not allowed' }
+			})
+		).rejects.toMatchObject({ _tag: 'CachedPermissionDenied', reason: 'permissionMissing' });
+	});
+
+	test('contacts the remote boundary only for explicit administration and stores no raw invite code', async () => {
+		const database = await openDatabase();
+		const alice = profile({ workosUserId: 'user_alice' });
+		const home = household();
+		await database.profiles.add(alice);
+		await addAuthSlot(database, alice, 'a');
+		await database.households.add(home);
+		const aliceMembership = membership({ workosUserId: alice.workosUserId });
+		await database.memberships.add(aliceMembership);
+		const inviteId = uuidv7();
+		const requestBodies: unknown[] = [];
+		const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.body) requestBodies.push(JSON.parse(String(init.body)));
+			return Response.json({
+				schemaVersion: 1,
+				payload: {
+					id: inviteId,
+					householdId: home.householdId,
+					createdByUserId: alice.workosUserId,
+					roleSlug: 'member',
+					maxUses: 4,
+					usesCount: 0,
+					expiresAt: '2026-08-28T12:00:00.000Z',
+					revokedAt: null,
+					createdAt: timestamp
+				}
+			});
+		});
+
+		expect(fetcher).not.toHaveBeenCalled();
+		const created = await createHouseholdInvite(
+			database,
+			alice.profileId,
+			{ householdId: home.householdId, roleSlug: 'member', expiresInDays: 7, maxUses: 4 },
+			fetcher as typeof fetch
+		);
+		expect(fetcher).toHaveBeenCalledTimes(1);
+		expect(requestBodies[0]).toMatchObject({ code: created.code, expiresInDays: 7 });
+		const stored = await database.householdInvites.get(inviteId);
+		expect(stored).toEqual(created.invite);
+		expect(stored).not.toHaveProperty('code');
+		expect(stored).not.toHaveProperty('codeHash');
+		expect(await hashInviteCode(created.code)).toMatch(/^[0-9a-f]{64}$/);
+	});
+
+	test('commits validated create and join projections before selecting the remote household', async () => {
+		const database = await openDatabase();
+		const alice = profile({ workosUserId: 'user_alice' });
+		await database.profiles.add(alice);
+		await addAuthSlot(database, alice, 'a');
+		const createdHousehold = household({ householdId: 'org_created', name: 'Created home' });
+		const joinedHousehold = household({ householdId: 'org_joined', name: 'Joined home' });
+		const createdMembership = membership({
+			membershipId: 'membership_created',
+			householdId: createdHousehold.householdId
+		});
+		const joinedMembership = membership({
+			membershipId: 'membership_joined',
+			householdId: joinedHousehold.householdId,
+			roleSlug: 'member'
+		});
+		const responses = [
+			{ household: createdHousehold, membership: createdMembership },
+			{ household: joinedHousehold, membership: joinedMembership }
+		];
+		const requests: Array<{ url: string; body: unknown; idempotencyKey: string | null }> = [];
+		const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			requests.push({
+				url: String(input),
+				body: init?.body ? JSON.parse(String(init.body)) : null,
+				idempotencyKey: new Headers(init?.headers).get('idempotency-key')
+			});
+			const payload = responses.shift();
+			if (!payload) throw new Error('Unexpected request');
+			return Response.json({ schemaVersion: 1, payload });
+		});
+
+		await expect(
+			createRemoteHousehold(
+				database,
+				alice.profileId,
+				{
+					name: 'Created home',
+					locale: 'en-NL',
+					timezone: 'Europe/Amsterdam',
+					idempotencyKey: 'create-intent-1'
+				},
+				fetcher as typeof fetch
+			)
+		).resolves.toEqual({ householdId: createdHousehold.householdId });
+		await expect(
+			joinRemoteHousehold(database, alice.profileId, 'ABCD-EFGH-IJKL', fetcher as typeof fetch)
+		).resolves.toEqual({ householdId: joinedHousehold.householdId });
+
+		expect(requests).toEqual([
+			expect.objectContaining({
+				url: `/api/auth-slots/${'a'.repeat(32)}/households`,
+				body: { name: 'Created home', locale: 'en-NL', timezone: 'Europe/Amsterdam' },
+				idempotencyKey: 'create-intent-1'
+			}),
+			expect.objectContaining({
+				url: `/api/auth-slots/${'a'.repeat(32)}/households/join`,
+				body: { code: 'ABCD-EFGH-IJKL' }
+			})
+		]);
+		await expect(database.households.get(createdHousehold.householdId)).resolves.toEqual(
+			createdHousehold
+		);
+		await expect(database.memberships.get(joinedMembership.membershipId)).resolves.toEqual(
+			joinedMembership
+		);
+		await expect(database.uiState.get(`activeHouseholdId:${alice.profileId}`)).resolves.toEqual({
+			key: `activeHouseholdId:${alice.profileId}`,
+			value: joinedHousehold.householdId
+		});
+	});
+
+	test('commits decoded membership projections before returning from explicit role changes', async () => {
+		const database = await openDatabase();
+		const alice = profile({ workosUserId: 'user_alice' });
+		const home = household();
+		const target = membership({ workosUserId: 'user_bob', roleSlug: 'member' });
+		await database.profiles.add(alice);
+		await addAuthSlot(database, alice, 'a');
+		await database.households.add(home);
+		await database.memberships.bulkAdd([membership({ workosUserId: alice.workosUserId }), target]);
+		const updated = {
+			...target,
+			roleSlug: 'child' as const,
+			updatedAt: '2026-08-21T13:00:00.000Z'
+		};
+		const fetcher = vi.fn(async () => Response.json({ schemaVersion: 1, payload: updated }));
+
+		await expect(
+			updateHouseholdMemberRole(
+				database,
+				alice.profileId,
+				{ householdId: home.householdId, membershipId: target.membershipId, roleSlug: 'child' },
+				fetcher as typeof fetch
+			)
+		).resolves.toMatchObject({ roleSlug: 'child' });
+		await expect(database.memberships.get(target.membershipId)).resolves.toMatchObject({
+			roleSlug: 'child'
+		});
+	});
+
+	test('quarantines denied work and forks an exportable detached snapshot with new IDs', async () => {
+		const database = await openDatabase();
+		const alice = profile({ workosUserId: 'user_alice' });
+		const home = household();
+		const aliceMembership = membership({ workosUserId: alice.workosUserId });
+		await database.profiles.add(alice);
+		await addAuthSlot(database, alice, 'a');
+		await database.households.add(home);
+		await database.memberships.add(aliceMembership);
+		const mealId = uuidv7();
+		const checkInId = uuidv7();
+		await database.meals.add({
+			id: mealId,
+			householdId: home.householdId,
+			date: '2026-08-22',
+			status: 'planned',
+			sortOrder: 1000,
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+			deletedAt: null,
+			conflictClocks: {}
+		});
+		await database.mealCheckIns.add({
+			id: checkInId,
+			mealId,
+			reporterUserId: alice.workosUserId,
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+			deletedAt: null,
+			conflictClocks: {}
+		});
+		await database.outbox.add({
+			mutationId: uuidv7(),
+			authSlotId: 'a'.repeat(32),
+			scopeKind: 'household',
+			scopeId: home.householdId,
+			status: 'pending',
+			occurredAt: timestamp,
+			aggregateId: mealId,
+			entityKind: 'meal',
+			conflictGroup: 'schedule',
+			operation: 'upsert',
+			originDeviceId: uuidv7(),
+			payload: {},
+			nextAttemptAt: timestamp,
+			attempts: 0
+		});
+
+		await detachHouseholdSnapshot(database, {
+			profileId: alice.profileId,
+			householdId: home.householdId,
+			denialCode: 'membership_revoked',
+			detachedAt: timestamp
+		});
+		await expect(database.memberships.get(aliceMembership.membershipId)).resolves.toMatchObject({
+			status: 'detached',
+			denialCode: 'membership_revoked'
+		});
+		await expect(database.outbox.toArray()).resolves.toMatchObject([{ status: 'quarantined' }]);
+		await expect(listHouseholdsForProfile(database, alice.profileId)).resolves.toMatchObject([
+			{ detached: true }
+		]);
+
+		const fork = await forkDetachedHouseholdSnapshot(database, {
+			profileId: alice.profileId,
+			householdId: home.householdId,
+			name: 'Canal kitchen copy',
+			occurredAt: timestamp
+		});
+		expect(fork).toMatchObject({ mealCount: 1, checkInCount: 1 });
+		expect(fork.householdId).not.toBe(home.householdId);
+		await expect(database.households.get(fork.householdId)).resolves.toMatchObject({
+			name: 'Canal kitchen copy',
+			localOnly: true
+		});
+		const copiedMeal = await database.meals.where('householdId').equals(fork.householdId).first();
+		expect(copiedMeal?.id).not.toBe(mealId);
+		const copiedCheckIn = await database.mealCheckIns
+			.filter((candidate) => candidate.mealId === copiedMeal?.id)
+			.first();
+		expect(copiedCheckIn?.id).not.toBe(checkInId);
+	});
+
+	test('deletes a local-only household and its content but refuses a remote household', async () => {
+		const database = await openDatabase();
+		const alice = profile({ workosUserId: 'user_alice' });
+		const remote = household();
+		const local = household({ householdId: uuidv7(), name: 'Imported kitchen', localOnly: true });
+		await database.profiles.add(alice);
+		await database.households.bulkAdd([remote, local]);
+		await database.memberships.bulkAdd([
+			membership({ workosUserId: alice.workosUserId }),
+			membership({
+				workosUserId: alice.workosUserId,
+				householdId: local.householdId,
+				source: 'localFork'
+			})
+		]);
+		const mealId = uuidv7();
+		await database.meals.add({
+			id: mealId,
+			householdId: local.householdId,
+			date: '2026-08-22',
+			status: 'planned',
+			sortOrder: 1000,
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+			deletedAt: null,
+			conflictClocks: {}
+		});
+		await database.mealCheckIns.add({
+			id: uuidv7(),
+			mealId,
+			reporterUserId: alice.workosUserId,
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+			deletedAt: null,
+			conflictClocks: {}
+		});
+		await database.uiState.put({
+			key: `activeHouseholdId:${alice.profileId}`,
+			value: local.householdId
+		});
+
+		await deleteLocalHousehold(database, {
+			profileId: alice.profileId,
+			householdId: local.householdId
+		});
+
+		await expect(database.households.get(local.householdId)).resolves.toBeUndefined();
+		await expect(database.meals.count()).resolves.toBe(0);
+		await expect(database.mealCheckIns.count()).resolves.toBe(0);
+		await expect(
+			database.uiState.get(`activeHouseholdId:${alice.profileId}`)
+		).resolves.toBeUndefined();
+		await expect(listHouseholdsForProfile(database, alice.profileId)).resolves.toMatchObject([
+			{ household: { householdId: remote.householdId } }
+		]);
+		await expect(
+			deleteLocalHousehold(database, {
+				profileId: alice.profileId,
+				householdId: remote.householdId
+			})
+		).rejects.toMatchObject({ _tag: 'LocalOnlyHouseholdRequired' });
+		await expect(database.households.get(remote.householdId)).resolves.toEqual(remote);
+	});
+});
