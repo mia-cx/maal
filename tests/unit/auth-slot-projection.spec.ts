@@ -19,6 +19,7 @@ import {
 import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.js';
 import {
 	finalizeProfileSignOut,
+	lockProfile,
 	requestProfilePinReset,
 	setProfilePin,
 	switchActiveProfile
@@ -104,7 +105,12 @@ const queuedMutation = (
 	...overrides
 });
 
-const authenticatedResponse = (authSlotId: AuthSlotId, workosUserId: string, firstName: string) =>
+const authenticatedResponse = (
+	authSlotId: AuthSlotId,
+	workosUserId: string,
+	firstName: string,
+	proof: { freshAuthentication?: true; pinResetNonce?: string } = { freshAuthentication: true }
+) =>
 	new Response(
 		JSON.stringify({
 			schemaVersion: 1,
@@ -116,6 +122,7 @@ const authenticatedResponse = (authSlotId: AuthSlotId, workosUserId: string, fir
 			lastName: 'de Vries',
 			profilePictureUrl: null,
 			verifiedAt: timestamp,
+			...proof,
 			households: [],
 			sealedSession: 'must be discarded'
 		}),
@@ -356,7 +363,7 @@ describe('auth callback projection', () => {
 			)
 		).rejects.toBeInstanceOf(AuthSlotCapacityExceeded);
 
-		expect(fetcher).toHaveBeenLastCalledWith(`/api/auth-slots/${BOB_SLOT}/`, {
+		expect(fetcher).toHaveBeenLastCalledWith(`/api/auth-slots/${BOB_SLOT}/?preserveIdentity=true`, {
 			method: 'DELETE'
 		});
 		await expect(database.profiles.count()).resolves.toBe(MAX_AUTHENTICATED_SLOTS);
@@ -393,6 +400,43 @@ describe('auth callback projection', () => {
 		).resolves.toMatchObject({ state: 'authenticated' });
 	});
 
+	test('keeps a capacity-rejected profile ready to retry reauthentication on the same slot', async () => {
+		const database = await openDatabase();
+		const alice = { ...profile('user_alice', 'Alice'), authState: 'reauthRequired' as const };
+		await database.profiles.add(alice);
+		await addSlot(database, alice, ALICE_SLOT);
+		await database.authSlots.update(ALICE_SLOT, { sessionState: 'reauthRequired' });
+		const others: Profile[] = [];
+		for (let index = 0; index < MAX_AUTHENTICATED_SLOTS; index += 1) {
+			const retained = profile(`user_${index}`, `Cook ${index}`);
+			others.push(retained);
+			await database.profiles.add(retained);
+			await addSlot(database, retained, index.toString(16).padStart(32, '0') as AuthSlotId);
+		}
+		const fetcher = vi.fn(async () => authenticatedResponse(ALICE_SLOT, 'user_alice', 'Alice'));
+		const marker = { authSlotId: ALICE_SLOT, authStatus: 'authenticated' as const };
+
+		await expect(projectAuthCallback(database, marker, { fetcher })).rejects.toBeInstanceOf(
+			AuthSlotCapacityExceeded
+		);
+		expect(fetcher).toHaveBeenLastCalledWith(
+			`/api/auth-slots/${ALICE_SLOT}/?preserveIdentity=true`,
+			{
+				method: 'DELETE'
+			}
+		);
+		await expect(database.authSlots.get(ALICE_SLOT)).resolves.toMatchObject({
+			profileId: alice.profileId,
+			sessionState: 'reauthRequired'
+		});
+		await finalizeProfileSignOut(database, others[0]!.profileId);
+		await expect(projectAuthCallback(database, marker, { fetcher })).resolves.toMatchObject({
+			state: 'authenticated',
+			profileId: alice.profileId,
+			authSlotId: ALICE_SLOT
+		});
+	});
+
 	test('moves work queued while signed out onto the slot Alice signs back in with', async () => {
 		const database = await openDatabase();
 		const alice = profile('user_alice', 'Alice');
@@ -423,35 +467,86 @@ describe('auth callback projection', () => {
 		await expect(slotFor(bobRow)).resolves.toBe(BOB_SLOT);
 	});
 
-	test('clears a forgotten PIN once Alice signs in again', async () => {
+	test.each(['retained slot', 'fresh slot'])(
+		'clears a forgotten PIN after owner sign-in on a %s',
+		async (scenario) => {
+			const database = await openDatabase();
+			const alice = profile('user_alice', 'Alice');
+			const bob = profile('user_bob', 'Bob');
+			await database.profiles.bulkAdd([alice, bob]);
+			await addSlot(database, alice, ALICE_SLOT);
+			await addSlot(database, bob, BOB_SLOT);
+			await switchActiveProfile(database, alice.profileId);
+			await setProfilePin(database, alice.profileId, '4826');
+			await switchActiveProfile(database, bob.profileId);
+			if (scenario === 'fresh slot') await finalizeProfileSignOut(database, alice.profileId);
+			const pinResetNonce = await requestProfilePinReset(database, alice.profileId);
+			const authSlotId = scenario === 'fresh slot' ? ('c'.repeat(32) as AuthSlotId) : ALICE_SLOT;
+
+			await projectAuthCallback(
+				database,
+				{ authSlotId, authStatus: 'authenticated' },
+				{
+					fetcher: async () =>
+						authenticatedResponse(authSlotId, 'user_alice', 'Alice', {
+							freshAuthentication: true,
+							pinResetNonce
+						})
+				}
+			);
+
+			await expect(database.profiles.get(alice.profileId)).resolves.toMatchObject({
+				lockPolicy: 'none',
+				pinSalt: null,
+				pinVerifier: null
+			});
+			await expect(database.uiState.get('activeProfileId')).resolves.toMatchObject({
+				value: alice.profileId
+			});
+			await expect(database.uiState.get(`profileLock:${alice.profileId}`)).resolves.toMatchObject({
+				value: false
+			});
+		}
+	);
+
+	test.each([
+		'retained session',
+		'unrelated sign-in',
+		'wrong reset request',
+		'nonce without proof'
+	])('does not clear a forgotten PIN using %s', async (scenario) => {
 		const database = await openDatabase();
 		const alice = profile('user_alice', 'Alice');
-		const bob = profile('user_bob', 'Bob');
-		await database.profiles.bulkAdd([alice, bob]);
+		await database.profiles.add(alice);
 		await addSlot(database, alice, ALICE_SLOT);
-		await addSlot(database, bob, BOB_SLOT);
 		await switchActiveProfile(database, alice.profileId);
 		await setProfilePin(database, alice.profileId, '4826');
-		await switchActiveProfile(database, bob.profileId);
-		await requestProfilePinReset(database, alice.profileId);
+		await lockProfile(database, alice.profileId);
+		const pinResetNonce = await requestProfilePinReset(database, alice.profileId);
+		const proof =
+			scenario === 'retained session'
+				? {}
+				: scenario === 'unrelated sign-in'
+					? { freshAuthentication: true as const }
+					: scenario === 'wrong reset request'
+						? { freshAuthentication: true as const, pinResetNonce: 'd'.repeat(32) }
+						: { pinResetNonce };
 
 		await projectAuthCallback(
 			database,
 			{ authSlotId: ALICE_SLOT, authStatus: 'authenticated' },
-			{ fetcher: async () => authenticatedResponse(ALICE_SLOT, 'user_alice', 'Alice') }
+			{ fetcher: async () => authenticatedResponse(ALICE_SLOT, 'user_alice', 'Alice', proof) }
 		);
 
 		await expect(database.profiles.get(alice.profileId)).resolves.toMatchObject({
-			lockPolicy: 'none',
-			pinSalt: null,
-			pinVerifier: null
+			lockPolicy: 'pin',
+			pinVerifier: expect.any(String)
 		});
-		await expect(database.uiState.get('activeProfileId')).resolves.toMatchObject({
-			value: alice.profileId
-		});
-		await expect(database.uiState.get(`profileLock:${alice.profileId}`)).resolves.toMatchObject({
-			value: false
-		});
+		if (scenario === 'retained session' || scenario === 'nonce without proof') {
+			await expect(database.uiState.get(`profileLock:${alice.profileId}`)).resolves.toMatchObject({
+				value: true
+			});
+		}
 	});
 
 	test('keeps a household with pending local edits when sign-in discovers it', async () => {

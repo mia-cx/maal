@@ -15,6 +15,7 @@ export const AUTH_SLOT_COOKIE_PREFIX = '__Secure-maal_session_';
 export const AUTH_FLOW_COOKIE_PREFIX = '__Secure-maal_auth_flow_';
 export const AUTH_FLOW_MARKER_VALUE = 'pending' as const;
 export const AUTH_IDENTITY_COOKIE_PREFIX = '__Secure-maal_identity_';
+export const AUTH_COMPLETION_COOKIE_PREFIX = '__Secure-maal_auth_completion_';
 const RETAINED_COOKIE_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
 
 export class AuthSlotCookieTooLarge extends Data.TaggedError('AuthSlotCookieTooLarge')<{
@@ -36,6 +37,10 @@ export function authFlowCookieName(nonce: string) {
 
 export function authIdentityCookieName(slotId: AuthSlotId) {
 	return `${AUTH_IDENTITY_COOKIE_PREFIX}${slotId}` as const;
+}
+
+export function authCompletionCookieName(slotId: AuthSlotId) {
+	return `${AUTH_COMPLETION_COOKIE_PREFIX}${slotId}` as const;
 }
 
 export function authCookieOptions(slotId: AuthSlotId): CookieSerializeOptions & { path: string } {

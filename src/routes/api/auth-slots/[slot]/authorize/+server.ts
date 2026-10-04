@@ -1,5 +1,5 @@
 import { error, redirect } from '@sveltejs/kit';
-import { createAuthSlotId } from '$lib/auth-slots';
+import { createAuthSlotId, isAuthSlotId } from '$lib/auth-slots';
 import {
 	authFlowCookieName,
 	authFlowCookieOptions,
@@ -23,6 +23,10 @@ export const GET: RequestHandler = async (event) => {
 	try {
 		const slotId = routeSlotId(event);
 		const purpose = parsePurpose(event.url.searchParams.get('purpose'));
+		const pinResetNonce = event.url.searchParams.get('pinResetNonce');
+		if (pinResetNonce !== null && !isAuthSlotId(pinResetNonce)) {
+			error(400, 'Invalid PIN reset nonce');
+		}
 		const config = readAuthSlotConfig(event.platform?.env);
 		const adapter = authSlotAdapterFor(event.platform?.env);
 		const boundUserId = await openSlotIdentity(
@@ -42,6 +46,7 @@ export const GET: RequestHandler = async (event) => {
 				expectedUserId,
 				returnTo,
 				nonce,
+				...(pinResetNonce === null ? {} : { pinResetNonce }),
 				issuedAt: issuedAt.toISOString(),
 				expiresAt: new Date(issuedAt.getTime() + AUTH_FLOW_LIFETIME_MS).toISOString()
 			},

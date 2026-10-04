@@ -183,7 +183,10 @@ const upsertAuthenticatedSlot = async (
 			);
 			const profileId = existing?.profileId ?? uuidv7();
 			projectedProfileId = profileId;
-			const pinReset = (await database.uiState.get(pinResetKey(profileId)))?.value === true;
+			const pinReset =
+				metadata.freshAuthentication === true &&
+				metadata.pinResetNonce !== undefined &&
+				(await database.uiState.get(pinResetKey(profileId)))?.value === metadata.pinResetNonce;
 
 			const profile = Schema.decodeUnknownSync(ProfileSchema)({
 				profileId,
@@ -247,7 +250,12 @@ const upsertAuthenticatedSlot = async (
 			if (pinReset) await database.uiState.delete(pinResetKey(profileId));
 			const uiState = [
 				{ key: 'activeProfileId', value: profileId },
-				{ key: profileLockKey(profileId), value: false }
+				{
+					key: profileLockKey(profileId),
+					value:
+						metadata.freshAuthentication !== true &&
+						(await database.uiState.get(profileLockKey(profileId)))?.value === true
+				}
 			];
 			if (discovered.length > 0 && !(await database.uiState.get(activeHouseholdKey(profileId)))) {
 				uiState.push({
@@ -322,10 +330,11 @@ export const projectAuthCallback = async (
 			await markSlotState(database, marker.authSlotId, 'reauthRequired');
 		}
 		if (cause instanceof AuthSlotCapacityExceeded) {
-			// The callback already set this slot's cookie; revoke it so no ninth session is retained.
-			await fetcher(`/api/auth-slots/${encodeURIComponent(marker.authSlotId)}/`, {
-				method: 'DELETE'
-			});
+			// Revoke the ninth session, but retain its owner binding so reauthentication can be retried.
+			await fetcher(
+				`/api/auth-slots/${encodeURIComponent(marker.authSlotId)}/?preserveIdentity=true`,
+				{ method: 'DELETE' }
+			);
 		}
 		throw cause;
 	}

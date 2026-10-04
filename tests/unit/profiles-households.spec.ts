@@ -15,6 +15,7 @@ import {
 	openMaalDatabase,
 	readLockedActiveProfile,
 	removeProfileFromDevice,
+	requestProfilePinReset,
 	setActiveHousehold,
 	setProfilePin,
 	switchActiveProfile,
@@ -127,6 +128,29 @@ const addAuthSlot = async (database: MaalDatabase, value: Profile, suffix = 'a')
 };
 
 describe('device-local profile lifecycle', () => {
+	test.each(['unlock', 'change', 'remove'])(
+		'cancels an abandoned PIN-reset request after a valid PIN %s',
+		async (action) => {
+			const database = await openDatabase();
+			const alice = profile();
+			await database.profiles.add(alice);
+			await switchActiveProfile(database, alice.profileId);
+			await setProfilePin(database, alice.profileId, '4826');
+			await lockProfile(database, alice.profileId);
+			await requestProfilePinReset(database, alice.profileId);
+			await expect(switchActiveProfile(database, alice.profileId, '1111')).rejects.toMatchObject({
+				_tag: 'ProfilePinInvalid'
+			});
+			await expect(database.uiState.get(`pinReset:${alice.profileId}`)).resolves.toBeDefined();
+
+			if (action === 'unlock') await switchActiveProfile(database, alice.profileId, '4826');
+			if (action === 'change') await setProfilePin(database, alice.profileId, '1234', '4826');
+			if (action === 'remove') await clearProfilePin(database, alice.profileId, '4826');
+
+			await expect(database.uiState.get(`pinReset:${alice.profileId}`)).resolves.toBeUndefined();
+		}
+	);
+
 	test('switches profiles and unlocks a PIN without touching either retained auth slot', async () => {
 		const database = await openDatabase();
 		const alice = profile({ workosUserId: 'user_alice' });

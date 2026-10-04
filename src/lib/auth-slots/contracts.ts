@@ -30,6 +30,8 @@ export const AuthenticatedAuthSlotMetadata = Schema.Struct({
 	lastName: Schema.NullOr(Schema.String),
 	profilePictureUrl: Schema.NullOr(Schema.String),
 	verifiedAt: UtcInstantSchema,
+	freshAuthentication: Schema.optional(Schema.Literal(true)),
+	pinResetNonce: Schema.optional(AuthSlotId),
 	households: Schema.optional(Schema.Array(HouseholdDiscoveryEntrySchema))
 });
 export type AuthenticatedAuthSlotMetadata = typeof AuthenticatedAuthSlotMetadata.Type;

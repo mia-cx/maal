@@ -47,8 +47,8 @@
 	};
 
 	const forgotPin = async () => {
-		await requestProfilePinReset(database, profile.profileId);
-		window.location.assign(signInHref);
+		const nonce = await requestProfilePinReset(database, profile.profileId);
+		window.location.assign(`${signInHref}&pinResetNonce=${nonce}`);
 	};
 </script>
 

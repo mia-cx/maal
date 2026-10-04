@@ -8,6 +8,7 @@ export const AUTH_FLOW_LIFETIME_MS = 10 * 60 * 1000;
 
 const AUTH_FLOW_VERSION = 'v1';
 const AUTH_FLOW_AAD = new TextEncoder().encode('maal:auth-flow:v1');
+const AUTH_COMPLETION_AAD = new TextEncoder().encode('maal:auth-completion:v1');
 
 export interface AuthFlow {
 	readonly schemaVersion: 1;
@@ -16,6 +17,7 @@ export interface AuthFlow {
 	readonly expectedUserId: string | null;
 	readonly returnTo: string;
 	readonly nonce: string;
+	readonly pinResetNonce?: AuthSlotId;
 	readonly issuedAt: string;
 	readonly expiresAt: string;
 }
@@ -37,25 +39,55 @@ export function expectedUserForFlow(purpose: AuthFlowPurpose, boundUserId: strin
 	return boundUserId;
 }
 
-export async function sealAuthFlow(
+export function sealAuthFlow(
 	flow: AuthFlow,
 	secret: string,
 	randomValues: (bytes: Uint8Array<ArrayBuffer>) => void = fillRandomValues
 ) {
+	return sealAuthPayload(flow, secret, AUTH_FLOW_AAD, randomValues);
+}
+
+export function sealAuthCompletion(
+	flow: AuthFlow,
+	secret: string,
+	randomValues: (bytes: Uint8Array<ArrayBuffer>) => void = fillRandomValues
+) {
+	return sealAuthPayload(flow, secret, AUTH_COMPLETION_AAD, randomValues);
+}
+
+export function openAuthFlow(value: string | null | undefined, secret: string, now = new Date()) {
+	return openAuthPayload(value, secret, AUTH_FLOW_AAD, now);
+}
+
+export function openAuthCompletion(
+	value: string | null | undefined,
+	secret: string,
+	now = new Date()
+) {
+	return openAuthPayload(value, secret, AUTH_COMPLETION_AAD, now);
+}
+
+async function sealAuthPayload(
+	flow: AuthFlow,
+	secret: string,
+	additionalData: Uint8Array<ArrayBuffer>,
+	randomValues: (bytes: Uint8Array<ArrayBuffer>) => void
+) {
 	const iv = new Uint8Array(12);
 	randomValues(iv);
 	const ciphertext = await crypto.subtle.encrypt(
-		{ name: 'AES-GCM', iv, additionalData: AUTH_FLOW_AAD },
+		{ name: 'AES-GCM', iv, additionalData },
 		await flowKey(secret),
 		new TextEncoder().encode(JSON.stringify(flow))
 	);
 	return `${AUTH_FLOW_VERSION}.${encodeBase64Url(iv)}.${encodeBase64Url(new Uint8Array(ciphertext))}`;
 }
 
-export async function openAuthFlow(
+async function openAuthPayload(
 	value: string | null | undefined,
 	secret: string,
-	now = new Date()
+	additionalData: Uint8Array<ArrayBuffer>,
+	now: Date
 ): Promise<AuthFlow | null> {
 	if (!value) return null;
 	const [version, encodedIv, encodedCiphertext, extra] = value.split('.');
@@ -66,7 +98,7 @@ export async function openAuthFlow(
 			{
 				name: 'AES-GCM',
 				iv: decodeBase64Url(encodedIv),
-				additionalData: AUTH_FLOW_AAD
+				additionalData
 			},
 			await flowKey(secret),
 			decodeBase64Url(encodedCiphertext)
@@ -98,6 +130,8 @@ function validAuthFlow(flow: Partial<AuthFlow>, now: Date): flow is AuthFlow {
 		safeReturnTo(flow.returnTo) !== flow.returnTo ||
 		typeof flow.nonce !== 'string' ||
 		!isAuthSlotId(flow.nonce) ||
+		(flow.pinResetNonce !== undefined &&
+			(typeof flow.pinResetNonce !== 'string' || !isAuthSlotId(flow.pinResetNonce))) ||
 		typeof flow.issuedAt !== 'string' ||
 		typeof flow.expiresAt !== 'string'
 	) {

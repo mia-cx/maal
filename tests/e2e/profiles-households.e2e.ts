@@ -249,8 +249,78 @@ test('a locked profile hides its data until its PIN or a fresh sign-in opens it'
 	);
 	await page.getByRole('button', { name: 'Forgot PIN?' }).click();
 	await expect(page).toHaveURL(
-		/\/api\/auth-slots\/a{32}\/authorize\?purpose=reauthenticate&returnTo=%2Fplan$/
+		/\/api\/auth-slots\/a{32}\/authorize\?purpose=reauthenticate&returnTo=%2Fplan&pinResetNonce=[0-9a-f]{32}$/
 	);
+});
+
+test('removes the only local profile from the lock screen only after confirmation', async ({
+	page
+}) => {
+	await seedProfilesAndHousehold(page);
+	await page.evaluate(async () => {
+		const database = await new Promise<IDBDatabase>((resolve, reject) => {
+			const request = indexedDB.open('maal-v1:production');
+			request.onerror = () => reject(request.error);
+			request.onsuccess = () => resolve(request.result);
+		});
+		const transaction = database.transaction(['profiles', 'authSlots'], 'readwrite');
+		transaction.objectStore('profiles').delete('01990c69-7f00-7000-8000-000000000002');
+		transaction.objectStore('authSlots').delete('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+		await new Promise<void>((resolve, reject) => {
+			transaction.oncomplete = () => resolve();
+			transaction.onerror = () => reject(transaction.error);
+		});
+		database.close();
+	});
+	await page.reload();
+
+	const alice = page.getByRole('button', { name: /AD Alice de Vries alice@example\.test/ });
+	await alice.click();
+	await page.getByRole('menuitem', { name: /Set profile PIN/ }).click();
+	await page.getByPlaceholder('4 to 8 numbers').fill('4826');
+	await page.getByRole('button', { name: 'Save PIN' }).click();
+	await alice.click();
+	await page.getByRole('menuitem', { name: 'Lock profile' }).click();
+	await expect(page.getByRole('heading', { name: 'Open Alice de Vries' })).toBeVisible();
+	await page.reload();
+	await expect(page.getByRole('heading', { name: 'Open Alice de Vries' })).toBeVisible();
+	await expect(page.getByTestId('shared-app-shell')).toHaveCount(0);
+	await expect(page.getByText('Other profiles', { exact: true })).toHaveCount(0);
+
+	let removalRequests = 0;
+	await page.route('**/api/auth-slots/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/', async (route) => {
+		removalRequests += 1;
+		expect(route.request().method()).toBe('DELETE');
+		await route.fulfill({ status: removalRequests === 1 ? 503 : 204 });
+	});
+	const remove = page.getByRole('button', { name: 'Remove from this device', exact: true });
+	const dialog = page.getByRole('dialog', {
+		name: 'Remove Alice de Vries from this device?'
+	});
+	await remove.click();
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole('button', { name: 'Export data first' })).toHaveCount(0);
+	expect(removalRequests).toBe(0);
+	await page.keyboard.press('Escape');
+	await expect(dialog).toHaveCount(0);
+	await expect(page.getByRole('heading', { name: 'Open Alice de Vries' })).toBeVisible();
+	expect(removalRequests).toBe(0);
+
+	await remove.click();
+	await dialog.getByRole('button', { name: 'Remove from this device' }).click();
+	await expect(dialog.getByRole('alert')).toHaveText(
+		'This profile could not be removed. Check the connection and try again.'
+	);
+	await page.keyboard.press('Escape');
+	await expect(dialog).toHaveCount(0);
+	await expect(page.getByRole('heading', { name: 'Open Alice de Vries' })).toBeVisible();
+	await remove.click();
+	await dialog.getByRole('button', { name: 'Remove from this device' }).click();
+	await expect(dialog).toHaveCount(0);
+	await expect(page.getByRole('heading', { name: 'Add a profile' })).toBeVisible();
+	expect(removalRequests).toBe(2);
+	await page.reload();
+	await expect(page.getByRole('heading', { name: 'Add a profile' })).toBeVisible();
 });
 
 test('keeps the approved household layout usable at kitchen-tablet and phone widths', async ({
