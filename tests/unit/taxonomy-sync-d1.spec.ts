@@ -121,7 +121,7 @@ const householdFoodAliasId = uuidv7();
 const userUnitAliasId = uuidv7();
 const householdUnitAliasId = uuidv7();
 
-// Every nullable field is filled somewhere, and every adoption status and alias scope appears.
+// Every nullable field is filled per kind, and every adoption status and alias scope appears.
 const drafts: {
 	[K in TaxonomyEditableEntityKind]: TaxonomyDraft<TaxonomyEditableRecordMap[K]>;
 } = {
@@ -142,10 +142,10 @@ const drafts: {
 		foodId: 'tomatoes',
 		alias: 'tomaatjes',
 		locale: 'nl-NL',
-		sourceDomain: null,
+		sourceDomain: 'recipes.example',
 		adoptionStatus: 'pending_review',
-		defaultMeasureUnitId: null,
-		defaultMeasureBaseUnitId: null
+		defaultMeasureUnitId: 'kilograms',
+		defaultMeasureBaseUnitId: 'grams'
 	},
 	foodUserEntry: {
 		id: uuidv7(),
@@ -180,7 +180,7 @@ const drafts: {
 		unitId: 'fahrenheit',
 		baseUnitId: 'celsius',
 		alias: 'graden F',
-		pluralAlias: null,
+		pluralAlias: 'graden Fahrenheit',
 		locale: 'nl-NL',
 		sourceDomain: 'recipes.example',
 		adoptionStatus: 'accepted'
@@ -298,6 +298,7 @@ test('every editable taxonomy kind survives Dexie -> mutation -> D1 -> Dexie unc
 	expect(outbox.every(({ status }) => status === 'acknowledged')).toBe(true);
 
 	// Bootstrap rebuilds aggregates from normalized D1 rows, not the change log.
+	await d1.prepare('DELETE FROM sync_changes').run();
 	const replica = await openDevice();
 	const deviceId = uuidv7();
 	await applyUserBootstrap(
