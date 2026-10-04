@@ -136,3 +136,45 @@ test('two tabs drain and acknowledge before a worker update reloads a saved loca
 	await expect(page.getByRole('button', { name: 'Open Update-safe lentil soup' })).toBeVisible();
 	expect(pageErrors).toEqual([]);
 });
+
+test('cancelling an update that waits on an unresponsive tab resumes local saves', async ({
+	page
+}) => {
+	const pageErrors: string[] = [];
+	page.on('pageerror', (error) => pageErrors.push(error.message));
+
+	await page.goto('/menu');
+	await page.evaluate(async () => navigator.serviceWorker.ready.then(() => undefined));
+	await page.reload();
+	await expect
+		.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)))
+		.toBe(true);
+	await page.evaluate(seedLocalProfile, databaseName);
+	await page.reload();
+	await page.evaluate(async (version) => {
+		await navigator.serviceWorker.register(`/service-worker.js?${version}`, { scope: '/' });
+	}, `cancel-proof-${Date.now()}`);
+	const update = page.getByRole('button', { name: 'Reload and update' });
+	await expect(update).toBeVisible();
+	// The prompt proves the coordinator is listening. This peer heartbeats but never answers
+	// PREPARE_UPDATE, so the update has to wait for it.
+	await page.evaluate(() => {
+		const peer = new BroadcastChannel('maal-pwa-updates-v1');
+		const beat = () =>
+			peer.postMessage({ type: 'HEARTBEAT', tabId: 'silent-tab', sentAt: Date.now() });
+		beat();
+		setInterval(beat, 1_000);
+	});
+
+	await update.click();
+	await expect(page.getByText('Waiting for another open Maal tab…')).toBeVisible();
+	await page.getByRole('button', { name: 'Cancel update' }).click();
+	await expect(page.getByRole('button', { name: 'Reload and update' })).toBeVisible();
+
+	await page.getByRole('button', { name: 'Add recipe' }).click();
+	await page.getByLabel('Title').fill('Saved after cancel');
+	await page.getByRole('textbox', { name: 'Ingredient 1', exact: true }).fill('rice');
+	await page.getByRole('button', { name: 'Save recipe' }).click();
+	await expect(page.getByRole('button', { name: 'Open Saved after cancel' })).toBeVisible();
+	expect(pageErrors).toEqual([]);
+});

@@ -17,7 +17,7 @@ const HEARTBEAT_MS = 5_000;
 const LIVE_TAB_MS = 15_000;
 
 export type PwaUpdateStatus =
-	'idle' | 'available' | 'preparing' | 'waiting-for-tabs' | 'reload-required';
+	'idle' | 'available' | 'preparing' | 'waiting-for-tabs' | 'activating' | 'reload-required';
 
 export interface PwaUpdateState {
 	readonly status: PwaUpdateStatus;
@@ -27,6 +27,13 @@ export interface PwaUpdateState {
 }
 
 type Listener = (state: PwaUpdateState) => void;
+type PrepareUpdateMessage = Extract<UpdateChannelMessage, { type: 'PREPARE_UPDATE' }>;
+
+const UPDATING_STATUSES: ReadonlySet<PwaUpdateStatus> = new Set([
+	'preparing',
+	'waiting-for-tabs',
+	'activating'
+]);
 
 interface UpdateWorker {
 	readonly scriptURL: string;
@@ -46,9 +53,15 @@ interface UpdateRegistration {
 interface UpdateServiceWorkerContainer {
 	readonly ready: Promise<UpdateRegistration>;
 	readonly controller: unknown;
-	addEventListener(type: 'message', listener: (event: { data: unknown }) => void): void;
+	addEventListener(
+		type: 'message',
+		listener: (event: { data: unknown; source: UpdateWorker | null }) => void
+	): void;
 	addEventListener(type: 'controllerchange', listener: () => void): void;
-	removeEventListener(type: 'message', listener: (event: { data: unknown }) => void): void;
+	removeEventListener(
+		type: 'message',
+		listener: (event: { data: unknown; source: UpdateWorker | null }) => void
+	): void;
 	removeEventListener(type: 'controllerchange', listener: () => void): void;
 }
 
@@ -107,13 +120,20 @@ export class PwaUpdateCoordinator {
 	#runtime: PwaUpdateRuntime;
 	#channel: UpdateChannel | null = null;
 	#registration: UpdateRegistration | null = null;
+	#workerVersions = new WeakMap<UpdateWorker, string>();
 	#listeners = new Set<Listener>();
 	#peers = new Map<string, number>();
 	#readyTabs = new Set<string>();
-	#commitPauseReasons = new Set<string>();
-	#requestId: string | null = null;
+	#preparedRequests = new Set<string>();
+	/** Critical requests keep their commits paused and cannot be cancelled. */
+	#preparedCritical = new Map<string, boolean>();
+	// A queued PREPARE_UPDATE must not reinstate a cancelled request's commit pause.
+	#cancelledRequests = new Set<string>();
+	/** The update request this tab started, re-sent to any tab that is not ready yet. */
+	#request: PrepareUpdateMessage | null = null;
 	#heartbeat: ReturnType<typeof setInterval> | null = null;
 	#activationTimeout: ReturnType<typeof setTimeout> | null = null;
+	#activationRetryWorker: UpdateWorker | null = null;
 	#unsubscribeDatabaseEvents: (() => void) | null = null;
 	#removeServiceWorkerListeners: (() => void) | null = null;
 	#removeRegistrationListener: (() => void) | null = null;
@@ -141,15 +161,23 @@ export class PwaUpdateCoordinator {
 		try {
 			this.#channel = this.#runtime.createChannel(CHANNEL_NAME);
 			this.#channel.addEventListener('message', (event) => this.#receiveChannel(event.data));
-			const receiveServiceWorkerMessage = (event: { data: unknown }) => {
+			const receiveServiceWorkerMessage = (event: {
+				data: unknown;
+				source: UpdateWorker | null;
+			}) => {
 				if (!this.#started || !isServiceWorkerEvent(event.data)) return;
-				if (event.data.type !== 'UPDATE_WAITING') return;
+				if (event.data.type !== 'UPDATE_WAITING' || !event.source) return;
+				if (
+					this.#registration &&
+					event.source !== this.#registration.waiting &&
+					event.source !== this.#registration.installing
+				)
+					return;
+				this.#workerVersions.set(event.source, event.data.version);
 				this.#announceUpdate(event.data.version, event.data.critical);
 			};
 			const handleControllerChange = () => {
-				if (!this.#started || !['preparing', 'waiting-for-tabs'].includes(this.#state.status)) {
-					return;
-				}
+				if (!this.#started || !this.#updating()) return;
 				this.#post({
 					type: 'RELOAD',
 					tabId: this.tabId,
@@ -181,7 +209,7 @@ export class PwaUpdateCoordinator {
 			if (!this.#started || lifecycle !== this.#lifecycle) return;
 			this.#registration = registration;
 			this.#watchRegistration(registration);
-			if (registration.waiting) {
+			if (registration.waiting && !this.#updating()) {
 				if (this.#state.critical && this.#state.version) void this.activate();
 				else registration.waiting.postMessage({ type: 'GET_VERSION' });
 			}
@@ -212,28 +240,36 @@ export class PwaUpdateCoordinator {
 		this.#channel?.close();
 		this.#channel = null;
 		this.#registration = null;
-		this.#requestId = null;
+		this.#request = null;
 		this.#readyTabs.clear();
 		this.#peers.clear();
-		for (const reason of this.#commitPauseReasons) this.#runtime.resumeCommits(reason);
-		this.#commitPauseReasons.clear();
+		this.#resumeCommits();
 	}
 
 	async activate(): Promise<void> {
-		if (!this.#state.version || !this.#registration?.waiting) return;
-		const requestId = this.#runtime.createId();
-		this.#requestId = requestId;
+		if (!this.#state.version || !this.#registration) return;
 		this.#readyTabs.clear();
 		this.#setState({ ...this.#state, status: 'preparing', message: 'Finishing local changes…' });
-		const message: UpdateChannelMessage = {
+		const message: PrepareUpdateMessage = {
 			type: 'PREPARE_UPDATE',
 			tabId: this.tabId,
-			requestId,
+			requestId: this.#runtime.createId(),
 			version: this.#state.version,
 			critical: this.#state.critical
 		};
+		this.#request = message;
 		this.#post(message);
 		await this.#prepareTab(message);
+	}
+
+	/** Abandons the pending update in every tab, so local saving resumes everywhere. */
+	cancel(): void {
+		if (this.#state.status === 'activating') return;
+		for (const requestId of this.#preparedRequests) {
+			if (this.#preparedCritical.get(requestId)) continue;
+			this.#post({ type: 'CANCEL_UPDATE', tabId: this.tabId, requestId });
+			this.#abandonUpdate(requestId);
+		}
 	}
 
 	#watchRegistration(registration: UpdateRegistration): void {
@@ -246,6 +282,8 @@ export class PwaUpdateCoordinator {
 				if (!this.#started) return;
 				if (installing.state !== 'installed' || !this.#runtime.serviceWorker?.controller) return;
 				installing.postMessage({ type: 'GET_VERSION' });
+				// The worker that was still installing when activation was attempted is waiting now.
+				this.#tryActivation();
 			};
 			installing.addEventListener('statechange', stateChanged);
 			this.#removeInstallingListener = () =>
@@ -257,6 +295,18 @@ export class PwaUpdateCoordinator {
 	}
 
 	#announceUpdate(version: string, critical: boolean): void {
+		if (this.#updating()) {
+			if (this.#state.status === 'activating') return;
+			if (version === this.#state.version) {
+				this.#tryActivation();
+				return;
+			}
+			// Supersession retires even critical requests; user cancellation still cannot.
+			for (const requestId of this.#preparedRequests) {
+				this.#post({ type: 'SUPERSEDE_UPDATE', tabId: this.tabId, requestId, version, critical });
+				this.#abandonUpdate(requestId);
+			}
+		}
 		this.#setState({ status: 'available', version, critical, message: null });
 		this.#post({ type: 'UPDATE_AVAILABLE', tabId: this.tabId, version, critical });
 		if (critical) void this.activate();
@@ -268,6 +318,8 @@ export class PwaUpdateCoordinator {
 		switch (value.type) {
 			case 'HEARTBEAT':
 				this.#peers.set(value.tabId, value.sentAt);
+				// A tab opened after PREPARE_UPDATE went out still has to drain before activation.
+				if (this.#request && !this.#readyTabs.has(value.tabId)) this.#post(this.#request);
 				break;
 			case 'UPDATE_AVAILABLE':
 				if (this.#state.status === 'idle') {
@@ -283,31 +335,47 @@ export class PwaUpdateCoordinator {
 				void this.#prepareTab(value);
 				break;
 			case 'UPDATE_READY':
-				if (value.requestId === this.#requestId) {
+				if (value.requestId === this.#request?.requestId) {
 					this.#readyTabs.add(value.tabId);
 					this.#tryActivation();
 				}
 				break;
 			case 'UPDATE_PREPARING':
 				break;
+			case 'CANCEL_UPDATE':
+				if (!this.#preparedCritical.get(value.requestId)) this.#abandonUpdate(value.requestId);
+				break;
+			case 'SUPERSEDE_UPDATE': {
+				if (this.#state.status === 'activating') break;
+				const prepared = this.#preparedRequests.has(value.requestId);
+				this.#abandonUpdate(value.requestId);
+				if (prepared && this.#preparedRequests.size === 0) {
+					this.#setState({
+						status: 'available',
+						version: value.version,
+						critical: value.critical,
+						message: null
+					});
+				}
+				break;
+			}
 			case 'RELOAD':
 				this.#runtime.reload();
 				break;
 		}
 	}
 
-	async #prepareTab(
-		message: Extract<UpdateChannelMessage, { type: 'PREPARE_UPDATE' }>
-	): Promise<void> {
-		if (!this.#started) return;
+	async #prepareTab(message: PrepareUpdateMessage): Promise<void> {
+		if (!this.#started || this.#cancelledRequests.has(message.requestId)) return;
 		const lifecycle = this.#lifecycle;
 		if (message.tabId !== this.tabId) {
 			this.#post({ type: 'UPDATE_PREPARING', tabId: this.tabId, requestId: message.requestId });
 		}
 		const pauseReason = `service-worker-update:${message.requestId}`;
-		if (!this.#commitPauseReasons.has(pauseReason)) {
+		if (!this.#preparedRequests.has(message.requestId)) {
 			this.#runtime.pauseCommits(pauseReason);
-			this.#commitPauseReasons.add(pauseReason);
+			this.#preparedRequests.add(message.requestId);
+			this.#preparedCritical.set(message.requestId, message.critical);
 		}
 		this.#setState({
 			status: 'preparing',
@@ -317,6 +385,7 @@ export class PwaUpdateCoordinator {
 		});
 		await this.#runtime.drainCommits();
 		if (!this.#started || lifecycle !== this.#lifecycle) return;
+		if (!this.#preparedRequests.has(message.requestId)) return;
 		if (message.tabId === this.tabId) {
 			this.#readyTabs.add(this.tabId);
 			if (this.#activationTimeout !== null) {
@@ -332,7 +401,19 @@ export class PwaUpdateCoordinator {
 	}
 
 	#tryActivation(): void {
-		if (!this.#requestId || !this.#registration?.waiting || !this.#state.version) return;
+		if (this.#state.status === 'activating') return;
+		if (!this.#request || !this.#readyTabs.has(this.tabId)) return;
+		if (!this.#state.version) return;
+		const waiting = this.#registration?.waiting ?? null;
+		if (!waiting) {
+			this.#watchInstallingForActivation();
+			return;
+		}
+		// A registration can replace its waiting worker before that worker announces its version.
+		if (this.#workerVersions.get(waiting) !== this.#request.version) {
+			waiting.postMessage({ type: 'GET_VERSION' });
+			return;
+		}
 		const now = this.#runtime.now();
 		const livePeers = [...this.#peers]
 			.filter(([, seenAt]) => now - seenAt <= LIVE_TAB_MS)
@@ -345,10 +426,25 @@ export class PwaUpdateCoordinator {
 			});
 			return;
 		}
-		this.#registration.waiting.postMessage({
+		waiting.postMessage({
 			type: 'SKIP_WAITING',
 			version: this.#state.version
 		});
+		this.#setState({ ...this.#state, status: 'activating' });
+	}
+
+	/** Retries activation once the worker that is still installing reaches `installed`. */
+	#watchInstallingForActivation(): void {
+		const installing = this.#registration?.installing ?? null;
+		if (!installing || installing === this.#activationRetryWorker) return;
+		this.#activationRetryWorker = installing;
+		const stateChanged = () => {
+			if (installing.state !== 'installed') return;
+			this.#activationRetryWorker = null;
+			installing.removeEventListener('statechange', stateChanged);
+			this.#tryActivation();
+		};
+		installing.addEventListener('statechange', stateChanged);
 	}
 
 	#sendHeartbeat(): void {
@@ -358,6 +454,37 @@ export class PwaUpdateCoordinator {
 		}
 		this.#post({ type: 'HEARTBEAT', tabId: this.tabId, sentAt: now });
 		if (this.#state.status === 'waiting-for-tabs') this.#tryActivation();
+	}
+
+	#abandonUpdate(requestId: string): void {
+		this.#cancelledRequests.add(requestId);
+		if (this.#request?.requestId === requestId) {
+			this.#request = null;
+			this.#readyTabs.clear();
+			if (this.#activationTimeout !== null) {
+				this.#runtime.timers.clearTimeout(this.#activationTimeout);
+				this.#activationTimeout = null;
+			}
+		}
+		if (this.#preparedRequests.delete(requestId)) {
+			this.#runtime.resumeCommits(`service-worker-update:${requestId}`);
+		}
+		this.#preparedCritical.delete(requestId);
+		if (this.#preparedRequests.size === 0 && this.#updating()) {
+			this.#setState({ ...this.#state, status: 'available', message: null });
+		}
+	}
+
+	#resumeCommits(): void {
+		for (const requestId of this.#preparedRequests) {
+			this.#runtime.resumeCommits(`service-worker-update:${requestId}`);
+		}
+		this.#preparedRequests.clear();
+		this.#preparedCritical.clear();
+	}
+
+	#updating(): boolean {
+		return UPDATING_STATUSES.has(this.#state.status);
 	}
 
 	#post(message: UpdateChannelMessage): void {

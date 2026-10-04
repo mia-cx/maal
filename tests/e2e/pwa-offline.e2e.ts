@@ -41,6 +41,14 @@ test('reopens the local shell offline without content API requests', async ({ co
 
 	await expect(page).toHaveTitle('Meal plan · Maal');
 	await expect(page.getByText(/Choose a local profile|Opening local Maal data/)).toBeVisible();
+	const offlineStatuses = await page.evaluate(() =>
+		Promise.all(
+			['/manifest.webmanifest', '/icon-192.png', '/favicon.svg'].map(
+				async (path) => (await fetch(path)).status
+			)
+		)
+	);
+	expect(offlineStatuses).toEqual([200, 200, 200]);
 	expect(contentRequests).toEqual([]);
 	expect(pageErrors).toEqual([]);
 });
