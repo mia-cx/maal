@@ -9,6 +9,13 @@ import {
 
 class FakeChannelHub {
 	channels = new Set<FakeChannel>();
+	pending: (() => void)[] = [];
+
+	constructor(readonly queued = false) {}
+
+	flush(): void {
+		for (const deliver of this.pending.splice(0)) deliver();
+	}
 
 	create(): FakeChannel {
 		const channel = new FakeChannel(this);
@@ -29,7 +36,11 @@ class FakeChannel {
 
 	postMessage(message: unknown): void {
 		for (const channel of this.hub.channels) {
-			if (channel !== this) channel.listener?.({ data: structuredClone(message) });
+			if (channel === this) continue;
+			const data: unknown = structuredClone(message);
+			const deliver = () => channel.listener?.({ data });
+			if (this.hub.queued) this.hub.pending.push(deliver);
+			else deliver();
 		}
 	}
 
@@ -160,7 +171,7 @@ const runtimeFor = (
 
 /** Tabs that share one channel and one waiting worker, on the global (fakeable) timers. */
 class UpdateTabs {
-	readonly hub = new FakeChannelHub();
+	constructor(readonly hub = new FakeChannelHub()) {}
 	readonly waiting = new FakeWorker();
 	readonly registration = new FakeRegistration(this.waiting);
 	#nextId = 0;
@@ -392,6 +403,70 @@ describe('PWA update coordination', () => {
 				type: 'SKIP_WAITING',
 				version: 'build-2'
 			});
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	test('ignores queued preparation and stale cancellation but permits a new attempt', async () => {
+		vi.useFakeTimers();
+		try {
+			const hub = new FakeChannelHub(true);
+			const tabs = new UpdateTabs(hub);
+			const peerDrain = deferred();
+			const first = tabs.open();
+			const peer = tabs.open(() => peerDrain.promise);
+			await Promise.all([first.coordinator.start(), peer.coordinator.start()]);
+			hub.flush();
+			first.serviceWorkers.emitMessage({
+				type: 'UPDATE_WAITING',
+				version: 'build-2',
+				critical: false
+			});
+			hub.flush();
+			await first.coordinator.activate();
+			hub.flush();
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect(first.status()).toBe('waiting-for-tabs');
+
+			const late = hub.create();
+			late.postMessage({ type: 'HEARTBEAT', tabId: 'late-tab', sentAt: Date.now() });
+			hub.flush(); // Queues the initiator's PREPARE_UPDATE rebroadcast.
+			peer.coordinator.cancel();
+			hub.flush(); // Delivers PREPARE_UPDATE after the peer cancelled locally.
+			peerDrain.resolve();
+			await vi.advanceTimersByTimeAsync(1_000);
+			hub.flush();
+
+			expect(first.status()).toBe('available');
+			expect(peer.status()).toBe('available');
+			expect(first.resumed).toEqual(first.paused);
+			expect(peer.resumed).toEqual(peer.paused);
+			expect(tabs.waiting.messages).not.toContainEqual({
+				type: 'SKIP_WAITING',
+				version: 'build-2'
+			});
+
+			await first.coordinator.activate();
+			hub.flush();
+			await vi.advanceTimersByTimeAsync(1_000);
+			hub.flush();
+			late.postMessage({ type: 'CANCEL_UPDATE', tabId: 'late-tab', requestId: 'id-3' });
+			hub.flush();
+			expect(first.paused).toHaveLength(2);
+			expect(peer.paused).toHaveLength(2);
+			expect(first.status()).toBe('waiting-for-tabs');
+			expect(peer.status()).toBe('preparing');
+			expect(first.resumed).toHaveLength(1);
+			expect(peer.resumed).toHaveLength(1);
+
+			first.coordinator.cancel();
+			hub.flush();
+			expect(first.resumed).toEqual(first.paused);
+			expect(peer.resumed).toEqual(peer.paused);
+			first.coordinator.dispose();
+			peer.coordinator.dispose();
+			late.close();
 		} finally {
 			vi.useRealTimers();
 		}

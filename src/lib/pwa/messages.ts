@@ -47,7 +47,8 @@ export const UpdateChannelMessageSchema = Schema.Union(
 	}),
 	Schema.Struct({
 		type: Schema.Literal('CANCEL_UPDATE'),
-		tabId: NonEmptyString
+		tabId: NonEmptyString,
+		requestId: NonEmptyString
 	}),
 	Schema.Struct({
 		type: Schema.Literal('RELOAD'),

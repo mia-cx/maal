@@ -113,7 +113,9 @@ export class PwaUpdateCoordinator {
 	#listeners = new Set<Listener>();
 	#peers = new Map<string, number>();
 	#readyTabs = new Set<string>();
-	#commitPauseReasons = new Set<string>();
+	#preparedRequests = new Set<string>();
+	// A queued PREPARE_UPDATE must not reinstate a cancelled request's commit pause.
+	#cancelledRequests = new Set<string>();
 	/** The update request this tab started, re-sent to any tab that is not ready yet. */
 	#request: PrepareUpdateMessage | null = null;
 	#heartbeat: ReturnType<typeof setInterval> | null = null;
@@ -238,8 +240,10 @@ export class PwaUpdateCoordinator {
 
 	/** Abandons the pending update in every tab, so local saving resumes everywhere. */
 	cancel(): void {
-		this.#post({ type: 'CANCEL_UPDATE', tabId: this.tabId });
-		this.#abandonUpdate();
+		for (const requestId of this.#preparedRequests) {
+			this.#post({ type: 'CANCEL_UPDATE', tabId: this.tabId, requestId });
+			this.#abandonUpdate(requestId);
+		}
 	}
 
 	#watchRegistration(registration: UpdateRegistration): void {
@@ -300,7 +304,7 @@ export class PwaUpdateCoordinator {
 			case 'UPDATE_PREPARING':
 				break;
 			case 'CANCEL_UPDATE':
-				this.#abandonUpdate();
+				this.#abandonUpdate(value.requestId);
 				break;
 			case 'RELOAD':
 				this.#runtime.reload();
@@ -309,15 +313,15 @@ export class PwaUpdateCoordinator {
 	}
 
 	async #prepareTab(message: PrepareUpdateMessage): Promise<void> {
-		if (!this.#started) return;
+		if (!this.#started || this.#cancelledRequests.has(message.requestId)) return;
 		const lifecycle = this.#lifecycle;
 		if (message.tabId !== this.tabId) {
 			this.#post({ type: 'UPDATE_PREPARING', tabId: this.tabId, requestId: message.requestId });
 		}
 		const pauseReason = `service-worker-update:${message.requestId}`;
-		if (!this.#commitPauseReasons.has(pauseReason)) {
+		if (!this.#preparedRequests.has(message.requestId)) {
 			this.#runtime.pauseCommits(pauseReason);
-			this.#commitPauseReasons.add(pauseReason);
+			this.#preparedRequests.add(message.requestId);
 		}
 		this.#setState({
 			status: 'preparing',
@@ -327,7 +331,7 @@ export class PwaUpdateCoordinator {
 		});
 		await this.#runtime.drainCommits();
 		if (!this.#started || lifecycle !== this.#lifecycle) return;
-		if (!this.#commitPauseReasons.has(pauseReason)) return;
+		if (!this.#preparedRequests.has(message.requestId)) return;
 		if (message.tabId === this.tabId) {
 			this.#readyTabs.add(this.tabId);
 			if (this.#activationTimeout !== null) {
@@ -372,20 +376,29 @@ export class PwaUpdateCoordinator {
 		if (this.#state.status === 'waiting-for-tabs') this.#tryActivation();
 	}
 
-	#abandonUpdate(): void {
-		this.#request = null;
-		this.#readyTabs.clear();
-		if (this.#activationTimeout !== null) {
-			this.#runtime.timers.clearTimeout(this.#activationTimeout);
-			this.#activationTimeout = null;
+	#abandonUpdate(requestId: string): void {
+		this.#cancelledRequests.add(requestId);
+		if (this.#request?.requestId === requestId) {
+			this.#request = null;
+			this.#readyTabs.clear();
+			if (this.#activationTimeout !== null) {
+				this.#runtime.timers.clearTimeout(this.#activationTimeout);
+				this.#activationTimeout = null;
+			}
 		}
-		this.#resumeCommits();
-		if (this.#updating()) this.#setState({ ...this.#state, status: 'available', message: null });
+		if (this.#preparedRequests.delete(requestId)) {
+			this.#runtime.resumeCommits(`service-worker-update:${requestId}`);
+		}
+		if (this.#preparedRequests.size === 0 && this.#updating()) {
+			this.#setState({ ...this.#state, status: 'available', message: null });
+		}
 	}
 
 	#resumeCommits(): void {
-		for (const reason of this.#commitPauseReasons) this.#runtime.resumeCommits(reason);
-		this.#commitPauseReasons.clear();
+		for (const requestId of this.#preparedRequests) {
+			this.#runtime.resumeCommits(`service-worker-update:${requestId}`);
+		}
+		this.#preparedRequests.clear();
 	}
 
 	#updating(): boolean {
