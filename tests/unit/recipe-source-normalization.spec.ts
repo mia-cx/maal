@@ -133,6 +133,25 @@ describe('URL import', () => {
 		expect(candidate.instructionEvents[0]?.baseValue).toBeCloseTo(176.67, 2);
 	});
 
+	test('parses a spaced Unicode mixed fraction', async () => {
+		const candidate = await importRecipe(['1 ½ cups flour', '2 ¾  teaspoons salt'], ['Mix.']);
+		expect(candidate.ingredients).toEqual([
+			expect.objectContaining({
+				sourceAmountText: '1 ½',
+				sourceQuantity: 1.5,
+				sourceUnitLabel: 'cup',
+				sourceFoodLabel: 'flour',
+				baseUnitId: 'cups'
+			}),
+			expect.objectContaining({
+				sourceQuantity: 2.75,
+				sourceUnitLabel: 'tsp',
+				sourceFoodLabel: 'salt',
+				baseUnitId: 'teaspoons'
+			})
+		]);
+	});
+
 	test('resolves multi-word unit aliases by longest match', async () => {
 		const candidate = await importRecipe(
 			['8 fl oz milk', '1 fluid ounce cream', '16 fluid ounces broth'],

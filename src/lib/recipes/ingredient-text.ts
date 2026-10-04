@@ -63,7 +63,7 @@ const fractionLabels = new Map([
 	['7/8', '⅞']
 ]);
 
-const quantitySource = String.raw`(?:\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?[¼½¾⅓⅔⅛⅜⅝⅞]|\d+(?:\.\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞])`;
+const quantitySource = String.raw`(?:\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?[¼½¾⅓⅔⅛⅜⅝⅞]|\d+\s+[¼½¾⅓⅔⅛⅜⅝⅞]|\d+(?:\.\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞])`;
 const quantityRangeSource = String.raw`${quantitySource}(?:\s*(?:-|–|—|to)\s*${quantitySource})?`;
 const leadingIngredientPattern = new RegExp(
 	String.raw`^\s*(${quantityRangeSource})(?:\s+([^\s,()]+))?(?:\s+|$)(.*)$`,
