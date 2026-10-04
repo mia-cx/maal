@@ -85,7 +85,6 @@ export const reconcileStaleTrialClaims = async (input: {
 						subscriberUserId: claim.workosUserId,
 						eventId: `trial-recovery:${claim.id}`,
 						eventCreatedAt: input.now,
-						eventReceivedAt: input.now,
 						existing: await input.repository.subscription(claim.householdId),
 						paidPeriodSucceeded: false
 					})

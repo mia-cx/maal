@@ -15,7 +15,7 @@ export const startMaalTrial = async (input: {
 	trialDays: number;
 	now: string;
 }): Promise<void> => {
-	await assertTrialAvailable(input.repository, input.workosUserId, input.householdId, input.now);
+	await assertTrialAvailable(input.repository, input.workosUserId, input.householdId);
 	const price = input.priceId
 		? await requireMaalPrice(input.stripe, input.productId, input.priceId)
 		: (await listMaalPrices(input.stripe, input.productId)).find(
@@ -32,7 +32,7 @@ export const startMaalTrial = async (input: {
 		});
 	} catch {
 		// A competing request can win either independent UNIQUE constraint after the availability read.
-		await assertTrialAvailable(input.repository, input.workosUserId, input.householdId, input.now);
+		await assertTrialAvailable(input.repository, input.workosUserId, input.householdId);
 		throw new TrialStartError('claim_reservation_failed');
 	}
 
@@ -79,7 +79,6 @@ export const startMaalTrial = async (input: {
 				subscriberUserId: input.workosUserId,
 				eventId: `trial:${claimId}`,
 				eventCreatedAt: input.now,
-				eventReceivedAt: input.now,
 				existing: null,
 				paidPeriodSucceeded: false
 			})

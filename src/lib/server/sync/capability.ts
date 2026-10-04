@@ -1,6 +1,10 @@
 import { ServerSyncCapabilityDenied, ServerSyncPermissionDenied } from './errors.js';
 import type { LiveWorkOSMembership } from '$lib/server/auth-slots/adapter.js';
 import { expandWorkOSPermissions } from '$lib/domain/household/permissions.js';
+import {
+	renewalCutoff,
+	subscriptionEnablesRemoteService
+} from '$lib/server/billing/entitlement.js';
 
 export type UserSyncPermission = 'recipes:read' | 'recipes:write';
 export type HouseholdSyncPermission = 'meals:read' | 'meals:write' | 'households:write';
@@ -104,7 +108,7 @@ export const d1UserSyncCapabilityAuthorizer: UserSyncCapabilityAuthorizer = {
 			.bind(
 				input.workosUserId,
 				...input.activeWorkOSMemberships.map(({ householdId }) => householdId),
-				input.now,
+				renewalCutoff(input.now),
 				input.now
 			);
 		const result = await statement.all<CapabilityRow>();
@@ -187,13 +191,10 @@ export const d1HouseholdSyncCapabilityAuthorizer: HouseholdSyncCapabilityAuthori
 				message: 'The current household membership lacks the required permission.'
 			});
 		}
-		const enabled =
-			((row.status === 'active' || row.status === 'trialing') &&
-				row.current_period_end !== null &&
-				row.current_period_end > input.now) ||
-			((row.status === 'past_due' || row.status === 'paused') &&
-				row.grace_until !== null &&
-				row.grace_until > input.now);
+		const enabled = subscriptionEnablesRemoteService(
+			{ status: row.status, currentPeriodEnd: row.current_period_end, graceUntil: row.grace_until },
+			input.now
+		);
 		if (!enabled) {
 			throw new ServerSyncCapabilityDenied({
 				code: 'maal_plan_required',
