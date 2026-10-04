@@ -508,6 +508,40 @@ describe('PWA update coordination', () => {
 		}
 	});
 
+	test('replaces an in-flight update when a newer worker installs', async () => {
+		vi.useFakeTimers();
+		try {
+			const tabs = new UpdateTabs();
+			const peer = tabs.open(() => new Promise(() => undefined));
+			const first = tabs.open();
+			await Promise.all([first.coordinator.start(), peer.coordinator.start()]);
+			first.serviceWorkers.emitMessage({
+				type: 'UPDATE_WAITING',
+				version: 'build-2',
+				critical: false
+			});
+			await first.coordinator.activate();
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect(first.status()).toBe('waiting-for-tabs');
+
+			first.serviceWorkers.emitMessage({
+				type: 'UPDATE_WAITING',
+				version: 'build-3',
+				critical: false
+			});
+			await vi.advanceTimersByTimeAsync(1_000);
+
+			expect(first.status()).toBe('available');
+			expect(first.resumed).toEqual(first.paused);
+			expect(tabs.waiting.messages).not.toContainEqual({
+				type: 'SKIP_WAITING',
+				version: 'build-2'
+			});
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	test('cancels delayed activation and an unresolved startup when stopped', async () => {
 		const ready = deferred();
 		const waiting = new FakeWorker();

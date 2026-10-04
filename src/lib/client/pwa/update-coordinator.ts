@@ -272,7 +272,12 @@ export class PwaUpdateCoordinator {
 	}
 
 	#announceUpdate(version: string, critical: boolean): void {
-		if (this.#updating()) return;
+		if (this.#updating()) {
+			if (version === this.#state.version || this.#state.status === 'activating') return;
+			// A newer worker superseded the in-flight request: drop it locally before switching.
+			const inFlight = this.#request;
+			if (inFlight) this.#abandonUpdate(inFlight.requestId);
+		}
 		this.#setState({ status: 'available', version, critical, message: null });
 		this.#post({ type: 'UPDATE_AVAILABLE', tabId: this.tabId, version, critical });
 		if (critical) void this.activate();
