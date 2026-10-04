@@ -133,6 +133,44 @@ describe('auth-slot proof evidence', () => {
 		expect(() => validateNativeMatrix([macos, ios])).toThrow(/exactly three/);
 	});
 
+	it.each(['appAsset', 'aliceSlot', 'bobSlot'] as const)(
+		'rejects unexpected and duplicate retained cookies on %s',
+		(route) => {
+			const evidence = completeEvidence();
+			for (const name of [
+				`__Secure-maal_session_${'a'.repeat(32)}`,
+				`__Secure-maal_identity_${'a'.repeat(32)}`,
+				`__Secure-maal_session_${route === 'bobSlot' ? BOB_SLOT : ALICE_SLOT}`,
+				`__Secure-maal_identity_${route === 'bobSlot' ? BOB_SLOT : ALICE_SLOT}`
+			]) {
+				expect(() =>
+					validateNativeEvidence({
+						...evidence,
+						requestCookieNames: {
+							...evidence.requestCookieNames,
+							[route]: [...evidence.requestCookieNames[route], name]
+						}
+					})
+				).toThrow(/auth-slot cookies?/);
+			}
+		}
+	);
+
+	it('allows unrelated cookies without losing duplicate retained-cookie names', () => {
+		const evidence = completeEvidence();
+		expect(() =>
+			validateNativeEvidence({
+				...evidence,
+				requestCookieNames: {
+					appAsset: ['maal_proof_trace'],
+					aliceSlot: ['maal_proof_trace', ...evidence.requestCookieNames.aliceSlot],
+					bobSlot: ['maal_proof_trace', ...evidence.requestCookieNames.bobSlot]
+				}
+			})
+		).not.toThrow();
+		expect(requestCookieNames('one=first; one=second')).toEqual(['one', 'one']);
+	});
+
 	it('accepts complete native evidence and rejects secret-bearing or incomplete files', () => {
 		const evidence = completeEvidence();
 		expect(() => validateNativeEvidence(evidence)).not.toThrow();

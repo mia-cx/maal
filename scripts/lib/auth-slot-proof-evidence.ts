@@ -338,8 +338,9 @@ export function validateNativeEvidence(value: unknown): asserts value is NativeA
 	assertStringArray(bobSlot, 'requestCookieNames.bobSlot');
 	const aliceCookies = [value.cookies.aliceInitial.name, value.identityCookies.aliceInitial.name];
 	const bobCookies = [value.cookies.bobInitial.name, value.identityCookies.bobInitial.name];
+	const retainedCookie = /^__Secure-maal_(session|identity)_/;
 	assert(
-		![...aliceCookies, ...bobCookies].some((name) => appAsset.includes(name)),
+		!appAsset.some((name) => retainedCookie.test(name)),
 		'app assets must receive no retained auth-slot cookie'
 	);
 	assert(
@@ -354,6 +355,14 @@ export function validateNativeEvidence(value: unknown): asserts value is NativeA
 	assert(
 		!aliceCookies.some((name) => bobSlot.includes(name)),
 		'Bob route received an Alice cookie'
+	);
+	assert(
+		aliceSlot.filter((name) => retainedCookie.test(name)).length === aliceCookies.length,
+		'Alice route must receive exactly its own auth-slot cookies'
+	);
+	assert(
+		bobSlot.filter((name) => retainedCookie.test(name)).length === bobCookies.length,
+		'Bob route must receive exactly its own auth-slot cookies'
 	);
 
 	assertObject(value.checks, 'checks');

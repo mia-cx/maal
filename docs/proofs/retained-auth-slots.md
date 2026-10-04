@@ -89,6 +89,7 @@ Each target gets a fresh Alice and Bob. Never reuse a pair.
 
 ```sh
 export T=native-macos-safari     # or native-ios-safari, native-android-chrome
+unset CALLBACK_OK FLOW_ONE_USE_OK AUTH_SLOT_PROOF_D1_OPENED
 ev init "$T" "$P/$T.template.json"
 ev fixtures-create "$P/$T.fixtures.json"
 export RUN_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -104,6 +105,17 @@ Open the inspector:
 
 In Network, turn on Preserve Log and Disable Cache. Decline every "save password" prompt. Navigate the device from the inspector console with `location.assign('<url>')`. Clear the clipboard with `pbcopy </dev/null` after each paste below.
 
+Before the first authorization, clear the previous helper state and set a fresh, non-secret trace label in the staging-origin console:
+
+```js
+sessionStorage.removeItem('issue70');
+var proofLabel = `issue70-${crypto.randomUUID()}`;
+document.cookie = `maal_proof_trace=${proofLabel}; Path=/; Secure; SameSite=Lax`;
+proofLabel;
+```
+
+Give this label to the lead. With `MAAL_PROOF_TELEMETRY=staging-only`, this cookie traces all Worker-served requests from the device, including authorization, callback, document navigations, and application-generated fetches. The cookie holds no authentication material and is ignored outside staging telemetry. The lead opens Workers Logs for `maal-staging` and checks `staging_proof_request` events with this exact `proofLabel` over the full run window. Logs must be unsampled and complete; missing events or a dropped tail connection leave the observation unset. Do not export raw request logs or callback URLs.
+
 ### 3. Per target: record versions
 
 - **macOS**: `sw_vers`, `sysctl -n hw.model`, and `defaults read /Applications/Safari.app/Contents/Info CFBundleShortVersionString`.
@@ -118,7 +130,7 @@ export BROWSER_NAME='<Safari|Chrome>' BROWSER_VERSION='<exact version>' UA='<nav
 
 ### 4. Per target: run the flow
 
-Paste this helper into the staging-origin console, and again after every page load. Its state lives in `sessionStorage` and survives the WorkOS round trip. Every request carries `x-maal-proof-trace`, so the Worker reports per request whether D1 opened.
+Paste this helper into the staging-origin console, and again after every page load. Its state lives in `sessionStorage` and survives the WorkOS round trip. Its D1 aggregate covers only helper fetches and is a cross-check, not the full-run observation; the lead must include the native navigations and application requests using the trace label above.
 
 ```js
 var P = {
@@ -132,12 +144,11 @@ var P = {
 			method,
 			body,
 			headers: {
-				'x-maal-proof-trace': 'issue70-native',
 				...(body ? { 'content-type': 'application/json' } : {})
 			}
 		});
 		const d1 = response.headers.get('x-maal-proof-d1-opened');
-		if (d1 === null) this.s.telemetry = false;
+		if (d1 !== 'true' && d1 !== 'false') this.s.telemetry = false;
 		if (d1 === 'true') this.s.d1Opened = true;
 		return {
 			http: response.status,
@@ -158,7 +169,9 @@ var P = {
 
 Stop at the first FAIL, and run step 5 anyway.
 
-**Callback observations, after every login.** In Network, the `/api/auth/callback` 303 has no slot in its path, and its `Location` is `/?authSlot=<slot>&authStatus=authenticated`. Storage > Cookies shows no `__Secure-maal_auth_flow_*` cookie afterwards. You set `CALLBACK_OK` and `FLOW_ONE_USE_OK` from these in step 4.7.
+**Flow observations, for each of the three logins.** Inspect the authorization response and outbound WorkOS URL privately in Network. Confirm the registered `redirect_uri` is exactly `https://staging.maal.is/api/auth/callback`. The state must have the opaque `v1.<base64url IV>.<base64url ciphertext>` format, with a 16-character IV segment, not plaintext JSON or visible slot, purpose, expected-user, or return-path fields. The local flow tests establish encryption; this native observation checks the deployed wire format. Confirm the authorization response sets a fresh `__Secure-maal_auth_flow_<nonce>` marker with value `pending`, `Path=/api/auth/callback`, `Secure`, `HttpOnly`, `SameSite=Lax`, and a ten-minute lifetime. Do not copy state or cookie values into a console, shell, file, or report.
+
+**Callback and replay observations, after every login.** In Network, the `/api/auth/callback` 303 has no slot in its path, and its `Location` is `/?authSlot=<slot>&authStatus=authenticated`. Confirm the matching flow marker is deleted. After capturing the original callback's cookies, use the inspector's resend/replay request action on that exact callback with the browser's current cookies, not the original saved `Cookie` header. It must return 400 and set no replacement session or identity cookies. Confirm all already-bound retained identities are unchanged after replay. Return to `/` and re-paste the helper if replay navigated the page. If the inspector cannot replay using current cookies, stop and ask the lead for a private intercepting-proxy replay; do not substitute cookie disappearance for replay rejection. Set `CALLBACK_OK` and `FLOW_ONE_USE_OK` in step 4.7 only after all three logins satisfy their respective observations.
 
 **Cookie captures.** From the callback 303, copy one `Set-Cookie` value without the field name, and pipe it through `ev inspect-cookie`. It prints only the cookie name, byte count, and attributes. It rejects a wrong Path, a missing `Secure` or `HttpOnly`, anything but `SameSite=Lax`, a `Domain`, and 4,096 bytes or more.
 
@@ -264,8 +277,9 @@ P.pass(
 	d.http === 204 && a.status === 'reauthRequired' && b.user === P.s.bob
 );
 var z = await P.call(`/api/auth-slots/${P.B}/`, 'DELETE');
+P.pass('_bobRemoved', z.http === 204 && (await P.who(P.B)).status === 'reauthRequired');
 var summary = JSON.stringify({
-	bobRemoved: z.http === 204,
+	bobRemoved: P.s.checks._bobRemoved,
 	telemetry: P.s.telemetry,
 	d1Opened: P.s.d1Opened,
 	checks: Object.fromEntries(Object.entries(P.s.checks).filter(([k]) => !k.startsWith('_')))
@@ -277,10 +291,10 @@ sessionStorage.removeItem('issue70');
 
 ```sh
 pbpaste > "$P/$T.console.json"; cat "$P/$T.console.json"; pbcopy </dev/null
-export CALLBACK_OK=true FLOW_ONE_USE_OK=true   # only if every login showed both callback observations; otherwise leave unset
+export CALLBACK_OK=true FLOW_ONE_USE_OK=true   # only after all three callback and flow/replay observations pass; otherwise leave unset
 ```
 
-If the summary shows `"telemetry": false`, the deploy lacks `MAAL_PROOF_TELEMETRY` and `d1Opened` was not measured. Stop and tell the lead.
+If the summary shows `"telemetry": false` or `"bobRemoved": false`, stop and tell the lead, then run cleanup anyway. The lead must reconcile the device's Network requests against complete labeled Worker events from the first authorization through Bob's final metadata check, including all three callbacks and replays. Edge-served static assets cannot open the Worker D1 binding; every Worker-served request must have an event. Set `AUTH_SLOT_PROOF_D1_OPENED=true` if any event reports `d1Opened: true`, or `false` only if every event reports false and coverage is complete. Without this full-run observation, leave it unset. The helper's partial aggregate cannot establish a run-wide false.
 
 ### 5. Per target: cleanup
 
@@ -295,28 +309,35 @@ Then clear site data for the staging origin and the AuthKit domain on the device
 
 ### 6. Per target: assemble and validate
 
+The assembly fails closed unless telemetry, both slot removals, and the lead's full-run D1 observation are recorded. Never default an unobserved D1 result to false.
+
 ```sh
+export AUTH_SLOT_PROOF_D1_OPENED=<true-or-false-from-the-lead>
+jq -e '.telemetry == true and .bobRemoved == true' "$P/$T.console.json" && \
 jq --arg sha "$CANDIDATE_SHA" --arg label "$DEPLOY_LABEL" --arg run "$RUN_AT" \
    --arg hw "$HW" --arg osn "$OS_NAME" --arg osv "$OS_VERSION" \
    --arg bn "$BROWSER_NAME" --arg bv "$BROWSER_VERSION" --arg ua "$UA" \
    --argjson cb "${CALLBACK_OK:-false}" --argjson fl "${FLOW_ONE_USE_OK:-false}" \
+   --argjson d1 "${AUTH_SLOT_PROOF_D1_OPENED:?Full-run D1 observation required}" \
    --slurpfile ai "$P/$T.aliceInitial.json" --slurpfile bi "$P/$T.bobInitial.json" \
    --slurpfile ar "$P/$T.aliceRefresh.json" --slurpfile aa "$P/$T.aliceReauthentication.json" \
    --slurpfile ii "$P/$T.aliceIdentity.json" --slurpfile bii "$P/$T.bobIdentity.json" \
    --slurpfile ia "$P/$T.aliceReauthIdentity.json" \
    --slurpfile na "$P/$T.names.appAsset.json" --slurpfile nal "$P/$T.names.aliceSlot.json" --slurpfile nb "$P/$T.names.bobSlot.json" \
    --slurpfile con "$P/$T.console.json" --slurpfile cl "$P/$T.cleanup.json" \
-   '.gitCommit=$sha | .stagingDeploymentLabel=$label | .runAtUtc=$run
+   'if ($d1 | type) != "boolean" or ($con[0].d1Opened == true and $d1 != true)
+     then error("Invalid or inconsistent full-run D1 observation") else . end
+     | .gitCommit=$sha | .stagingDeploymentLabel=$label | .runAtUtc=$run
     | .device={hardwareModel:$hw, osName:$osn, osVersion:$osv}
     | .browser={name:$bn, version:$bv, userAgent:$ua}
     | .cookies={aliceInitial:$ai[0], bobInitial:$bi[0], aliceRefresh:$ar[0], aliceReauthentication:$aa[0]}
     | .identityCookies={aliceInitial:$ii[0], bobInitial:$bii[0], aliceReauthentication:$ia[0]}
     | .requestCookieNames={appAsset:$na[0], aliceSlot:$nal[0], bobSlot:$nb[0]}
     | .checks=({stableRegisteredCallback:$cb, opaqueOneUseFlowState:$fl} + $con[0].checks)
-    | .d1Opened=$con[0].d1Opened
+    | .d1Opened=$d1
     | .cleanup={aliceDeleted:($cl[0].verifiedDeleted==2), bobDeleted:($cl[0].verifiedDeleted==2),
                 remainingDisposableUsers:$cl[0].remainingDisposableUsers, verifiedAtUtc:$cl[0].verifiedAtUtc}' \
-   "$P/$T.template.json" > "$P/$T.json" && chmod 600 "$P/$T.json"
+   "$P/$T.template.json" > "$P/$T.json" && chmod 600 "$P/$T.json" && \
 ev validate "$P/$T.json"
 ```
 

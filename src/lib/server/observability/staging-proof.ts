@@ -15,13 +15,12 @@ export const stagingProofTelemetry = (
 	request: Request,
 	environment: StagingProofEnvironment
 ): StagingProofTelemetry | null => {
-	const pathname = new URL(request.url).pathname;
-	const label = request.headers.get(TRACE_REQUEST_HEADER) ?? '';
-	if (
-		environment.MAAL_PROOF_TELEMETRY !== 'staging-only' ||
-		(!pathname.startsWith('/api/') && pathname !== '/mcp') ||
-		!TRACE_LABEL.test(label)
-	) {
+	// A staging-only cookie also traces native navigations and application-generated requests.
+	const cookieLabel = request.headers
+		.get('cookie')
+		?.match(/(?:^|;\s*)maal_proof_trace=([^;]*)/)?.[1];
+	const label = request.headers.get(TRACE_REQUEST_HEADER) ?? cookieLabel ?? '';
+	if (environment.MAAL_PROOF_TELEMETRY !== 'staging-only' || !TRACE_LABEL.test(label)) {
 		return null;
 	}
 
