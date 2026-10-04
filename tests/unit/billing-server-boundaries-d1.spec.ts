@@ -207,13 +207,21 @@ const subscriptionEvent = (
 	id: string,
 	created: number,
 	subId: string,
-	type = 'customer.subscription.updated'
+	type = 'customer.subscription.updated',
+	reportedStatus: Stripe.Subscription.Status | null = null
 ) =>
 	({
 		id,
 		type,
 		created,
-		data: { object: { object: 'subscription', id: subId } }
+		data: {
+			object: {
+				object: 'subscription',
+				id: subId,
+				status: reportedStatus,
+				pause_collection: null
+			}
+		}
 	}) as unknown as Stripe.Event;
 
 const invoicePaidEvent = (id: string, created: number, subId: string) =>
@@ -281,7 +289,13 @@ describe('Stripe grace projection', () => {
 		await processStripeWebhook({
 			stripe,
 			repository: new BillingRepository(database),
-			event: subscriptionEvent('evt_failed', t0, 'sub_a'),
+			event: subscriptionEvent(
+				'evt_failed',
+				t0,
+				'sub_a',
+				'customer.subscription.updated',
+				'past_due'
+			),
 			receivedAt: '2026-09-23T14:13:20.000Z'
 		});
 		expect(await billingRow()).toMatchObject({
@@ -297,9 +311,15 @@ describe('Stripe grace projection', () => {
 			processStripeWebhook({ stripe, repository, event, receivedAt });
 
 		subscriptions.set('sub_a', sub('sub_a', 'past_due'));
-		await deliver(subscriptionEvent('evt_failed', t0, 'sub_a'), iso(t0));
+		await deliver(
+			subscriptionEvent('evt_failed', t0, 'sub_a', 'customer.subscription.updated', 'past_due'),
+			iso(t0)
+		);
 		subscriptions.set('sub_a', sub('sub_a', 'active'));
-		await deliver(subscriptionEvent('evt_active', t0 + 101, 'sub_a'), iso(t0 + 200));
+		await deliver(
+			subscriptionEvent('evt_active', t0 + 101, 'sub_a', 'customer.subscription.updated', 'active'),
+			iso(t0 + 200)
+		);
 		await deliver(invoicePaidEvent('evt_paid', t0 + 100, 'sub_a'), iso(t0 + 300));
 		expect(await billingRow()).toMatchObject({
 			interruption_started_at: null,
@@ -310,7 +330,13 @@ describe('Stripe grace projection', () => {
 		// The next renewal fails 40 days later and gets its own full window.
 		subscriptions.set('sub_a', sub('sub_a', 'past_due'));
 		await deliver(
-			subscriptionEvent('evt_failed_again', t0 + 3_500_000, 'sub_a'),
+			subscriptionEvent(
+				'evt_failed_again',
+				t0 + 3_500_000,
+				'sub_a',
+				'customer.subscription.updated',
+				'past_due'
+			),
 			iso(t0 + 3_500_000)
 		);
 		expect(await billingRow()).toMatchObject({ grace_until: '2026-12-01T02:26:40.000Z' });
@@ -326,7 +352,13 @@ describe('Stripe grace projection', () => {
 			const deliver = (event: Stripe.Event) =>
 				processStripeWebhook({ stripe, repository, event, receivedAt: iso(event.created) });
 			const paid = invoicePaidEvent('evt_paid', t0, 'sub_a');
-			const failed = subscriptionEvent('evt_failed', t0 + 500, 'sub_a');
+			const failed = subscriptionEvent(
+				'evt_failed',
+				t0 + 500,
+				'sub_a',
+				'customer.subscription.updated',
+				'past_due'
+			);
 			for (const event of order === 'paid-then-failed' ? [paid, failed] : [failed, paid]) {
 				await deliver(event);
 			}
@@ -348,9 +380,21 @@ describe('Stripe grace projection', () => {
 			const deliver = (event: Stripe.Event) =>
 				processStripeWebhook({ stripe, repository, event, receivedAt: iso(event.created) });
 			// F0 at t0, payment at t0+500, the next failure F1 at t0+600.
-			const f0 = subscriptionEvent('evt_failed_0', t0, 'sub_a');
+			const f0 = subscriptionEvent(
+				'evt_failed_0',
+				t0,
+				'sub_a',
+				'customer.subscription.updated',
+				'past_due'
+			);
 			const paid = invoicePaidEvent('evt_paid', t0 + 500, 'sub_a');
-			const f1 = subscriptionEvent('evt_failed_1', t0 + 600, 'sub_a');
+			const f1 = subscriptionEvent(
+				'evt_failed_1',
+				t0 + 600,
+				'sub_a',
+				'customer.subscription.updated',
+				'past_due'
+			);
 			await deliver(f0);
 			if (order === 'failure-payment-failure') {
 				await deliver(paid);
@@ -381,10 +425,28 @@ describe('Stripe grace projection', () => {
 				processStripeWebhook({ stripe, repository, event, receivedAt: iso(event.created) });
 			// F0 at t0, payment at t0+500, next failure F1 at t0+600, and a much later
 			// status-preserving update U at t0+86400: the new window starts at F1, not U.
-			const f0 = subscriptionEvent('evt_failed_0', t0, 'sub_a');
+			const f0 = subscriptionEvent(
+				'evt_failed_0',
+				t0,
+				'sub_a',
+				'customer.subscription.updated',
+				'past_due'
+			);
 			const paid = invoicePaidEvent('evt_paid', t0 + 500, 'sub_a');
-			const f1 = subscriptionEvent('evt_failed_1', t0 + 600, 'sub_a');
-			const update = subscriptionEvent('evt_update', t0 + 86_400, 'sub_a');
+			const f1 = subscriptionEvent(
+				'evt_failed_1',
+				t0 + 600,
+				'sub_a',
+				'customer.subscription.updated',
+				'past_due'
+			);
+			const update = subscriptionEvent(
+				'evt_update',
+				t0 + 86_400,
+				'sub_a',
+				'customer.subscription.updated',
+				'past_due'
+			);
 			await deliver(f0);
 			if (order === 'payment-between-failures') {
 				await deliver(paid);
@@ -404,6 +466,85 @@ describe('Stripe grace projection', () => {
 		}
 	);
 
+	test('a recovery payment ignores an update that reported active while Stripe stayed past_due', async () => {
+		const repository = new BillingRepository(database);
+		const { stripe, subscriptions } = fakeStripe();
+		subscriptions.set('sub_a', sub('sub_a', 'past_due'));
+		const deliver = (event: Stripe.Event) =>
+			processStripeWebhook({ stripe, repository, event, receivedAt: iso(event.created) });
+		// F0 at t0, payment at t0+500, F1 at t0+600, and at t0+86400 an update whose payload
+		// reported the subscription active (a recovery) even though the live status is still
+		// past_due. Recorded by its live status it would masquerade as an interruption.
+		const f0 = subscriptionEvent(
+			'evt_failed_0',
+			t0,
+			'sub_a',
+			'customer.subscription.updated',
+			'past_due'
+		);
+		const paid = invoicePaidEvent('evt_paid', t0 + 500, 'sub_a');
+		const f1 = subscriptionEvent(
+			'evt_failed_1',
+			t0 + 600,
+			'sub_a',
+			'customer.subscription.updated',
+			'past_due'
+		);
+		const recovery = subscriptionEvent(
+			'evt_recovery',
+			t0 + 86_400,
+			'sub_a',
+			'customer.subscription.updated',
+			'active'
+		);
+		for (const event of [f0, f1, recovery, paid]) await deliver(event);
+		expect(await billingRow()).toMatchObject({
+			status: 'past_due',
+			interruption_started_at: iso(t0 + 600),
+			grace_until: iso(t0 + 600 + 30 * 86_400),
+			last_successful_payment_at: iso(t0 + 500)
+		});
+	});
+
+	test('an update that reported active between failures cannot become the grace start', async () => {
+		const repository = new BillingRepository(database);
+		const { stripe, subscriptions } = fakeStripe();
+		subscriptions.set('sub_a', sub('sub_a', 'past_due'));
+		const deliver = (event: Stripe.Event) =>
+			processStripeWebhook({ stripe, repository, event, receivedAt: iso(event.created) });
+		// An update at t0+550 reporting active lands between F0 and F1. If its row recorded the
+		// live past_due status, the reconstruction would move grace forward to t0+550.
+		const f0 = subscriptionEvent(
+			'evt_failed_0',
+			t0,
+			'sub_a',
+			'customer.subscription.updated',
+			'past_due'
+		);
+		const paid = invoicePaidEvent('evt_paid', t0 + 500, 'sub_a');
+		const staleRecovery = subscriptionEvent(
+			'evt_stale_recovery',
+			t0 + 550,
+			'sub_a',
+			'customer.subscription.updated',
+			'active'
+		);
+		const f1 = subscriptionEvent(
+			'evt_failed_1',
+			t0 + 600,
+			'sub_a',
+			'customer.subscription.updated',
+			'past_due'
+		);
+		for (const event of [f0, f1, staleRecovery, paid]) await deliver(event);
+		expect(await billingRow()).toMatchObject({
+			status: 'past_due',
+			interruption_started_at: iso(t0 + 600),
+			grace_until: iso(t0 + 600 + 30 * 86_400),
+			last_successful_payment_at: iso(t0 + 500)
+		});
+	});
+
 	test('a paid invoice older than a newer failure keeps the newer grace window', async () => {
 		const repository = new BillingRepository(database);
 		const { stripe, subscriptions } = fakeStripe();
@@ -411,7 +552,13 @@ describe('Stripe grace projection', () => {
 		await processStripeWebhook({
 			stripe,
 			repository,
-			event: subscriptionEvent('evt_failed', t0 + 500, 'sub_a'),
+			event: subscriptionEvent(
+				'evt_failed',
+				t0 + 500,
+				'sub_a',
+				'customer.subscription.updated',
+				'past_due'
+			),
 			receivedAt: iso(t0 + 500)
 		});
 		await processStripeWebhook({

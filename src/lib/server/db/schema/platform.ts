@@ -100,7 +100,9 @@ export const stripeEvents = sqliteTable(
 		safeErrorCode: text('safe_error_code'),
 		stripeSubscriptionId: text('stripe_subscription_id'),
 		stripeCreatedAt: text('stripe_created_at'),
-		projectedStatus: text('projected_status')
+		// The subscription status this event itself reported — not the status retrieved live when
+		// it was processed. Used to reconstruct interruption order independent of delivery order.
+		eventStatus: text('event_status')
 	},
 	(table) => [
 		enumCheck('stripe_events_state_check', table.state, stripeEventStateValues),

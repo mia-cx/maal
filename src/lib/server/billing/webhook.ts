@@ -1,5 +1,7 @@
 import Stripe from 'stripe';
 
+import type { StripeSubscriptionStatus } from '$lib/domain/billing/contracts.js';
+
 import { reconcileHouseholdDeletionRefund } from './deletion.js';
 import type { BillingRepository } from './repository.js';
 import {
@@ -39,6 +41,21 @@ const refundForEvent = async (
 ): Promise<Stripe.Refund | null> => {
 	const object = event.data.object;
 	return object.object === 'refund' ? stripe.refunds.retrieve(object.id) : null;
+};
+
+/**
+ * The subscription status the event itself reported. Stripe delivers the subscription as it was
+ * when the event was created, which can differ from the live status we retrieve for the
+ * projection — recording the reported status keeps the interruption reconstruction honest.
+ */
+const statusReportedByEvent = (event: Stripe.Event): StripeSubscriptionStatus | null => {
+	const object = event.data.object;
+	if (event.type.startsWith('customer.subscription.') && object.object === 'subscription') {
+		return effectiveStripeStatus(object as Stripe.Subscription);
+	}
+	if (event.type === 'invoice.payment_failed') return 'past_due';
+	if (event.type === 'invoice.paid' || event.type === 'invoice.payment_succeeded') return 'active';
+	return null;
 };
 
 const supportedEventTypes = new Set([
@@ -133,7 +150,8 @@ export const processStripeWebhook = async (input: {
 			}),
 			input.receivedAt,
 			paidPeriodSucceeded ? eventCreatedAt : null,
-			replacesEndedSubscriptionId
+			replacesEndedSubscriptionId,
+			statusReportedByEvent(input.event)
 		);
 		return 'processed';
 	} catch (cause) {

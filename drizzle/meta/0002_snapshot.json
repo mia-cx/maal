@@ -3090,8 +3090,8 @@
           "notNull": false,
           "autoincrement": false
         },
-        "projected_status": {
-          "name": "projected_status",
+        "event_status": {
+          "name": "event_status",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

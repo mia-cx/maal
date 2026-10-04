@@ -349,7 +349,8 @@ export class BillingRepository {
 		projection: SubscriptionProjectionWrite,
 		processedAt: string,
 		paidAt: string | null = null,
-		replacesEndedSubscriptionId?: string
+		replacesEndedSubscriptionId?: string,
+		eventStatus: StripeSubscriptionStatus | null = null
 	): Promise<void> {
 		await this.database.batch([
 			this.subscriptionUpsertStatement(
@@ -361,14 +362,14 @@ export class BillingRepository {
 			this.database
 				.prepare(
 					`UPDATE stripe_events SET state = 'processed', processed_at = ?, safe_error_code = NULL,
-						stripe_subscription_id = ?, stripe_created_at = ?, projected_status = ?
+						stripe_subscription_id = ?, stripe_created_at = ?, event_status = ?
 					 WHERE stripe_event_id = ?`
 				)
 				.bind(
 					processedAt,
 					projection.stripeSubscriptionId,
 					projection.eventCreatedAt,
-					projection.status,
+					eventStatus,
 					eventId
 				)
 		]);
@@ -645,7 +646,7 @@ export class BillingRepository {
 							ELSE COALESCE(
 								(SELECT MIN(stripe_created_at) FROM stripe_events
 									WHERE stripe_subscription_id = ?3 AND state = 'processed'
-										AND projected_status IN ('past_due', 'paused')
+										AND event_status IN ('past_due', 'paused')
 										AND stripe_created_at > ?1),
 								?1) END
 						WHEN interruption_started_at IS NULL OR interruption_started_at > ?1
@@ -658,7 +659,7 @@ export class BillingRepository {
 							ELSE strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(
 								(SELECT MIN(stripe_created_at) FROM stripe_events
 									WHERE stripe_subscription_id = ?3 AND state = 'processed'
-										AND projected_status IN ('past_due', 'paused')
+										AND event_status IN ('past_due', 'paused')
 										AND stripe_created_at > ?1),
 								?1), '+${BILLING_GRACE_DAYS} days') END
 						WHEN interruption_started_at IS NULL OR interruption_started_at > ?1 THEN grace_until
