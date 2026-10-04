@@ -27,7 +27,11 @@
 </script>
 
 {#if meal}
-	<div aria-hidden="true" class={cn('pointer-events-none relative min-w-0', className)}>
+	<div
+		aria-hidden="true"
+		data-meal-drop-skeleton
+		class={cn('pointer-events-none relative min-w-0', className)}
+	>
 		<div class="invisible">
 			<MealPlanCard
 				{meal}

@@ -1,21 +1,24 @@
 <script lang="ts">
 	import { liveQuery } from 'dexie';
 	import { Schema } from 'effect';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 
 	import {
 		deleteMeal,
 		liveMealCalendarRange,
+		liveMealPool,
+		defaultScheduleUiState,
 		mealAggregateToScheduleMeal,
 		membershipsToHouseholdMembers,
 		planRecipeAsMeal,
 		readScheduleUiState,
 		recipeAggregateToPickerItem,
-		recipeAggregateToPoolMeal,
+		reorderMeals,
 		saveMealCheckIn,
 		updateMealSchedule,
 		writeScheduleUiState,
 		type MealCalendarRange,
+		type MealCalendarRangeResult,
 		type MealCommandContext,
 		type ScheduleUiState
 	} from '$lib/client/meals/index.js';
@@ -29,13 +32,8 @@
 	} from '$lib/client/recipes/index.js';
 	import { fetchRecipeUrlCandidate } from '$lib/client/recipes/url-import.js';
 	import ScheduleDashboard from '$lib/components/dashboard/schedule-dashboard.svelte';
-	import type {
-		HouseholdMember,
-		Meal,
-		MealDropTarget
-	} from '$lib/components/dashboard/schedule-types.js';
+	import type { HouseholdMember, Meal } from '$lib/components/dashboard/schedule-types.js';
 	import type { MealCheckInPayload } from '$lib/components/dashboard/meal-check-in-dialog.svelte';
-	import { sortOrderForUntimedInsertion } from '$lib/components/dashboard/schedule-ordering.js';
 	import type { RecipeMenuItem } from '$lib/components/menu/index.js';
 	import { DomainIdSchema } from '$lib/domain/contracts/primitives.js';
 	import { recipeMenuItemToEditorPatch } from '$lib/menu/recipe-local-adapter.js';
@@ -47,18 +45,47 @@
 		defaultMealServings: number;
 		weekStartsOn: 'sunday' | 'monday';
 		householdTimeZone?: string;
-		mealPool: Meal[];
 		recipes: RecipeMenuItem[];
 		householdMembers: HouseholdMember[];
-		uiState: ScheduleUiState;
 	};
+
+	const noMeals: MealCalendarRangeResult = { meals: [], checkIns: [] };
+	const readError = 'Your local meal plan could not be read.';
+	/** Scroll and mode changes arrive every frame; Dexie gets at most one write per interval. */
+	const uiStateWriteIntervalMs = 250;
 
 	let database = $state<MaalDatabase | null>(null);
 	let view = $state<PlanView | null>(null);
-	let calendarMeals = $state<Meal[]>([]);
+	let uiState = $state<{ scope: string; state: ScheduleUiState } | null>(null);
+	let rangeMeals = $state<MealCalendarRangeResult>(noMeals);
+	let poolMeals = $state<MealCalendarRangeResult>(noMeals);
 	let renderedMealRange = $state<MealCalendarRange | null>(null);
 	let error = $state<string | null>(null);
-	const dashboardMeals = $derived(view ? [...calendarMeals, ...view.mealPool] : []);
+	let pendingUiStateWrite: (() => Promise<void>) | null = null;
+	let uiStateWriteTimer: ReturnType<typeof setTimeout> | undefined;
+
+	const scope = $derived(view ? `${view.profileId}:${view.householdId}` : null);
+	const householdId = $derived(view?.householdId ?? null);
+	const dashboardMeals = $derived.by((): Meal[] => {
+		if (!view) return [];
+		// The range and pool queries re-run independently, so a meal crossing between them can
+		// briefly appear in both. The higher revision is the newer local write.
+		const latest = new Map(
+			[...rangeMeals.meals, ...poolMeals.meals]
+				.toSorted((left, right) => left.revision - right.revision)
+				.map((meal) => [meal.id, meal])
+		);
+		const latestCheckInByMeal = new Map(
+			[...rangeMeals.checkIns, ...poolMeals.checkIns]
+				.filter(({ mealId }) => mealId !== null)
+				.toSorted((left, right) => left.updatedAt.localeCompare(right.updatedAt))
+				.map((checkIn) => [checkIn.mealId!, checkIn])
+		);
+		const timeZone = view.householdTimeZone;
+		return [...latest.values()].map((meal) =>
+			mealAggregateToScheduleMeal(meal, latestCheckInByMeal.get(meal.id), timeZone)
+		);
+	});
 
 	const commandContext = async (): Promise<MealCommandContext> => {
 		if (!database || !view) throw new Error('Choose a local household first.');
@@ -72,19 +99,10 @@
 		};
 	};
 
-	const planRecipe = async (
-		recipe: RecipeMenuItem,
-		date?: string,
-		target?: MealDropTarget
-	): Promise<Meal> => {
+	const planRecipe = async (recipe: RecipeMenuItem, date?: string): Promise<Meal> => {
 		if (!database || !view) throw new Error('Local meal storage is still opening.');
-		const sortOrder =
-			target?.kind === 'date'
-				? sortOrderForUntimedInsertion(calendarMeals, target.date, target.index)
-				: null;
 		const planned = await planRecipeAsMeal(database, await commandContext(), recipe.id, {
 			date: date ?? null,
-			sortOrder,
 			plannedYield: view.defaultMealServings
 		});
 		return mealAggregateToScheduleMeal(planned, undefined, view.householdTimeZone);
@@ -99,6 +117,25 @@
 			plannedCookUserId: meal.plannedCookWorkosUserId ?? null,
 			plannedYield: meal.servingsPlanned ?? null
 		});
+	};
+
+	const reorderMealsInOneCommit = async (moves: { meal: Meal }[]): Promise<void> => {
+		if (!database) throw new Error('Local meal storage is still opening.');
+		const context = await commandContext();
+		await reorderMeals(
+			database,
+			context,
+			moves.map(({ meal }) => ({
+				mealId: meal.id,
+				patch: {
+					date: meal.date ?? null,
+					time: meal.time ?? null,
+					sortOrder: meal.sortOrder ?? null,
+					plannedCookUserId: meal.plannedCookWorkosUserId ?? null,
+					plannedYield: meal.servingsPlanned ?? null
+				}
+			}))
+		);
 	};
 
 	const removeMeal = async (meal: Meal): Promise<void> => {
@@ -144,9 +181,22 @@
 		return mealAggregateToScheduleMeal(meal, undefined, view.householdTimeZone);
 	};
 
-	const saveUiState = async (state: ScheduleUiState): Promise<void> => {
+	const flushUiState = (): void => {
+		clearTimeout(uiStateWriteTimer);
+		uiStateWriteTimer = undefined;
+		const write = pendingUiStateWrite;
+		pendingUiStateWrite = null;
+		write?.().catch(() => {
+			error = 'Your schedule position could not be saved.';
+		});
+	};
+
+	const saveUiState = (state: ScheduleUiState): void => {
 		if (!database || !view) return;
-		await writeScheduleUiState(database, view.profileId, view.householdId, state);
+		const opened = database;
+		const { profileId, householdId } = view;
+		pendingUiStateWrite = () => writeScheduleUiState(opened, profileId, householdId, state);
+		uiStateWriteTimer ??= setTimeout(flushUiState, uiStateWriteIntervalMs);
 	};
 
 	const updateRenderedMealRange = (range: MealCalendarRange): void => {
@@ -168,16 +218,10 @@
 					if (typeof activeHousehold?.value !== 'string') return null;
 					const household = await opened.households.get(activeHousehold.value);
 					if (!household) return null;
-					const [recipeAggregates, memberships, profiles, uiState] = await Promise.all([
+					const [recipeAggregates, memberships, profiles] = await Promise.all([
 						listRecipes(opened, profile.workosUserId),
 						opened.memberships.where('householdId').equals(household.householdId).toArray(),
-						opened.profiles.toArray(),
-						readScheduleUiState(
-							opened,
-							profile.profileId,
-							household.householdId,
-							household.timezone ?? undefined
-						)
+						opened.profiles.toArray()
 					]);
 					return {
 						profileId: profile.profileId,
@@ -186,65 +230,86 @@
 						defaultMealServings: household.defaultPlannedYield,
 						weekStartsOn: household.weekStartsOn === 0 ? 'sunday' : 'monday',
 						householdTimeZone: household.timezone ?? undefined,
-						mealPool: recipeAggregates.map(recipeAggregateToPoolMeal),
 						recipes: recipeAggregates.map(recipeAggregateToPickerItem),
-						householdMembers: membershipsToHouseholdMembers(memberships, profiles),
-						uiState
+						householdMembers: membershipsToHouseholdMembers(memberships, profiles)
 					};
 				}).subscribe({
 					next: (nextView) => {
 						const previousScope = view ? `${view.profileId}:${view.householdId}` : null;
 						const nextScope = nextView ? `${nextView.profileId}:${nextView.householdId}` : null;
 						if (previousScope !== nextScope) {
-							calendarMeals = [];
+							rangeMeals = noMeals;
 							renderedMealRange = null;
 						}
 						view = nextView;
 						error = null;
 					},
 					error: () => {
-						error = 'Your local meal plan could not be read.';
+						error = readError;
 					}
 				});
 			})
 			.catch(() => {
 				error = 'Your local meal plan could not be opened.';
 			});
-		return () => subscription?.unsubscribe();
+		return () => {
+			subscription?.unsubscribe();
+			flushUiState();
+		};
+	});
+
+	// The schedule owns its UI state after the first render, so it is read once per scope and
+	// kept out of the live view query. Otherwise every scroll write would re-run that query.
+	$effect(() => {
+		const opened = database;
+		const readScope = scope;
+		if (!opened || !readScope) return;
+		const { profileId, householdId, householdTimeZone } = untrack(() => view!);
+		let current = true;
+		readScheduleUiState(opened, profileId, householdId, householdTimeZone).then(
+			(state) => {
+				if (current) uiState = { scope: readScope, state };
+			},
+			() => {
+				if (!current) return;
+				error = readError;
+				// Render the first-visit state anyway; the failed read may succeed next scope change.
+				uiState = { scope: readScope, state: defaultScheduleUiState(householdTimeZone) };
+			}
+		);
+		return () => {
+			current = false;
+			flushUiState();
+		};
 	});
 
 	$effect(() => {
 		const opened = database;
-		const activeView = view;
-		const range = renderedMealRange;
-		if (!opened || !activeView || !range) return;
-		const queryScope = `${activeView.profileId}:${activeView.householdId}:${range.start}:${range.end}`;
-		const isCurrentQuery = () =>
-			view !== null &&
-			renderedMealRange !== null &&
-			`${view.profileId}:${view.householdId}:${renderedMealRange.start}:${renderedMealRange.end}` ===
-				queryScope;
-		const subscription = liveMealCalendarRange(opened, activeView.householdId, range).subscribe({
-			next: ({ meals, checkIns }) => {
-				if (!isCurrentQuery()) return;
-				const latestCheckInByMeal = new Map(
-					checkIns
-						.filter(({ mealId }) => mealId !== null)
-						.toSorted((left, right) => left.updatedAt.localeCompare(right.updatedAt))
-						.map((checkIn) => [checkIn.mealId!, checkIn])
-				);
-				calendarMeals = meals.map((meal) =>
-					mealAggregateToScheduleMeal(
-						meal,
-						latestCheckInByMeal.get(meal.id),
-						activeView.householdTimeZone
-					)
-				);
-				error = null;
+		if (!opened || !householdId) return;
+		const subscription = liveMealPool(opened, householdId).subscribe({
+			next: (result) => {
+				poolMeals = result;
 			},
 			error: () => {
-				if (!isCurrentQuery()) return;
-				error = 'Your local meal plan could not be read.';
+				error = readError;
+			}
+		});
+		return () => {
+			subscription.unsubscribe();
+			poolMeals = noMeals;
+		};
+	});
+
+	$effect(() => {
+		const opened = database;
+		const range = renderedMealRange;
+		if (!opened || !householdId || !range) return;
+		const subscription = liveMealCalendarRange(opened, householdId, range).subscribe({
+			next: (result) => {
+				rangeMeals = result;
+			},
+			error: () => {
+				error = readError;
 			}
 		});
 		return () => subscription.unsubscribe();
@@ -252,28 +317,33 @@
 </script>
 
 <svelte:head><title>Meal plan · Maal</title></svelte:head>
+<svelte:window onpagehide={flushUiState} />
 
 {#if database}
 	{#if view}
-		{#key `${view.profileId}:${view.householdId}`}
-			<ScheduleDashboard
-				meals={dashboardMeals}
-				recipes={view.recipes}
-				weekStartsOn={view.weekStartsOn}
-				householdTimeZone={view.householdTimeZone}
-				currentUserId={view.userId}
-				householdMembers={view.householdMembers}
-				initialUiState={view.uiState}
-				onplanrecipe={planRecipe}
-				onmealchange={changeMeal}
-				onmealdelete={removeMeal}
-				onmealcheckin={checkIn}
-				oncreaterecipe={createRecipeAndMeal}
-				onimporturl={importRecipeAndMeal}
-				onloadedrangechange={updateRenderedMealRange}
-				onuistatechange={saveUiState}
-			/>
-		{/key}
+		{#if uiState?.scope === scope}
+			{#key scope}
+				<ScheduleDashboard
+					meals={dashboardMeals}
+					recipes={view.recipes}
+					weekStartsOn={view.weekStartsOn}
+					householdTimeZone={view.householdTimeZone}
+					currentUserId={view.userId}
+					householdMembers={view.householdMembers}
+					initialUiState={uiState.state}
+					{error}
+					onplanrecipe={planRecipe}
+					onmealchange={changeMeal}
+					onmealsreorder={reorderMealsInOneCommit}
+					onmealdelete={removeMeal}
+					onmealcheckin={checkIn}
+					oncreaterecipe={createRecipeAndMeal}
+					onimporturl={importRecipeAndMeal}
+					onloadedrangechange={updateRenderedMealRange}
+					onuistatechange={saveUiState}
+				/>
+			{/key}
+		{/if}
 	{:else}
 		<div class="grid min-h-svh place-items-center px-6 text-center">
 			<p class="text-sm text-muted-foreground">

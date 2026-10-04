@@ -17,8 +17,23 @@ const capture = async (page: Page, name: string) => {
 	});
 };
 
+/** Plans the seeded recipe into the household pool through the pool's Add meal picker. */
+const addRecipeToPool = async (page: Page) => {
+	const pool = page.locator('[data-meal-drop-kind="pool"]').first();
+	await pool.getByRole('button', { name: 'Add meal' }).click();
+	await page.getByRole('option', { name: /Gingery chicken rice bowls/ }).click();
+	const close = page.getByRole('button', { name: 'Close meal preview' }).first();
+	await expect(close).toBeVisible();
+	await page.keyboard.press('Escape');
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+	await expect(pool).toContainText('Gingery chicken rice bowls');
+};
+
 const planRecipeOn = async (page: Page, date: string) => {
-	const recipe = page.getByRole('button', { name: 'Open Gingery chicken rice bowls' }).first();
+	const recipe = page
+		.locator('[data-meal-drop-kind="pool"]')
+		.first()
+		.getByRole('button', { name: 'Open Gingery chicken rice bowls' });
 	const day = page.locator(`[data-meal-drop-date="${date}"]`).first();
 	const [recipeBox, dayBox] = await Promise.all([recipe.boundingBox(), day.boundingBox()]);
 	if (!recipeBox || !dayBox) throw new Error('The recipe and target day must be visible.');
@@ -44,6 +59,7 @@ for (const viewport of viewports) {
 		await page.clock.setFixedTime(new Date('2026-08-22T12:00:00.000Z'));
 		await page.setViewportSize({ width: viewport.width, height: viewport.height });
 		await seedProduct(page);
+		await addRecipeToPool(page);
 
 		await page.getByRole('button', { name: viewport.scheduleMode, exact: true }).click();
 		if (viewport.scheduleMode === 'Month') {

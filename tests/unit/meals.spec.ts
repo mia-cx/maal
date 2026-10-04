@@ -9,10 +9,13 @@ import {
 	deleteMeal,
 	defaultScheduleUiState,
 	liveMealCalendarRange,
+	liveMealPool,
 	listHouseholdMeals,
 	planRecipeAsMeal,
 	readMealCalendarRange,
+	readMealPool,
 	readScheduleUiState,
+	reorderMeals,
 	saveMealCheckIn,
 	updateMealSchedule,
 	writeScheduleUiState,
@@ -451,6 +454,73 @@ describe('indexed calendar ranges', () => {
 		});
 		expect(result).toEqual({ meals: [], checkIns: [] });
 		expect(checkInWhere).not.toHaveBeenCalled();
+	});
+});
+
+describe('household meal pool', () => {
+	test('lists every member’s undated live meals and reacts when a meal moves to the pool', async () => {
+		const database = await openDatabase();
+		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
+		const plan = (context: MealCommandContext, date: string | null) =>
+			planRecipeAsMeal(database, context, recipe.id, { date });
+		const alicePool = await plan(mealContext(), null);
+		const bobPool = await plan({ ...mealContext(), reporterUserId: 'user_bob' }, null);
+		const scheduled = await plan(mealContext(), '2026-08-23');
+		const deleted = await plan(mealContext(), null);
+		await deleteMeal(database, mealContext(at(22)), deleted.id);
+		await plan({ ...mealContext(), householdId: 'org_other' }, null);
+
+		const emissions: string[][] = [];
+		const subscription = liveMealPool(database, 'org_family').subscribe(({ meals }) =>
+			emissions.push(meals.map(({ id }) => id).toSorted())
+		);
+		await vi.waitFor(() => expect(emissions).toHaveLength(1));
+		expect(emissions[0]).toEqual([alicePool.id, bobPool.id].toSorted());
+
+		await updateMealSchedule(database, mealContext(at(23)), scheduled.id, {
+			date: null,
+			time: null,
+			sortOrder: 1000
+		});
+		await vi.waitFor(() => expect(emissions).toHaveLength(2));
+		expect(emissions[1]).toEqual([alicePool.id, bobPool.id, scheduled.id].toSorted());
+		expect((await readMealPool(database, 'org_family')).meals).toHaveLength(3);
+		subscription.unsubscribe();
+	});
+});
+
+describe('atomic meal reorder', () => {
+	test('commits every move of one gesture together or not at all', async () => {
+		const database = await openDatabase();
+		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
+		const first = await planRecipeAsMeal(database, mealContext(), recipe.id, {
+			date: '2026-08-23',
+			sortOrder: 1
+		});
+		const second = await planRecipeAsMeal(database, mealContext(), recipe.id, {
+			date: '2026-08-23',
+			sortOrder: 2
+		});
+
+		const reordered = await reorderMeals(database, mealContext(at(23)), [
+			{ mealId: first.id, patch: { date: '2026-08-23', time: null, sortOrder: 2 } },
+			{ mealId: second.id, patch: { date: '2026-08-23', time: null, sortOrder: 1 } }
+		]);
+		expect(reordered.map(({ sortOrder }) => sortOrder)).toEqual([2, 1]);
+
+		// The second move names a meal that does not exist: no sort order or outbox row survives.
+		const outboxBefore = await database.outbox.count();
+		await expect(
+			reorderMeals(database, mealContext(at(24)), [
+				{ mealId: first.id, patch: { date: '2026-08-24', time: null, sortOrder: 1 } },
+				{ mealId: uuidv7(), patch: { date: '2026-08-24', time: null, sortOrder: 2 } }
+			])
+		).rejects.toThrow();
+		expect(await database.meals.get(first.id)).toMatchObject({
+			date: '2026-08-23',
+			sortOrder: 2
+		});
+		expect(await database.outbox.count()).toBe(outboxBefore);
 	});
 });
 

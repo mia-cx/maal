@@ -1,7 +1,11 @@
 import { Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
 
-import { executeLocalCommand, type LocalCommand } from '$lib/client/local/commands.js';
+import {
+	executeLocalCommand,
+	executeLocalCommands,
+	type LocalCommand
+} from '$lib/client/local/commands.js';
 import type { MaalDatabase } from '$lib/client/local/database.js';
 import { resolveLocalHouseholdSyncCapability } from '$lib/client/sync/household-capability.js';
 import { LocalDecodeError } from '$lib/domain/contracts/errors.js';
@@ -254,13 +258,11 @@ export const planRecipeAsMeal = async (
 	return decode(MealAggregateSchema, result.aggregates[0], 'decode planned meal');
 };
 
-export const updateMealSchedule = async (
-	database: MaalDatabase,
+const mealScheduleCommand = (
 	context: MealCommandContext,
 	mealId: string,
 	patch: MealSchedulePatch
-): Promise<MealAggregate> => {
-	const occurredAt = commandTime(context);
+): LocalCommand => {
 	const decodedPatch = {
 		date: decode(NullableDateSchema, patch.date, 'decode meal date'),
 		time: decode(NullableTimeSchema, patch.time, 'decode meal time'),
@@ -270,7 +272,7 @@ export const updateMealSchedule = async (
 			: {}),
 		...(patch.plannedYield !== undefined ? { plannedYield: patch.plannedYield } : {})
 	};
-	const result = await executeLocalCommand(database, {
+	return {
 		authSlotId: context.authSlotId,
 		scopeKind: 'household',
 		scopeId: context.householdId,
@@ -279,7 +281,7 @@ export const updateMealSchedule = async (
 		conflictGroup: 'schedule',
 		operation: 'upsert',
 		originDeviceId: context.originDeviceId,
-		occurredAt,
+		occurredAt: commandTime(context),
 		payload: { mealId, conflictGroups: ['schedule'], patch: decodedPatch },
 		payloadSchema: MealMutationPayloadSchema,
 		writes: [
@@ -294,8 +296,36 @@ export const updateMealSchedule = async (
 				})
 			}
 		]
-	});
+	};
+};
+
+export const updateMealSchedule = async (
+	database: MaalDatabase,
+	context: MealCommandContext,
+	mealId: string,
+	patch: MealSchedulePatch
+): Promise<MealAggregate> => {
+	const result = await executeLocalCommand(database, mealScheduleCommand(context, mealId, patch));
 	return decode(MealAggregateSchema, result.aggregates[0], 'decode scheduled meal');
+};
+
+/**
+ * Commits every move of one drag gesture in a single transaction, so a mid-batch failure leaves no
+ * partial order behind. Returns the reordered aggregates in move order.
+ */
+export const reorderMeals = async (
+	database: MaalDatabase,
+	context: MealCommandContext,
+	moves: readonly { mealId: string; patch: MealSchedulePatch }[]
+): Promise<MealAggregate[]> => {
+	const occurredAt = commandTime(context);
+	const results = await executeLocalCommands(
+		database,
+		moves.map(({ mealId, patch }) => mealScheduleCommand({ ...context, occurredAt }, mealId, patch))
+	);
+	return results.map((result) =>
+		decode(MealAggregateSchema, result.aggregates[0], 'decode reordered meal')
+	);
 };
 
 export const setMealStatus = async (
