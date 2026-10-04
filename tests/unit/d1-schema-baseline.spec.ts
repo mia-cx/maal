@@ -15,8 +15,7 @@ import {
 	schemaFingerprint
 } from './d1-test-migrations.js';
 
-const SCHEMA_FINGERPRINT =
-	'a4d0d7317e5bc43979ded7187edea7de2f0316cef637b5656744af2021dd6f96';
+const SCHEMA_FINGERPRINT = 'a4d0d7317e5bc43979ded7187edea7de2f0316cef637b5656744af2021dd6f96';
 
 const instances: Miniflare[] = [];
 
