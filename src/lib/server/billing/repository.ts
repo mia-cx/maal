@@ -552,6 +552,43 @@ export class BillingRepository {
 		return { complete: true, rowsDeleted };
 	}
 
+	/**
+	 * Payer cleanups recorded by a billing-owner transfer whose detach never completed. The
+	 * pending record's safe_details carry the Stripe customer and the original cutoff.
+	 */
+	async pendingPayerCleanups(limit = 10): Promise<
+		readonly {
+			idempotencyKey: string;
+			householdId: string | null;
+			safeDetails: string;
+			occurredAt: string;
+		}[]
+	> {
+		const size = boundedSize(limit);
+		return (
+			await this.database
+				.prepare(
+					`SELECT pending.idempotency_key AS idempotencyKey, pending.household_id AS householdId,
+						pending.safe_details AS safeDetails, pending.occurred_at AS occurredAt
+					 FROM billing_audit_events pending
+					 WHERE pending.event_type = 'billing_payer_cleanup_pending'
+					 AND NOT EXISTS (
+						SELECT 1 FROM billing_audit_events done
+						WHERE done.idempotency_key =
+							'payer-cleanup-completed:' || substr(pending.idempotency_key, 15)
+					 )
+					 ORDER BY pending.occurred_at, pending.idempotency_key LIMIT ?`
+				)
+				.bind(size)
+				.all<{
+					idempotencyKey: string;
+					householdId: string | null;
+					safeDetails: string;
+					occurredAt: string;
+				}>()
+		).results;
+	}
+
 	async audit(input: {
 		idempotencyKey: string;
 		householdId: string | null;

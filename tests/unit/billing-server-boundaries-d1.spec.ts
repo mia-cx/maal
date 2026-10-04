@@ -24,6 +24,7 @@ import {
 	MAAL_PRICE_LOOKUP_KEYS,
 	processStripeWebhook,
 	purgeExpiredHouseholds,
+	reconcilePendingPayerCleanups,
 	startMaalTrial,
 	transferBillingOwnership
 } from '$lib/server/billing/index.js';
@@ -131,12 +132,19 @@ const sub = (id: string, status: Stripe.Subscription.Status): Stripe.Subscriptio
 	}) as unknown as Stripe.Subscription;
 
 /** A Stripe double backed by an in-memory subscription table; records every write. */
-const fakeStripe = (subscriptions = new Map<string, Stripe.Subscription>()) => {
+const fakeStripe = (
+	subscriptions = new Map<string, Stripe.Subscription>(),
+	options: {
+		paymentMethods?: { id: string; created: number }[];
+		failOn?: 'subscriptions.update' | 'customers.update' | 'paymentMethods.detach';
+	} = {}
+) => {
 	const calls: { method: string; args: unknown[] }[] = [];
 	const record =
 		<R>(method: string, result: (...args: never[]) => R) =>
 		async (...args: never[]) => {
 			calls.push({ method, args });
+			if (options.failOn === method) throw new Error(`stripe ${method} failed`);
 			return result(...args);
 		};
 	const stripe = {
@@ -163,7 +171,10 @@ const fakeStripe = (subscriptions = new Map<string, Stripe.Subscription>()) => {
 		customers: {
 			create: record('customers.create', () => ({ id: 'cus_family' })),
 			update: record('customers.update', () => ({ id: 'cus_family' })),
-			listPaymentMethods: async () => ({ data: [{ id: 'pm_alice' }], has_more: false })
+			listPaymentMethods: async () => ({
+				data: options.paymentMethods ?? [{ id: 'pm_alice', created: 1_700_000_000 }],
+				has_more: false
+			})
 		},
 		paymentMethods: { detach: record('paymentMethods.detach', (id: string) => ({ id })) },
 		checkout: {
@@ -460,19 +471,26 @@ describe('household deletion and billing', () => {
 });
 
 describe('billing transfer', () => {
+	const transferInput = (stripe: Stripe) => ({
+		stripe,
+		repository: new BillingRepository(database),
+		householdId,
+		currentUserId: 'user_alice',
+		newUserId: 'user_bob',
+		now: '2026-09-01T00:00:00.000Z'
+	});
+	const auditEvents = () =>
+		database
+			.prepare('SELECT event_type, idempotency_key FROM billing_audit_events ORDER BY rowid')
+			.all<{ event_type: string; idempotency_key: string }>();
+
 	test('moves payment off the previous owner so their card stops renewing', async () => {
 		await insertMembership('membership_bob', 'user_bob');
 		await insertSubscription({ status: 'active', currentPeriodEnd: '2026-10-01T00:00:00.000Z' });
 		const { stripe, subscriptions, calls } = fakeStripe();
 		subscriptions.set('sub_a', sub('sub_a', 'active'));
-		await transferBillingOwnership({
-			stripe,
-			repository: new BillingRepository(database),
-			householdId,
-			currentUserId: 'user_alice',
-			newUserId: 'user_bob',
-			now: '2026-09-01T00:00:00.000Z'
-		});
+		const result = await transferBillingOwnership(transferInput(stripe));
+		expect(result.payerCleanup).toBe('completed');
 		expect(await billingRow()).toMatchObject({ subscriber_user_id: 'user_bob' });
 		const byMethod = (method: string) =>
 			calls.filter((call) => call.method === method).map(({ args }) => args);
@@ -491,6 +509,106 @@ describe('billing transfer', () => {
 		expect(byMethod('subscriptions.update')).toMatchObject([
 			['sub_a', { default_payment_method: '', metadata: { workosUserId: 'user_bob' } }]
 		]);
+	});
+
+	test('transferring to yourself is rejected before any Stripe or D1 write', async () => {
+		await insertSubscription({ status: 'active', currentPeriodEnd: '2026-10-01T00:00:00.000Z' });
+		const { stripe, calls } = fakeStripe();
+		await expect(
+			transferBillingOwnership({ ...transferInput(stripe), newUserId: 'user_alice' })
+		).rejects.toMatchObject({ reason: 'target_must_differ' });
+		expect(calls).toHaveLength(0);
+		expect(await billingRow()).toMatchObject({ subscriber_user_id: 'user_alice' });
+	});
+
+	test('a failed subscription update restores the D1 owner without touching the customer', async () => {
+		await insertMembership('membership_bob', 'user_bob');
+		await insertSubscription({ status: 'active', currentPeriodEnd: '2026-10-01T00:00:00.000Z' });
+		const { stripe, subscriptions, calls } = fakeStripe(
+			new Map(),
+			{ failOn: 'subscriptions.update' }
+		);
+		subscriptions.set('sub_a', sub('sub_a', 'active'));
+		await expect(transferBillingOwnership(transferInput(stripe))).rejects.toThrow(
+			'stripe subscriptions.update failed'
+		);
+		expect(await billingRow()).toMatchObject({ subscriber_user_id: 'user_alice' });
+		expect(calls.some(({ method }) => method === 'customers.update')).toBe(false);
+	});
+
+	test('a failed customer update restores the subscription and the D1 owner', async () => {
+		await insertMembership('membership_bob', 'user_bob');
+		await insertSubscription({ status: 'active', currentPeriodEnd: '2026-10-01T00:00:00.000Z' });
+		const { stripe, subscriptions, calls } = fakeStripe(new Map(), {
+			failOn: 'customers.update'
+		});
+		subscriptions.set('sub_a', {
+			...sub('sub_a', 'active'),
+			default_payment_method: 'pm_alice'
+		} as Stripe.Subscription);
+		await expect(transferBillingOwnership(transferInput(stripe))).rejects.toThrow(
+			'stripe customers.update failed'
+		);
+		expect(await billingRow()).toMatchObject({ subscriber_user_id: 'user_alice' });
+		expect(
+			calls.filter(({ method }) => method === 'subscriptions.update').map(({ args }) => args)
+		).toEqual([
+			[
+				'sub_a',
+				{
+					default_payment_method: '',
+					metadata: { householdId, workosUserId: 'user_bob' }
+				}
+			],
+			[
+				'sub_a',
+				{
+					default_payment_method: 'pm_alice',
+					metadata: { householdId, workosUserId: 'user_alice' }
+				}
+			]
+		]);
+	});
+
+	test('a failed detach leaves ownership transferred and maintenance finishes the cleanup', async () => {
+		await insertMembership('membership_bob', 'user_bob');
+		await insertSubscription({ status: 'active', currentPeriodEnd: '2026-10-01T00:00:00.000Z' });
+		const paymentMethods = [
+			{ id: 'pm_old', created: 1_700_000_000 },
+			{ id: 'pm_new', created: t0 + 100 }
+		];
+		const { stripe, subscriptions } = fakeStripe(new Map(), {
+			paymentMethods,
+			failOn: 'paymentMethods.detach'
+		});
+		subscriptions.set('sub_a', sub('sub_a', 'active'));
+		const result = await transferBillingOwnership({
+			...transferInput(stripe),
+			now: iso(t0)
+		});
+		expect(result.payerCleanup).toBe('pending');
+		expect(await billingRow()).toMatchObject({ subscriber_user_id: 'user_bob' });
+		expect((await auditEvents()).results).toContainEqual({
+			event_type: 'billing_payer_cleanup_pending',
+			idempotency_key: 'payer-cleanup:sub_a:user_bob'
+		});
+
+		// Maintenance re-runs the detach against the recorded cutoff: the PM created after it,
+		// the new owner's card, survives.
+		const retry = fakeStripe(new Map(), { paymentMethods });
+		const cleanup = await reconcilePendingPayerCleanups({
+			repository: new BillingRepository(database),
+			stripe: retry.stripe,
+			now: iso(t0 + 60)
+		});
+		expect(cleanup).toEqual({ completed: 1, pending: 0 });
+		expect(
+			retry.calls.filter(({ method }) => method === 'paymentMethods.detach').map(({ args }) => args)
+		).toEqual([['pm_old']]);
+		expect((await auditEvents()).results).toContainEqual({
+			event_type: 'billing_payer_cleanup_completed',
+			idempotency_key: 'payer-cleanup-completed:sub_a:user_bob'
+		});
 	});
 });
 
