@@ -638,6 +638,13 @@ test.describe('meal sheet', () => {
 		await page.getByRole('option', { name: /°F/ }).first().click();
 		await page.getByRole('button', { name: 'Save overrides' }).click();
 		await expect(temperature).toContainText('°F');
+		await expect
+			.poll(async () =>
+				(await readStore(page, 'householdUnitDisplayPreferences')).some(
+					(row) => row.baseUnitId === 'celsius' && row.preferredUnitId === 'fahrenheit'
+				)
+			)
+			.toBe(true);
 
 		await page.goto('/plan');
 		await mealPool(page).getByRole('button', { name: 'Open Gingery chicken rice bowls' }).click();
