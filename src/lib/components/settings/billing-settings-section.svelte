@@ -221,11 +221,12 @@
 					<Button variant="outline" size="sm" disabled={busy} onclick={() => void portal()}>
 						{busy ? m.billing_opening() : m.billing_manage_subscriptions()}
 					</Button>
-				{:else if canManage && !hasPlan && prices.length === 0}
+				{/if}
+				{#if canManage && !hasPlan && prices.length === 0}
 					<Button variant="outline" size="sm" disabled={busy} onclick={() => void refresh()}>
 						{busy ? m.settings_loading_billing() : m.billing_see_plans()}
 					</Button>
-				{:else}
+				{:else if !ownsBilling}
 					<Button variant="outline" size="sm" disabled={busy} onclick={() => void refresh()}>
 						{busy ? m.settings_loading_billing() : m.settings_refresh()}
 					</Button>

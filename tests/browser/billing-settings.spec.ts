@@ -133,6 +133,35 @@ const cachePrices = (database: MaalDatabase) =>
 		value: { prices: [monthlyPrice], trialAvailable: false, trialUnavailableReason: null }
 	});
 
+test('lets a canceled billing owner load plans without cached pricing', async () => {
+	const capability: BillingCapability = {
+		...paidCapability,
+		state: 'disabled',
+		stripeStatus: 'canceled',
+		subscriberUserId: 'user_bob',
+		validUntil: null
+	};
+	const fetcher = vi.fn<typeof fetch>(async () =>
+		Response.json({
+			schemaVersion: 1,
+			capability,
+			prices: [monthlyPrice],
+			trialAvailable: false,
+			trialUnavailableReason: 'user_already_claimed',
+			refreshedAt: timestamp
+		})
+	);
+	vi.stubGlobal('fetch', fetcher);
+	const screen = await renderForBob(['households:write', 'meals:read'], capability);
+
+	await expect.element(screen.getByText('No active plan')).toBeVisible();
+	await expect.element(screen.getByRole('button', { name: /Manage subscription/ })).toBeVisible();
+	await screen.getByRole('button', { name: 'See plans' }).click();
+
+	await expect.element(screen.getByRole('button', { name: 'Start subscription' })).toBeVisible();
+	expect(fetcher).toHaveBeenCalledOnce();
+});
+
 test('sends a billing owner to the portal when Stripe still holds their subscription', async () => {
 	const fetcher = stubOpenSubscription();
 	const screen = await renderForBob(

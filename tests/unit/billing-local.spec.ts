@@ -271,6 +271,55 @@ describe('local billing projection', () => {
 		});
 	});
 
+	it.each(['disabled', 'failed', 'enabled', 'portal', 'never-enabled'] as const)(
+		'handles a stale paid Checkout return after a %s status read',
+		async (initial) => {
+			database = await openMaalDatabase(`billing-stale-checkout-${crypto.randomUUID()}`);
+			const profileId = await seedSignedInAlice(database, ['org_kitchen']);
+			await database.uiState.bulkPut([
+				{ key: 'activeProfileId', value: profileId },
+				{ key: `activeHouseholdId:${profileId}`, value: 'org_kitchen' }
+			]);
+			const disabled = {
+				...projection().capability,
+				state: 'disabled' as const,
+				stripeStatus: 'canceled' as const,
+				validUntil: null
+			};
+			await database.billingCapabilities.put({ ...disabled, stale: true });
+			const fetcher = vi.fn<typeof fetch>(async (): Promise<Response> => {
+				if (initial === 'failed' && fetcher.mock.calls.length === 1) {
+					return new Response(null, { status: 503 });
+				}
+				return Response.json(
+					initial === 'never-enabled' || (initial !== 'enabled' && fetcher.mock.calls.length === 1)
+						? { ...projection(), capability: disabled }
+						: projection()
+				);
+			});
+			const wait = vi.fn(async () => {});
+
+			await refreshBillingOnLoad(
+				database,
+				new URL(
+					`https://maal.test/household?billing=${initial === 'portal' ? 'returned' : 'checkout-success'}`
+				),
+				fetcher,
+				wait
+			);
+
+			const retries =
+				initial === 'never-enabled' ? 5 : initial === 'enabled' || initial === 'portal' ? 0 : 1;
+			expect(fetcher).toHaveBeenCalledTimes(1 + retries);
+			expect(wait.mock.calls).toEqual(
+				[1_000, 2_000, 4_000, 8_000, 16_000].slice(0, retries).map((pause) => [pause])
+			);
+			await expect(database.billingCapabilities.get('org_kitchen')).resolves.toMatchObject({
+				state: initial === 'portal' || initial === 'never-enabled' ? 'disabled' : 'enabled'
+			});
+		}
+	);
+
 	it('stores the plan of a household joined by invite, so its sync starts', async () => {
 		database = await openMaalDatabase(`billing-join-${crypto.randomUUID()}`);
 		const profileId = await seedSignedInAlice(database, []);
