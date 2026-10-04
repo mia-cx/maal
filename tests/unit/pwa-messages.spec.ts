@@ -28,5 +28,17 @@ describe('PWA coordination message contracts', () => {
 			isUpdateChannelMessage({ type: 'UPDATE_READY', tabId: '', requestId: 'request-a' })
 		).toBe(false);
 		expect(isServiceWorkerEvent({ type: 'UPDATE_WAITING', version: 'build-2' })).toBe(false);
+		expect(
+			isUpdateChannelMessage({
+				type: 'SUPERSEDE_UPDATE',
+				tabId: 'tab-a',
+				requestId: 'request-a',
+				version: 'build-3',
+				critical: false
+			})
+		).toBe(true);
+		expect(
+			isUpdateChannelMessage({ type: 'SUPERSEDE_UPDATE', tabId: 'tab-a', requestId: 'request-a' })
+		).toBe(false);
 	});
 });

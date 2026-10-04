@@ -51,6 +51,13 @@ export const UpdateChannelMessageSchema = Schema.Union(
 		requestId: NonEmptyString
 	}),
 	Schema.Struct({
+		type: Schema.Literal('SUPERSEDE_UPDATE'),
+		tabId: NonEmptyString,
+		requestId: NonEmptyString,
+		version: NonEmptyString,
+		critical: Schema.Boolean
+	}),
+	Schema.Struct({
 		type: Schema.Literal('RELOAD'),
 		tabId: NonEmptyString,
 		version: NonEmptyString

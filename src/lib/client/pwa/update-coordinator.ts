@@ -53,9 +53,15 @@ interface UpdateRegistration {
 interface UpdateServiceWorkerContainer {
 	readonly ready: Promise<UpdateRegistration>;
 	readonly controller: unknown;
-	addEventListener(type: 'message', listener: (event: { data: unknown }) => void): void;
+	addEventListener(
+		type: 'message',
+		listener: (event: { data: unknown; source: UpdateWorker | null }) => void
+	): void;
 	addEventListener(type: 'controllerchange', listener: () => void): void;
-	removeEventListener(type: 'message', listener: (event: { data: unknown }) => void): void;
+	removeEventListener(
+		type: 'message',
+		listener: (event: { data: unknown; source: UpdateWorker | null }) => void
+	): void;
 	removeEventListener(type: 'controllerchange', listener: () => void): void;
 }
 
@@ -114,6 +120,7 @@ export class PwaUpdateCoordinator {
 	#runtime: PwaUpdateRuntime;
 	#channel: UpdateChannel | null = null;
 	#registration: UpdateRegistration | null = null;
+	#workerVersions = new WeakMap<UpdateWorker, string>();
 	#listeners = new Set<Listener>();
 	#peers = new Map<string, number>();
 	#readyTabs = new Set<string>();
@@ -154,9 +161,19 @@ export class PwaUpdateCoordinator {
 		try {
 			this.#channel = this.#runtime.createChannel(CHANNEL_NAME);
 			this.#channel.addEventListener('message', (event) => this.#receiveChannel(event.data));
-			const receiveServiceWorkerMessage = (event: { data: unknown }) => {
+			const receiveServiceWorkerMessage = (event: {
+				data: unknown;
+				source: UpdateWorker | null;
+			}) => {
 				if (!this.#started || !isServiceWorkerEvent(event.data)) return;
-				if (event.data.type !== 'UPDATE_WAITING') return;
+				if (event.data.type !== 'UPDATE_WAITING' || !event.source) return;
+				if (
+					this.#registration &&
+					event.source !== this.#registration.waiting &&
+					event.source !== this.#registration.installing
+				)
+					return;
+				this.#workerVersions.set(event.source, event.data.version);
 				this.#announceUpdate(event.data.version, event.data.critical);
 			};
 			const handleControllerChange = () => {
@@ -279,10 +296,16 @@ export class PwaUpdateCoordinator {
 
 	#announceUpdate(version: string, critical: boolean): void {
 		if (this.#updating()) {
-			if (version === this.#state.version || this.#state.status === 'activating') return;
-			// A newer worker superseded the in-flight request: drop it locally before switching.
-			const inFlight = this.#request;
-			if (inFlight) this.#abandonUpdate(inFlight.requestId);
+			if (this.#state.status === 'activating') return;
+			if (version === this.#state.version) {
+				this.#tryActivation();
+				return;
+			}
+			// Supersession retires even critical requests; user cancellation still cannot.
+			for (const requestId of this.#preparedRequests) {
+				this.#post({ type: 'SUPERSEDE_UPDATE', tabId: this.tabId, requestId, version, critical });
+				this.#abandonUpdate(requestId);
+			}
 		}
 		this.#setState({ status: 'available', version, critical, message: null });
 		this.#post({ type: 'UPDATE_AVAILABLE', tabId: this.tabId, version, critical });
@@ -322,6 +345,20 @@ export class PwaUpdateCoordinator {
 			case 'CANCEL_UPDATE':
 				if (!this.#preparedCritical.get(value.requestId)) this.#abandonUpdate(value.requestId);
 				break;
+			case 'SUPERSEDE_UPDATE': {
+				if (this.#state.status === 'activating') break;
+				const prepared = this.#preparedRequests.has(value.requestId);
+				this.#abandonUpdate(value.requestId);
+				if (prepared && this.#preparedRequests.size === 0) {
+					this.#setState({
+						status: 'available',
+						version: value.version,
+						critical: value.critical,
+						message: null
+					});
+				}
+				break;
+			}
 			case 'RELOAD':
 				this.#runtime.reload();
 				break;
@@ -370,6 +407,11 @@ export class PwaUpdateCoordinator {
 		const waiting = this.#registration?.waiting ?? null;
 		if (!waiting) {
 			this.#watchInstallingForActivation();
+			return;
+		}
+		// A registration can replace its waiting worker before that worker announces its version.
+		if (this.#workerVersions.get(waiting) !== this.#request.version) {
+			waiting.postMessage({ type: 'GET_VERSION' });
 			return;
 		}
 		const now = this.#runtime.now();

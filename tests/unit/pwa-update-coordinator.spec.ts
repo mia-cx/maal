@@ -79,17 +79,26 @@ class FakeWorker {
 
 class FakeServiceWorkers {
 	readonly controller = {};
-	listeners = new Map<string, Set<(event: { data: unknown }) => void>>();
+	listeners = new Map<string, Set<(event: { data: unknown; source: FakeWorker | null }) => void>>();
+	#registration: FakeRegistration | null = null;
 
-	constructor(readonly ready: Promise<FakeRegistration>) {}
+	constructor(readonly ready: Promise<FakeRegistration>) {
+		void ready.then((registration) => (this.#registration = registration));
+	}
 
-	addEventListener(type: string, listener: (event: { data: unknown }) => void): void {
+	addEventListener(
+		type: string,
+		listener: (event: { data: unknown; source: FakeWorker | null }) => void
+	): void {
 		const listeners = this.listeners.get(type) ?? new Set();
 		listeners.add(listener);
 		this.listeners.set(type, listeners);
 	}
 
-	removeEventListener(type: string, listener: (event: { data: unknown }) => void): void {
+	removeEventListener(
+		type: string,
+		listener: (event: { data: unknown; source: FakeWorker | null }) => void
+	): void {
 		this.listeners.get(type)?.delete(listener);
 	}
 
@@ -97,12 +106,17 @@ class FakeServiceWorkers {
 		return this.listeners.get(type)?.size ?? 0;
 	}
 
-	emitMessage(data: unknown): void {
-		for (const listener of this.listeners.get('message') ?? []) listener({ data });
+	emitMessage(
+		data: unknown,
+		source = this.#registration?.waiting ?? this.#registration?.installing ?? null
+	): void {
+		for (const listener of this.listeners.get('message') ?? []) listener({ data, source });
 	}
 
 	emitControllerChange(): void {
-		for (const listener of this.listeners.get('controllerchange') ?? []) listener({ data: null });
+		for (const listener of this.listeners.get('controllerchange') ?? []) {
+			listener({ data: null, source: null });
+		}
 	}
 }
 
@@ -528,35 +542,103 @@ describe('PWA update coordination', () => {
 		}
 	});
 
-	test('replaces an in-flight update when a newer worker installs', async () => {
+	test.each([
+		{ announcer: 'initiator', critical: false },
+		{ announcer: 'follower', critical: false },
+		{ announcer: 'initiator', critical: true },
+		{ announcer: 'follower', critical: true }
+	])(
+		'retires superseded preparation in every tab ($announcer, critical: $critical)',
+		async ({ announcer, critical }) => {
+			vi.useFakeTimers();
+			try {
+				const hub = new FakeChannelHub(true);
+				const tabs = new UpdateTabs(hub);
+				const peerDrain = deferred();
+				const peer = tabs.open(() => peerDrain.promise);
+				const first = tabs.open();
+				await Promise.all([first.coordinator.start(), peer.coordinator.start()]);
+				hub.flush();
+				first.serviceWorkers.emitMessage({
+					type: 'UPDATE_WAITING',
+					version: 'build-2',
+					critical
+				});
+				if (!critical) await first.coordinator.activate();
+				hub.flush();
+				await vi.advanceTimersByTimeAsync(1_000);
+				expect(first.status()).toBe('waiting-for-tabs');
+
+				// Queue a rebroadcast of the old preparation before the replacement is announced.
+				const late = hub.create();
+				late.postMessage({ type: 'HEARTBEAT', tabId: 'late-tab', sentAt: Date.now() });
+				hub.flush();
+				tabs.registration.waiting = new FakeWorker();
+				(announcer === 'initiator' ? first : peer).serviceWorkers.emitMessage({
+					type: 'UPDATE_WAITING',
+					version: 'build-3',
+					critical: false
+				});
+				hub.flush();
+				hub.flush();
+				peerDrain.resolve();
+				await vi.advanceTimersByTimeAsync(1_000);
+				hub.flush();
+
+				expect(first.status()).toBe('available');
+				expect(peer.status()).toBe('available');
+				expect(first.resumed).toEqual(first.paused);
+				expect(peer.resumed).toEqual(peer.paused);
+				expect(tabs.waiting.messages).not.toContainEqual({
+					type: 'SKIP_WAITING',
+					version: 'build-2'
+				});
+				first.coordinator.dispose();
+				peer.coordinator.dispose();
+				late.close();
+			} finally {
+				vi.useRealTimers();
+			}
+		}
+	);
+
+	test('verifies a replacement worker before activating and recovers from its delayed announcement', async () => {
 		vi.useFakeTimers();
 		try {
 			const tabs = new UpdateTabs();
-			const peer = tabs.open(() => new Promise(() => undefined));
 			const first = tabs.open();
-			await Promise.all([first.coordinator.start(), peer.coordinator.start()]);
+			await first.coordinator.start();
 			first.serviceWorkers.emitMessage({
 				type: 'UPDATE_WAITING',
 				version: 'build-2',
 				critical: false
 			});
 			await first.coordinator.activate();
+
+			const replacement = new FakeWorker('installing');
+			tabs.registration.installing = replacement;
+			tabs.registration.emitUpdateFound();
+			replacement.state = 'installed';
+			tabs.registration.installing = null;
+			tabs.registration.waiting = replacement;
+			replacement.emitStateChange();
 			await vi.advanceTimersByTimeAsync(1_000);
-			expect(first.status()).toBe('waiting-for-tabs');
+			expect(replacement.messages).toContainEqual({ type: 'GET_VERSION' });
+			expect(replacement.messages).not.toContainEqual({ type: 'SKIP_WAITING', version: 'build-2' });
+			expect(first.status()).not.toBe('activating');
 
 			first.serviceWorkers.emitMessage({
 				type: 'UPDATE_WAITING',
 				version: 'build-3',
 				critical: false
 			});
-			await vi.advanceTimersByTimeAsync(1_000);
-
 			expect(first.status()).toBe('available');
 			expect(first.resumed).toEqual(first.paused);
-			expect(tabs.waiting.messages).not.toContainEqual({
-				type: 'SKIP_WAITING',
-				version: 'build-2'
-			});
+			await first.coordinator.activate();
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect(replacement.messages).toContainEqual({ type: 'SKIP_WAITING', version: 'build-3' });
+			expect(first.status()).toBe('activating');
+			first.coordinator.dispose();
 		} finally {
 			vi.useRealTimers();
 		}
