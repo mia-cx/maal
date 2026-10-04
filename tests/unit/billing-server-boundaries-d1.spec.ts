@@ -136,7 +136,11 @@ const fakeStripe = (
 	subscriptions = new Map<string, Stripe.Subscription>(),
 	options: {
 		paymentMethods?: { id: string; created: number }[];
-		failOn?: 'subscriptions.update' | 'customers.update' | 'paymentMethods.detach';
+		failOn?:
+			| 'subscriptions.update'
+			| 'customers.update'
+			| 'customers.listPaymentMethods'
+			| 'paymentMethods.detach';
 	} = {}
 ) => {
 	const paymentMethods = new Map(
@@ -177,10 +181,10 @@ const fakeStripe = (
 		customers: {
 			create: record('customers.create', () => ({ id: 'cus_family' })),
 			update: record('customers.update', () => ({ id: 'cus_family' })),
-			listPaymentMethods: async () => ({
+			listPaymentMethods: record('customers.listPaymentMethods', () => ({
 				data: [...paymentMethods.values()],
 				has_more: false
-			})
+			}))
 		},
 		paymentMethods: {
 			retrieve: async (id: string) =>
@@ -618,6 +622,22 @@ describe('billing transfer', () => {
 		).rejects.toMatchObject({ reason: 'target_must_differ' });
 		expect(calls).toHaveLength(0);
 		expect(await billingRow()).toMatchObject({ subscriber_user_id: 'user_alice' });
+	});
+
+	test('a failed payment method listing leaves D1 and Stripe untouched', async () => {
+		await insertMembership('membership_bob', 'user_bob');
+		await insertSubscription({ status: 'active', currentPeriodEnd: '2026-10-01T00:00:00.000Z' });
+		const { stripe, subscriptions, calls } = fakeStripe(new Map(), {
+			failOn: 'customers.listPaymentMethods'
+		});
+		subscriptions.set('sub_a', sub('sub_a', 'active'));
+		await expect(transferBillingOwnership(transferInput(stripe))).rejects.toThrow(
+			'stripe customers.listPaymentMethods failed'
+		);
+		expect(await billingRow()).toMatchObject({ subscriber_user_id: 'user_alice' });
+		expect(
+			calls.some(({ method }) => method === 'subscriptions.update' || method === 'customers.update')
+		).toBe(false);
 	});
 
 	test('a failed subscription update restores the D1 owner without touching the customer', async () => {

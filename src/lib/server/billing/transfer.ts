@@ -58,6 +58,14 @@ export const transferBillingOwnership = async (input: {
 	const stripeSubscription = await input.stripe.subscriptions.retrieve(
 		subscription.stripeSubscriptionId
 	);
+	// The previous payer's methods are enumerated before anything changes, while they are
+	// unambiguous, and recorded so both this request and any maintenance retry detach exactly
+	// this set. A failure here leaves D1 and Stripe untouched.
+	const payerPaymentMethods = await input.stripe.customers.listPaymentMethods(
+		subscription.stripeCustomerId,
+		{ limit: 100 }
+	);
+	const payerPaymentMethodIds = payerPaymentMethods.data.map((method) => method.id);
 	const rollbackOwner = () =>
 		input.repository.transferBillingOwner({
 			householdId: input.householdId,
@@ -96,13 +104,6 @@ export const transferBillingOwnership = async (input: {
 		await rollbackOwner();
 		throw cause;
 	}
-	// The previous payer's methods are enumerated now, while they are unambiguous, and recorded
-	// so both this request and any maintenance retry detach exactly this set.
-	const payerPaymentMethods = await input.stripe.customers.listPaymentMethods(
-		subscription.stripeCustomerId,
-		{ limit: 100 }
-	);
-	const payerPaymentMethodIds = payerPaymentMethods.data.map((method) => method.id);
 	await input.repository.audit({
 		idempotencyKey: `transfer:${subscription.stripeSubscriptionId}:${input.newUserId}`,
 		householdId: input.householdId,
@@ -176,11 +177,7 @@ export const reconcilePendingPayerCleanups = async (input: {
 			continue;
 		}
 		try {
-			await detachPayerPaymentMethods(
-				input.stripe,
-				details.stripeCustomerId,
-				paymentMethodIds
-			);
+			await detachPayerPaymentMethods(input.stripe, details.stripeCustomerId, paymentMethodIds);
 			await input.repository.audit({
 				idempotencyKey: payerCleanupCompletedKey(cleanup.idempotencyKey),
 				householdId: cleanup.householdId,
