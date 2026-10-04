@@ -160,7 +160,8 @@ export const processStripeWebhook = async (input: {
 				eventId: input.event.id,
 				eventCreatedAt,
 				existing,
-				paidPeriodSucceeded
+				paidPeriodSucceeded,
+				reportsStatus: statusReportedByEvent(input.event) !== null
 			}),
 			input.receivedAt,
 			paidPeriodSucceeded ? eventCreatedAt : null,

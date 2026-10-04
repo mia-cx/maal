@@ -179,7 +179,8 @@ describe('Stripe subscription projection', () => {
 			eventId: 'evt_pause',
 			eventCreatedAt: '2026-08-21T12:00:00.000Z',
 			existing: null,
-			paidPeriodSucceeded: false
+			paidPeriodSucceeded: false,
+			reportsStatus: true
 		});
 		expect(projected).toMatchObject({
 			status: 'paused',
@@ -214,7 +215,8 @@ describe('Stripe subscription projection', () => {
 				eventId: 'evt_active',
 				eventCreatedAt: '2026-08-10T12:00:00.000Z',
 				existing,
-				paidPeriodSucceeded: false
+				paidPeriodSucceeded: false,
+				reportsStatus: true
 			}).interruptionStartedAt
 		).toBe('2026-08-01T12:00:00.000Z');
 		expect(
@@ -225,7 +227,8 @@ describe('Stripe subscription projection', () => {
 				eventId: 'evt_paid',
 				eventCreatedAt: '2026-08-10T12:00:02.000Z',
 				existing,
-				paidPeriodSucceeded: true
+				paidPeriodSucceeded: true,
+				reportsStatus: false
 			}).interruptionStartedAt
 		).toBeNull();
 	});

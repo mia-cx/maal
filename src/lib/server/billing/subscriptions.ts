@@ -48,6 +48,8 @@ export const projectionFromStripeSubscription = (input: {
 	eventCreatedAt: string;
 	existing: BillingSubscriptionRow | null;
 	paidPeriodSucceeded: boolean;
+	/** Subscription events report the status at event time; invoice events do not. */
+	reportsStatus: boolean;
 }): SubscriptionProjectionWrite => {
 	const customerId = stringId(input.subscription.customer);
 	const priceId = subscriptionPriceId(input.subscription);
@@ -61,6 +63,9 @@ export const projectionFromStripeSubscription = (input: {
 		? (input.existing?.interruptionStartedAt ?? null)
 		: null;
 	const interruptionIsOver =
+		// An event that reports no subscription status (an invoice) cannot restart the window;
+		// it keeps the current — possibly provisional payment-time — start until a snapshot lands.
+		input.reportsStatus &&
 		priorInterruption !== null &&
 		input.existing?.lastSuccessfulPaymentAt != null &&
 		priorInterruption <= input.existing.lastSuccessfulPaymentAt;

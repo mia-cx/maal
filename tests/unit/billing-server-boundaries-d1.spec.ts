@@ -681,6 +681,51 @@ describe('Stripe grace projection', () => {
 		});
 	});
 
+	test('a recovery payment opens a provisional window until the next failure lands', async () => {
+		const repository = new BillingRepository(database);
+		const { stripe, subscriptions } = fakeStripe();
+		subscriptions.set('sub_a', sub('sub_a', 'past_due'));
+		const deliver = (event: Stripe.Event) =>
+			processStripeWebhook({ stripe, repository, event, receivedAt: iso(event.created) });
+		// F0's interruption at t0 expired long before the recovery payment P at t0+40d.
+		await deliver(
+			subscriptionEvent('evt_failed_0', t0, 'sub_a', 'customer.subscription.updated', 'past_due')
+		);
+		await deliver(invoicePaidEvent('evt_paid', t0 + 40 * 86_400, 'sub_a'));
+		// No interrupted event newer than P is recorded yet, so the window is provisional at P
+		// and the household keeps access while the account catches up.
+		expect(await billingRow()).toMatchObject({
+			status: 'past_due',
+			interruption_started_at: iso(t0 + 40 * 86_400),
+			grace_until: iso(t0 + 70 * 86_400),
+			last_successful_payment_at: iso(t0 + 40 * 86_400)
+		});
+		await expect(authorizeHousehold(iso(t0 + 40 * 86_400 + 3_600))).resolves.toBeTruthy();
+		// F1's failure invoice arrives before its subscription snapshot: invoice rows carry no
+		// event_status, so the window stays provisional until the snapshot lands.
+		await deliver({
+			...invoicePaidEvent('evt_failed_1_invoice', t0 + 41 * 86_400, 'sub_a'),
+			type: 'invoice.payment_failed'
+		} as Stripe.Event);
+		expect(await billingRow()).toMatchObject({
+			interruption_started_at: iso(t0 + 40 * 86_400),
+			grace_until: iso(t0 + 70 * 86_400)
+		});
+		await deliver(
+			subscriptionEvent(
+				'evt_failed_1',
+				t0 + 41 * 86_400,
+				'sub_a',
+				'customer.subscription.updated',
+				'past_due'
+			)
+		);
+		expect(await billingRow()).toMatchObject({
+			interruption_started_at: iso(t0 + 41 * 86_400),
+			grace_until: iso(t0 + 71 * 86_400)
+		});
+	});
+
 	test('every delivery order of the same events lands the same interruption window', async () => {
 		const permutations = <T>(items: T[]): T[][] =>
 			items.length < 2

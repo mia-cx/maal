@@ -685,31 +685,35 @@ export class BillingRepository {
 	 * the last successful payment that reported the subscription interrupted. Runs last in every
 	 * batch that writes an event row, so ordering cannot matter — a stale snapshot landing after
 	 * the payment it precedes still back-dates the window to the first failure. When no
-	 * interrupted event is recorded yet, the current (possibly provisional payment-time) start
-	 * and grace are kept. Open rows are left alone; a payment clears their stale interruption.
+	 * interrupted event is recorded yet, an interruption at or before the last payment is over:
+	 * the window opens provisionally at that payment until the next failure lands. Open rows are
+	 * left alone; a payment clears their stale interruption.
 	 */
 	private interruptionRecomputeStatement(
 		householdId: string,
 		stripeSubscriptionId: string
 	): D1PreparedStatement {
+		const firstFailureAfterPayment = `(SELECT MIN(stripe_created_at) FROM stripe_events
+							WHERE stripe_subscription_id = ?2 AND state = 'processed'
+								AND event_status IN ('past_due', 'paused')
+								AND stripe_created_at > COALESCE(
+									billing_subscriptions.last_successful_payment_at, ''))`;
+		const fallbackStart = `CASE
+							WHEN interruption_started_at IS NULL
+								OR interruption_started_at <= COALESCE(
+									billing_subscriptions.last_successful_payment_at, '')
+								THEN billing_subscriptions.last_successful_payment_at
+							ELSE interruption_started_at END`;
 		return this.database
 			.prepare(
 				`UPDATE billing_subscriptions SET
 					interruption_started_at = COALESCE(
-						(SELECT MIN(stripe_created_at) FROM stripe_events
-							WHERE stripe_subscription_id = ?2 AND state = 'processed'
-								AND event_status IN ('past_due', 'paused')
-								AND stripe_created_at > COALESCE(
-									billing_subscriptions.last_successful_payment_at, '')),
-						interruption_started_at),
+						${firstFailureAfterPayment},
+						${fallbackStart}),
 					grace_until = strftime('%Y-%m-%dT%H:%M:%fZ',
 						COALESCE(
-							(SELECT MIN(stripe_created_at) FROM stripe_events
-								WHERE stripe_subscription_id = ?2 AND state = 'processed'
-									AND event_status IN ('past_due', 'paused')
-									AND stripe_created_at > COALESCE(
-										billing_subscriptions.last_successful_payment_at, '')),
-							interruption_started_at),
+							${firstFailureAfterPayment},
+							${fallbackStart}),
 						'+${BILLING_GRACE_DAYS} days')
 				 WHERE household_id = ?1 AND stripe_subscription_id = ?2
 					AND status IN ('past_due', 'paused')`

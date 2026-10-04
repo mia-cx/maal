@@ -80,7 +80,8 @@ export const startMaalTrial = async (input: {
 				eventId: `trial:${claimId}`,
 				eventCreatedAt: input.now,
 				existing: null,
-				paidPeriodSucceeded: false
+				paidPeriodSucceeded: false,
+				reportsStatus: true
 			})
 		});
 	} catch (cause) {

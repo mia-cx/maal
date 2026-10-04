@@ -86,7 +86,8 @@ export const reconcileStaleTrialClaims = async (input: {
 						eventId: `trial-recovery:${claim.id}`,
 						eventCreatedAt: input.now,
 						existing: await input.repository.subscription(claim.householdId),
-						paidPeriodSucceeded: false
+						paidPeriodSucceeded: false,
+						reportsStatus: true
 					})
 				});
 				rollbacksCompleted += 1;
