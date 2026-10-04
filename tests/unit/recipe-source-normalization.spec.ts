@@ -133,41 +133,42 @@ describe('URL import', () => {
 		expect(candidate.instructionEvents[0]?.baseValue).toBeCloseTo(176.67, 2);
 	});
 
-	test('stores a null quantity for non-finite amounts without rejecting the candidate', async () => {
-		const candidate = await importRecipe(['½–1 tsp salt', '1/0 cup flour'], ['Mix.']);
-		expect(candidate.ingredients).toEqual([
-			expect.objectContaining({
-				sourceAmountText: '½–1',
+	test.each(['½-1', '¼-1', '½–1', '½—1', '½ to 1', '1/0'])(
+		'imports the unsupported amount %s with null quantities',
+		async (amount) => {
+			const candidate = await importRecipe([`${amount} tsp salt`], ['Mix.']);
+			expect(candidate.ingredients[0]).toMatchObject({
+				originalText: `${amount} tsp salt`,
+				sourceAmountText: amount,
 				sourceQuantity: null,
+				baseQuantity: null,
 				sourceUnitLabel: 'tsp',
 				sourceFoodLabel: 'salt'
-			}),
-			expect.objectContaining({
-				sourceAmountText: '1/0',
-				sourceQuantity: null,
-				sourceUnitLabel: 'cup',
-				sourceFoodLabel: 'flour'
-			})
-		]);
-	});
+			});
+		}
+	);
 
-	test('an editor save accepts a non-finite amount as a null quantity', async () => {
-		const database = await openMaalDatabase(`recipe-normalization-${crypto.randomUUID()}`);
-		databases.push(database);
-		const created = await createRecipeFromEditor(
-			database,
-			context,
-			editorPatch(
-				[{ id: null, amount: '½–1', unit: 'tsp', item: 'salt' }],
-				[{ id: null, position: 1, text: 'Mix.' }]
-			)
-		);
-		expect(created.ingredients[0]).toMatchObject({
-			sourceAmountText: '½–1',
-			sourceQuantity: null,
-			sourceFoodLabel: 'salt'
-		});
-	});
+	test.each(['½-1', '¼-1', '½–1', '½—1', '½ to 1', '1/0'])(
+		'an editor save preserves the unsupported amount %s with null quantities',
+		async (amount) => {
+			const database = await openMaalDatabase(`recipe-normalization-${crypto.randomUUID()}`);
+			databases.push(database);
+			const created = await createRecipeFromEditor(
+				database,
+				context,
+				editorPatch(
+					[{ id: null, amount, unit: 'tsp', item: 'salt' }],
+					[{ id: null, position: 1, text: 'Mix.' }]
+				)
+			);
+			expect(created.ingredients[0]).toMatchObject({
+				sourceAmountText: amount,
+				sourceQuantity: null,
+				baseQuantity: null,
+				sourceFoodLabel: 'salt'
+			});
+		}
+	);
 
 	test('decodes degree entities in imported instruction text', async () => {
 		const candidate = await importRecipe(
@@ -181,11 +182,11 @@ describe('URL import', () => {
 		]);
 	});
 
-	test('parses a spaced Unicode mixed fraction', async () => {
-		const candidate = await importRecipe(['1 ½ cups flour', '2 ¾  teaspoons salt'], ['Mix.']);
+	test.each(['1½', '1 ½'])('parses the Unicode mixed fraction %s', async (amount) => {
+		const candidate = await importRecipe([`${amount} cups flour`, '2 ¾  teaspoons salt'], ['Mix.']);
 		expect(candidate.ingredients).toEqual([
 			expect.objectContaining({
-				sourceAmountText: '1 ½',
+				sourceAmountText: amount,
 				sourceQuantity: 1.5,
 				sourceUnitLabel: 'cup',
 				sourceFoodLabel: 'flour',

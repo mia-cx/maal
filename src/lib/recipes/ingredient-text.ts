@@ -363,13 +363,13 @@ export const parseQuantity = (value: string): number | null => {
 	let parsed: number;
 	const mixedFraction = /^(\d+)\s+(\d+)\/(\d+)$/.exec(trimmed);
 	const fraction = /^(\d+)\/(\d+)$/.exec(trimmed);
-	const vulgar = trimmed.match(/[¼½¾⅓⅔⅛⅜⅝⅞]/u)?.[0];
+	const vulgar = /^(?:(\d+(?:\.\d+)?)\s*)?([¼½¾⅓⅔⅛⅜⅝⅞])$/u.exec(trimmed);
 	if (mixedFraction) {
 		parsed = Number(mixedFraction[1]) + Number(mixedFraction[2]) / Number(mixedFraction[3]);
 	} else if (fraction) {
 		parsed = Number(fraction[1]) / Number(fraction[2]);
 	} else if (vulgar) {
-		parsed = Number(trimmed.replace(vulgar, '').trim() || 0) + vulgarFractions[vulgar];
+		parsed = Number(vulgar[1] ?? 0) + vulgarFractions[vulgar[2]];
 	} else {
 		parsed = Number(trimmed);
 	}
