@@ -258,11 +258,12 @@ export const planRecipeAsMeal = async (
 	return decode(MealAggregateSchema, result.aggregates[0], 'decode planned meal');
 };
 
-const mealScheduleCommand = (
+export const mealScheduleCommand = (
 	context: MealCommandContext,
 	mealId: string,
 	patch: MealSchedulePatch
 ): LocalCommand => {
+	const occurredAt = commandTime(context);
 	const decodedPatch = {
 		date: decode(NullableDateSchema, patch.date, 'decode meal date'),
 		time: decode(NullableTimeSchema, patch.time, 'decode meal time'),
@@ -281,7 +282,7 @@ const mealScheduleCommand = (
 		conflictGroup: 'schedule',
 		operation: 'upsert',
 		originDeviceId: context.originDeviceId,
-		occurredAt: commandTime(context),
+		occurredAt,
 		payload: { mealId, conflictGroups: ['schedule'], patch: decodedPatch },
 		payloadSchema: MealMutationPayloadSchema,
 		writes: [
@@ -326,6 +327,74 @@ export const reorderMeals = async (
 	return results.map((result) =>
 		decode(MealAggregateSchema, result.aggregates[0], 'decode reordered meal')
 	);
+};
+
+export interface MealHeaderPatch {
+	title: string;
+	description: string | null;
+	cookTimeMinutes: number | null;
+}
+
+const MealHeaderPatchSchema = Schema.Struct({
+	title: Schema.String.pipe(Schema.minLength(1)),
+	description: NullableStringSchema,
+	cookTimeMinutes: Schema.NullOr(Schema.NonNegativeInt)
+});
+
+/**
+ * Builds the command for the meal sheet's own fields (title, description, cook minutes) under the `header`
+ * conflict group. The sheet only offers them for custom meals with no source recipe.
+ */
+export const mealHeaderCommand = (
+	context: MealCommandContext,
+	mealId: string,
+	patch: MealHeaderPatch
+): LocalCommand => {
+	const occurredAt = commandTime(context);
+	const decodedPatch = decode(
+		MealHeaderPatchSchema,
+		{
+			title: patch.title.trim(),
+			description: patch.description?.trim() || null,
+			cookTimeMinutes: patch.cookTimeMinutes
+		},
+		'decode meal header'
+	);
+	return {
+		authSlotId: context.authSlotId,
+		scopeKind: 'household',
+		scopeId: context.householdId,
+		entityKind: 'meal',
+		aggregateId: mealId,
+		conflictGroup: 'header',
+		operation: 'upsert',
+		originDeviceId: context.originDeviceId,
+		occurredAt,
+		payload: { mealId, conflictGroups: ['header'], patch: decodedPatch },
+		payloadSchema: MealMutationPayloadSchema,
+		writes: [
+			{
+				store: 'meals',
+				aggregateId: mealId,
+				conflictGroups: ['header'],
+				schema: StoredMealSchema,
+				update: (current) => ({
+					...requireMeal(current, context.householdId, 'update meal header'),
+					...decodedPatch
+				})
+			}
+		]
+	};
+};
+
+export const updateMealHeader = async (
+	database: MaalDatabase,
+	context: MealCommandContext,
+	mealId: string,
+	patch: MealHeaderPatch
+): Promise<MealAggregate> => {
+	const result = await executeLocalCommand(database, mealHeaderCommand(context, mealId, patch));
+	return decode(MealAggregateSchema, result.aggregates[0], 'decode meal header update');
 };
 
 export const setMealStatus = async (

@@ -11,23 +11,30 @@ import {
 	liveMealCalendarRange,
 	liveMealPool,
 	listHouseholdMeals,
+	mealAggregateToScheduleMeal,
+	mealHeaderCommand,
+	mealScheduleCommand,
+	membershipsToHouseholdMembers,
 	planRecipeAsMeal,
 	readMealCalendarRange,
 	readMealPool,
 	readScheduleUiState,
 	reorderMeals,
 	saveMealCheckIn,
+	updateMealHeader,
 	updateMealSchedule,
 	writeScheduleUiState,
 	type MealCommandContext
 } from '$lib/client/meals/index.js';
 import { MaalDatabase, openMaalDatabase } from '$lib/client/local/database.js';
+import { executeLocalCommands } from '$lib/client/local/commands.js';
 import {
 	commitImportedRecipeCandidate,
 	permanentlyDeleteRecipe,
 	updateRecipeFromEditor,
 	type RecipeCommandContext
 } from '$lib/client/recipes/index.js';
+import type { Membership } from '$lib/domain/household/contracts.js';
 import { MealCheckInSchema } from '$lib/domain/meals/schema.js';
 import {
 	RecipeImportedCandidateSchema,
@@ -521,6 +528,153 @@ describe('atomic meal reorder', () => {
 			sortOrder: 2
 		});
 		expect(await database.outbox.count()).toBe(outboxBefore);
+	});
+});
+
+describe('meal sheet edits', () => {
+	test('rolls back header edits and outbox rows when the schedule write fails', async () => {
+		const database = await openDatabase();
+		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
+		const meal = await planRecipeAsMeal(database, mealContext(), recipe.id, {
+			date: '2026-08-23',
+			time: '18:30'
+		});
+		const originalOutbox = await database.outbox.toArray();
+		const failSchedule = (changes: unknown) => {
+			if (
+				typeof changes === 'object' &&
+				changes !== null &&
+				'date' in changes &&
+				changes.date === '2026-08-25'
+			) {
+				throw new DOMException('Storage is full', 'QuotaExceededError');
+			}
+		};
+		database.meals.hook('updating', failSchedule);
+
+		try {
+			await expect(
+				executeLocalCommands(database, [
+					mealHeaderCommand(mealContext(at(24)), meal.id, {
+						title: 'Leftover soup',
+						description: null,
+						cookTimeMinutes: 20
+					}),
+					mealScheduleCommand(mealContext(at(24)), meal.id, {
+						date: '2026-08-25',
+						time: '19:00',
+						sortOrder: null
+					})
+				])
+			).rejects.toMatchObject({ _tag: 'LocalQuotaExceededError' });
+		} finally {
+			database.meals.hook('updating').unsubscribe(failSchedule);
+		}
+
+		expect(await database.meals.get(meal.id)).toEqual(meal);
+		expect(await database.outbox.toArray()).toEqual(originalOutbox);
+	});
+
+	test('saves a custom meal header with its own outbox row and conflict clock', async () => {
+		const database = await openDatabase();
+		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
+		const meal = await planRecipeAsMeal(database, mealContext(), recipe.id, {
+			date: '2026-08-23',
+			time: '18:30'
+		});
+
+		const renamed = await updateMealHeader(database, mealContext(at(24)), meal.id, {
+			title: '  Leftover soup  ',
+			description: '   ',
+			cookTimeMinutes: 20
+		});
+
+		expect(renamed).toMatchObject({
+			title: 'Leftover soup',
+			description: null,
+			cookTimeMinutes: 20,
+			date: '2026-08-23',
+			time: '18:30'
+		});
+		expect(renamed.conflictClocks.header?.occurredAt).toBe(at(24));
+		expect((await listHouseholdMeals(database, 'org_family'))[0]?.title).toBe('Leftover soup');
+		const rows = await database.outbox.filter(({ occurredAt }) => occurredAt === at(24)).toArray();
+		expect(
+			rows.map(({ entityKind, aggregateId, conflictGroup }) => [
+				entityKind,
+				aggregateId,
+				conflictGroup
+			])
+		).toEqual([['meal', meal.id, 'header']]);
+	});
+
+	test('maps a check-in without inventing familiarity or an adjusted cook time', async () => {
+		const database = await openDatabase();
+		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
+		const meal = await planRecipeAsMeal(database, mealContext(), recipe.id, { date: '2026-08-23' });
+		const { meal: cooked, checkIn } = await saveMealCheckIn(
+			database,
+			mealContext(at(23)),
+			meal.id,
+			{
+				status: 'cooked',
+				verdict: 'avoid',
+				cookTimeMinutes: 55,
+				reason: 'Too spicy.'
+			}
+		);
+
+		const scheduled = mealAggregateToScheduleMeal(cooked, checkIn);
+
+		expect(scheduled).not.toHaveProperty('familiarity');
+		expect(scheduled).not.toHaveProperty('adjustedCookTimeMinutes');
+		expect(scheduled.cookTimeMinutes).toBe(33);
+		expect(scheduled.latestCheckIn).toEqual({
+			verdict: 'avoid',
+			cookTime: 55,
+			reason: 'Too spicy.'
+		});
+	});
+
+	test('offers only active members as cooks, named from local profiles or attributions', () => {
+		const membership = (workosUserId: string, status: Membership['status']): Membership => ({
+			membershipId: `membership_${workosUserId}`,
+			householdId: 'org_family',
+			workosUserId,
+			roleSlug: 'member',
+			permissions: [],
+			status,
+			directoryManaged: false,
+			workosCreatedAt: at(20),
+			lastVerifiedAt: at(20),
+			updatedAt: at(20),
+			detachedAt: status === 'active' ? null : at(21),
+			denialCode: null,
+			source: 'workos'
+		});
+
+		const members = membershipsToHouseholdMembers(
+			[
+				membership('user_alice', 'active'),
+				membership('user_bob', 'active'),
+				membership('user_carol', 'detached'),
+				membership('user_dan', 'revoked')
+			],
+			[],
+			[
+				{
+					workosUserId: 'user_bob',
+					displayName: 'Bob de Vries',
+					email: 'bob@example.test',
+					profilePictureUrl: null
+				}
+			]
+		);
+
+		expect(members.map(({ userId, name, email }) => [userId, name, email])).toEqual([
+			['user_alice', 'user_alice', ''],
+			['user_bob', 'Bob de Vries', 'bob@example.test']
+		]);
 	});
 });
 
