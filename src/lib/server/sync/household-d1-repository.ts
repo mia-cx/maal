@@ -804,16 +804,21 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 		householdId: string,
 		page: HouseholdServerBootstrapPageRequest
 	): Promise<HouseholdServerBootstrapPage> {
-		const [state, identities, authoritativeIds] = await Promise.all([
-			scopeState(this.database, householdId),
-			listHeldIdentities<HouseholdSyncEntityKind>(
-				this.database,
-				audience(householdId),
-				HELD_ENTITY_SQL,
-				{ afterEntityKey: page.afterEntityKey, limit: page.limit + 1 }
-			),
-			heldManifestKeys(this.database, audience(householdId), HELD_ENTITY_SQL, page.manifest)
-		]);
+		// Read the watermark before the listing: a commit landing between them then
+		// appears on the page instead of being skipped above throughSequence.
+		const state = await scopeState(this.database, householdId);
+		const identities = await listHeldIdentities<HouseholdSyncEntityKind>(
+			this.database,
+			audience(householdId),
+			HELD_ENTITY_SQL,
+			{ afterEntityKey: page.afterEntityKey, limit: page.limit + 1 }
+		);
+		const authoritativeIds = await heldManifestKeys(
+			this.database,
+			audience(householdId),
+			HELD_ENTITY_SQL,
+			page.manifest
+		);
 		const selected = identities.slice(0, page.limit);
 		const last = selected.at(-1);
 		return {

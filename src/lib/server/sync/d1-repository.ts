@@ -781,16 +781,21 @@ export class D1UserSyncRepository implements UserSyncRepository {
 		workosUserId: string,
 		page: ServerBootstrapPageRequest
 	): Promise<ServerBootstrapPage> {
-		const [state, identities, authoritativeIds] = await Promise.all([
-			scopeState(this.database, workosUserId),
-			listHeldIdentities<UserSyncEntityKind>(
-				this.database,
-				audience(workosUserId),
-				HELD_ENTITY_SQL,
-				{ afterEntityKey: page.afterEntityKey, limit: page.limit + 1 }
-			),
-			heldManifestKeys(this.database, audience(workosUserId), HELD_ENTITY_SQL, page.manifest)
-		]);
+		// Read the watermark before the listing: a commit landing between them then
+		// appears on the page instead of being skipped above throughSequence.
+		const state = await scopeState(this.database, workosUserId);
+		const identities = await listHeldIdentities<UserSyncEntityKind>(
+			this.database,
+			audience(workosUserId),
+			HELD_ENTITY_SQL,
+			{ afterEntityKey: page.afterEntityKey, limit: page.limit + 1 }
+		);
+		const authoritativeIds = await heldManifestKeys(
+			this.database,
+			audience(workosUserId),
+			HELD_ENTITY_SQL,
+			page.manifest
+		);
 		const selected = identities.slice(0, page.limit);
 		const last = selected.at(-1);
 		return {

@@ -428,6 +428,66 @@ describe('D1 user sync repository', () => {
 		});
 	});
 
+	test('a commit landing after the watermark read still reaches the bootstrap page', async () => {
+		const concurrent = new D1UserSyncRepository(database);
+		const entityId = uuidv7();
+		let injected = false;
+		// Resolve the scope-state read, then commit a new entity before the
+		// identity listing runs — the page must contain it (or the watermark
+		// must not cover it).
+		const intercepted: D1Database = new Proxy(database, {
+			get(target, property) {
+				if (property !== 'prepare') {
+					const value = Reflect.get(target, property);
+					return typeof value === 'function' ? value.bind(target) : value;
+				}
+				return (sql: string) => {
+					const statement = target.prepare(sql);
+					if (!sql.includes('FROM sync_scope_state')) return statement;
+					return new Proxy(statement, {
+						get(inner, innerProperty) {
+							if (innerProperty !== 'bind') {
+								const value = Reflect.get(inner, innerProperty);
+								return typeof value === 'function' ? value.bind(inner) : value;
+							}
+							return (...args: unknown[]) => {
+								const bound = (inner.bind as (...a: unknown[]) => D1PreparedStatement)(...args);
+								return new Proxy(bound, {
+									get(boundTarget, boundProperty) {
+										if (boundProperty !== 'first') {
+											const value = Reflect.get(boundTarget, boundProperty);
+											return typeof value === 'function' ? value.bind(boundTarget) : value;
+										}
+										return async () => {
+											const result = await bound.first();
+											if (!injected) {
+												injected = true;
+												await concurrent.commit({
+													actorUserId: userId,
+													deviceId,
+													mutation: mutation(entityId, uuidv7(), '2026-08-22T12:00:00.000Z', 3),
+													mode: 'live',
+													receivedAt: '2026-08-22T12:00:00.000Z'
+												});
+											}
+											return result;
+										};
+									}
+								});
+							};
+						}
+					});
+				};
+			}
+		});
+		const repository = new D1UserSyncRepository(intercepted);
+		const snapshot = await repository.bootstrap(userId, FIRST_PAGE);
+		expect(injected).toBe(true);
+		expect(snapshot.aggregates).toEqual(
+			expect.arrayContaining([expect.objectContaining({ entityId })])
+		);
+	});
+
 	test('writes and rehydrates complete normalized recipe aggregates and retained purge tombstones', async () => {
 		const repository = new D1UserSyncRepository(database);
 		const entityId = uuidv7();
