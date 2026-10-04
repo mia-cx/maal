@@ -9,15 +9,12 @@ import {
 	type RecipeImportedCandidate
 } from '$lib/domain/recipes/schema.js';
 import type { RecipeMenuItem } from '$lib/menu/menu-types.js';
-import {
-	mergeEditorIntoImportedCandidate,
-	recipeMenuItemToEditorPatch
-} from '$lib/menu/recipe-local-adapter.js';
+import { mergeEditorIntoImportedCandidate } from '$lib/menu/recipe-local-adapter.js';
 import * as m from '$lib/paraglide/messages';
 
 import {
 	commitImportedRecipeCandidate,
-	updateRecipeFromEditor,
+	updateRecipeFromImportedCandidate,
 	type RecipeCommandContext
 } from './commands.js';
 
@@ -122,4 +119,9 @@ export const confirmUrlImport = (
 				context,
 				mergeEditorIntoImportedCandidate(candidate, recipe)
 			)
-		: updateRecipeFromEditor(database, context, recipe.id, recipeMenuItemToEditorPatch(recipe));
+		: updateRecipeFromImportedCandidate(
+				database,
+				context,
+				recipe.id,
+				mergeEditorIntoImportedCandidate(candidate, recipe)
+			);

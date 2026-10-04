@@ -489,6 +489,33 @@ export const commitImportedRecipeCandidate = async (
 	return decode(RecipeAggregateSchema, result.aggregates[0], 'decode imported recipe');
 };
 
+export const updateRecipeFromImportedCandidate = async (
+	database: MaalDatabase,
+	context: RecipeCommandContext,
+	recipeId: string,
+	candidateInput: RecipeImportedCandidate
+): Promise<RecipeAggregate> => {
+	const candidate = decode(
+		RecipeImportedCandidateSchema,
+		candidateInput,
+		'decode imported recipe candidate'
+	);
+	const conflictGroups = RECIPE_CONFLICT_GROUPS.filter((group) => group !== 'deletion');
+	const result = await executeRecipeWrite(
+		database,
+		context,
+		recipeId,
+		conflictGroups,
+		{ recipeId, conflictGroups, patch: candidate },
+		(current) => ({
+			...requireOwnedRecipe(current, context.ownerUserId, 'update imported recipe'),
+			...candidate,
+			searchTokens: recipeSearchTokens(candidate)
+		})
+	);
+	return decode(RecipeAggregateSchema, result.aggregates[0], 'decode updated imported recipe');
+};
+
 /**
  * The plan route's "import from URL" gesture: commits the reporter's recipe and plans it as a
  * household meal in one transaction, so a planning failure leaves no recipe behind.

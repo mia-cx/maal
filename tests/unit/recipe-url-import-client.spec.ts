@@ -10,7 +10,8 @@ import { activeHouseholdKey } from '$lib/client/local/profiles.js';
 import type { MealCommandContext } from '$lib/client/meals/commands.js';
 import {
 	commitImportedCandidateAndPlanMeal,
-	createRecipeFromEditor,
+	commitImportedRecipeCandidate,
+	permanentlyDeleteRecipe,
 	type RecipeCommandContext
 } from '$lib/client/recipes/commands.js';
 import {
@@ -20,6 +21,7 @@ import {
 } from '$lib/client/recipes/url-import.js';
 import {
 	RecipeImportedCandidateSchema,
+	RECIPE_CONFLICT_GROUPS,
 	type RecipeImportedCandidate
 } from '$lib/domain/recipes/schema.js';
 import { importedCandidateToMenuItem } from '$lib/menu/recipe-local-adapter.js';
@@ -263,36 +265,107 @@ describe('confirmUrlImport', () => {
 
 	test('importing into an existing recipe updates it instead of creating a second one', async () => {
 		const database = await seededDatabase();
-		const existing = await createRecipeFromEditor(database, context(), {
-			title: 'Old soup',
-			description: null,
-			imageUrl: null,
-			sourceUrl: null,
-			sourceSiteName: null,
-			sourceAuthorName: null,
-			sourcePublisherName: null,
-			sourceIsBasedOnUrl: null,
-			prepTimeMinutes: null,
-			cookTimeMinutes: null,
-			yield: null,
-			ingredients: [],
-			instructions: []
-		});
+		const existing = await commitImportedRecipeCandidate(
+			database,
+			{ ...context(), occurredAt: IMPORTED_AT },
+			{
+				...candidate(),
+				title: 'Old soup',
+				sourceHtmlHash: 'sha256:old-soup',
+				classifications: [
+					{
+						id: uuidv7(),
+						kind: 'diet',
+						value: 'Old diet',
+						normalizedValue: 'old-diet',
+						schemaOrgValue: null,
+						locale: 'en',
+						confidence: 1,
+						createdAt: IMPORTED_AT
+					}
+				],
+				nutritionFacts: [
+					{
+						id: uuidv7(),
+						nutrient: 'calories',
+						schemaOrgProperty: 'calories',
+						originalText: '100 kcal',
+						amount: 100,
+						unitId: null,
+						baseAmount: null,
+						baseUnitId: null,
+						locale: 'en',
+						confidence: 1,
+						createdAt: IMPORTED_AT,
+						updatedAt: IMPORTED_AT
+					}
+				]
+			}
+		);
 		const imported = candidate();
+		const occurredAt = '2026-09-21T10:00:00.000Z';
 
-		const recipe = await confirmUrlImport(database, context(), imported, {
+		const recipe = await confirmUrlImport(database, { ...context(), occurredAt }, imported, {
 			...importedCandidateToMenuItem(imported, existing.id),
-			id: existing.id
+			title: 'Weeknight tomato soup'
 		});
 
 		expect(recipe.id).toBe(existing.id);
 		expect(await database.recipes.count()).toBe(1);
 		expect(await database.recipes.get(existing.id)).toMatchObject({
-			title: 'Tomato soup',
-			sourceUrl: 'https://example.com/soup',
-			ingredients: [expect.objectContaining({ sourceFoodLabel: 'tomatoes' })]
+			...imported,
+			title: 'Weeknight tomato soup',
+			ownerUserId: USER_ID,
+			createdAt: existing.createdAt,
+			updatedAt: occurredAt,
+			revision: existing.revision + 1
 		});
+		const outbox = await database.outbox.toCollection().sortBy('occurredAt');
+		expect(outbox).toHaveLength(2);
+		expect(outbox[1]).toMatchObject({
+			aggregateId: existing.id,
+			conflictGroup: 'aggregate',
+			payload: {
+				conflictGroups: RECIPE_CONFLICT_GROUPS.filter((group) => group !== 'deletion'),
+				patch: { ...imported, title: 'Weeknight tomato soup' }
+			}
+		});
+		for (const group of RECIPE_CONFLICT_GROUPS.filter((group) => group !== 'deletion')) {
+			expect(recipe.conflictClocks[group]?.mutationId).toBe(outbox[1]?.mutationId);
+		}
+		expect(recipe.conflictClocks.deletion).toEqual(existing.conflictClocks.deletion);
+		expect(recipe.searchTokens).toContain('weeknight');
+		expect(recipe.searchTokens).not.toContain('old');
 	});
+
+	test.each(['missing', 'another owner', 'permanently deleted'])(
+		'rejects import confirmation for a %s recipe without writing',
+		async (kind) => {
+			const database = await seededDatabase();
+			const imported = candidate();
+			const existing = await commitImportedRecipeCandidate(database, context(), candidate());
+			let recipeId = existing.id;
+			if (kind === 'missing') recipeId = uuidv7();
+			if (kind === 'another owner') {
+				await database.recipes.update(existing.id, { ownerUserId: 'user_bob' });
+			}
+			if (kind === 'permanently deleted') {
+				await permanentlyDeleteRecipe(database, context(), existing.id);
+			}
+			const before = await database.recipes.toArray();
+			const outboxBefore = await database.outbox.toArray();
+			await expect(
+				confirmUrlImport(
+					database,
+					context(),
+					imported,
+					importedCandidateToMenuItem(imported, recipeId)
+				)
+			).rejects.toMatchObject({ _tag: 'LocalDecodeError' });
+			expect(await database.recipes.toArray()).toEqual(before);
+			expect(await database.outbox.toArray()).toEqual(outboxBefore);
+		}
+	);
 });
 
 describe('commitImportedCandidateAndPlanMeal', () => {

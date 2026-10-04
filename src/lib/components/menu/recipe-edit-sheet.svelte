@@ -37,6 +37,7 @@
 	} = $props();
 
 	let editingRecipeId = $state<string | null>(null);
+	let importedCandidate = $state<RecipeMenuItem['importedCandidate']>();
 	let title = $state('');
 	let sourceUrl = $state('');
 	let sourceSiteName = $state('');
@@ -91,6 +92,7 @@
 	const syncRecipe = (nextRecipe: RecipeMenuItem | null) => {
 		const nextInstructions = nextRecipe ? defaultInstructions(nextRecipe) : [];
 		editingRecipeId = nextRecipe?.id ?? null;
+		importedCandidate = nextRecipe?.importedCandidate;
 		title = nextRecipe?.title ?? '';
 		sourceUrl = nextRecipe?.sourceUrl ?? '';
 		sourceSiteName = nextRecipe?.sourceSiteName ?? '';
@@ -376,6 +378,7 @@
 		try {
 			await onsaved?.({
 				...recipe,
+				importedCandidate,
 				title: title.trim() || recipe.title,
 				sourceUrl: sourceUrl.trim() || undefined,
 				sourceSiteName: sourceSiteName.trim() || undefined,
