@@ -62,8 +62,9 @@ export const mealPriorityKey = (date: unknown, id: string, now: Date): string =>
 
 /**
  * Aggregates backfill must skip: the server already has them (an acknowledged row, pushed or received),
- * a push is still carrying them, or an earlier attempt was refused. Only never-acknowledged records
- * with no outcome yet stay eligible.
+ * a push is still carrying them, or an earlier attempt was refused or quarantined — a quarantined edit
+ * belongs to a revoked member and must never ride another member's credentials. Only
+ * never-acknowledged records with no outcome yet stay eligible.
  */
 export const backfillIneligibleKeys = async (
 	database: MaalDatabase,
@@ -76,6 +77,7 @@ export const backfillIneligibleKeys = async (
 				'acknowledged',
 				'pending',
 				'sending',
+				'quarantined',
 				'rejected'
 			])
 		).map(({ entityKind, aggregateId }) => `${entityKind}\u0000${aggregateId}`)

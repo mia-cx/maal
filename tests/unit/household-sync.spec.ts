@@ -919,6 +919,55 @@ describe('foreground household coordinator', () => {
 		expect(backfill).toHaveBeenCalledTimes(2);
 	});
 
+	test('does not backfill an aggregate a quarantined member edit touched', async () => {
+		const database = await openDatabase('quarantined-backfill');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: true
+		});
+		const deviceId = String((await database.meta.get('deviceId'))!.value);
+		const quarantinedMeal = meal(uuidv7(), uuidv7(), deviceId);
+		const cleanMeal = meal(uuidv7(), uuidv7(), deviceId);
+		await database.meals.bulkPut([quarantinedMeal, cleanMeal]);
+		// A revoked member's edit quarantined on this device: backfilling the shared meal under
+		// Alice's credentials would upload Bob's intent.
+		await database.outbox.add({
+			mutationId: uuidv7(),
+			authSlotId: 'slot_bob',
+			scopeKind: 'household',
+			scopeId: householdId,
+			status: 'quarantined',
+			occurredAt: timestamp,
+			aggregateId: quarantinedMeal.id,
+			entityKind: 'meal',
+			conflictGroup: 'schedule',
+			operation: 'upsert',
+			originDeviceId: deviceId,
+			payload: null,
+			nextAttemptAt: timestamp,
+			attempts: 0
+		});
+		const transport = new MemoryHouseholdServer().transport('user_alice');
+		const backfill = vi.spyOn(transport, 'backfill');
+		const coordinator = createHouseholdSyncCoordinator({
+			database,
+			authSlotId: 'slot_alice',
+			workosUserId: 'user_alice',
+			householdId,
+			transport,
+			environment: environment({ saveData: false })
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(backfill).toHaveBeenCalledTimes(1);
+		expect(backfill.mock.calls[0]?.[1].mutations.map(({ entityId }) => entityId)).toEqual([
+			cleanMeal.id
+		]);
+	});
+
 	test('includes the protocol envelope in the 256 KiB backfill limit', async () => {
 		const database = await openDatabase('backfill-envelope');
 		await seedProfile(database, {
