@@ -33,6 +33,7 @@ import {
 	type RecipeInstruction,
 	type RecipePurgeTombstone
 } from '$lib/domain/recipes/schema.js';
+import { normalizeIngredientSource } from '$lib/recipes/source-normalization.js';
 
 const NullableStringSchema = Schema.NullOr(Schema.String);
 const NullableNonNegativeIntSchema = Schema.NullOr(Schema.NonNegativeInt);
@@ -153,10 +154,7 @@ export const recipeSearchTokens = (recipe: {
 	return [...new Set(normalized)];
 };
 
-const ingredientOriginalText = (edit: RecipeIngredientEdit): string =>
-	[edit.amount.trim(), edit.unit.trim(), edit.item.trim()].filter(Boolean).join(' ');
-
-const reconcileIngredients = (
+export const reconcileIngredients = (
 	current: readonly RecipeIngredient[],
 	edits: readonly RecipeIngredientEdit[],
 	occurredAt: UtcInstant
@@ -166,33 +164,27 @@ const reconcileIngredients = (
 		.filter(({ item }) => item.trim().length > 0)
 		.map((edit, lineIndex) => {
 			const existing = edit.id === null ? undefined : byId.get(edit.id);
-			const sourceAmountText = edit.amount.trim() || null;
-			const sourceUnitLabel = edit.unit.trim() || null;
-			const sourceFoodLabel = edit.item.trim();
-			const originalText = ingredientOriginalText(edit);
+			const amount = edit.amount.trim();
+			const unit = edit.unit.trim();
+			const item = edit.item.trim();
+			// An untouched line keeps its stored source text and normalization.
 			if (
 				existing &&
-				existing.lineIndex === lineIndex &&
-				existing.sourceAmountText === sourceAmountText &&
-				existing.sourceUnitLabel === sourceUnitLabel &&
-				existing.sourceFoodLabel === sourceFoodLabel &&
-				existing.originalText === originalText
+				existing.sourceAmountText === (amount || null) &&
+				existing.sourceUnitLabel === (unit || null) &&
+				existing.sourceFoodLabel === item
 			) {
-				return existing;
+				return existing.lineIndex === lineIndex ? existing : { ...existing, lineIndex };
 			}
-			const numericAmount = sourceAmountText === null ? null : Number(sourceAmountText);
 			return {
 				id: existing?.id ?? uuidv7(),
 				lineIndex,
-				originalText,
-				sourceAmountText,
-				sourceQuantity: Number.isFinite(numericAmount) ? numericAmount : null,
-				sourceUnitLabel,
-				sourceFoodLabel,
-				baseFoodId: null,
-				baseQuantity: null,
-				baseUnitId: null,
-				baseUnitFamilyId: null,
+				...normalizeIngredientSource({
+					originalText: [amount, unit, item].filter(Boolean).join(' '),
+					amount,
+					unit,
+					item
+				}),
 				optional: existing?.optional ?? false,
 				confidence: 1,
 				createdAt: existing?.createdAt ?? occurredAt
@@ -200,7 +192,7 @@ const reconcileIngredients = (
 		});
 };
 
-const reconcileInstructions = (
+export const reconcileInstructions = (
 	current: readonly RecipeInstruction[],
 	edits: readonly RecipeInstructionEdit[],
 	occurredAt: UtcInstant

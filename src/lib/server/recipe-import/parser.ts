@@ -5,6 +5,7 @@ import {
 	RecipeImportedCandidateSchema,
 	type RecipeImportedCandidate
 } from '$lib/domain/recipes/schema.js';
+import { parseIngredientSource } from '$lib/recipes/source-normalization.js';
 
 import { fetchRecipePage } from './fetch.js';
 
@@ -180,15 +181,7 @@ export const parseRecipeCandidate = async (input: {
 		ingredients: ingredientLines.map((line, lineIndex) => ({
 			id: uuidv7(),
 			lineIndex,
-			originalText: line,
-			sourceAmountText: null,
-			sourceQuantity: null,
-			sourceUnitLabel: null,
-			sourceFoodLabel: line,
-			baseFoodId: null,
-			baseQuantity: null,
-			baseUnitId: null,
-			baseUnitFamilyId: null,
+			...parseIngredientSource(line),
 			optional: /\boptional\b/i.test(line),
 			confidence: 1,
 			createdAt: now
