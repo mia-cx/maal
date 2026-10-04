@@ -7,8 +7,8 @@ import { subscriptionIsOpen } from './subscriptions.js';
 export const PAYER_CLEANUP_PENDING_EVENT = 'billing_payer_cleanup_pending';
 export const PAYER_CLEANUP_COMPLETED_EVENT = 'billing_payer_cleanup_completed';
 
-const payerCleanupPendingKey = (subscriptionId: string, newUserId: string) =>
-	`payer-cleanup:${subscriptionId}:${newUserId}`;
+const payerCleanupPendingKey = (subscriptionId: string, newUserId: string, now: string) =>
+	`payer-cleanup:${subscriptionId}:${newUserId}:${now}`;
 const payerCleanupCompletedKey = (pendingKey: string) =>
 	`payer-cleanup-completed:${pendingKey.slice('payer-cleanup:'.length)}`;
 
@@ -101,7 +101,11 @@ export const transferBillingOwnership = async (input: {
 		occurredAt: input.now,
 		safeDetails: { newSubscriberUserId: input.newUserId }
 	});
-	const cleanupKey = payerCleanupPendingKey(subscription.stripeSubscriptionId, input.newUserId);
+	const cleanupKey = payerCleanupPendingKey(
+		subscription.stripeSubscriptionId,
+		input.newUserId,
+		input.now
+	);
 	await input.repository.audit({
 		idempotencyKey: cleanupKey,
 		householdId: input.householdId,

@@ -673,7 +673,7 @@ describe('billing transfer', () => {
 		expect(await billingRow()).toMatchObject({ subscriber_user_id: 'user_bob' });
 		expect((await auditEvents()).results).toContainEqual({
 			event_type: 'billing_payer_cleanup_pending',
-			idempotency_key: 'payer-cleanup:sub_a:user_bob'
+			idempotency_key: `payer-cleanup:sub_a:user_bob:${iso(t0)}`
 		});
 
 		// Maintenance re-runs the detach against the recorded cutoff: the PM created after it,
@@ -690,7 +690,44 @@ describe('billing transfer', () => {
 		).toEqual([['pm_old']]);
 		expect((await auditEvents()).results).toContainEqual({
 			event_type: 'billing_payer_cleanup_completed',
-			idempotency_key: 'payer-cleanup-completed:sub_a:user_bob'
+			idempotency_key: `payer-cleanup-completed:sub_a:user_bob:${iso(t0)}`
+		});
+	});
+
+	test('a repeat transfer to the same owner gets its own cleanup record', async () => {
+		await insertMembership('membership_bob', 'user_bob');
+		await insertSubscription({ status: 'active', currentPeriodEnd: '2026-10-01T00:00:00.000Z' });
+		const subscriptions = () => new Map([['sub_a', sub('sub_a', 'active')]]);
+		// Alice -> Bob -> Alice -> Bob; the earlier completed cleanups must not mask the
+		// last transfer's pending record when its detach fails.
+		for (const [from, to, now] of [
+			['user_alice', 'user_bob', iso(t0)],
+			['user_bob', 'user_alice', iso(t0 + 60)]
+		] as const) {
+			const { stripe } = fakeStripe(subscriptions());
+			await transferBillingOwnership({
+				...transferInput(stripe),
+				currentUserId: from,
+				newUserId: to,
+				now
+			});
+		}
+		const failing = fakeStripe(subscriptions(), { failOn: 'paymentMethods.detach' });
+		const result = await transferBillingOwnership({
+			...transferInput(failing.stripe),
+			now: iso(t0 + 120)
+		});
+		expect(result.payerCleanup).toBe('pending');
+
+		const cleanup = await reconcilePendingPayerCleanups({
+			repository: new BillingRepository(database),
+			stripe: fakeStripe(subscriptions()).stripe,
+			now: iso(t0 + 240)
+		});
+		expect(cleanup).toEqual({ completed: 1, pending: 0 });
+		expect((await auditEvents()).results).toContainEqual({
+			event_type: 'billing_payer_cleanup_completed',
+			idempotency_key: `payer-cleanup-completed:sub_a:user_bob:${iso(t0 + 120)}`
 		});
 	});
 });
