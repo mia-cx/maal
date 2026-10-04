@@ -131,11 +131,22 @@ const slotHouseholdPath = (authSlotId: string, householdId: string, suffix: stri
 const slotHouseholdBasePath = (authSlotId: string, householdId: string): string =>
 	`/api/auth-slots/${encodeURIComponent(authSlotId)}/households/${encodeURIComponent(householdId)}`;
 
+const administrationState = (database: MaalDatabase, householdId: string): Promise<string> =>
+	database.transaction('r', database.memberships, database.householdInvites, async () =>
+		JSON.stringify(
+			await Promise.all([
+				database.memberships.where('householdId').equals(householdId).toArray(),
+				database.householdInvites.where('householdId').equals(householdId).toArray()
+			])
+		)
+	);
+
 const commitHouseholdProjection = async (
 	database: MaalDatabase,
 	profileId: string,
 	projection: HouseholdAdministrationProjection,
-	selectHousehold: boolean
+	selectHousehold: boolean,
+	expectedState?: string
 ): Promise<void> => {
 	const householdId = projection.household.householdId;
 	await database.transaction(
@@ -147,7 +158,10 @@ const commitHouseholdProjection = async (
 			database.userAttributions,
 			database.remoteProjectionMeta,
 			database.uiState,
-			database.outbox
+			database.outbox,
+			database.profiles,
+			database.authSlots,
+			database.syncScopes
 		],
 		async () => {
 			const [existingHousehold, existingMemberships, existingInvites, pendingHouseholdMutation] =
@@ -167,6 +181,12 @@ const commitHouseholdProjection = async (
 						)
 						.first()
 				]);
+			// A completed action wins over a refresh that started from an older projection.
+			if (
+				expectedState !== undefined &&
+				expectedState !== JSON.stringify([existingMemberships, existingInvites])
+			)
+				return;
 			const household =
 				existingHousehold && pendingHouseholdMutation
 					? {
@@ -183,21 +203,41 @@ const commitHouseholdProjection = async (
 						}
 					: projection.household;
 			await database.households.put(household);
-			await database.memberships.bulkPut(projection.members.map(({ membership }) => membership));
-			const projectedMembershipIds = new Set(
-				projection.members.map(({ membership }) => membership.membershipId)
+			const projectedByUser = new Map(
+				projection.members.map(({ membership }) => [membership.workosUserId, membership])
 			);
+			for (const existing of existingMemberships) {
+				const projected = projectedByUser.get(existing.workosUserId);
+				if (projected && projected.membershipId !== existing.membershipId) {
+					// Rejoining creates a new WorkOS ID for the same unique household/user pair.
+					await database.memberships.delete(existing.membershipId);
+				}
+			}
+			await database.memberships.bulkPut(projection.members.map(({ membership }) => membership));
 			for (const existing of existingMemberships) {
 				if (
 					existing.source === 'workos' &&
 					existing.status === 'active' &&
-					!projectedMembershipIds.has(existing.membershipId)
+					!projectedByUser.has(existing.workosUserId)
 				) {
-					await database.memberships.update(existing.membershipId, {
-						status: 'revoked',
-						updatedAt: projection.membership.lastVerifiedAt,
-						denialCode: 'workos_membership_missing'
-					});
+					const localProfile = await database.profiles
+						.where('workosUserId')
+						.equals(existing.workosUserId)
+						.first();
+					if (localProfile) {
+						await detachHouseholdSnapshot(database, {
+							profileId: localProfile.profileId,
+							householdId,
+							denialCode: 'workos_membership_missing',
+							detachedAt: projection.membership.lastVerifiedAt as `${string}Z`
+						});
+					} else {
+						await database.memberships.update(existing.membershipId, {
+							status: 'revoked',
+							updatedAt: projection.membership.lastVerifiedAt,
+							denialCode: 'workos_membership_missing'
+						});
+					}
 				}
 			}
 			await database.householdInvites.bulkPut([...projection.invites]);
@@ -330,6 +370,7 @@ export const refreshRemoteHousehold = async (
 	fetcher: Fetch = globalThis.fetch
 ): Promise<HouseholdAdministrationProjection> => {
 	const { authSlotId } = await profileSlot(database, profileId);
+	const expectedState = await administrationState(database, householdId);
 	const response = await requestJson(
 		fetcher,
 		slotHouseholdBasePath(authSlotId, householdId),
@@ -342,15 +383,29 @@ export const refreshRemoteHousehold = async (
 			cause instanceof HouseholdAdministrationUnavailable &&
 			cause.code === 'membership_inactive'
 		) {
-			await detachHouseholdSnapshot(database, {
-				profileId,
-				householdId,
-				denialCode: 'membership_inactive'
-			});
+			await database.transaction(
+				'rw',
+				[
+					database.profiles,
+					database.authSlots,
+					database.memberships,
+					database.householdInvites,
+					database.outbox,
+					database.syncScopes
+				],
+				async () => {
+					if (expectedState !== (await administrationState(database, householdId))) return;
+					await detachHouseholdSnapshot(database, {
+						profileId,
+						householdId,
+						denialCode: 'membership_inactive'
+					});
+				}
+			);
 		}
 		throw cause;
 	});
-	await commitHouseholdProjection(database, profileId, response.payload, false);
+	await commitHouseholdProjection(database, profileId, response.payload, false, expectedState);
 	return response.payload;
 };
 
@@ -445,10 +500,34 @@ export const removeHouseholdMember = async (
 		HouseholdMemberRemovalResponseSchema,
 		{ database, authSlotId }
 	);
-	await database.memberships.update(membershipId, {
-		status: 'revoked',
-		updatedAt: new Date().toISOString() as `${string}Z`
-	});
+	await database.transaction(
+		'rw',
+		[
+			database.memberships,
+			database.profiles,
+			database.authSlots,
+			database.outbox,
+			database.syncScopes
+		],
+		async () => {
+			const removed = await database.memberships.get(membershipId);
+			const localProfile = removed
+				? await database.profiles.where('workosUserId').equals(removed.workosUserId).first()
+				: undefined;
+			if (localProfile) {
+				await detachHouseholdSnapshot(database, {
+					profileId: localProfile.profileId,
+					householdId,
+					denialCode: 'workos_membership_missing'
+				});
+			} else {
+				await database.memberships.update(membershipId, {
+					status: 'revoked',
+					updatedAt: new Date().toISOString() as `${string}Z`
+				});
+			}
+		}
+	);
 };
 
 export const leaveRemoteHousehold = async (

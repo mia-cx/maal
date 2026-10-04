@@ -139,6 +139,10 @@ const seedCurrentDatabase = async () => {
 };
 
 const seedProfilesAndHousehold = async (page: Page) => {
+	// Seeded slots have no server session; a refresh must not invalidate fixture authentication.
+	await page.route('**/api/auth-slots/*/households/org_canal_kitchen', (route) =>
+		route.fulfill({ status: 503 })
+	);
 	await page.goto('/');
 	await page.evaluate(resetDatabase);
 	await page.goto('/household');
@@ -427,3 +431,83 @@ test('opens a shared invite link as join with the code filled in', async ({ page
 	await expect(page).toHaveURL('/household?join=7KQ2MZ4HXP9A');
 	await expect(page.getByLabel('Invite code')).toHaveValue('7KQ2MZ4HXP9A');
 });
+
+for (const authentication of ['signedOut', 'revokedSlot', 'profileReauth', 'slotReauth'] as const) {
+	test(`authenticates ${authentication} before joining an invite while keeping local settings usable`, async ({
+		page
+	}) => {
+		await seedProfilesAndHousehold(page);
+		if (authentication === 'signedOut') {
+			await page.route('**/api/auth-slots/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/', (route) => {
+				expect(route.request().method()).toBe('DELETE');
+				return route.fulfill({ status: 204 });
+			});
+			await page.getByRole('button', { name: /AD Alice de Vries alice@example\.test/ }).click();
+			await page.getByRole('menuitem', { name: 'Sign out', exact: true }).click();
+			await page.getByRole('button', { name: /AD Alice de Vries alice@example\.test/ }).click();
+			await expect(page.getByRole('menuitem', { name: 'Sign out', exact: true })).toHaveCount(0);
+			await page.keyboard.press('Escape');
+		} else {
+			await page.evaluate(async (authentication) => {
+				const database = await new Promise<IDBDatabase>((resolve, reject) => {
+					const request = indexedDB.open('maal-v1:production');
+					request.onerror = () => reject(request.error);
+					request.onsuccess = () => resolve(request.result);
+				});
+				const storeName = authentication === 'profileReauth' ? 'profiles' : 'authSlots';
+				const transaction = database.transaction(storeName, 'readwrite');
+				const store = transaction.objectStore(storeName);
+				const request = store.get(
+					authentication === 'profileReauth'
+						? '01990c69-7f00-7000-8000-000000000001'
+						: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+				);
+				request.onsuccess = () => {
+					store.put({
+						...request.result,
+						...(authentication === 'profileReauth'
+							? { authState: 'reauthRequired' }
+							: { sessionState: authentication === 'revokedSlot' ? 'revoked' : 'reauthRequired' })
+					});
+				};
+				await new Promise<void>((resolve, reject) => {
+					transaction.oncomplete = () => resolve();
+					transaction.onerror = () => reject(transaction.error);
+				});
+				database.close();
+			}, authentication);
+			await page.reload();
+		}
+
+		await expect(page.getByRole('heading', { name: 'Household settings' })).toBeVisible();
+		await page.getByLabel('Name').fill('Local kitchen');
+		await page.getByRole('button', { name: 'Save household' }).click();
+		await expect(page.getByText('Household settings saved.')).toBeVisible();
+		await page.goto('/invite/7kq2-mz4h-xp9a');
+		await expect(
+			page.getByRole('heading', { name: 'Sign in to join this household' })
+		).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Join household' })).toHaveCount(0);
+
+		const signIn = page.getByRole('link', { name: 'Sign in', exact: true });
+		const href = await signIn.getAttribute('href');
+		expect(href).not.toBeNull();
+		const authorization = new URL(href!, page.url());
+		expect(authorization.searchParams.get('returnTo')).toBe('/household?join=7KQ2MZ4HXP9A');
+		if (authentication === 'signedOut' || authentication === 'revokedSlot') {
+			expect(authorization.searchParams.get('purpose')).toBe('add-profile');
+			expect(authorization.pathname).toMatch(/^\/api\/auth-slots\/[a-z0-9]{32}\/authorize$/);
+			expect(authorization.pathname).not.toContain('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+		} else {
+			expect(authorization.searchParams.get('purpose')).toBe('reauthenticate');
+			expect(authorization.pathname).toBe(
+				'/api/auth-slots/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/authorize'
+			);
+		}
+		await page.route('**/api/auth-slots/*/authorize?**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/plain', body: 'WorkOS sign-in' })
+		);
+		await signIn.click();
+		await expect(page).toHaveURL(authorization.href);
+	});
+}

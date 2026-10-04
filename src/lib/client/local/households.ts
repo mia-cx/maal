@@ -238,12 +238,14 @@ export const detachHouseholdSnapshot = async (
 	if (!membership) throw new LocalHouseholdMissing({ householdId: input.householdId });
 	const slot = await database.authSlots.where('profileId').equals(input.profileId).first();
 	const detachedAt = Schema.decodeUnknownSync(UtcInstantSchema)(input.detachedAt ?? nowUtc());
+	const ownSlotIds = new Set([slot?.authSlotId, `signed-out:${input.profileId}`]);
 
 	await database.transaction(
 		'rw',
 		database.memberships,
 		database.outbox,
 		database.syncScopes,
+		database.profiles,
 		async () => {
 			await database.memberships.update(membership.membershipId, {
 				status: 'detached',
@@ -256,10 +258,20 @@ export const detachHouseholdSnapshot = async (
 					(mutation) =>
 						mutation.scopeKind === 'household' &&
 						mutation.scopeId === input.householdId &&
-						(!slot || mutation.authSlotId === slot.authSlotId) &&
+						ownSlotIds.has(mutation.authSlotId) &&
 						mutation.status !== 'acknowledged'
 				)
 				.modify({ status: 'quarantined' });
+			const localUsers = new Set(
+				(await database.profiles.toArray()).map(({ workosUserId }) => workosUserId)
+			);
+			const remainingMember = await database.memberships
+				.where('householdId')
+				.equals(input.householdId)
+				.filter(({ status, workosUserId }) => status === 'active' && localUsers.has(workosUserId))
+				.first();
+			// The scope/lease is shared by local profiles; another active member can still sync it.
+			if (remainingMember) return;
 			await database.syncScopes
 				.filter((scope) => scope.scopeKind === 'household' && scope.scopeId === input.householdId)
 				.modify({

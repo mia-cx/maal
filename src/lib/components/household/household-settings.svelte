@@ -77,6 +77,7 @@
 	let originDeviceId = $state<string | null>(null);
 	let appliances = $state<ApplianceView[]>([]);
 	let loadedRevision = $state<string | null>(null);
+	let loadedAppliances: string | null = null;
 	let name = $state('');
 	let locale = $state('en-US');
 	let timezone = $state('');
@@ -216,7 +217,7 @@
 				originDeviceId: typeof device?.value === 'string' ? device.value : null,
 				membership: nextMembership ?? null,
 				members: nextMembers
-					.filter(({ status }) => status !== 'revoked')
+					.filter(({ status }) => status === 'active')
 					.map((candidate) => {
 						const local = profilesByUser.get(candidate.workosUserId);
 						const attribution = attributionsByUser.get(candidate.workosUserId);
@@ -228,6 +229,7 @@
 						};
 					}),
 				invites: nextInvites,
+				applianceRevision: JSON.stringify(nextAppliances),
 				appliances: applianceValues.map((appliance) => {
 					const stored = nextAppliances.find((candidate) => candidate.appliance === appliance);
 					return {
@@ -247,7 +249,10 @@
 			membership = value.membership;
 			members = value.members;
 			invites = value.invites;
-			appliances = value.appliances;
+			if (loadedAppliances !== value.applianceRevision) {
+				loadedAppliances = value.applianceRevision;
+				appliances = value.appliances;
+			}
 			if (
 				value.household &&
 				loadedRevision !== `${value.household.householdId}:${value.household.revision}`
@@ -443,7 +448,7 @@
 	};
 </script>
 
-<svelte:window onfocus={() => void refreshFromServer()} />
+<svelte:window onfocus={() => void refreshFromServer()} ononline={() => void refreshFromServer()} />
 
 <Dialog.Root bind:open={inviteOpen}>
 	<Dialog.Content class="sm:max-w-md">

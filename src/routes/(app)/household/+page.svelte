@@ -18,6 +18,8 @@
 	let database = $state<MaalDatabase | null>(null);
 	let activeProfileId = $state<string | null>(null);
 	let activeHouseholdId = $state<string | null>(null);
+	let canOnboard = $state(false);
+	let reauthSlotId = $state<string | null>(null);
 	let error = $state<string | null>(null);
 	let exportOpen = $state(false);
 
@@ -25,24 +27,36 @@
 	// the profile already has a household.
 	const inviteCode = $derived(page.url.searchParams.get('join') ?? '');
 	const onboarding = $derived(page.url.searchParams.has('create') || inviteCode !== '');
-	const signInToJoinHref = $derived(
-		`/api/auth-slots/${createAuthSlotId()}/authorize?purpose=add-profile&returnTo=${encodeURIComponent(`/household?join=${encodeURIComponent(inviteCode)}`)}`
+	const signInHref = $derived(
+		`/api/auth-slots/${reauthSlotId ?? createAuthSlotId()}/authorize?purpose=${reauthSlotId ? 'reauthenticate' : 'add-profile'}&returnTo=${encodeURIComponent(page.url.pathname + page.url.search)}`
 	);
 
 	onMount(() => {
 		let unsubscribe: (() => void) | null = null;
 		void getBrowserDatabase()
 			.then((local) => {
-				database = local;
 				const subscription = liveQuery(async () => {
 					const profileState = await local.uiState.get('activeProfileId');
 					const profileId = typeof profileState?.value === 'string' ? profileState.value : null;
-					if (!profileId) return { profileId: null, householdId: null };
-					const householdState = await local.uiState.get(activeHouseholdKey(profileId));
-					if (typeof householdState?.value === 'string') {
-						return { profileId, householdId: householdState.value };
+					if (!profileId) {
+						return { profileId: null, householdId: null, canOnboard: false, reauthSlotId: null };
 					}
 					const profile = await local.profiles.get(profileId);
+					const slot = await local.authSlots.where('profileId').equals(profileId).first();
+					const authentication = {
+						canOnboard:
+							(profile?.authState === 'authenticated' || profile?.authState === 'stale') &&
+							slot?.sessionState === 'authenticated',
+						// Sign-out removes the server identity binding, so revoked slots need a fresh sign-in.
+						reauthSlotId:
+							profile && profile.authState !== 'signedOut' && slot?.sessionState !== 'revoked'
+								? (slot?.authSlotId ?? null)
+								: null
+					};
+					const householdState = await local.uiState.get(activeHouseholdKey(profileId));
+					if (typeof householdState?.value === 'string') {
+						return { profileId, householdId: householdState.value, ...authentication };
+					}
 					const firstMembership = profile
 						? await local.memberships
 								.where('workosUserId')
@@ -50,10 +64,17 @@
 								.filter(({ status }) => status !== 'revoked')
 								.first()
 						: null;
-					return { profileId, householdId: firstMembership?.householdId ?? null };
+					return {
+						profileId,
+						householdId: firstMembership?.householdId ?? null,
+						...authentication
+					};
 				}).subscribe((value) => {
 					activeProfileId = value.profileId;
 					activeHouseholdId = value.householdId;
+					canOnboard = value.canOnboard;
+					reauthSlotId = value.reauthSlotId;
+					database = local;
 				});
 				unsubscribe = () => subscription.unsubscribe();
 			})
@@ -73,7 +94,22 @@
 		<div class="flex w-9 shrink-0 items-center justify-center"><Sidebar.Trigger /></div>
 	</header>
 	<div class="h-[calc(100svh-52px)] min-h-0 overflow-y-auto">
-		{#if activeProfileId && (onboarding || !activeHouseholdId)}
+		{#if !canOnboard && (onboarding || !activeHouseholdId) && (activeProfileId || inviteCode)}
+			<div class="mx-auto grid min-h-[60svh] max-w-xl place-items-center px-6 text-center">
+				<div class="grid justify-items-center gap-3">
+					<h1 class="text-xl font-semibold tracking-tight">
+						{inviteCode ? 'Sign in to join this household' : 'Sign in to set up your household'}
+					</h1>
+					{#if inviteCode}
+						<p class="text-sm text-muted-foreground">
+							After you sign in, the invite code is filled in for you.
+						</p>
+					{/if}
+					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+					<Button href={signInHref}>Sign in</Button>
+				</div>
+			</div>
+		{:else if activeProfileId && (onboarding || !activeHouseholdId)}
 			{#key `${activeProfileId}:${inviteCode}`}
 				<HouseholdOnboarding
 					{database}
@@ -94,17 +130,6 @@
 					}}
 				/>
 			{/key}
-		{:else if inviteCode}
-			<div class="mx-auto grid min-h-[60svh] max-w-xl place-items-center px-6 text-center">
-				<div class="grid justify-items-center gap-3">
-					<h1 class="text-xl font-semibold tracking-tight">Sign in to join this household</h1>
-					<p class="text-sm text-muted-foreground">
-						After you sign in, the invite code is filled in for you.
-					</p>
-					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-					<Button href={signInToJoinHref}>Sign in</Button>
-				</div>
-			</div>
 		{:else}
 			<div class="mx-auto grid min-h-[60svh] max-w-xl place-items-center px-6 text-center">
 				<div class="grid gap-2">

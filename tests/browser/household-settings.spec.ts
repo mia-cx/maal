@@ -161,16 +161,81 @@ test('lists only members whose membership is still active', async () => {
 	const { database, profileId } = await seed({
 		members: [
 			membership('user_alice', 'admin'),
-			membership('user_bob', 'member', { status: 'revoked' })
+			membership('user_bob', 'member', { status: 'revoked' }),
+			membership('user_charlie', 'member', { status: 'detached' })
 		]
 	});
 	await database.userAttributions.put(identity('user_bob', 'Bob de Vries'));
+	await database.userAttributions.put(identity('user_charlie', 'Charlie de Vries'));
 	vi.spyOn(window, 'fetch').mockRejectedValue(new TypeError('offline'));
 
 	const screen = await render(HouseholdSettings, { database, profileId, householdId });
 	await expect.element(screen.getByRole('heading', { name: 'Members' })).toBeVisible();
 	await expect.element(screen.getByText('Alice de Vries')).toBeVisible();
 	await expect.element(screen.getByText('Bob de Vries')).not.toBeInTheDocument();
+	await expect.element(screen.getByText('Charlie de Vries')).not.toBeInTheDocument();
+});
+
+test('preserves appliance drafts across focus refreshes and saves them', async () => {
+	const { database, profileId } = await seed();
+	const alice = membership('user_alice', 'admin');
+	const bob = membership('user_bob', 'member');
+	let focused = false;
+	const refreshes = mockRefresh(() => ({
+		household: household(),
+		membership: alice,
+		members: [
+			{ membership: alice, user: identity('user_alice', 'Alice de Vries') },
+			...(focused ? [{ membership: bob, user: identity('user_bob', 'Bob de Vries') }] : [])
+		],
+		invites: []
+	}));
+	const screen = await render(HouseholdSettings, { database, profileId, householdId });
+	await expect.poll(() => database.remoteProjectionMeta.count()).toBe(1);
+	const oven = screen.getByRole('checkbox', { name: 'Oven', exact: true });
+	await screen.getByText('Oven', { exact: true }).click();
+	await expect.element(oven).toBeChecked();
+	focused = true;
+	await expect
+		.poll(() => {
+			window.dispatchEvent(new FocusEvent('focus'));
+			return refreshes.length;
+		})
+		.toBeGreaterThanOrEqual(2);
+	await expect.element(screen.getByText('Bob de Vries')).toBeVisible();
+	await expect.element(oven).toBeChecked();
+	await screen.getByRole('button', { name: 'Save appliances' }).click();
+	await expect
+		.poll(
+			async () =>
+				(
+					await database.householdAppliances.where('householdId').equals(householdId).toArray()
+				).find(({ appliance }) => appliance === 'oven')?.available
+		)
+		.toBe(true);
+});
+
+test('refreshes after reconnecting while settings stays open', async () => {
+	const { database, profileId } = await seed();
+	const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+	const alice = membership('user_alice', 'admin');
+	const bob = membership('user_bob', 'member');
+	const refreshes = mockRefresh(() => ({
+		household: household(),
+		membership: alice,
+		members: [
+			{ membership: alice, user: identity('user_alice', 'Alice de Vries') },
+			{ membership: bob, user: identity('user_bob', 'Bob de Vries') }
+		],
+		invites: []
+	}));
+	const screen = await render(HouseholdSettings, { database, profileId, householdId });
+	await expect.element(screen.getByRole('heading', { name: 'Members' })).toBeVisible();
+	expect(refreshes).toHaveLength(0);
+	online.mockReturnValue(true);
+	window.dispatchEvent(new Event('online'));
+	await expect.element(screen.getByText('Bob de Vries')).toBeVisible();
+	expect(refreshes).toHaveLength(1);
 });
 
 test('copies a shareable invite URL', async () => {
