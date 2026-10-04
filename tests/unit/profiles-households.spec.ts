@@ -522,6 +522,7 @@ describe('offline households and cached authority', () => {
 				url: String(input),
 				body: init?.body ? JSON.parse(String(init.body)) : null
 			});
+			if (String(input).includes('/billing/status')) return new Response(null, { status: 503 });
 			const payload = responses.shift();
 			if (!payload) throw new Error('Unexpected request');
 			return Response.json({ schemaVersion: 1, payload });
@@ -545,8 +546,14 @@ describe('offline households and cached authority', () => {
 				body: { name: 'Created home', locale: 'en-NL', timezone: 'Europe/Amsterdam' }
 			}),
 			expect.objectContaining({
+				url: `/api/auth-slots/${'a'.repeat(32)}/billing/status?householdId=org_created`
+			}),
+			expect.objectContaining({
 				url: `/api/auth-slots/${'a'.repeat(32)}/households/join`,
 				body: { code: 'ABCD-EFGH-IJKL' }
+			}),
+			expect.objectContaining({
+				url: `/api/auth-slots/${'a'.repeat(32)}/billing/status?householdId=org_joined`
 			})
 		]);
 		await expect(database.households.get(createdHousehold.householdId)).resolves.toEqual(

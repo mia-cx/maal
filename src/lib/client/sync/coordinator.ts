@@ -443,6 +443,7 @@ export const createUserSyncCoordinator = (
 	let active: Promise<UserSyncRunState> | null = null;
 	let started = false;
 	let terminalBlocked = false;
+	let capabilityBlocked = false;
 	let retryAttempt = 0;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let unsubscribe: (() => void)[] = [];
@@ -580,6 +581,7 @@ export const createUserSyncCoordinator = (
 
 	const markTerminal = async (error: unknown): Promise<void> => {
 		terminalBlocked = true;
+		capabilityBlocked = error instanceof SyncCapabilityDenied;
 		if (error instanceof SyncUnauthenticated) {
 			currentState = 'reauthRequired';
 			await markProfileReauthRequired(options.database, options.authSlotId);
@@ -696,7 +698,9 @@ export const createUserSyncCoordinator = (
 			schedule(250);
 		},
 		resumeAfterCapabilityRefresh() {
+			if (terminalBlocked && !capabilityBlocked) return;
 			terminalBlocked = false;
+			capabilityBlocked = false;
 			retryAttempt = 0;
 			schedule();
 		},
