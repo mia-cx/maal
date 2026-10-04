@@ -165,6 +165,38 @@ const mealMutation = (
 });
 
 describe('D1 household sync', () => {
+	test.each(['households:write', 'household:manage'])(
+		'expands stored %s without bypassing live permission checks',
+		async (storedPermission) => {
+			await database
+				.prepare('UPDATE household_memberships SET permissions = ? WHERE workos_user_id = ?')
+				.bind(JSON.stringify([storedPermission]), aliceId)
+				.run();
+			for (const permission of ['meals:read', 'meals:write', 'households:write'] as const) {
+				await expect(
+					d1HouseholdSyncCapabilityAuthorizer.authorize({
+						database,
+						workosUserId: aliceId,
+						householdId,
+						activeWorkOSMemberships: [liveMembership()],
+						permission,
+						now: timestamp
+					})
+				).resolves.toEqual({ householdId, permission });
+			}
+			await expect(
+				d1HouseholdSyncCapabilityAuthorizer.authorize({
+					database,
+					workosUserId: aliceId,
+					householdId,
+					activeWorkOSMemberships: [liveMembership({ permissions: ['meals:read'] })],
+					permission: 'meals:write',
+					now: timestamp
+				})
+			).rejects.toMatchObject({ code: 'household_permission_required' });
+		}
+	);
+
 	test('commits and bootstraps the household settings aggregate', async () => {
 		const repository = new D1HouseholdSyncRepository(database);
 		const mutationId = uuidv7();

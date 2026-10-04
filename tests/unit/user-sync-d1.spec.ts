@@ -144,7 +144,12 @@ const recipeAggregate = (id: string, mutationId: string) => ({
 });
 
 describe('D1 user sync repository', () => {
-	test('requires a current WorkOS household intersection and active/grace Maal capability', async () => {
+	test.each([
+		{ permissions: ['recipes:read', 'recipes:write'] },
+		{ permissions: ['households:write'] },
+		{ permissions: ['household:manage'] },
+		{ permissions: ['household:meals:manage'] }
+	])('authorizes stored $permissions', async ({ permissions }) => {
 		await database.prepare('INSERT INTO users (workos_user_id) VALUES (?)').bind(userId).run();
 		await database
 			.prepare("INSERT INTO households (household_id, created_by_user_id) VALUES ('org_paid', ?)")
@@ -157,7 +162,7 @@ describe('D1 user sync repository', () => {
 				  workos_created_at, last_verified_at)
 				 VALUES ('membership_paid', 'org_paid', ?, 'member', ?, 'active', ?, ?)`
 			)
-			.bind(userId, JSON.stringify(['recipes:read', 'recipes:write']), timestamp, timestamp)
+			.bind(userId, JSON.stringify(permissions), timestamp, timestamp)
 			.run();
 		await database
 			.prepare(

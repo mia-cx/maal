@@ -173,6 +173,29 @@ describe('MCP key lifecycle', () => {
 });
 
 describe('MCP request authorization', () => {
+	test.each([
+		['households:write', MCP_TEST_PERMISSIONS],
+		['household:manage', MCP_TEST_PERMISSIONS],
+		['household:meals:manage', ['recipes:read', 'recipes:write', 'meals:read', 'meals:write']],
+		['household:meals:attend', ['meals:read']],
+		['meals:read', ['meals:read']],
+		['unknown:permission', []]
+	] as const)(
+		'intersects expanded stored %s with live permissions',
+		async (storedPermission, expected) => {
+			await database
+				.prepare('UPDATE household_memberships SET permissions = ?')
+				.bind(JSON.stringify([storedPermission]))
+				.run();
+			const created = await createKey();
+			expect((await authorize(created.key)).effectiveHouseholds[0]?.permissions).toEqual(expected);
+			expect(
+				(await authorize(created.key, [membership(MCP_TEST_HOUSEHOLD, undefined, ['meals:read'])]))
+					.effectiveHouseholds[0]?.permissions
+			).toEqual(expected.filter((permission) => permission === 'meals:read'));
+		}
+	);
+
 	test('uses only the Authorization header and returns safe no-store challenges', async () => {
 		const querySecret = `mk_${'q'.repeat(43)}`;
 		const queryOnly = new Request(`https://maal.test/mcp?api_key=${querySecret}`, {
