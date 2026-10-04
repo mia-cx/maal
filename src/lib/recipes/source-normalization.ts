@@ -2,12 +2,20 @@
  * Turns recipe source text into structured rows against the global taxonomy seed. URL imports and
  * editor saves both run through here, on the Worker and in the browser, so it stays pure.
  */
-import type { RecipeIngredient } from '$lib/domain/recipes/schema.js';
+import { uuidv7 } from 'uuidv7';
+
+import type {
+	InstructionEvent,
+	RecipeIngredient,
+	RecipeInstruction
+} from '$lib/domain/recipes/schema.js';
+import { toBaseQuantity } from '$lib/domain/taxonomy/conversion.js';
 import { GLOBAL_UNIT_ALIAS_SEED, GLOBAL_UNIT_SEED } from '$lib/domain/taxonomy/global-seed.js';
 import { normalizedAlias } from '$lib/taxonomy/aliases.js';
 
 import {
 	canonicalIngredientUnit,
+	instructionUnitPatternFor,
 	parseIngredientLine,
 	parseQuantity,
 	type IngredientUnitAliases,
@@ -26,6 +34,9 @@ type IngredientSourceFields = Pick<
 	| 'baseUnitId'
 	| 'baseUnitFamilyId'
 >;
+
+const TEMPERATURE_BASE_UNIT_ID = 'celsius';
+const TEMPERATURE_EVENT_CONFIDENCE = 0.9;
 
 // `parseIngredientLine` speaks compact labels ("cup"); the seed speaks unit IDs ("cups").
 const seedUnitByCompact = new Map(
@@ -94,3 +105,52 @@ export const parseIngredientSource = (line: string): IngredientSourceFields => {
 		item: split.item
 	});
 };
+
+const temperatureUnitById = new Map(
+	GLOBAL_UNIT_SEED.filter(({ baseUnitId }) => baseUnitId === TEMPERATURE_BASE_UNIT_ID).map(
+		(unit) => [unit.id, unit]
+	)
+);
+const temperatureAliases = GLOBAL_UNIT_ALIAS_SEED.filter(
+	({ baseUnitId, sourceDomain }) => baseUnitId === TEMPERATURE_BASE_UNIT_ID && sourceDomain === null
+);
+const temperatureUnitIdByAlias = new Map(
+	temperatureAliases.map(({ alias, unitId }) => [normalizedAlias(alias), unitId])
+);
+const temperaturePattern = new RegExp(
+	String.raw`(-?\d+(?:\.\d+)?)\s*(${[
+		...new Set(temperatureAliases.flatMap(({ alias }) => [alias, normalizedAlias(alias)]))
+	]
+		.toSorted((left, right) => right.length - left.length)
+		.map(instructionUnitPatternFor)
+		.join('|')})\b`,
+	'giu'
+);
+
+/** Temperature events ("350°F") found in one instruction, one per mention, in text order. */
+export const parseInstructionEvents = (
+	instruction: Pick<RecipeInstruction, 'id' | 'text'>,
+	createdAt: InstructionEvent['createdAt']
+): InstructionEvent[] =>
+	[...instruction.text.matchAll(temperaturePattern)].flatMap(([sourceText, rawValue, rawUnit]) => {
+		const unit = temperatureUnitById.get(
+			temperatureUnitIdByAlias.get(normalizedAlias(rawUnit ?? '')) ?? ''
+		);
+		const value = Number(rawValue);
+		if (!unit || !Number.isFinite(value)) return [];
+		return [
+			{
+				id: uuidv7(),
+				recipeInstructionId: instruction.id,
+				kind: 'temperature' as const,
+				appliance: null,
+				sourceText,
+				value,
+				unitId: unit.id,
+				baseValue: toBaseQuantity(value, unit),
+				baseUnitId: unit.baseUnitId,
+				confidence: TEMPERATURE_EVENT_CONFIDENCE,
+				createdAt
+			}
+		];
+	});

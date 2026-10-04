@@ -33,7 +33,10 @@ import {
 	type RecipeInstruction,
 	type RecipePurgeTombstone
 } from '$lib/domain/recipes/schema.js';
-import { normalizeIngredientSource } from '$lib/recipes/source-normalization.js';
+import {
+	normalizeIngredientSource,
+	parseInstructionEvents
+} from '$lib/recipes/source-normalization.js';
 
 const NullableStringSchema = Schema.NullOr(Schema.String);
 const NullableNonNegativeIntSchema = Schema.NullOr(Schema.NonNegativeInt);
@@ -154,7 +157,7 @@ export const recipeSearchTokens = (recipe: {
 	return [...new Set(normalized)];
 };
 
-export const reconcileIngredients = (
+const reconcileIngredients = (
 	current: readonly RecipeIngredient[],
 	edits: readonly RecipeIngredientEdit[],
 	occurredAt: UtcInstant
@@ -192,7 +195,7 @@ export const reconcileIngredients = (
 		});
 };
 
-export const reconcileInstructions = (
+const reconcileInstructions = (
 	current: readonly RecipeInstruction[],
 	edits: readonly RecipeInstructionEdit[],
 	occurredAt: UtcInstant
@@ -216,6 +219,30 @@ export const reconcileInstructions = (
 				updatedAt: occurredAt
 			};
 		});
+};
+
+/**
+ * Builds the ingredient, instruction, and instruction-event sidecars for an editor save. Edited
+ * lines are parsed again; untouched lines and the events of unchanged instruction text are kept.
+ */
+export const reconcileRecipeLines = (
+	current: Pick<RecipeImportedCandidate, 'ingredients' | 'instructions' | 'instructionEvents'>,
+	patch: Pick<RecipeEditorPatch, 'ingredients' | 'instructions'>,
+	occurredAt: UtcInstant
+): Pick<RecipeImportedCandidate, 'ingredients' | 'instructions' | 'instructionEvents'> => {
+	const instructions = reconcileInstructions(current.instructions, patch.instructions, occurredAt);
+	const previousText = new Map(current.instructions.map(({ id, text }) => [id, text]));
+	return {
+		ingredients: reconcileIngredients(current.ingredients, patch.ingredients, occurredAt),
+		instructions,
+		instructionEvents: instructions.flatMap((instruction) =>
+			previousText.get(instruction.id) === instruction.text
+				? current.instructionEvents.filter(
+						({ recipeInstructionId }) => recipeInstructionId === instruction.id
+					)
+				: parseInstructionEvents(instruction, occurredAt)
+		)
+	};
 };
 
 const recipeWriteCommand = (
@@ -261,8 +288,11 @@ const createRecipeCommand = (
 ): { recipe: RecipeAggregate; command: LocalCommand } => {
 	const occurredAt = commandTime(context);
 	const patch = decode(RecipeEditorPatchSchema, patchInput, 'decode recipe editor patch');
-	const ingredients = reconcileIngredients([], patch.ingredients, occurredAt);
-	const instructions = reconcileInstructions([], patch.instructions, occurredAt);
+	const lines = reconcileRecipeLines(
+		{ ingredients: [], instructions: [], instructionEvents: [] },
+		patch,
+		occurredAt
+	);
 	const candidateWithoutSearch = {
 		schemaVersion: CURRENT_SCHEMA_VERSION,
 		revision: 1,
@@ -300,9 +330,7 @@ const createRecipeCommand = (
 		instructionConfidence: null,
 		nutritionConfidence: null,
 		userNotes: null,
-		ingredients,
-		instructions,
-		instructionEvents: [],
+		...lines,
 		applianceRequirements: [],
 		classifications: [],
 		media: [],
@@ -389,13 +417,6 @@ export const updateRecipeFromEditor = async (
 		{ recipeId, conflictGroups: ['header', 'ingredients', 'instructions'], patch },
 		(current) => {
 			const recipe = requireOwnedRecipe(current, context.ownerUserId, 'update recipe');
-			const ingredients = reconcileIngredients(recipe.ingredients, patch.ingredients, occurredAt);
-			const instructions = reconcileInstructions(
-				recipe.instructions,
-				patch.instructions,
-				occurredAt
-			);
-			const retainedInstructionIds = new Set(instructions.map(({ id }) => id));
 			const nextWithoutSearch = {
 				...recipe,
 				title: patch.title.trim(),
@@ -409,11 +430,7 @@ export const updateRecipeFromEditor = async (
 				prepTimeMinutes: patch.prepTimeMinutes,
 				cookTimeMinutes: patch.cookTimeMinutes,
 				yield: patch.yield,
-				ingredients,
-				instructions,
-				instructionEvents: recipe.instructionEvents.filter(({ recipeInstructionId }) =>
-					retainedInstructionIds.has(recipeInstructionId)
-				),
+				...reconcileRecipeLines(recipe, patch, occurredAt),
 				searchTokens: []
 			} satisfies RecipeAggregate;
 			return {

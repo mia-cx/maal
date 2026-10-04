@@ -65,6 +65,15 @@ const context = {
 	occurredAt: now
 } as const;
 
+const fahrenheitEvent = {
+	kind: 'temperature',
+	appliance: null,
+	sourceText: '350°F',
+	value: 350,
+	unitId: 'fahrenheit',
+	baseUnitId: 'celsius'
+};
+
 describe('URL import', () => {
 	test('splits ingredient lines and resolves seed units, keeping the source line', async () => {
 		const candidate = await importRecipe(
@@ -105,12 +114,33 @@ describe('URL import', () => {
 		]);
 	});
 
-	test('review edits re-derive changed ingredient lines and keep untouched ones', async () => {
-		const candidate = await importRecipe(['1 cup flour'], ['Mix.']);
+	test('derives temperature events from instruction text', async () => {
+		const candidate = await importRecipe(['flour'], ['Preheat to 350°F.', 'Bake at 200°C.']);
+		const [preheat, bake] = candidate.instructions;
+		expect(candidate.instructionEvents).toEqual([
+			expect.objectContaining({ ...fahrenheitEvent, recipeInstructionId: preheat?.id }),
+			expect.objectContaining({
+				recipeInstructionId: bake?.id,
+				kind: 'temperature',
+				sourceText: '200°C',
+				value: 200,
+				unitId: 'celsius',
+				baseValue: 200,
+				baseUnitId: 'celsius'
+			})
+		]);
+		expect(candidate.instructionEvents[0]?.baseValue).toBeCloseTo(176.67, 2);
+	});
+
+	test('review edits re-derive changed lines and keep untouched ones', async () => {
+		const candidate = await importRecipe(['1 cup flour'], ['Preheat to 350°F.', 'Mix.']);
 		const draft = importedCandidateToMenuItem(candidate, uuidv7());
 		const merged = mergeEditorIntoImportedCandidate(candidate, {
 			...draft,
-			ingredients: draft.ingredients?.map((row) => ({ ...row, amount: '2 1/2' }))
+			ingredients: draft.ingredients?.map((row) => ({ ...row, amount: '2 1/2' })),
+			instructions: draft.instructions?.map((row) =>
+				row.position === 1 ? { ...row, text: 'Preheat to 200°C.' } : row
+			)
 		});
 		expect(merged.ingredients[0]).toMatchObject({
 			sourceAmountText: '2 1/2',
@@ -118,11 +148,18 @@ describe('URL import', () => {
 			baseQuantity: 2.5,
 			baseUnitId: 'cups'
 		});
+		expect(merged.instructionEvents).toEqual([
+			expect.objectContaining({
+				recipeInstructionId: candidate.instructions[0]?.id,
+				sourceText: '200°C',
+				unitId: 'celsius'
+			})
+		]);
 	});
 });
 
 describe('editor save', () => {
-	test('parses fractional amounts and seed units on create and edit', async () => {
+	test('parses amounts and temperatures on create, and regenerates events when text changes', async () => {
 		const database = await openMaalDatabase(`recipe-normalization-${crypto.randomUUID()}`);
 		databases.push(database);
 		const created = await createRecipeFromEditor(
@@ -130,7 +167,7 @@ describe('editor save', () => {
 			context,
 			editorPatch(
 				[{ id: null, amount: '1 1/2', unit: 'cups', item: 'flour' }],
-				[{ id: null, position: 1, text: 'Mix.' }]
+				[{ id: null, position: 1, text: 'Preheat to 350°F.' }]
 			)
 		);
 		expect(created.ingredients[0]).toMatchObject({
@@ -143,6 +180,7 @@ describe('editor save', () => {
 			baseUnitId: 'cups',
 			baseUnitFamilyId: 'milliliters'
 		});
+		expect(created.instructionEvents).toEqual([expect.objectContaining(fahrenheitEvent)]);
 
 		const instruction = created.instructions[0]!;
 		const updated = await updateRecipeFromEditor(
@@ -151,9 +189,17 @@ describe('editor save', () => {
 			created.id,
 			editorPatch(
 				[{ id: created.ingredients[0]!.id, amount: '¾', unit: 'cups', item: 'flour' }],
-				[{ id: instruction.id, position: 1, text: 'Mix.' }]
+				[{ id: instruction.id, position: 1, text: 'Preheat to 200°C.' }]
 			)
 		);
 		expect(updated.ingredients[0]).toMatchObject({ sourceQuantity: 0.75, baseQuantity: 0.75 });
+		expect(updated.instructionEvents).toEqual([
+			expect.objectContaining({
+				recipeInstructionId: instruction.id,
+				sourceText: '200°C',
+				value: 200,
+				unitId: 'celsius'
+			})
+		]);
 	});
 });

@@ -508,7 +508,8 @@ const normalizedInstructionUnitAlias = (value: string): string =>
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const instructionUnitPatternFor = (alias: string): string => {
+/** Regex source matching a unit alias in instruction text: `°` also matches `º`, spaces stretch. */
+export const instructionUnitPatternFor = (alias: string): string => {
 	const escaped = escapeRegExp(alias.trim()).replace(/°/gu, '[°º]');
 	return escaped.replace(/\\ /gu, '\\s+');
 };
