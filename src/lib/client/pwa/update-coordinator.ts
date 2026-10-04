@@ -17,7 +17,7 @@ const HEARTBEAT_MS = 5_000;
 const LIVE_TAB_MS = 15_000;
 
 export type PwaUpdateStatus =
-	'idle' | 'available' | 'preparing' | 'waiting-for-tabs' | 'reload-required';
+	'idle' | 'available' | 'preparing' | 'waiting-for-tabs' | 'activating' | 'reload-required';
 
 export interface PwaUpdateState {
 	readonly status: PwaUpdateStatus;
@@ -29,7 +29,11 @@ export interface PwaUpdateState {
 type Listener = (state: PwaUpdateState) => void;
 type PrepareUpdateMessage = Extract<UpdateChannelMessage, { type: 'PREPARE_UPDATE' }>;
 
-const UPDATING_STATUSES: ReadonlySet<PwaUpdateStatus> = new Set(['preparing', 'waiting-for-tabs']);
+const UPDATING_STATUSES: ReadonlySet<PwaUpdateStatus> = new Set([
+	'preparing',
+	'waiting-for-tabs',
+	'activating'
+]);
 
 interface UpdateWorker {
 	readonly scriptURL: string;
@@ -240,6 +244,7 @@ export class PwaUpdateCoordinator {
 
 	/** Abandons the pending update in every tab, so local saving resumes everywhere. */
 	cancel(): void {
+		if (this.#state.status === 'activating') return;
 		for (const requestId of this.#preparedRequests) {
 			this.#post({ type: 'CANCEL_UPDATE', tabId: this.tabId, requestId });
 			this.#abandonUpdate(requestId);
@@ -347,6 +352,7 @@ export class PwaUpdateCoordinator {
 	}
 
 	#tryActivation(): void {
+		if (this.#state.status === 'activating') return;
 		if (!this.#request || !this.#readyTabs.has(this.tabId)) return;
 		if (!this.#registration?.waiting || !this.#state.version) return;
 		const now = this.#runtime.now();
@@ -365,6 +371,7 @@ export class PwaUpdateCoordinator {
 			type: 'SKIP_WAITING',
 			version: this.#state.version
 		});
+		this.#setState({ ...this.#state, status: 'activating' });
 	}
 
 	#sendHeartbeat(): void {

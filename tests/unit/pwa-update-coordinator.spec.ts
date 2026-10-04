@@ -176,7 +176,10 @@ class UpdateTabs {
 	readonly registration = new FakeRegistration(this.waiting);
 	#nextId = 0;
 
-	open(drainCommits: () => Promise<void> = async () => undefined) {
+	open(
+		drainCommits: () => Promise<void> = async () => undefined,
+		reload: () => void = () => undefined
+	) {
 		const serviceWorkers = new FakeServiceWorkers(Promise.resolve(this.registration));
 		const paused: string[] = [];
 		const resumed: string[] = [];
@@ -194,7 +197,7 @@ class UpdateTabs {
 			pauseCommits: (reason) => paused.push(reason),
 			resumeCommits: (reason) => resumed.push(reason),
 			drainCommits,
-			reload: () => undefined
+			reload
 		});
 		let state: PwaUpdateState | null = null;
 		coordinator.subscribe((next) => (state = next));
@@ -467,6 +470,39 @@ describe('PWA update coordination', () => {
 			first.coordinator.dispose();
 			peer.coordinator.dispose();
 			late.close();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	test('keeps the update in activating after SKIP_WAITING until the new worker takes over', async () => {
+		vi.useFakeTimers();
+		try {
+			const tabs = new UpdateTabs();
+			const reload = vi.fn();
+			const first = tabs.open(undefined, reload);
+			await first.coordinator.start();
+			first.serviceWorkers.emitMessage({
+				type: 'UPDATE_WAITING',
+				version: 'build-2',
+				critical: false
+			});
+			await first.coordinator.activate();
+			await vi.advanceTimersByTimeAsync(1_000);
+
+			expect(tabs.waiting.messages).toContainEqual({
+				type: 'SKIP_WAITING',
+				version: 'build-2'
+			});
+			expect(first.status()).toBe('activating');
+
+			first.coordinator.cancel();
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect(first.status()).toBe('activating');
+			expect(first.resumed).toHaveLength(0);
+
+			first.serviceWorkers.emitControllerChange();
+			expect(reload).toHaveBeenCalled();
 		} finally {
 			vi.useRealTimers();
 		}
