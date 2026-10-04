@@ -404,6 +404,34 @@ test.describe('meal pool', () => {
 		await expect(targetDay).not.toContainText('Gingery chicken rice bowls');
 	});
 
+	test('keeps a pool meal visible and editable after saving a time without a date', async ({
+		page
+	}) => {
+		await seed(page);
+		const [meal] = await readStore(page, 'meals');
+		const card = mealPool(page).locator(`[data-meal-card-id="${meal!.id}"]`);
+		await card.click();
+		await page.getByRole('button', { name: /Choose a date and time/ }).click();
+		await page.getByRole('textbox', { name: 'Start eating', exact: true }).fill('18:30');
+		await page.keyboard.press('Escape');
+		await page.getByRole('button', { name: 'Save meal', exact: true }).click();
+		await expect(page.getByRole('dialog')).toHaveCount(0);
+		await expect
+			.poll(async () =>
+				(await readStore(page, 'meals')).map(({ id, date, time }) => ({ id, date, time }))
+			)
+			.toEqual([{ id: meal!.id, date: null, time: '18:30' }]);
+		await expect(card).toBeVisible();
+
+		await page.reload();
+		await expect(card).toBeVisible();
+		await card.click();
+		await page.getByRole('button', { name: /Choose a date and time/ }).click();
+		await expect(page.getByRole('textbox', { name: 'Start eating', exact: true })).toHaveValue(
+			'18:30'
+		);
+	});
+
 	test('previews a pool meal without writing anything', async ({ page }) => {
 		await seed(page);
 		const counts = async () => ({

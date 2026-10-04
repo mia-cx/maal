@@ -1,12 +1,19 @@
 import { describe, expect, test } from 'vitest';
 
 import { moveMealToDropTarget } from './schedule-dnd.js';
-import { sortScheduledMeals } from './schedule-ordering.js';
+import { isMealInPool, sortScheduledMeals } from './schedule-ordering.js';
 import type { Meal } from './schedule-types.js';
 
 const meal = (id: string, patch: Partial<Meal> = {}): Meal => ({ id, title: id, ...patch });
 
 describe('schedule ordering', () => {
+	test('keeps undated meals in the pool regardless of time', () => {
+		expect(isMealInPool(meal('undated'))).toBe(true);
+		expect(isMealInPool(meal('undated-timed', { time: '18:30' }))).toBe(true);
+		expect(isMealInPool(meal('dated', { date: '2026-08-23' }))).toBe(false);
+		expect(isMealInPool(meal('dated-timed', { date: '2026-08-23', time: '18:30' }))).toBe(false);
+	});
+
 	test('keeps timed meals before untimed meals and spaces reordered pool positions', () => {
 		const meals = [
 			meal('late', { date: '2026-08-23', time: '19:00' }),
