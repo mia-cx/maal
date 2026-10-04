@@ -14,11 +14,14 @@
 		updateRecipeFromEditor,
 		type RecipeCommandContext
 	} from '$lib/client/recipes/index.js';
+	import { liveRecipeStatistics } from '$lib/client/recipes/statistics.js';
 	import { detachDeletedRecipeFromMeals } from '$lib/client/meals/index.js';
 	import { getBrowserDatabase } from '$lib/client/local/browser.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import { DomainIdSchema } from '$lib/domain/contracts/primitives.js';
+	import type { RecipeAggregate } from '$lib/domain/recipes/schema.js';
 	import { MyMenuDashboard, type RecipeMenuItem } from '$lib/components/menu/index.js';
+	import type { RecipeMenuStats } from '$lib/menu/recipe-defaults.js';
 	import {
 		mergeEditorIntoImportedCandidate,
 		recipeAggregateToMenuItem,
@@ -26,10 +29,21 @@
 	} from '$lib/menu/recipe-local-adapter.js';
 
 	let database = $state<MaalDatabase | null>(null);
-	let recipes = $state<RecipeMenuItem[]>([]);
-	let archivedRecipes = $state<RecipeMenuItem[]>([]);
+	let library = $state.raw<{ recipes: RecipeAggregate[]; archivedRecipes: RecipeAggregate[] }>({
+		recipes: [],
+		archivedRecipes: []
+	});
+	let statistics = $state.raw<ReadonlyMap<string, RecipeMenuStats>>(new Map());
 	let activeOwnerUserId = $state<string | null>(null);
 	let loadError = $state<string | null>(null);
+	// Only a successful statistics emission may clear its error, not library updates.
+	let statisticsError = $state<string | null>(null);
+	const visibleError = $derived(loadError ?? statisticsError);
+
+	const toMenuItem = (recipe: RecipeAggregate) =>
+		recipeAggregateToMenuItem(recipe, statistics.get(recipe.id));
+	const recipes = $derived(library.recipes.map(toMenuItem));
+	const archivedRecipes = $derived(library.archivedRecipes.map(toMenuItem));
 
 	const commandContext = async (): Promise<RecipeCommandContext> => {
 		if (!database || !activeOwnerUserId) throw new Error('Choose a local profile first.');
@@ -117,6 +131,7 @@
 	onMount(() => {
 		let cancelled = false;
 		let subscription: { unsubscribe: () => void } | undefined;
+		let statisticsSubscription: { unsubscribe: () => void } | undefined;
 
 		void getBrowserDatabase()
 			.then((opened) => {
@@ -138,14 +153,23 @@
 					]);
 					return { ownerUserId: profile.workosUserId, recipes: active, archivedRecipes: deleted };
 				}).subscribe({
-					next: (library) => {
-						activeOwnerUserId = library.ownerUserId;
-						recipes = library.recipes.map(recipeAggregateToMenuItem);
-						archivedRecipes = library.archivedRecipes.map(recipeAggregateToMenuItem);
+					next: (next) => {
+						activeOwnerUserId = next.ownerUserId;
+						library = next;
 						loadError = null;
 					},
 					error: () => {
 						loadError = 'Your local recipe library could not be read.';
+					}
+				});
+				// Separate from the library query so meal changes don't re-read every recipe.
+				statisticsSubscription = liveRecipeStatistics(opened).subscribe({
+					next: (next) => {
+						statistics = next;
+						statisticsError = null;
+					},
+					error: () => {
+						statisticsError = 'Your local recipe library could not be read.';
 					}
 				});
 			})
@@ -156,13 +180,14 @@
 		return () => {
 			cancelled = true;
 			subscription?.unsubscribe();
+			statisticsSubscription?.unsubscribe();
 		};
 	});
 </script>
 
-{#if loadError}
+{#if visibleError}
 	<div role="alert" class="grid gap-1 p-4 text-sm text-destructive">
-		<p>{loadError}</p>
+		<p>{visibleError}</p>
 		<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
 		<a class="underline underline-offset-4" href="/recovery">Open local recovery</a>
 	</div>

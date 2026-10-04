@@ -2,11 +2,16 @@ import type { RecipeEditorPatch } from '$lib/client/recipes/commands.js';
 import type { RecipeAggregate, RecipeImportedCandidate } from '$lib/domain/recipes/schema.js';
 import { uuidv7 } from 'uuidv7';
 
-import { emptyRecipeMenuStats } from './recipe-defaults.js';
+import { emptyRecipeMenuStats, type RecipeMenuStats } from './recipe-defaults.js';
 import type { RecipeMenuItem } from './menu-types.js';
 
-export const recipeAggregateToMenuItem = (recipe: RecipeAggregate): RecipeMenuItem => ({
+/** Maps a stored recipe to a menu item; `stats` comes from `readRecipeStatistics`. */
+export const recipeAggregateToMenuItem = (
+	recipe: RecipeAggregate,
+	stats?: RecipeMenuStats
+): RecipeMenuItem => ({
 	...emptyRecipeMenuStats(),
+	...stats,
 	id: recipe.id,
 	title: recipe.title,
 	description: recipe.description ?? '',
