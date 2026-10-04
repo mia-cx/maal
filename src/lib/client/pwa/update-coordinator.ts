@@ -126,6 +126,7 @@ export class PwaUpdateCoordinator {
 	#request: PrepareUpdateMessage | null = null;
 	#heartbeat: ReturnType<typeof setInterval> | null = null;
 	#activationTimeout: ReturnType<typeof setTimeout> | null = null;
+	#activationRetryWorker: UpdateWorker | null = null;
 	#unsubscribeDatabaseEvents: (() => void) | null = null;
 	#removeServiceWorkerListeners: (() => void) | null = null;
 	#removeRegistrationListener: (() => void) | null = null;
@@ -229,7 +230,7 @@ export class PwaUpdateCoordinator {
 	}
 
 	async activate(): Promise<void> {
-		if (!this.#state.version || !this.#registration?.waiting) return;
+		if (!this.#state.version || !this.#registration) return;
 		this.#readyTabs.clear();
 		this.#setState({ ...this.#state, status: 'preparing', message: 'Finishing local changes…' });
 		const message: PrepareUpdateMessage = {
@@ -264,6 +265,8 @@ export class PwaUpdateCoordinator {
 				if (!this.#started) return;
 				if (installing.state !== 'installed' || !this.#runtime.serviceWorker?.controller) return;
 				installing.postMessage({ type: 'GET_VERSION' });
+				// The worker that was still installing when activation was attempted is waiting now.
+				this.#tryActivation();
 			};
 			installing.addEventListener('statechange', stateChanged);
 			this.#removeInstallingListener = () =>
@@ -363,7 +366,12 @@ export class PwaUpdateCoordinator {
 	#tryActivation(): void {
 		if (this.#state.status === 'activating') return;
 		if (!this.#request || !this.#readyTabs.has(this.tabId)) return;
-		if (!this.#registration?.waiting || !this.#state.version) return;
+		if (!this.#state.version) return;
+		const waiting = this.#registration?.waiting ?? null;
+		if (!waiting) {
+			this.#watchInstallingForActivation();
+			return;
+		}
 		const now = this.#runtime.now();
 		const livePeers = [...this.#peers]
 			.filter(([, seenAt]) => now - seenAt <= LIVE_TAB_MS)
@@ -376,11 +384,25 @@ export class PwaUpdateCoordinator {
 			});
 			return;
 		}
-		this.#registration.waiting.postMessage({
+		waiting.postMessage({
 			type: 'SKIP_WAITING',
 			version: this.#state.version
 		});
 		this.#setState({ ...this.#state, status: 'activating' });
+	}
+
+	/** Retries activation once the worker that is still installing reaches `installed`. */
+	#watchInstallingForActivation(): void {
+		const installing = this.#registration?.installing ?? null;
+		if (!installing || installing === this.#activationRetryWorker) return;
+		this.#activationRetryWorker = installing;
+		const stateChanged = () => {
+			if (installing.state !== 'installed') return;
+			this.#activationRetryWorker = null;
+			installing.removeEventListener('statechange', stateChanged);
+			this.#tryActivation();
+		};
+		installing.addEventListener('statechange', stateChanged);
 	}
 
 	#sendHeartbeat(): void {

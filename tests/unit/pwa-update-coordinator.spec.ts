@@ -52,15 +52,29 @@ class FakeChannel {
 
 class FakeWorker {
 	readonly scriptURL = 'https://maal.test/service-worker.js';
-	readonly state = 'installed';
+	state: string;
 	messages: unknown[] = [];
+	#listeners = new Set<() => void>();
+
+	constructor(state = 'installed') {
+		this.state = state;
+	}
 
 	postMessage(message: unknown): void {
 		this.messages.push(message);
 	}
 
-	addEventListener(): void {}
-	removeEventListener(): void {}
+	addEventListener(_type: 'statechange', listener: () => void): void {
+		this.#listeners.add(listener);
+	}
+
+	removeEventListener(_type: 'statechange', listener: () => void): void {
+		this.#listeners.delete(listener);
+	}
+
+	emitStateChange(): void {
+		for (const listener of this.#listeners) listener();
+	}
 }
 
 class FakeServiceWorkers {
@@ -93,9 +107,15 @@ class FakeServiceWorkers {
 }
 
 class FakeRegistration {
-	readonly installing = null;
+	installing: FakeWorker | null = null;
+	waiting: FakeWorker | null;
 	listeners = new Set<() => void>();
-	constructor(readonly waiting: FakeWorker) {}
+	constructor(waiting: FakeWorker | null) {
+		this.waiting = waiting;
+	}
+	emitUpdateFound(): void {
+		for (const listener of this.listeners) listener();
+	}
 	addEventListener(_type: 'updatefound', listener: () => void): void {
 		this.listeners.add(listener);
 	}
@@ -566,6 +586,52 @@ describe('PWA update coordination', () => {
 			expect(peer.status()).toBe('preparing');
 			expect(first.resumed).toHaveLength(0);
 			expect(peer.resumed).toHaveLength(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	test('retries activation once the announced worker finishes installing', async () => {
+		vi.useFakeTimers();
+		try {
+			const installing = new FakeWorker('installing');
+			const registration = new FakeRegistration(null);
+			registration.installing = installing;
+			const serviceWorkers = new FakeServiceWorkers(Promise.resolve(registration));
+			const coordinator = new PwaUpdateCoordinator(
+				runtimeFor(serviceWorkers, {
+					setInterval: (callback, delay) => setInterval(callback, delay),
+					clearInterval: (handle) => clearInterval(handle),
+					setTimeout: (callback, delay) => setTimeout(callback, delay),
+					clearTimeout: (handle) => clearTimeout(handle)
+				})
+			);
+			let status: PwaUpdateState['status'] = 'idle';
+			coordinator.subscribe((next) => (status = next.status));
+
+			await coordinator.start();
+			serviceWorkers.emitMessage({
+				type: 'UPDATE_WAITING',
+				version: 'build-2',
+				critical: false
+			});
+			await coordinator.activate();
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect(installing.messages).not.toContainEqual({
+				type: 'SKIP_WAITING',
+				version: 'build-2'
+			});
+
+			installing.state = 'installed';
+			registration.waiting = installing;
+			installing.emitStateChange();
+			await vi.advanceTimersByTimeAsync(1_000);
+
+			expect(installing.messages).toContainEqual({
+				type: 'SKIP_WAITING',
+				version: 'build-2'
+			});
+			expect(status).toBe('activating');
 		} finally {
 			vi.useRealTimers();
 		}
