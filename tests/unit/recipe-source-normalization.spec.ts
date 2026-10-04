@@ -10,6 +10,7 @@ import {
 	updateRecipeFromEditor,
 	type RecipeEditorPatch
 } from '$lib/client/recipes/index.js';
+import { reconcileRecipeLines } from '$lib/client/recipes/commands.js';
 import {
 	importedCandidateToMenuItem,
 	mergeEditorIntoImportedCandidate
@@ -130,6 +131,38 @@ describe('URL import', () => {
 			})
 		]);
 		expect(candidate.instructionEvents[0]?.baseValue).toBeCloseTo(176.67, 2);
+	});
+
+	test('an amount-only edit keeps the resolved food link', () => {
+		const ingredient = {
+			id: uuidv7(),
+			lineIndex: 0,
+			originalText: '800 g tomatoes',
+			sourceAmountText: '800',
+			sourceQuantity: 800,
+			sourceUnitLabel: 'g',
+			sourceFoodLabel: 'tomatoes',
+			baseFoodId: 'food_tomato',
+			baseQuantity: 800,
+			baseUnitId: 'grams',
+			baseUnitFamilyId: 'grams',
+			optional: false,
+			confidence: 1,
+			createdAt: now
+		};
+		const lines = reconcileRecipeLines(
+			{ ingredients: [ingredient], instructions: [], instructionEvents: [] },
+			{
+				ingredients: [{ id: ingredient.id, amount: '400', unit: 'g', item: 'tomatoes' }],
+				instructions: []
+			},
+			now as `${string}Z`
+		);
+		expect(lines.ingredients[0]).toMatchObject({
+			sourceQuantity: 400,
+			baseQuantity: 400,
+			baseFoodId: 'food_tomato'
+		});
 	});
 
 	test('review edits re-derive changed lines and keep untouched ones', async () => {

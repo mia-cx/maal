@@ -179,15 +179,18 @@ const reconcileIngredients = (
 			) {
 				return existing.lineIndex === lineIndex ? existing : { ...existing, lineIndex };
 			}
+			const normalized = normalizeIngredientSource({
+				originalText: [amount, unit, item].filter(Boolean).join(' '),
+				amount,
+				unit,
+				item
+			});
 			return {
 				id: existing?.id ?? uuidv7(),
 				lineIndex,
-				...normalizeIngredientSource({
-					originalText: [amount, unit, item].filter(Boolean).join(' '),
-					amount,
-					unit,
-					item
-				}),
+				...normalized,
+				// An amount/unit-only edit re-derives units but keeps the resolved food link.
+				baseFoodId: existing?.sourceFoodLabel === item ? existing.baseFoodId : null,
 				optional: existing?.optional ?? false,
 				confidence: 1,
 				createdAt: existing?.createdAt ?? occurredAt
