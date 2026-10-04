@@ -5,6 +5,7 @@
 	import {
 		beginCheckout,
 		beginTrial,
+		LocalBillingRequestFailed,
 		openBillingPortal,
 		refreshBillingProjection,
 		transferBillingOwner
@@ -128,8 +129,18 @@
 		try {
 			const { url } = await beginCheckout(database, profileId, householdId, priceId);
 			window.location.assign(url);
-		} catch {
-			error = m.billing_checkout_failed();
+		} catch (cause) {
+			// The Worker refuses a second checkout while Stripe still holds a subscription; the
+			// billing owner fixes that in the portal, anyone else just needs to know why.
+			if (
+				cause instanceof LocalBillingRequestFailed &&
+				cause.safeMessage.includes('already_subscribed')
+			) {
+				if (ownsBilling) return portal();
+				error = m.billing_checkout_already_subscribed();
+			} else {
+				error = m.billing_checkout_failed();
+			}
 			busy = false;
 		}
 	};
