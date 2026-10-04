@@ -23,7 +23,7 @@ import {
 import { requireCachedPermission } from '$lib/domain/household/permissions.js';
 import type { MaalDatabase } from '$lib/client/local/database.js';
 import { detachHouseholdSnapshot } from '$lib/client/local/households.js';
-import { LocalProfileMissing } from '$lib/client/local/profiles.js';
+import { LocalProfileMissing, markProfileReauthRequired } from '$lib/client/local/profiles.js';
 
 const LegacyHouseholdMembershipResponseSchema = Schema.Struct({
 	schemaVersion: Schema.Literal(1),
@@ -60,7 +60,8 @@ const requestJson = async <A>(
 	url: string,
 	operation: string,
 	init: RequestInit,
-	schema: Schema.Schema<A>
+	schema: Schema.Schema<A>,
+	session: { database: MaalDatabase; authSlotId: string }
 ): Promise<A> => {
 	let response: Response;
 	try {
@@ -69,6 +70,10 @@ const requestJson = async <A>(
 		throw new HouseholdAdministrationUnavailable({ operation, status: null });
 	}
 	if (!response.ok) {
+		// The server rejected this slot's session: surface the reauth affordance before the error.
+		if (response.status === 401) {
+			await markProfileReauthRequired(session.database, session.authSlotId);
+		}
 		const body = Schema.decodeUnknownOption(ErrorResponseSchema)(
 			await response.json().catch(() => null)
 		);
@@ -283,7 +288,8 @@ export const createRemoteHousehold = async (
 			headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
 			body: JSON.stringify(input)
 		},
-		CreateJoinResponseSchema
+		CreateJoinResponseSchema,
+		{ database, authSlotId: slot.authSlotId }
 	);
 	await commitCreateJoinProjection(database, profileId, response.payload, true);
 	return { householdId: response.payload.household.householdId };
@@ -305,7 +311,8 @@ export const joinRemoteHousehold = async (
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({ code })
 		},
-		CreateJoinResponseSchema
+		CreateJoinResponseSchema,
+		{ database, authSlotId: slot.authSlotId }
 	);
 	await commitCreateJoinProjection(database, profileId, response.payload, true);
 	return { householdId: response.payload.household.householdId };
@@ -328,7 +335,8 @@ export const refreshRemoteHousehold = async (
 		slotHouseholdBasePath(authSlotId, householdId),
 		'refresh household',
 		{ method: 'GET' },
-		HouseholdAdministrationProjectionResponseSchema
+		HouseholdAdministrationProjectionResponseSchema,
+		{ database, authSlotId }
 	).catch(async (cause: unknown) => {
 		if (
 			cause instanceof HouseholdAdministrationUnavailable &&
@@ -364,7 +372,8 @@ export const createHouseholdInvite = async (
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({ ...decoded, code })
 		},
-		HouseholdInviteResponseSchema
+		HouseholdInviteResponseSchema,
+		{ database, authSlotId }
 	);
 	await database.householdInvites.put(response.payload);
 	return { code, invite: response.payload };
@@ -383,7 +392,8 @@ export const revokeHouseholdInvite = async (
 		`${slotHouseholdPath(authSlotId, householdId, 'invites')}/${encodeURIComponent(inviteId)}`,
 		'revoke household invite',
 		{ method: 'DELETE' },
-		HouseholdInviteResponseSchema
+		HouseholdInviteResponseSchema,
+		{ database, authSlotId }
 	);
 	await database.householdInvites.put(response.payload);
 	return response.payload;
@@ -412,7 +422,8 @@ export const updateHouseholdMemberRole = async (
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({ roleSlug: decoded.roleSlug })
 		},
-		HouseholdMembershipResponseSchema
+		HouseholdMembershipResponseSchema,
+		{ database, authSlotId }
 	);
 	await database.memberships.put(response.payload);
 	return response.payload;
@@ -431,7 +442,8 @@ export const removeHouseholdMember = async (
 		`${slotHouseholdPath(authSlotId, householdId, 'members')}/${encodeURIComponent(membershipId)}`,
 		'remove household member',
 		{ method: 'DELETE' },
-		HouseholdMemberRemovalResponseSchema
+		HouseholdMemberRemovalResponseSchema,
+		{ database, authSlotId }
 	);
 	await database.memberships.update(membershipId, {
 		status: 'revoked',
@@ -451,7 +463,8 @@ export const leaveRemoteHousehold = async (
 		`${slotHouseholdBasePath(authSlotId, householdId)}/membership`,
 		'leave household',
 		{ method: 'DELETE' },
-		HouseholdMemberRemovalResponseSchema
+		HouseholdMemberRemovalResponseSchema,
+		{ database, authSlotId }
 	);
 	await detachHouseholdSnapshot(database, {
 		profileId,

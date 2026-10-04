@@ -250,6 +250,43 @@ describe('household administration Dexie projection', () => {
 		await expect(database.households.get(family.householdId)).resolves.toEqual(family);
 	});
 
+	test('marks the profile reauth required when the server rejects the slot session', async () => {
+		database = await openMaalDatabase(`household-admin-${crypto.randomUUID()}`);
+		const alice = profile('user_alice', 'Alice Janssen');
+		const family = household('org_family', 'Canal kitchen');
+		await database.profiles.put(alice);
+		await database.authSlots.put({
+			authSlotId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+			profileId: alice.profileId,
+			workosUserId: alice.workosUserId,
+			sessionState: 'authenticated',
+			lastRefreshedAt: timestamp,
+			lastVerifiedAt: timestamp,
+			nextRetryAt: null,
+			retryCount: 0
+		});
+		await database.households.put(family);
+
+		const expiredFetcher: typeof fetch = vi.fn(async () =>
+			Response.json(
+				{
+					schemaVersion: 1,
+					error: { _tag: 'HouseholdAdministrationError', code: 'auth_slot_expired' }
+				},
+				{ status: 401 }
+			)
+		);
+		await expect(
+			refreshRemoteHousehold(database, alice.profileId, family.householdId, expiredFetcher)
+		).rejects.toMatchObject({ status: 401 });
+		await expect(database.authSlots.get('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')).resolves.toMatchObject(
+			{ sessionState: 'reauthRequired' }
+		);
+		await expect(database.profiles.get(alice.profileId)).resolves.toMatchObject({
+			authState: 'reauthRequired'
+		});
+	});
+
 	test('keeps the membership active when a refresh is denied for another reason', async () => {
 		database = await openMaalDatabase(`household-admin-${crypto.randomUUID()}`);
 		const alice = profile('user_alice', 'Alice Janssen');
