@@ -543,9 +543,13 @@ describe('portable archives', () => {
 				entityKind: 'userFoodPreference',
 				operation: 'upsert',
 				status: 'pending',
-				occurredAt: archived.updatedAt
+				occurredAt: expect.any(String)
 			})
 		]);
+		expect(Date.parse(outbox[0]!.occurredAt)).toBeGreaterThan(Date.parse(archived.updatedAt));
+		await expect(target.userFoodPreferences.get(localPreferenceId)).resolves.toMatchObject({
+			conflictClocks: { row: { occurredAt: outbox[0]!.occurredAt } }
+		});
 		const replanned = await planPortableImport(target, archive, targetIdentity.profileId);
 		expect(replanned.collisions.filter(({ store }) => store === 'userFoodPreferences')).toEqual([]);
 		await expect(
@@ -779,7 +783,7 @@ describe('portable imports and sync', () => {
 				expect.objectContaining({
 					operation: 'upsert',
 					status: 'pending',
-					occurredAt: archived.updatedAt
+					occurredAt: expect.any(String)
 				})
 			]
 		);

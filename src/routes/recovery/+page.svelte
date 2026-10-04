@@ -43,8 +43,14 @@
 			});
 	});
 
-	const recoveryMessage = ({ archives, skipped, unreadable }: RecoveryArchiveExport): string => {
+	const recoveryMessage = ({
+		archives,
+		skipped,
+		repaired,
+		unreadable
+	}: RecoveryArchiveExport): string => {
 		const skippedCount = Object.values(skipped).reduce((total, count) => total + count, 0);
+		const repairedCount = Object.values(repaired).reduce((total, count) => total + count, 0);
 		return [
 			archives.length === 1
 				? 'Recovery archive saved.'
@@ -53,6 +59,11 @@
 				? '1 unreadable record was skipped.'
 				: skippedCount > 1
 					? `${skippedCount} unreadable records were skipped.`
+					: '',
+			repairedCount === 1
+				? '1 record was repaired to keep the archive restorable.'
+				: repairedCount > 1
+					? `${repairedCount} records were repaired to keep the archive restorable.`
 					: '',
 			unreadable.length > 0 ? `These tables could not be read: ${unreadable.join(', ')}.` : ''
 		]
@@ -142,8 +153,8 @@
 				<h2 class="font-medium">Download readable data</h2>
 				<p class="mt-1 text-sm text-muted-foreground text-pretty">
 					This unencrypted Maal archive excludes profile PINs, auth sessions, billing, sync queues,
-					and UI state. Damaged rows are counted and skipped. After a reset, import it with Import
-					or export data in the profile menu.
+					and UI state. Damaged rows and missing references are counted and repaired or skipped.
+					After a reset, import it with Import or export data in the profile menu.
 				</p>
 			</div>
 			<Button

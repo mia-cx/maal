@@ -920,17 +920,17 @@ const syncScopeKey = (scope: SyncRequestedScope): string =>
 	`${scope.scopeKind}\u0000${scope.scopeId}`;
 
 /**
- * Archives carry no conflict clocks, so every group gets a clock at the archived `updatedAt`.
- * Keeping the original event time lets backfill order the row against server edits by when it
- * changed, not by when it was imported, and keeps a second import of the same archive identical.
+ * New rows retain archive event times for backfill. Explicit replacements are new local intent,
+ * so their clocks use the import time while content timestamps remain unchanged for re-imports.
  */
 const importedAggregate = (
 	descriptor: PortableSyncDescriptor,
 	record: Record<string, unknown>,
 	originDeviceId: string,
-	mutationId: string
+	mutationId: string,
+	occurredAt: string = text(record.updatedAt)
 ): Record<string, unknown> => {
-	const clock = { occurredAt: text(record.updatedAt), originDeviceId, mutationId };
+	const clock = { occurredAt, originDeviceId, mutationId };
 	return {
 		...record,
 		schemaVersion: 1,
@@ -972,15 +972,28 @@ export const commitPortableImport = async (
 						continue;
 					}
 					const replaced = plan.replacements.get(store);
-					const prepared = rows.map((row) => ({ row, mutationId: uuidv7() }));
+					const prepared = rows.map((row) => ({
+						row,
+						mutationId: uuidv7(),
+						replacement:
+							replaced?.has(rowId(store, row)) &&
+							(descriptor.entityKind !== 'meal_check_in' ||
+								row.reporterUserId === plan.importerWorkosUserId)
+					}));
 					await database
 						.table(store)
 						.bulkPut(
-							prepared.map(({ row, mutationId }) =>
-								importedAggregate(descriptor, row, originDeviceId, mutationId)
+							prepared.map(({ row, mutationId, replacement }) =>
+								importedAggregate(
+									descriptor,
+									row,
+									originDeviceId,
+									mutationId,
+									replacement ? importedAt : text(row.updatedAt)
+								)
 							)
 						);
-					for (const { row, mutationId } of prepared) {
+					for (const { row, mutationId, replacement } of prepared) {
 						const id = rowId(store, row);
 						const scopeId =
 							descriptor.scopeKind === 'user'
@@ -995,22 +1008,31 @@ export const commitPortableImport = async (
 						) {
 							continue;
 						}
-						// New rows reach the server through backfill, which compares event times, so an
-						// old archive never beats a newer server edit. A replacement is the user's explicit
-						// choice: it goes out as a live upsert, and the pending row keeps a pull from
-						// overwriting it before it is pushed.
-						if (replaced?.has(id)) {
+						// Backfill handles historical rows. Only the reporter may push a check-in;
+						// other reporters' imported projections remain subject to authoritative pulls.
+						if (replacement) {
+							await database.outbox
+								.where('aggregateId')
+								.equals(id)
+								.filter(
+									(intent) =>
+										intent.scopeKind === descriptor.scopeKind &&
+										intent.scopeId === scopeId &&
+										intent.entityKind === descriptor.entityKind &&
+										['pending', 'sending', 'quarantined'].includes(intent.status)
+								)
+								.delete();
 							await database.outbox.add({
 								mutationId,
 								authSlotId,
 								scopeKind: descriptor.scopeKind,
 								scopeId,
 								status: 'pending',
-								occurredAt: text(row.updatedAt) as `${string}Z`,
+								occurredAt: importedAt,
 								aggregateId: id,
 								entityKind: descriptor.entityKind,
 								conflictGroup: descriptor.conflictGroups[0]!,
-								operation: 'upsert',
+								operation: row.deletedAt === null ? 'upsert' : 'delete',
 								originDeviceId,
 								payload: null,
 								nextAttemptAt: importedAt,
