@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
-import { openAuthFlow, type AuthFlow } from '$lib/server/auth-slots/flow.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+	openAuthCompletion,
+	openAuthFlow,
+	sealAuthFlow,
+	type AuthFlow
+} from '$lib/server/auth-slots/flow.js';
 
 const ALICE_SLOT = '00112233445566778899aabbccddeeff';
 const BOB_SLOT = 'ffeeddccbbaa99887766554433221100';
@@ -27,6 +32,11 @@ vi.mock('$lib/server/auth-slots', async (importOriginal) => ({
 const { GET } = await import('../../src/routes/api/auth-slots/[slot]/authorize/+server.js');
 
 describe('retained profile authorization HTTP seam', () => {
+	beforeEach(() => {
+		workos.authorizationUrl.mockClear();
+		workos.openSlotIdentity.mockReset();
+	});
+
 	it('sends concurrent slots through one registered callback with independent opaque state', async () => {
 		workos.openSlotIdentity.mockResolvedValue(null);
 		const alice = eventFor(
@@ -65,6 +75,8 @@ describe('retained profile authorization HTTP seam', () => {
 			returnTo: '/settings/profile'
 		});
 		expect(aliceFlow?.nonce).not.toBe(bobFlow?.nonce);
+		expect(aliceFlow).not.toHaveProperty('pinResetNonce');
+		expect(bobFlow).not.toHaveProperty('pinResetNonce');
 		expectMarker(alice.cookies.set, aliceFlow!);
 		expectMarker(bob.cookies.set, bobFlow!);
 	});
@@ -73,7 +85,7 @@ describe('retained profile authorization HTTP seam', () => {
 		workos.openSlotIdentity.mockResolvedValue('user_alice');
 		const request = eventFor(
 			ALICE_SLOT,
-			`https://maal.test/api/auth-slots/${ALICE_SLOT}/authorize?purpose=reauthenticate&returnTo=//evil.test`
+			`https://maal.test/api/auth-slots/${ALICE_SLOT}/authorize?purpose=reauthenticate&returnTo=//evil.test&pinResetNonce=${BOB_SLOT}`
 		);
 
 		await expectRedirect(GET(request.event), 'https://authkit.test/authorize');
@@ -88,9 +100,47 @@ describe('retained profile authorization HTTP seam', () => {
 			authSlotId: ALICE_SLOT,
 			purpose: 'reauthenticate',
 			expectedUserId: 'user_alice',
-			returnTo: '/'
+			returnTo: '/',
+			pinResetNonce: BOB_SLOT
 		});
+		await expect(openAuthCompletion(input.state, COOKIE_PASSWORD)).resolves.toBeNull();
 	});
+
+	it.each(['', 'abc', 'A'.repeat(32), 'g'.repeat(32), 'a'.repeat(33)])(
+		'rejects invalid PIN reset nonce %j before creating an authorization flow',
+		async (pinResetNonce) => {
+			const request = eventFor(
+				ALICE_SLOT,
+				`https://maal.test/api/auth-slots/${ALICE_SLOT}/authorize?pinResetNonce=${pinResetNonce}`
+			);
+			await expect(GET(request.event)).rejects.toMatchObject({ status: 400 });
+			expect(workos.openSlotIdentity).not.toHaveBeenCalled();
+			expect(workos.authorizationUrl).not.toHaveBeenCalled();
+			expect(request.cookies.set).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['', 'A'.repeat(32), null, 42])(
+		'rejects an otherwise sealed flow with invalid PIN reset nonce %j',
+		async (pinResetNonce) => {
+			const issuedAt = Date.now() - 1_000;
+			const state = await sealAuthFlow(
+				{
+					schemaVersion: 1,
+					authSlotId: ALICE_SLOT,
+					purpose: 'reauthenticate',
+					expectedUserId: 'user_alice',
+					returnTo: '/',
+					nonce: BOB_SLOT,
+					issuedAt: new Date(issuedAt).toISOString(),
+					expiresAt: new Date(issuedAt + 600_000).toISOString(),
+					pinResetNonce
+				} as AuthFlow,
+				COOKIE_PASSWORD
+			);
+			await expect(openAuthFlow(state, COOKIE_PASSWORD)).resolves.toBeNull();
+		}
+	);
 });
 
 function eventFor(slot: string, url: string) {

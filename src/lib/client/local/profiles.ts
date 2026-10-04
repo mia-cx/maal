@@ -1,14 +1,18 @@
 import { Data, Schema } from 'effect';
 
-import { MAX_AUTHENTICATED_SLOTS } from '$lib/auth-slots/contracts.js';
+import { createAuthSlotId, MAX_AUTHENTICATED_SLOTS } from '$lib/auth-slots/contracts.js';
 import { DomainIdSchema, UtcInstantSchema } from '$lib/domain/contracts/primitives.js';
 import { ProfileSchema, type Profile } from '$lib/domain/household/contracts.js';
 
 import type { MaalDatabase } from './database.js';
 
 const ACTIVE_PROFILE_KEY = 'activeProfileId';
-const profileLockKey = (profileId: string) => `profileLock:${profileId}`;
+export const profileLockKey = (profileId: string) => `profileLock:${profileId}`;
 export const activeHouseholdKey = (profileId: string) => `activeHouseholdId:${profileId}`;
+/** Binds "Forgot PIN" to the fresh sign-in that may clear this profile's PIN. */
+export const pinResetKey = (profileId: string) => `pinReset:${profileId}`;
+/** Outbox owner for work a profile queues while it has no slot; rebound on its next sign-in. */
+export const signedOutAuthSlotId = (profileId: string) => `signed-out:${profileId}`;
 
 const PIN_ITERATIONS = 310_000;
 const PIN_PATTERN = /^\d{4,8}$/;
@@ -94,14 +98,28 @@ export const addOrUpdateLocalProfile = async (
 	await database.profiles.put(decoded);
 };
 
+const verifyProfilePin = async (profile: Profile, pin: string | undefined): Promise<void> => {
+	if (!pin) throw new ProfilePinRequired({ profileId: profile.profileId });
+	if (!PIN_PATTERN.test(pin) || !profile.pinSalt || !profile.pinVerifier) {
+		throw new ProfilePinInvalid({ profileId: profile.profileId });
+	}
+	const candidate = await derivePinVerifier(pin, decodeBase64Url(profile.pinSalt));
+	if (!equalVerifier(candidate, profile.pinVerifier)) {
+		throw new ProfilePinInvalid({ profileId: profile.profileId });
+	}
+};
+
+/** Profiles that already have a PIN need `currentPin` to change it. */
 export const setProfilePin = async (
 	database: MaalDatabase,
 	profileId: string,
-	pin: string
+	pin: string,
+	currentPin?: string
 ): Promise<void> => {
 	if (!PIN_PATTERN.test(pin)) throw new ProfilePinFormatInvalid();
 	const profile = await database.profiles.get(profileId);
 	if (!profile) throw new LocalProfileMissing({ profileId });
+	if (profile.lockPolicy === 'pin') await verifyProfilePin(profile, currentPin);
 	const salt = crypto.getRandomValues(new Uint8Array(16));
 	const verifier = await derivePinVerifier(pin, salt);
 	await database.transaction('rw', database.profiles, database.uiState, async () => {
@@ -111,17 +129,36 @@ export const setProfilePin = async (
 			lockPolicy: 'pin'
 		});
 		await database.uiState.put({ key: profileLockKey(profileId), value: false });
+		await database.uiState.delete(pinResetKey(profileId));
 	});
 };
 
-export const clearProfilePin = async (database: MaalDatabase, profileId: string): Promise<void> => {
-	const changed = await database.profiles.update(profileId, {
-		pinSalt: null,
-		pinVerifier: null,
-		lockPolicy: 'none'
+export const clearProfilePin = async (
+	database: MaalDatabase,
+	profileId: string,
+	currentPin?: string
+): Promise<void> => {
+	const profile = await database.profiles.get(profileId);
+	if (!profile) throw new LocalProfileMissing({ profileId });
+	if (profile.lockPolicy === 'pin') await verifyProfilePin(profile, currentPin);
+	await database.transaction('rw', database.profiles, database.uiState, async () => {
+		await database.profiles.update(profileId, {
+			pinSalt: null,
+			pinVerifier: null,
+			lockPolicy: 'none'
+		});
+		await database.uiState.bulkDelete([profileLockKey(profileId), pinResetKey(profileId)]);
 	});
-	if (!changed) throw new LocalProfileMissing({ profileId });
-	await database.uiState.delete(profileLockKey(profileId));
+};
+
+/** Marks a forgotten PIN for reset; call it right before sending the user to sign in. */
+export const requestProfilePinReset = async (
+	database: MaalDatabase,
+	profileId: string
+): Promise<string> => {
+	const nonce = createAuthSlotId();
+	await database.uiState.put({ key: pinResetKey(profileId), value: nonce });
+	return nonce;
 };
 
 export const lockProfile = async (database: MaalDatabase, profileId: string): Promise<void> => {
@@ -140,14 +177,7 @@ const assertProfileUnlocked = async (
 	if (profile.lockPolicy !== 'pin') return;
 	const lock = await database.uiState.get(profileLockKey(profile.profileId));
 	if (lock?.value !== true) return;
-	if (!pin) throw new ProfilePinRequired({ profileId: profile.profileId });
-	if (!PIN_PATTERN.test(pin) || !profile.pinSalt || !profile.pinVerifier) {
-		throw new ProfilePinInvalid({ profileId: profile.profileId });
-	}
-	const candidate = await derivePinVerifier(pin, decodeBase64Url(profile.pinSalt));
-	if (!equalVerifier(candidate, profile.pinVerifier)) {
-		throw new ProfilePinInvalid({ profileId: profile.profileId });
-	}
+	await verifyProfilePin(profile, pin);
 };
 
 export const switchActiveProfile = async (
@@ -174,6 +204,7 @@ export const switchActiveProfile = async (
 			{ key: profileLockKey(profileId), value: false }
 		]);
 		await database.profiles.update(profileId, { lastUsedAt: decodedNow });
+		await database.uiState.delete(pinResetKey(profileId));
 	});
 
 	return { ...profile, lastUsedAt: decodedNow };
@@ -185,17 +216,27 @@ export const readActiveProfile = async (database: MaalDatabase): Promise<Profile
 	return (await database.profiles.get(profileId)) ?? null;
 };
 
+/** The active profile while it sits behind its PIN, otherwise `null`. The app shell shows the lock screen for it. */
+export const readLockedActiveProfile = async (database: MaalDatabase): Promise<Profile | null> => {
+	const profile = await readActiveProfile(database);
+	if (profile?.lockPolicy !== 'pin') return null;
+	const lock = await database.uiState.get(profileLockKey(profile.profileId));
+	return lock?.value === true ? profile : null;
+};
+
+/**
+ * Called when the server rejects a slot's session. The slot's profile turns `reauthRequired` so the
+ * switcher and settings offer Reauthenticate; local data stays usable (spec §4.1).
+ */
 export const markProfileReauthRequired = async (
 	database: MaalDatabase,
-	profileId: string
+	authSlotId: string
 ): Promise<void> => {
-	const profile = await database.profiles.get(profileId);
-	if (!profile) throw new LocalProfileMissing({ profileId });
 	await database.transaction('rw', database.profiles, database.authSlots, async () => {
-		await database.profiles.update(profileId, { authState: 'reauthRequired' });
-		await database.authSlots.where('profileId').equals(profileId).modify({
-			sessionState: 'reauthRequired'
-		});
+		const slot = await database.authSlots.get(authSlotId);
+		if (!slot) return;
+		await database.authSlots.update(authSlotId, { sessionState: 'reauthRequired' });
+		await database.profiles.update(slot.profileId, { authState: 'reauthRequired' });
 	});
 };
 
@@ -306,9 +347,9 @@ export const removeProfileFromDevice = async (
 		}
 
 		await database.memberships.where('workosUserId').equals(profile.workosUserId).delete();
-		if (slot) {
-			await database.outbox.filter((mutation) => mutation.authSlotId === slot.authSlotId).delete();
-		}
+		// Sign-in rebinds earlier slots' work to the current slot, so these two IDs own all of it.
+		const ownSlotIds = new Set([signedOutAuthSlotId(profileId), slot?.authSlotId]);
+		await database.outbox.filter((mutation) => ownSlotIds.has(mutation.authSlotId)).delete();
 		await database.outbox
 			.filter(
 				(mutation) => mutation.scopeKind === 'user' && mutation.scopeId === profile.workosUserId
@@ -325,8 +366,11 @@ export const removeProfileFromDevice = async (
 			.delete();
 		await database.authSlots.where('profileId').equals(profileId).delete();
 		await database.profiles.delete(profileId);
-		await database.uiState.delete(profileLockKey(profileId));
-		await database.uiState.delete(activeHouseholdKey(profileId));
+		await database.uiState.bulkDelete([
+			profileLockKey(profileId),
+			activeHouseholdKey(profileId),
+			pinResetKey(profileId)
+		]);
 
 		const activeProfile = await database.uiState.get(ACTIVE_PROFILE_KEY);
 		if (activeProfile?.value === profileId) {

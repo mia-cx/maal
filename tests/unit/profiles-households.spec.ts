@@ -7,11 +7,15 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import {
 	addOrUpdateLocalProfile,
+	clearProfilePin,
 	detachHouseholdSnapshot,
 	forkDetachedHouseholdSnapshot,
 	listHouseholdsForProfile,
+	lockProfile,
 	openMaalDatabase,
+	readLockedActiveProfile,
 	removeProfileFromDevice,
+	requestProfilePinReset,
 	setActiveHousehold,
 	setProfilePin,
 	switchActiveProfile,
@@ -124,6 +128,29 @@ const addAuthSlot = async (database: MaalDatabase, value: Profile, suffix = 'a')
 };
 
 describe('device-local profile lifecycle', () => {
+	test.each(['unlock', 'change', 'remove'])(
+		'cancels an abandoned PIN-reset request after a valid PIN %s',
+		async (action) => {
+			const database = await openDatabase();
+			const alice = profile();
+			await database.profiles.add(alice);
+			await switchActiveProfile(database, alice.profileId);
+			await setProfilePin(database, alice.profileId, '4826');
+			await lockProfile(database, alice.profileId);
+			await requestProfilePinReset(database, alice.profileId);
+			await expect(switchActiveProfile(database, alice.profileId, '1111')).rejects.toMatchObject({
+				_tag: 'ProfilePinInvalid'
+			});
+			await expect(database.uiState.get(`pinReset:${alice.profileId}`)).resolves.toBeDefined();
+
+			if (action === 'unlock') await switchActiveProfile(database, alice.profileId, '4826');
+			if (action === 'change') await setProfilePin(database, alice.profileId, '1234', '4826');
+			if (action === 'remove') await clearProfilePin(database, alice.profileId, '4826');
+
+			await expect(database.uiState.get(`pinReset:${alice.profileId}`)).resolves.toBeUndefined();
+		}
+	);
+
 	test('switches profiles and unlocks a PIN without touching either retained auth slot', async () => {
 		const database = await openDatabase();
 		const alice = profile({ workosUserId: 'user_alice' });
@@ -155,6 +182,82 @@ describe('device-local profile lifecycle', () => {
 				expect.objectContaining({ authSlotId: 'b'.repeat(32), sessionState: 'authenticated' })
 			])
 		);
+	});
+
+	test('gates a locked active profile and needs the current PIN to change or remove it', async () => {
+		const database = await openDatabase();
+		const alice = profile();
+		await database.profiles.add(alice);
+		await switchActiveProfile(database, alice.profileId);
+		await setProfilePin(database, alice.profileId, '4826');
+		await expect(readLockedActiveProfile(database)).resolves.toBeNull();
+
+		await lockProfile(database, alice.profileId);
+		await expect(readLockedActiveProfile(database)).resolves.toMatchObject({
+			profileId: alice.profileId
+		});
+		await switchActiveProfile(database, alice.profileId, '4826');
+		await expect(readLockedActiveProfile(database)).resolves.toBeNull();
+
+		await expect(setProfilePin(database, alice.profileId, '1234')).rejects.toMatchObject({
+			_tag: 'ProfilePinRequired'
+		});
+		await expect(setProfilePin(database, alice.profileId, '1234', '0000')).rejects.toMatchObject({
+			_tag: 'ProfilePinInvalid'
+		});
+		await expect(clearProfilePin(database, alice.profileId)).rejects.toMatchObject({
+			_tag: 'ProfilePinRequired'
+		});
+		await setProfilePin(database, alice.profileId, '1234', '4826');
+		await expect(clearProfilePin(database, alice.profileId, '4826')).rejects.toMatchObject({
+			_tag: 'ProfilePinInvalid'
+		});
+		await clearProfilePin(database, alice.profileId, '1234');
+		await expect(database.profiles.get(alice.profileId)).resolves.toMatchObject({
+			lockPolicy: 'none',
+			pinVerifier: null
+		});
+	});
+
+	test('removes every mutation the profile queued, including work queued while signed out', async () => {
+		const database = await openDatabase();
+		const alice = profile({ workosUserId: 'user_alice' });
+		const bob = profile({ workosUserId: 'user_bob' });
+		await database.profiles.bulkAdd([alice, bob]);
+		await addAuthSlot(database, alice, 'a');
+		await addAuthSlot(database, bob, 'b');
+		await database.households.add(household());
+		await database.memberships.bulkAdd([
+			membership({ workosUserId: alice.workosUserId }),
+			membership({ workosUserId: bob.workosUserId, roleSlug: 'member' })
+		]);
+		const queued = (authSlotId: string) => ({
+			mutationId: uuidv7(),
+			authSlotId,
+			scopeKind: 'household' as const,
+			scopeId: 'org_household',
+			status: 'pending' as const,
+			occurredAt: timestamp,
+			aggregateId: uuidv7(),
+			entityKind: 'meal',
+			conflictGroup: 'meal',
+			operation: 'upsert' as const,
+			originDeviceId: 'device',
+			payload: {},
+			nextAttemptAt: timestamp,
+			attempts: 0
+		});
+		const bobRow = queued('b'.repeat(32));
+		await database.outbox.bulkAdd([
+			queued('a'.repeat(32)),
+			queued(`signed-out:${alice.profileId}`),
+			bobRow
+		]);
+
+		const removed = await removeProfileFromDevice(database, alice.profileId);
+
+		expect(removed.retainedHouseholdIds).toEqual(['org_household']);
+		await expect(database.outbox.toArray()).resolves.toEqual([bobRow]);
 	});
 
 	test('caps retained authenticated profiles at eight while keeping signed-out profiles usable', async () => {

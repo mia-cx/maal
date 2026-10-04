@@ -247,6 +247,34 @@ test('reauthenticates Alice without changing Bob retained state', async ({ page 
 	);
 });
 
+test('an abandoned PIN reset and forged callback marker cannot open a retained profile', async ({
+	page
+}) => {
+	await prepareDatabase(page, false, true);
+	await page.goto('/plan');
+	await expect(page.getByRole('heading', { name: 'Open Alice de Vries' })).toBeVisible();
+	await page.route(`**/api/auth-slots/${ALICE_SLOT}/authorize?**`, (route) =>
+		route.fulfill({ status: 200, contentType: 'text/plain', body: 'WorkOS sign-in' })
+	);
+	await page.getByRole('button', { name: 'Forgot PIN?' }).click();
+	await expect(page).toHaveURL(/\/authorize\?.*pinResetNonce=[0-9a-f]{32}$/);
+	await page.route(`**/api/auth-slots/${ALICE_SLOT}/`, (route) =>
+		route.fulfill({ json: metadata(ALICE_SLOT, 'user_alice', 'Alice') })
+	);
+
+	await page.goto(`/plan?authSlot=${ALICE_SLOT}&authStatus=authenticated`);
+	await expect
+		.poll(async () => (await readProjection(page)).profiles[0]?.authState)
+		.toBe('authenticated');
+	await expect(page.getByRole('heading', { name: 'Open Alice de Vries' })).toBeVisible();
+	await expect(page.getByTestId('shared-app-shell')).toHaveCount(0);
+	expect((await readProjection(page)).profiles[0]).toMatchObject({
+		lockPolicy: 'pin',
+		pinSalt: 'alice-pin-salt',
+		pinVerifier: 'alice-pin-verifier'
+	});
+});
+
 test('uses the real selected-slot Worker route to contain a missing or revoked session', async ({
 	page
 }) => {

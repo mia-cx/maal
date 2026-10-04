@@ -1,12 +1,15 @@
 import { json } from '@sveltejs/kit';
 import type { AuthSlotMetadata } from '$lib/auth-slots';
 import {
+	authCompletionCookieName,
 	authCookieOptions,
 	authIdentityCookieName,
 	authSlotAdapterFor,
 	authSlotCookieName,
 	authStatusForReason,
 	discoverActiveHouseholds,
+	openAuthCompletion,
+	readAuthSlotConfig,
 	revokeSelectedSession,
 	routeSlotId,
 	taggedErrorResponse
@@ -34,6 +37,19 @@ export const GET: RequestHandler = async (event) => {
 			});
 		}
 
+		const completionCookie = event.cookies.get(authCompletionCookieName(slotId));
+		let proof = null;
+		if (completionCookie !== undefined) {
+			event.cookies.delete(authCompletionCookieName(slotId), authCookieOptions(slotId));
+			const flow = await openAuthCompletion(
+				completionCookie,
+				readAuthSlotConfig(event.platform?.env).cookiePassword
+			);
+			if (flow?.authSlotId === slotId && flow.expectedUserId === result.user.id) {
+				proof = flow;
+			}
+		}
+
 		const database = event.platform?.env.DB;
 		if (!database) throw new TypeError('D1 is unavailable.');
 		const now = new Date().toISOString() as `${string}Z`;
@@ -54,7 +70,13 @@ export const GET: RequestHandler = async (event) => {
 			lastName: result.user.lastName,
 			profilePictureUrl: result.user.profilePictureUrl,
 			verifiedAt: now,
-			households
+			households,
+			...(proof
+				? {
+						freshAuthentication: true,
+						...(proof.pinResetNonce === undefined ? {} : { pinResetNonce: proof.pinResetNonce })
+					}
+				: {})
 		});
 	} catch (cause) {
 		return taggedErrorResponse(cause);
@@ -67,8 +89,11 @@ const metadataResponse = (metadata: AuthSlotMetadata): Response =>
 export const DELETE: RequestHandler = async (event) => {
 	try {
 		const slotId = routeSlotId(event);
+		event.cookies.delete(authCompletionCookieName(slotId), authCookieOptions(slotId));
 		await revokeSelectedSession(event, slotId);
-		event.cookies.delete(authIdentityCookieName(slotId), authCookieOptions(slotId));
+		if (event.url.searchParams.get('preserveIdentity') !== 'true') {
+			event.cookies.delete(authIdentityCookieName(slotId), authCookieOptions(slotId));
+		}
 		return new Response(null, { status: 204 });
 	} catch (cause) {
 		return taggedErrorResponse(cause);

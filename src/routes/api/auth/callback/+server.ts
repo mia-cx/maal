@@ -2,6 +2,7 @@ import { error, redirect } from '@sveltejs/kit';
 import { assertReauthenticatedUser } from '$lib/auth-slots';
 import {
 	assertAuthSlotCookieFits,
+	authCompletionCookieName,
 	authCookieOptions,
 	authFlowCookieName,
 	authFlowCookieOptions,
@@ -12,6 +13,7 @@ import {
 	clientAddress,
 	openAuthFlow,
 	readAuthSlotConfig,
+	sealAuthCompletion,
 	sealSlotIdentity,
 	taggedErrorResponse
 } from '$lib/server/auth-slots';
@@ -55,6 +57,14 @@ export const GET: RequestHandler = async (event) => {
 			authIdentityCookieName(slotId),
 			await sealSlotIdentity(session.user.id, config.cookiePassword),
 			authCookieOptions(slotId)
+		);
+		event.cookies.set(
+			authCompletionCookieName(slotId),
+			await sealAuthCompletion(
+				{ ...flow, purpose: 'reauthenticate', expectedUserId: session.user.id },
+				config.cookiePassword
+			),
+			{ ...authCookieOptions(slotId), maxAge: 600 }
 		);
 
 		const destination = new URL(flow.returnTo, event.url.origin);

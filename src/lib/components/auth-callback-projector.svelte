@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 
+	import { AuthSlotCapacityExceeded } from '$lib/auth-slots/contracts.js';
 	import { projectAuthCallback, takeAuthCallbackMarker } from '$lib/client/auth-slot-projection.js';
 	import { getBrowserDatabase } from '$lib/client/local/browser.js';
 
@@ -27,8 +28,11 @@
 					message = 'Maal could not verify this profile. Your local data is still available.';
 				}
 			})
-			.catch(() => {
-				message = 'Maal could not finish this sign-in. Your local data is still available.';
+			.catch((cause) => {
+				message =
+					cause instanceof AuthSlotCapacityExceeded
+						? 'Eight profiles are already signed in on this device. Sign out of one, then add this profile again.'
+						: 'Maal could not finish this sign-in. Your local data is still available.';
 			});
 	});
 </script>

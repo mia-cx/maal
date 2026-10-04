@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+	authCompletionCookieName,
 	authFlowCookieName,
 	AUTH_FLOW_MARKER_VALUE,
+	openAuthCompletion,
+	openAuthFlow,
+	sealAuthCompletion,
 	sealAuthFlow,
 	type AuthFlow
 } from '$lib/server/auth-slots';
@@ -40,7 +44,7 @@ describe('stable retained-profile callback HTTP seam', () => {
 			stateFor(ALICE_SLOT, ALICE_NONCE),
 			stateFor(BOB_SLOT, BOB_NONCE)
 		]);
-		const jar = new Map([
+		const jar = new Map<string, string>([
 			[authFlowCookieName(ALICE_NONCE), AUTH_FLOW_MARKER_VALUE],
 			[authFlowCookieName(BOB_NONCE), AUTH_FLOW_MARKER_VALUE]
 		]);
@@ -57,6 +61,18 @@ describe('stable retained-profile callback HTTP seam', () => {
 
 		expectSessionCookies(alice.cookies.set, ALICE_SLOT);
 		expectSessionCookies(bob.cookies.set, BOB_SLOT);
+		const [aliceFlow, aliceProof, bobProof] = await Promise.all([
+			openAuthFlow(aliceState, COOKIE_PASSWORD),
+			openAuthCompletion(jar.get(authCompletionCookieName(ALICE_SLOT)), COOKIE_PASSWORD),
+			openAuthCompletion(jar.get(authCompletionCookieName(BOB_SLOT)), COOKIE_PASSWORD)
+		]);
+		expect(aliceProof).toEqual({
+			...aliceFlow,
+			purpose: 'reauthenticate',
+			expectedUserId: 'user_alice'
+		});
+		expect(aliceProof).not.toHaveProperty('pinResetNonce');
+		expect(bobProof).toMatchObject({ authSlotId: BOB_SLOT, expectedUserId: 'user_bob' });
 		expect(alice.cookies.set).not.toHaveBeenCalledWith(
 			expect.stringContaining(BOB_SLOT),
 			expect.anything(),
@@ -74,24 +90,91 @@ describe('stable retained-profile callback HTTP seam', () => {
 	it('rejects tampered, expired, and replayed state before another code exchange', async () => {
 		const state = await stateFor(ALICE_SLOT, ALICE_NONCE);
 		const marker = authFlowCookieName(ALICE_NONCE);
-		const jar = new Map([[marker, AUTH_FLOW_MARKER_VALUE]]);
+		const jar = new Map<string, string>([[marker, AUTH_FLOW_MARKER_VALUE]]);
 		workos.exchangeCode.mockResolvedValue(sessionFor('alice'));
 
-		await expectStatus(GET(eventFor(`${state}tampered`, 'code-tampered', jar).event), 400);
+		const tampered = eventFor(`${state}tampered`, 'code-tampered', jar);
+		await expectStatus(GET(tampered.event), 400);
+		expect(tampered.cookies.set).not.toHaveBeenCalled();
 		expect(workos.exchangeCode).not.toHaveBeenCalled();
 
 		const expired = await stateFor(ALICE_SLOT, ALICE_NONCE, {
 			issuedAt: '2026-08-21T11:00:00.000Z',
 			expiresAt: '2026-08-21T11:10:00.000Z'
 		});
-		await expectStatus(GET(eventFor(expired, 'code-expired', jar).event), 400);
+		const expiredRequest = eventFor(expired, 'code-expired', jar);
+		await expectStatus(GET(expiredRequest.event), 400);
+		expect(expiredRequest.cookies.set).not.toHaveBeenCalled();
 		expect(workos.exchangeCode).not.toHaveBeenCalled();
 
 		const first = eventFor(state, 'code-alice', jar);
 		await expectRedirect(GET(first.event), `/?authSlot=${ALICE_SLOT}&authStatus=authenticated`);
 		expect(workos.exchangeCode).toHaveBeenCalledTimes(1);
-		await expectStatus(GET(eventFor(state, 'code-alice', jar).event), 400);
+		jar.delete(authCompletionCookieName(ALICE_SLOT));
+		const replay = eventFor(state, 'code-alice', jar);
+		await expectStatus(GET(replay.event), 400);
+		expect(replay.cookies.set).not.toHaveBeenCalled();
+		expect(jar.has(authCompletionCookieName(ALICE_SLOT))).toBe(false);
 		expect(workos.exchangeCode).toHaveBeenCalledTimes(1);
+	});
+
+	it('binds fresh reauthentication proof to the matched owner, PIN reset nonce and original expiry', async () => {
+		const state = await stateFor(ALICE_SLOT, ALICE_NONCE, {
+			purpose: 'reauthenticate',
+			expectedUserId: 'user_alice',
+			pinResetNonce: BOB_NONCE
+		});
+		const jar = new Map<string, string>([
+			[authFlowCookieName(ALICE_NONCE), AUTH_FLOW_MARKER_VALUE]
+		]);
+		workos.exchangeCode.mockResolvedValue(sessionFor('alice'));
+
+		const request = eventFor(state, 'code-alice', jar);
+		await expectRedirect(GET(request.event), `/?authSlot=${ALICE_SLOT}&authStatus=authenticated`);
+		const flow = await openAuthFlow(state, COOKIE_PASSWORD);
+		const completion = jar.get(authCompletionCookieName(ALICE_SLOT));
+		await expect(openAuthCompletion(completion, COOKIE_PASSWORD)).resolves.toEqual(flow);
+		await expect(openAuthFlow(completion, COOKIE_PASSWORD)).resolves.toBeNull();
+		await expect(openAuthCompletion(state, COOKIE_PASSWORD)).resolves.toBeNull();
+		expect(workos.revoke).not.toHaveBeenCalled();
+		expectSessionCookies(request.cookies.set, ALICE_SLOT);
+	});
+
+	it('rejects completion proof used as callback state even with a valid pending marker', async () => {
+		const state = await stateFor(ALICE_SLOT, ALICE_NONCE, {
+			purpose: 'reauthenticate',
+			expectedUserId: 'user_alice',
+			pinResetNonce: BOB_NONCE
+		});
+		const flow = await openAuthFlow(state, COOKIE_PASSWORD);
+		const completion = await sealAuthCompletion(flow!, COOKIE_PASSWORD);
+		const jar = new Map<string, string>([
+			[authFlowCookieName(ALICE_NONCE), AUTH_FLOW_MARKER_VALUE]
+		]);
+		const request = eventFor(completion, 'code-alice', jar);
+
+		await expectStatus(GET(request.event), 400);
+		expect(workos.exchangeCode).not.toHaveBeenCalled();
+		expect(request.cookies.set).not.toHaveBeenCalled();
+		expect(jar.get(authFlowCookieName(ALICE_NONCE))).toBe(AUTH_FLOW_MARKER_VALUE);
+	});
+
+	it('consumes a failed exchange marker without issuing proof or allowing a retry', async () => {
+		const state = await stateFor(ALICE_SLOT, ALICE_NONCE);
+		const jar = new Map<string, string>([
+			[authFlowCookieName(ALICE_NONCE), AUTH_FLOW_MARKER_VALUE]
+		]);
+		workos.exchangeCode.mockRejectedValue(new Error('Invalid authorization code'));
+
+		const request = eventFor(state, 'invalid-code', jar);
+		expect((await GET(request.event)).status).toBe(503);
+		expect(request.cookies.set).not.toHaveBeenCalled();
+		expect(jar.has(authCompletionCookieName(ALICE_SLOT))).toBe(false);
+		expect(jar.has(authFlowCookieName(ALICE_NONCE))).toBe(false);
+		const replay = eventFor(state, 'invalid-code', jar);
+		await expectStatus(GET(replay.event), 400);
+		expect(replay.cookies.set).not.toHaveBeenCalled();
+		expect(workos.exchangeCode).toHaveBeenCalledOnce();
 	});
 
 	it('revokes only a mismatched reauthentication session and writes no retained cookie', async () => {
@@ -112,6 +195,7 @@ describe('stable retained-profile callback HTTP seam', () => {
 		expect(workos.revoke).toHaveBeenCalledOnce();
 		expect(workos.revoke).toHaveBeenCalledWith('session_bob');
 		expect(request.cookies.set).not.toHaveBeenCalled();
+		expect(jar.has(authCompletionCookieName(ALICE_SLOT))).toBe(false);
 		expect(jar.get(`__Secure-maal_session_${BOB_SLOT}`)).toBe('bob-session');
 	});
 });
@@ -205,4 +289,11 @@ function expectSessionCookies(set: ReturnType<typeof vi.fn>, slotId: string) {
 		expect.any(String),
 		expect.objectContaining({ path: `/api/auth-slots/${slotId}/` })
 	);
+	expect(set).toHaveBeenCalledWith(authCompletionCookieName(slotId), expect.any(String), {
+		path: `/api/auth-slots/${slotId}/`,
+		httpOnly: true,
+		secure: true,
+		sameSite: 'lax',
+		maxAge: 600
+	});
 }
