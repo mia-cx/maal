@@ -92,6 +92,16 @@ export const processStripeWebhook = async (input: {
 			await input.repository.finishStripeEventWithoutProjection(input.event.id, input.receivedAt);
 			return 'ignored';
 		}
+		// A purged household has no rows to project onto; its late webhooks finish quietly so
+		// Stripe stops retrying them.
+		const deletion = await input.repository.deletionRequest(householdId);
+		if (deletion?.state === 'purged' || !(await input.repository.householdExists(householdId))) {
+			await input.repository.finishStripeEventWithoutProjection(
+				input.event.id,
+				input.receivedAt
+			);
+			return 'processed';
+		}
 		// An event for a different subscription than the projected row is normally a superseded
 		// duplicate, but a replacement subscription can legitimately arrive before the old one's
 		// cancellation event. When the row's subscription is still open in D1, ask Stripe whether

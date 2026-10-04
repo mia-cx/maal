@@ -8,6 +8,7 @@ import {
 	billingTrialClaims,
 	householdDeletionRequests,
 	householdMemberships,
+	households,
 	stripeEvents
 } from '$lib/server/db/schema/index.js';
 
@@ -404,6 +405,18 @@ export class BillingRepository {
 			)
 			.returning();
 		return updated[0] ?? null;
+	}
+
+	async householdExists(householdId: string): Promise<boolean> {
+		return (
+			(
+				await getDb(this.database)
+					.select({ householdId: households.householdId })
+					.from(households)
+					.where(eq(households.householdId, householdId))
+					.limit(1)
+			)[0] !== undefined
+		);
 	}
 
 	async deletionRequest(householdId: string): Promise<HouseholdDeletionRow | null> {

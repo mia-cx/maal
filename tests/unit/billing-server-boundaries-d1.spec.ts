@@ -184,10 +184,15 @@ const fakeStripe = (
 	return { stripe, subscriptions, calls };
 };
 
-const subscriptionEvent = (id: string, created: number, subId: string) =>
+const subscriptionEvent = (
+	id: string,
+	created: number,
+	subId: string,
+	type = 'customer.subscription.updated'
+) =>
 	({
 		id,
-		type: 'customer.subscription.updated',
+		type,
 		created,
 		data: { object: { object: 'subscription', id: subId } }
 	}) as unknown as Stripe.Event;
@@ -467,6 +472,35 @@ describe('household deletion and billing', () => {
 			{ args: ['sub_a', expect.anything(), expect.anything()] }
 		]);
 		expect(subscriptions.get('sub_a')?.status).toBe('canceled');
+	});
+
+	test('a webhook delivered after the household was purged finishes quietly', async () => {
+		await insertDeletion('2026-02-01T00:00:00.000Z');
+		await insertSubscription({ status: 'trialing', currentPeriodEnd: '2026-03-01T00:00:00.000Z' });
+		const { stripe, subscriptions } = fakeStripe();
+		subscriptions.set('sub_a', sub('sub_a', 'trialing'));
+		await purgeExpiredHouseholds({
+			repository: new BillingRepository(database),
+			stripe,
+			now: '2026-02-02T00:00:00.000Z',
+			deleteWorkOSOrganization: async () => undefined
+		});
+
+		// The cancellation webhook Stripe sends after the purge must not try to project onto a
+		// billing row whose household no longer exists.
+		const result = await processStripeWebhook({
+			stripe,
+			repository: new BillingRepository(database),
+			event: subscriptionEvent('evt_late_cancel', t0 + 100, 'sub_a', 'customer.subscription.deleted'),
+			receivedAt: iso(t0 + 100)
+		});
+		expect(result).toBe('processed');
+		expect(await billingRow()).toBeNull();
+		expect(
+			await database
+				.prepare("SELECT state FROM stripe_events WHERE stripe_event_id = 'evt_late_cancel'")
+				.first<{ state: string }>()
+		).toMatchObject({ state: 'processed' });
 	});
 });
 
