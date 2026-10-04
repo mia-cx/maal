@@ -1,4 +1,7 @@
+import type { Transaction } from 'dexie';
+
 import type { MaalDatabase } from '$lib/client/local/database.js';
+import type { BillingCapability } from '$lib/domain/billing/contracts.js';
 
 import {
 	createHouseholdSyncCoordinator,
@@ -9,6 +12,7 @@ import {
 	type HouseholdSyncTransport
 } from './household-transport.js';
 import { createUserSyncCoordinator, type UserSyncCoordinator } from './coordinator.js';
+import { localCapabilityAllowsSync } from './capability.js';
 import { subscribeLocalSyncRequests } from './requests.js';
 import { createFetchUserSyncTransport, type UserSyncTransport } from './transport.js';
 
@@ -101,26 +105,61 @@ export const startDeviceSync = (
 	const authSlotChanged = (): void => {
 		queueMicrotask(() => void reconcileAuthSlots());
 	};
-	const capabilityChanged = (): void => {
+	const capabilityChanged = (refreshedHouseholdId?: string): void => {
 		queueMicrotask(() => {
-			void reconcileAuthSlots().then(() => {
+			void reconcileAuthSlots().then(async () => {
 				for (const coordinator of householdCoordinators.values()) {
 					coordinator.resumeAfterCapabilityRefresh();
+				}
+				if (!refreshedHouseholdId || stopped) return;
+				const capability = await database.billingCapabilities.get(refreshedHouseholdId);
+				// Denial writes stale=true itself; only a fresh grant may clear its block.
+				if (!capability || capability.stale || !localCapabilityAllowsSync(capability, new Date())) {
+					return;
+				}
+				const members = new Set(
+					(await database.memberships.toArray())
+						.filter(
+							(membership) =>
+								membership.householdId === refreshedHouseholdId &&
+								membership.status === 'active' &&
+								membership.permissions.includes('recipes:read')
+						)
+						.map(({ workosUserId }) => workosUserId)
+				);
+				for (const slot of await database.authSlots.toArray()) {
+					if (members.has(slot.workosUserId)) {
+						coordinators.get(slot.authSlotId)?.resumeAfterCapabilityRefresh();
+					}
 				}
 			});
 		});
 	};
+	const membershipChanged = (): void => capabilityChanged();
+	const billingCreated = (
+		_primaryKey: unknown,
+		record: BillingCapability,
+		transaction: Transaction
+	): void => {
+		transaction.on('complete', () => capabilityChanged(record.householdId));
+	};
+	const billingUpdated = (
+		_changes: object,
+		_primaryKey: unknown,
+		record: BillingCapability,
+		transaction: Transaction
+	): void => billingCreated(_primaryKey, record, transaction);
 
 	database.outbox.hook('creating', notifyOutbox);
 	database.authSlots.hook('creating', authSlotChanged);
 	database.authSlots.hook('updating', authSlotChanged);
 	database.authSlots.hook('deleting', authSlotChanged);
-	database.memberships.hook('creating', capabilityChanged);
-	database.memberships.hook('updating', capabilityChanged);
-	database.memberships.hook('deleting', capabilityChanged);
-	database.billingCapabilities.hook('creating', capabilityChanged);
-	database.billingCapabilities.hook('updating', capabilityChanged);
-	database.billingCapabilities.hook('deleting', capabilityChanged);
+	database.memberships.hook('creating', membershipChanged);
+	database.memberships.hook('updating', membershipChanged);
+	database.memberships.hook('deleting', membershipChanged);
+	database.billingCapabilities.hook('creating', billingCreated);
+	database.billingCapabilities.hook('updating', billingUpdated);
+	database.billingCapabilities.hook('deleting', membershipChanged);
 	void reconcileAuthSlots();
 	const unsubscribeSyncRequests = subscribeLocalSyncRequests((event) => {
 		if (event.databaseName !== database.name) return;
@@ -144,12 +183,12 @@ export const startDeviceSync = (
 			database.authSlots.hook('creating').unsubscribe(authSlotChanged);
 			database.authSlots.hook('updating').unsubscribe(authSlotChanged);
 			database.authSlots.hook('deleting').unsubscribe(authSlotChanged);
-			database.memberships.hook('creating').unsubscribe(capabilityChanged);
-			database.memberships.hook('updating').unsubscribe(capabilityChanged);
-			database.memberships.hook('deleting').unsubscribe(capabilityChanged);
-			database.billingCapabilities.hook('creating').unsubscribe(capabilityChanged);
-			database.billingCapabilities.hook('updating').unsubscribe(capabilityChanged);
-			database.billingCapabilities.hook('deleting').unsubscribe(capabilityChanged);
+			database.memberships.hook('creating').unsubscribe(membershipChanged);
+			database.memberships.hook('updating').unsubscribe(membershipChanged);
+			database.memberships.hook('deleting').unsubscribe(membershipChanged);
+			database.billingCapabilities.hook('creating').unsubscribe(billingCreated);
+			database.billingCapabilities.hook('updating').unsubscribe(billingUpdated);
+			database.billingCapabilities.hook('deleting').unsubscribe(membershipChanged);
 			for (const coordinator of coordinators.values()) coordinator.stop();
 			for (const coordinator of householdCoordinators.values()) coordinator.stop();
 			coordinators.clear();

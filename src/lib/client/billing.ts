@@ -110,7 +110,8 @@ export const shouldRefreshBillingOnLaunch = async (
 
 export const refreshBillingProjectionsOnLaunch = async (
 	database: MaalDatabase,
-	fetcher: Fetch = globalThis.fetch
+	fetcher: Fetch = globalThis.fetch,
+	excludedHouseholdId?: string
 ): Promise<{ attempted: number; refreshed: number }> => {
 	const [capabilities, memberships, slots] = await Promise.all([
 		database.billingCapabilities.toArray(),
@@ -130,6 +131,7 @@ export const refreshBillingProjectionsOnLaunch = async (
 	let attempted = 0;
 	let refreshed = 0;
 	for (const capability of capabilities) {
+		if (capability.householdId === excludedHouseholdId) continue;
 		const profileId = profileByHouseholdId.get(capability.householdId);
 		if (!profileId || !(await shouldRefreshBillingOnLaunch(database, capability.householdId))) {
 			continue;
@@ -176,10 +178,9 @@ export const refreshBillingOnLoad = async (
 		stripeReturn === 'checkout-success' || stripeReturn === 'returned'
 			? await activeHousehold(database)
 			: null;
-	const coveredByLaunch =
-		returned !== null && (await shouldRefreshBillingOnLaunch(database, returned.householdId));
-	await refreshBillingProjectionsOnLaunch(database, fetcher);
-	if (!returned || coveredByLaunch) return;
+	// The return path owns this household's initial read and any webhook retries.
+	await refreshBillingProjectionsOnLaunch(database, fetcher, returned?.householdId);
+	if (!returned) return;
 
 	const retries = stripeReturn === 'checkout-success' ? CHECKOUT_WEBHOOK_RETRY_DELAYS_MS : [];
 	for (const pause of [0, ...retries]) {
