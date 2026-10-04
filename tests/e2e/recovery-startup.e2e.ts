@@ -1,6 +1,9 @@
 import { readFile } from 'node:fs/promises';
 
 import { expect, test, type Page } from '@playwright/test';
+import { BlobReader, TextWriter, ZipReader, configure } from '@zip.js/zip.js';
+
+configure({ useWebWorkers: false });
 
 const databaseName = 'maal-v1:production';
 const safeRecipeId = '01990c69-7f00-7000-8000-000000000077';
@@ -67,27 +70,34 @@ const seedRecoveryDatabase = async ({
 	});
 };
 
-const downloadRecoveryArtifact = async (page: Page): Promise<string> => {
+const downloadRecoveryArtifact = async (page: Page): Promise<Map<string, string>> => {
 	const downloadPromise = page.waitForEvent('download');
-	await page.getByRole('button', { name: 'Download recovery JSON' }).click();
+	await page.getByRole('button', { name: 'Download recovery archive' }).click();
 	const download = await downloadPromise;
+	expect(download.suggestedFilename()).toMatch(/^maal-recovery-user_alice-\d{4}-\d{2}-\d{2}\.zip$/);
 	const path = await download.path();
 	if (!path) throw new Error('The recovery download did not produce a local artifact.');
-	return readFile(path, 'utf8');
+	const reader = new ZipReader(new BlobReader(new Blob([await readFile(path)])));
+	const entries = new Map<string, string>();
+	for (const entry of await reader.getEntries()) {
+		if (!entry.directory) entries.set(entry.filename, await entry.getData(new TextWriter()));
+	}
+	await reader.close();
+	return entries;
 };
 
-const expectSafeRecoveryArtifact = (artifactText: string): void => {
-	const artifact = JSON.parse(artifactText) as {
-		databaseName: string;
-		records: { recipes?: { id: string; ownerUserId: string }[] };
-		skipped: { recipes?: number };
+// The damaged recipe and the profile row without a user ID are skipped. The surviving recipe is
+// a purged tombstone, so the archive is attributed to its owner but carries no recipe content.
+const expectSafeRecoveryArtifact = async (page: Page, entries: Map<string, string>) => {
+	const manifest = JSON.parse(entries.get('manifest.json') ?? '{}') as {
+		exporterWorkosUserId?: string;
 	};
-	expect(artifact.databaseName).toBe(databaseName);
-	expect(artifact.records.recipes).toEqual([
-		expect.objectContaining({ id: safeRecipeId, ownerUserId: 'user_alice' })
-	]);
-	expect(artifact.skipped.recipes).toBe(1);
-	expect(artifactText).not.toContain('never-export-this');
+	expect(manifest.exporterWorkosUserId).toBe('user_alice');
+	expect([...entries.keys()]).toEqual(expect.arrayContaining(['recipes.json', 'meals.json']));
+	expect([...entries.values()].join('\n')).not.toContain('never-export-this');
+	await expect(
+		page.getByText('Recovery archive saved. 2 unreadable records were skipped.')
+	).toBeVisible();
 };
 
 const readRecoverySourceState = async (name: string) => {
@@ -138,7 +148,7 @@ test('newer schema startup falls back to a safe recovery artifact', async ({ pag
 	]);
 
 	await expectRecoveryShell(page);
-	expectSafeRecoveryArtifact(await downloadRecoveryArtifact(page));
+	await expectSafeRecoveryArtifact(page, await downloadRecoveryArtifact(page));
 	expect(contentRequests).toEqual([]);
 	await expect
 		.poll(() => page.evaluate(readRecoverySourceState, databaseName))
@@ -180,7 +190,7 @@ test('failed IndexedDB upgrade stays in recovery and exports safe data', async (
 	await expect
 		.poll(() => page.evaluate((key) => localStorage.getItem(key), injectedFailureKey))
 		.toBe('1');
-	expectSafeRecoveryArtifact(await downloadRecoveryArtifact(page));
+	await expectSafeRecoveryArtifact(page, await downloadRecoveryArtifact(page));
 	await expect
 		.poll(() => page.evaluate(readRecoverySourceState, databaseName))
 		.toEqual({ count: 2, version: 50 });

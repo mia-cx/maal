@@ -8,9 +8,10 @@ import {
 	configure,
 	type Entry
 } from '@zip.js/zip.js';
+import type { Table } from 'dexie';
 import { Schema } from 'effect';
 
-import type { MaalDatabase } from '$lib/client/local/database.js';
+import type { LocalStoreName, MaalDatabase } from '$lib/client/local/database.js';
 import { PortableArchiveError } from '$lib/domain/contracts/errors.js';
 import { GLOBAL_TAXONOMY_SEED_VERSION } from '$lib/domain/taxonomy/global-seed.js';
 import {
@@ -25,6 +26,7 @@ import {
 	PortablePreferencesFileSchema,
 	PortableRecipesFileSchema,
 	PortableTaxonomyFileSchema,
+	PortableUserAttributionSchema,
 	PortableUsersFileSchema,
 	type PortableArchive
 } from '$lib/domain/portability/schema.js';
@@ -106,68 +108,84 @@ const fileCount = (value: unknown): number => {
 	);
 };
 
-const visibleRows = async <A extends { workosUserId: string }>(
-	rows: Promise<A[]>,
+const portableUserRows = <A extends { workosUserId: string; conflictClocks: unknown }>(
+	rows: readonly A[],
 	workosUserId: string
-): Promise<A[]> => (await rows).filter((row) => row.workosUserId === workosUserId);
+): Omit<A, 'conflictClocks'>[] =>
+	rows.filter((row) => row.workosUserId === workosUserId).map(withoutConflictClocks);
 
-const visibleHouseholdRows = async <A extends { householdId: string }>(
-	rows: Promise<A[]>,
+const portableHouseholdRows = <A extends { householdId: string; conflictClocks: unknown }>(
+	rows: readonly A[],
 	householdIds: ReadonlySet<string>
-): Promise<A[]> => (await rows).filter((row) => householdIds.has(row.householdId));
-
-const portableUserRows = async <A extends { workosUserId: string; conflictClocks: unknown }>(
-	rows: Promise<A[]>,
-	workosUserId: string
-): Promise<Omit<A, 'conflictClocks'>[]> =>
-	(await visibleRows(rows, workosUserId)).map(withoutConflictClocks);
-
-const portableHouseholdRows = async <A extends { householdId: string; conflictClocks: unknown }>(
-	rows: Promise<A[]>,
-	householdIds: ReadonlySet<string>
-): Promise<Omit<A, 'conflictClocks'>[]> =>
-	(await visibleHouseholdRows(rows, householdIds)).map(withoutConflictClocks);
+): Omit<A, 'conflictClocks'>[] =>
+	rows.filter((row) => householdIds.has(row.householdId)).map(withoutConflictClocks);
 
 export interface PortableExportOptions {
 	readonly appVersion?: string;
 	readonly createdAt?: `${string}Z`;
 }
 
-export const collectPortableArchive = async (
-	database: MaalDatabase,
-	profileId: string,
+/** Local stores an archive is built from. Profiles contribute only their display attribution. */
+export const PORTABLE_SOURCE_STORES = [
+	'memberships',
+	'households',
+	'householdAppliances',
+	'recipes',
+	'meals',
+	'mealCheckIns',
+	'userAttributions',
+	'foods',
+	'foodAliases',
+	'foodUserAliases',
+	'foodHouseholdAliases',
+	'foodUserEntries',
+	'foodHouseholdEntries',
+	'units',
+	'unitAliases',
+	'unitUserAliases',
+	'unitHouseholdAliases',
+	'unitUserEntries',
+	'unitHouseholdEntries',
+	'userFoodPreferences',
+	'userFoodDisplayPreferences',
+	'householdFoodDisplayPreferences',
+	'userUnitDisplayPreferences',
+	'householdUnitDisplayPreferences'
+] as const satisfies readonly LocalStoreName[];
+
+type PortableSourceStore = (typeof PORTABLE_SOURCE_STORES)[number];
+type StoreRow<K extends PortableSourceStore> =
+	MaalDatabase[K] extends Table<infer Row, string> ? Row : never;
+
+/** Every row of each source store, as the live database or a recovery read returns them. */
+export type PortableSource = { readonly [K in PortableSourceStore]: readonly StoreRow<K>[] };
+
+export type PortableUserAttribution = typeof PortableUserAttributionSchema.Type;
+
+/**
+ * Builds the archive of everything `exporter` can see in `source`. `localUsers` are this
+ * device's profiles; their attribution wins over cached attributions of the same user.
+ */
+export const buildPortableArchive = (
+	source: PortableSource,
+	exporter: PortableUserAttribution,
+	localUsers: readonly PortableUserAttribution[],
 	options: PortableExportOptions = {}
-): Promise<PortableArchive> => {
-	const profile = await database.profiles.get(profileId);
-	if (!profile) {
-		throw archiveError(
-			'invalid_content',
-			'select export profile',
-			'The export profile is missing.'
-		);
-	}
-	const memberships = await database.memberships
-		.where('workosUserId')
-		.equals(profile.workosUserId)
-		.filter(({ status }) => status !== 'revoked')
-		.toArray();
+): PortableArchive => {
+	const exporterId = exporter.workosUserId;
+	const memberships = source.memberships.filter(
+		({ workosUserId, status }) => workosUserId === exporterId && status !== 'revoked'
+	);
 	const householdIds = new Set(memberships.map(({ householdId }) => householdId));
-	const households = (
-		await database.households
-			.filter(
-				({ householdId, deletionState }) =>
-					householdIds.has(householdId) && deletionState !== 'purged'
-			)
-			.toArray()
-	).map(withoutConflictClocks);
-	const appliances = (
-		await visibleHouseholdRows(database.householdAppliances.toArray(), householdIds)
-	).map(withoutConflictClocks);
-	const storedRecipes = await database.recipes
-		.where('ownerUserId')
-		.equals(profile.workosUserId)
-		.toArray();
-	const recipes = storedRecipes
+	const households = source.households
+		.filter(
+			({ householdId, deletionState }) =>
+				householdIds.has(householdId) && deletionState !== 'purged'
+		)
+		.map(withoutConflictClocks);
+	const appliances = portableHouseholdRows(source.householdAppliances, householdIds);
+	const recipes = source.recipes
+		.filter(({ ownerUserId }) => ownerUserId === exporterId)
 		.map((record) => decode(StoredRecipeSchema, record, 'decode recipe for export'))
 		.filter(isRecipeAggregate);
 	const activeRecipes = recipes
@@ -176,113 +194,66 @@ export const collectPortableArchive = async (
 	const deletedRecipes = recipes
 		.filter(({ deletedAt }) => deletedAt !== null)
 		.map(withoutConflictClocks);
-	const meals = (await database.meals.toArray())
+	const meals = source.meals
 		.map((record) => decode(StoredMealSchema, record, 'decode meal for export'))
 		.filter(isMealAggregate)
 		.filter(({ householdId, deletedAt }) => householdIds.has(householdId) && deletedAt === null);
 	const mealIds = new Set(meals.map(({ id }) => id));
-	const checkIns = (await database.mealCheckIns.toArray())
+	const checkIns = source.mealCheckIns
 		.map((record) => decode(MealCheckInSchema, record, 'decode check-in for export'))
 		.filter(
 			(row) =>
 				(row.mealId !== null && mealIds.has(row.mealId)) ||
-				(row.mealId === null && row.reporterUserId === profile.workosUserId)
+				(row.mealId === null && row.reporterUserId === exporterId)
 		);
-	const exportedRecipeIds = new Set(recipes.map(({ id }) => id));
-	const portableMeals = meals.map((meal) => ({
-		...withoutConflictClocks(meal),
-		sourceRecipeId:
-			meal.sourceRecipeId !== null && exportedRecipeIds.has(meal.sourceRecipeId)
-				? meal.sourceRecipeId
-				: null
-	}));
+	// Meal provenance stays as the household has it, even when the recipe belongs to another member.
+	const portableMeals = meals.map(withoutConflictClocks);
 	const portableCheckIns = checkIns.map(withoutConflictClocks);
 
 	const taxonomy = {
 		version: PORTABLE_FILE_VERSION,
 		globalSeedVersion: GLOBAL_TAXONOMY_SEED_VERSION,
-		foods: await database.foods.toArray(),
-		foodAliases: await database.foodAliases.toArray(),
-		foodUserAliases: await portableUserRows(
-			database.foodUserAliases.toArray(),
-			profile.workosUserId
-		),
-		foodHouseholdAliases: await portableHouseholdRows(
-			database.foodHouseholdAliases.toArray(),
-			householdIds
-		),
-		foodUserEntries: await portableUserRows(
-			database.foodUserEntries.toArray(),
-			profile.workosUserId
-		),
-		foodHouseholdEntries: await portableHouseholdRows(
-			database.foodHouseholdEntries.toArray(),
-			householdIds
-		),
-		units: await database.units.toArray(),
-		unitAliases: await database.unitAliases.toArray(),
-		unitUserAliases: await portableUserRows(
-			database.unitUserAliases.toArray(),
-			profile.workosUserId
-		),
-		unitHouseholdAliases: await portableHouseholdRows(
-			database.unitHouseholdAliases.toArray(),
-			householdIds
-		),
-		unitUserEntries: await portableUserRows(
-			database.unitUserEntries.toArray(),
-			profile.workosUserId
-		),
-		unitHouseholdEntries: await portableHouseholdRows(
-			database.unitHouseholdEntries.toArray(),
-			householdIds
-		)
+		foods: source.foods,
+		foodAliases: source.foodAliases,
+		foodUserAliases: portableUserRows(source.foodUserAliases, exporterId),
+		foodHouseholdAliases: portableHouseholdRows(source.foodHouseholdAliases, householdIds),
+		foodUserEntries: portableUserRows(source.foodUserEntries, exporterId),
+		foodHouseholdEntries: portableHouseholdRows(source.foodHouseholdEntries, householdIds),
+		units: source.units,
+		unitAliases: source.unitAliases,
+		unitUserAliases: portableUserRows(source.unitUserAliases, exporterId),
+		unitHouseholdAliases: portableHouseholdRows(source.unitHouseholdAliases, householdIds),
+		unitUserEntries: portableUserRows(source.unitUserEntries, exporterId),
+		unitHouseholdEntries: portableHouseholdRows(source.unitHouseholdEntries, householdIds)
 	};
 	const preferences = {
 		version: PORTABLE_FILE_VERSION,
-		userFoodPreferences: await portableUserRows(
-			database.userFoodPreferences.toArray(),
-			profile.workosUserId
-		),
-		userFoodDisplayPreferences: await portableUserRows(
-			database.userFoodDisplayPreferences.toArray(),
-			profile.workosUserId
-		),
-		householdFoodDisplayPreferences: await portableHouseholdRows(
-			database.householdFoodDisplayPreferences.toArray(),
+		userFoodPreferences: portableUserRows(source.userFoodPreferences, exporterId),
+		userFoodDisplayPreferences: portableUserRows(source.userFoodDisplayPreferences, exporterId),
+		householdFoodDisplayPreferences: portableHouseholdRows(
+			source.householdFoodDisplayPreferences,
 			householdIds
 		),
-		userUnitDisplayPreferences: await portableUserRows(
-			database.userUnitDisplayPreferences.toArray(),
-			profile.workosUserId
-		),
-		householdUnitDisplayPreferences: await portableHouseholdRows(
-			database.householdUnitDisplayPreferences.toArray(),
+		userUnitDisplayPreferences: portableUserRows(source.userUnitDisplayPreferences, exporterId),
+		householdUnitDisplayPreferences: portableHouseholdRows(
+			source.householdUnitDisplayPreferences,
 			householdIds
 		)
 	};
 
 	const referencedUserIds = new Set<string>([
-		profile.workosUserId,
+		exporterId,
 		...households.flatMap(({ createdByUserId }) => (createdByUserId ? [createdByUserId] : [])),
 		...recipes.map(({ ownerUserId }) => ownerUserId),
 		...meals.flatMap(({ plannedCookUserId }) => (plannedCookUserId ? [plannedCookUserId] : [])),
 		...checkIns.map(({ reporterUserId }) => reporterUserId)
 	]);
-	const [profiles, storedAttributions] = await Promise.all([
-		database.profiles.toArray(),
-		database.userAttributions.toArray()
-	]);
-	const attributionByUser = new Map(
-		storedAttributions.map((attribution) => [attribution.workosUserId, attribution])
+	const attributionByUser = new Map<string, PortableUserAttribution>(
+		[...source.userAttributions, exporter, ...localUsers].map((attribution) => [
+			attribution.workosUserId,
+			attribution
+		])
 	);
-	for (const localProfile of profiles) {
-		attributionByUser.set(localProfile.workosUserId, {
-			workosUserId: localProfile.workosUserId,
-			displayName: localProfile.displayName,
-			profilePictureUrl: localProfile.profilePictureUrl
-		});
-	}
 	const users = [...referencedUserIds].toSorted().map(
 		(workosUserId) =>
 			attributionByUser.get(workosUserId) ?? {
@@ -338,7 +309,7 @@ export const collectPortableArchive = async (
 		archiveFormatVersion: PORTABLE_ARCHIVE_FORMAT_VERSION,
 		domainContractVersion: 1,
 		createdAt: options.createdAt ?? (new Date().toISOString() as `${string}Z`),
-		exporterWorkosUserId: profile.workosUserId,
+		exporterWorkosUserId: exporterId,
 		appVersion: options.appVersion ?? '0.0.1',
 		globalTaxonomySeedVersion: GLOBAL_TAXONOMY_SEED_VERSION,
 		files: entryValues.map(([name, value]) => ({
@@ -384,6 +355,45 @@ export const collectPortableArchive = async (
 				}
 			: {})
 	};
+};
+
+const profileAttribution = ({
+	workosUserId,
+	displayName,
+	profilePictureUrl
+}: PortableUserAttribution): PortableUserAttribution => ({
+	workosUserId,
+	displayName,
+	profilePictureUrl
+});
+
+export const collectPortableArchive = async (
+	database: MaalDatabase,
+	profileId: string,
+	options: PortableExportOptions = {}
+): Promise<PortableArchive> => {
+	const [profile, profiles, rows] = await Promise.all([
+		database.profiles.get(profileId),
+		database.profiles.toArray(),
+		Promise.all(
+			PORTABLE_SOURCE_STORES.map(async (store) => [store, await database.table(store).toArray()])
+		)
+	]);
+	if (!profile) {
+		throw archiveError(
+			'invalid_content',
+			'select export profile',
+			'The export profile is missing.'
+		);
+	}
+	// Each entry holds its own table's rows, which is exactly the PortableSource shape.
+	const source = Object.fromEntries(rows) as PortableSource;
+	return buildPortableArchive(
+		source,
+		profileAttribution(profile),
+		profiles.map(profileAttribution),
+		options
+	);
 };
 
 const archiveEntries = (archive: PortableArchive): [PortableEntryName, unknown][] => [

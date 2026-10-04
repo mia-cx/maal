@@ -16,7 +16,15 @@ export interface RecoveryExport {
 	createdAt: string;
 	records: Partial<Record<LocalStoreName, readonly unknown[]>>;
 	skipped: Partial<Record<LocalStoreName, number>>;
+	/** Tables that exist but could not be read at all, so none of their rows are in `records`. */
+	unreadable: LocalStoreName[];
 }
+
+const isMissingTable = (error: unknown): boolean =>
+	typeof error === 'object' &&
+	error !== null &&
+	'name' in error &&
+	error.name === 'InvalidTableError';
 
 export type RecoveryDecoders = Partial<Record<LocalStoreName, Schema.Schema.AnyNoContext>>;
 
@@ -66,6 +74,7 @@ export const exportDecodableRecoveryData = async (
 ): Promise<RecoveryExport> => {
 	const records: RecoveryExport['records'] = {};
 	const skipped: RecoveryExport['skipped'] = {};
+	const unreadable: LocalStoreName[] = [];
 	const batchSize = Math.max(1, Math.min(options.batchSize ?? RECOVERY_EXPORT_BATCH_SIZE, 1_000));
 
 	for (const [name, schema] of Object.entries(decoders) as [
@@ -93,8 +102,9 @@ export const exportDecodableRecoveryData = async (
 				offset += rawRecords.length;
 				if (rawRecords.length < batchSize) break;
 			}
-		} catch {
+		} catch (error) {
 			// Recovery mode may be opening an older schema that never had this table.
+			if (!isMissingTable(error)) unreadable.push(name);
 			continue;
 		}
 		records[name] = decoded;
@@ -105,7 +115,8 @@ export const exportDecodableRecoveryData = async (
 		databaseName: database.name,
 		createdAt: utcNow(),
 		records,
-		skipped
+		skipped,
+		unreadable
 	};
 };
 
