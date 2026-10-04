@@ -139,6 +139,12 @@ const fakeStripe = (
 		failOn?: 'subscriptions.update' | 'customers.update' | 'paymentMethods.detach';
 	} = {}
 ) => {
+	const paymentMethods = new Map(
+		(options.paymentMethods ?? [{ id: 'pm_alice', created: 1_700_000_000 }]).map((method) => [
+			method.id,
+			method
+		])
+	);
 	const calls: { method: string; args: unknown[] }[] = [];
 	const record =
 		<R>(method: string, result: (...args: never[]) => R) =>
@@ -172,11 +178,20 @@ const fakeStripe = (
 			create: record('customers.create', () => ({ id: 'cus_family' })),
 			update: record('customers.update', () => ({ id: 'cus_family' })),
 			listPaymentMethods: async () => ({
-				data: options.paymentMethods ?? [{ id: 'pm_alice', created: 1_700_000_000 }],
+				data: [...paymentMethods.values()],
 				has_more: false
 			})
 		},
-		paymentMethods: { detach: record('paymentMethods.detach', (id: string) => ({ id })) },
+		paymentMethods: {
+			retrieve: async (id: string) =>
+				paymentMethods.has(id)
+					? { ...paymentMethods.get(id)!, customer: 'cus_family' }
+					: { id, customer: null },
+			detach: record('paymentMethods.detach', (id: string) => {
+				paymentMethods.delete(id);
+				return { id };
+			})
+		},
 		checkout: {
 			sessions: { create: record('checkout.create', () => ({ url: 'https://checkout.test/s' })) }
 		}
@@ -656,12 +671,8 @@ describe('billing transfer', () => {
 	test('a failed detach leaves ownership transferred and maintenance finishes the cleanup', async () => {
 		await insertMembership('membership_bob', 'user_bob');
 		await insertSubscription({ status: 'active', currentPeriodEnd: '2026-10-01T00:00:00.000Z' });
-		const paymentMethods = [
-			{ id: 'pm_old', created: 1_700_000_000 },
-			{ id: 'pm_new', created: t0 + 100 }
-		];
 		const { stripe, subscriptions } = fakeStripe(new Map(), {
-			paymentMethods,
+			paymentMethods: [{ id: 'pm_old', created: 1_700_000_000 }],
 			failOn: 'paymentMethods.detach'
 		});
 		subscriptions.set('sub_a', sub('sub_a', 'active'));
@@ -676,9 +687,14 @@ describe('billing transfer', () => {
 			idempotency_key: `payer-cleanup:sub_a:user_bob:${iso(t0)}`
 		});
 
-		// Maintenance re-runs the detach against the recorded cutoff: the PM created after it,
-		// the new owner's card, survives.
-		const retry = fakeStripe(new Map(), { paymentMethods });
+		// Maintenance detaches the recorded methods only: the card the new owner attached
+		// after the transfer survives even though its Stripe creation time is older.
+		const retry = fakeStripe(new Map(), {
+			paymentMethods: [
+				{ id: 'pm_old', created: 1_700_000_000 },
+				{ id: 'pm_new', created: 1_600_000_000 }
+			]
+		});
 		const cleanup = await reconcilePendingPayerCleanups({
 			repository: new BillingRepository(database),
 			stripe: retry.stripe,
@@ -688,6 +704,9 @@ describe('billing transfer', () => {
 		expect(
 			retry.calls.filter(({ method }) => method === 'paymentMethods.detach').map(({ args }) => args)
 		).toEqual([['pm_old']]);
+		expect(await retry.stripe.paymentMethods.retrieve('pm_new')).toMatchObject({
+			customer: 'cus_family'
+		});
 		expect((await auditEvents()).results).toContainEqual({
 			event_type: 'billing_payer_cleanup_completed',
 			idempotency_key: `payer-cleanup-completed:sub_a:user_bob:${iso(t0)}`

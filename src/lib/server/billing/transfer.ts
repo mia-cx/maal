@@ -16,17 +16,20 @@ const stringId = (value: string | { id: string } | null): string | null =>
 	value === null ? null : typeof value === 'string' ? value : value.id;
 
 /**
- * Detaches every payment method the previous payer attached before `cutoffMs`. A method created
- * at or after the cutoff belongs to the new owner and is never touched.
+ * Detaches exactly the payment methods recorded for the previous payer. A method that is no
+ * longer attached to this customer counts as done; anything the new owner added — even one
+ * created earlier — was never listed and is never touched.
  */
 const detachPayerPaymentMethods = async (
 	stripe: Stripe,
 	customerId: string,
-	cutoffMs: number
+	paymentMethodIds: readonly string[]
 ): Promise<void> => {
-	const paymentMethods = await stripe.customers.listPaymentMethods(customerId, { limit: 100 });
-	for (const method of paymentMethods.data) {
-		if (method.created * 1_000 < cutoffMs) await stripe.paymentMethods.detach(method.id);
+	for (const id of paymentMethodIds) {
+		const method = await stripe.paymentMethods.retrieve(id);
+		if (method !== null && stringId(method.customer ?? null) === customerId) {
+			await stripe.paymentMethods.detach(id);
+		}
 	}
 };
 
@@ -93,6 +96,13 @@ export const transferBillingOwnership = async (input: {
 		await rollbackOwner();
 		throw cause;
 	}
+	// The previous payer's methods are enumerated now, while they are unambiguous, and recorded
+	// so both this request and any maintenance retry detach exactly this set.
+	const payerPaymentMethods = await input.stripe.customers.listPaymentMethods(
+		subscription.stripeCustomerId,
+		{ limit: 100 }
+	);
+	const payerPaymentMethodIds = payerPaymentMethods.data.map((method) => method.id);
 	await input.repository.audit({
 		idempotencyKey: `transfer:${subscription.stripeSubscriptionId}:${input.newUserId}`,
 		householdId: input.householdId,
@@ -114,14 +124,14 @@ export const transferBillingOwnership = async (input: {
 		occurredAt: input.now,
 		safeDetails: {
 			stripeCustomerId: subscription.stripeCustomerId,
-			cleanupBefore: input.now
+			paymentMethodIds: JSON.stringify(payerPaymentMethodIds)
 		}
 	});
 	try {
 		await detachPayerPaymentMethods(
 			input.stripe,
 			subscription.stripeCustomerId,
-			Date.parse(input.now)
+			payerPaymentMethodIds
 		);
 	} catch {
 		return { payerCleanup: 'pending' };
@@ -138,7 +148,7 @@ export const transferBillingOwnership = async (input: {
 
 /**
  * Re-runs payment-method cleanup for transfers whose detach failed. The pending audit record
- * carries the customer and the original cutoff, so only the previous payer's methods detach.
+ * carries the customer and the previous payer's method ids, so only those detach.
  */
 export const reconcilePendingPayerCleanups = async (input: {
 	repository: BillingRepository;
@@ -152,16 +162,24 @@ export const reconcilePendingPayerCleanups = async (input: {
 	for (const cleanup of cleanups) {
 		const details = JSON.parse(cleanup.safeDetails) as {
 			stripeCustomerId?: string;
-			cleanupBefore?: string;
+			paymentMethodIds?: string;
 		};
-		if (!details.stripeCustomerId || !details.cleanupBefore || cleanup.householdId === null) {
+		const paymentMethodIds: unknown =
+			typeof details.paymentMethodIds === 'string'
+				? JSON.parse(details.paymentMethodIds)
+				: undefined;
+		if (
+			!details.stripeCustomerId ||
+			!Array.isArray(paymentMethodIds) ||
+			cleanup.householdId === null
+		) {
 			continue;
 		}
 		try {
 			await detachPayerPaymentMethods(
 				input.stripe,
 				details.stripeCustomerId,
-				Date.parse(details.cleanupBefore)
+				paymentMethodIds
 			);
 			await input.repository.audit({
 				idempotencyKey: payerCleanupCompletedKey(cleanup.idempotencyKey),
