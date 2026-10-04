@@ -542,6 +542,35 @@ describe('PWA update coordination', () => {
 		}
 	});
 
+	test('a critical update ignores cancellation in every tab', async () => {
+		vi.useFakeTimers();
+		try {
+			const tabs = new UpdateTabs();
+			const peer = tabs.open(() => new Promise(() => undefined));
+			const first = tabs.open();
+			await Promise.all([first.coordinator.start(), peer.coordinator.start()]);
+			first.serviceWorkers.emitMessage({
+				type: 'UPDATE_WAITING',
+				version: 'build-2',
+				critical: true
+			});
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect(first.status()).toBe('waiting-for-tabs');
+			expect(peer.status()).toBe('preparing');
+
+			first.coordinator.cancel();
+			peer.coordinator.cancel();
+			await vi.advanceTimersByTimeAsync(1_000);
+
+			expect(first.status()).toBe('waiting-for-tabs');
+			expect(peer.status()).toBe('preparing');
+			expect(first.resumed).toHaveLength(0);
+			expect(peer.resumed).toHaveLength(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	test('cancels delayed activation and an unresolved startup when stopped', async () => {
 		const ready = deferred();
 		const waiting = new FakeWorker();

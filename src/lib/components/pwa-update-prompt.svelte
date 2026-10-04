@@ -40,7 +40,7 @@
 			<Button size="sm" onclick={() => void getPwaUpdateCoordinator().activate()}>
 				<RefreshCwIcon /> Reload and update
 			</Button>
-		{:else if state.status === 'preparing' || state.status === 'waiting-for-tabs'}
+		{:else if (state.status === 'preparing' || state.status === 'waiting-for-tabs') && !state.critical}
 			<Button variant="outline" size="sm" onclick={() => getPwaUpdateCoordinator().cancel()}>
 				Cancel update
 			</Button>

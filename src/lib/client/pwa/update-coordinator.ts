@@ -118,6 +118,8 @@ export class PwaUpdateCoordinator {
 	#peers = new Map<string, number>();
 	#readyTabs = new Set<string>();
 	#preparedRequests = new Set<string>();
+	/** Critical requests keep their commits paused and cannot be cancelled. */
+	#preparedCritical = new Map<string, boolean>();
 	// A queued PREPARE_UPDATE must not reinstate a cancelled request's commit pause.
 	#cancelledRequests = new Set<string>();
 	/** The update request this tab started, re-sent to any tab that is not ready yet. */
@@ -246,6 +248,7 @@ export class PwaUpdateCoordinator {
 	cancel(): void {
 		if (this.#state.status === 'activating') return;
 		for (const requestId of this.#preparedRequests) {
+			if (this.#preparedCritical.get(requestId)) continue;
 			this.#post({ type: 'CANCEL_UPDATE', tabId: this.tabId, requestId });
 			this.#abandonUpdate(requestId);
 		}
@@ -314,7 +317,7 @@ export class PwaUpdateCoordinator {
 			case 'UPDATE_PREPARING':
 				break;
 			case 'CANCEL_UPDATE':
-				this.#abandonUpdate(value.requestId);
+				if (!this.#preparedCritical.get(value.requestId)) this.#abandonUpdate(value.requestId);
 				break;
 			case 'RELOAD':
 				this.#runtime.reload();
@@ -332,6 +335,7 @@ export class PwaUpdateCoordinator {
 		if (!this.#preparedRequests.has(message.requestId)) {
 			this.#runtime.pauseCommits(pauseReason);
 			this.#preparedRequests.add(message.requestId);
+			this.#preparedCritical.set(message.requestId, message.critical);
 		}
 		this.#setState({
 			status: 'preparing',
@@ -401,6 +405,7 @@ export class PwaUpdateCoordinator {
 		if (this.#preparedRequests.delete(requestId)) {
 			this.#runtime.resumeCommits(`service-worker-update:${requestId}`);
 		}
+		this.#preparedCritical.delete(requestId);
 		if (this.#preparedRequests.size === 0 && this.#updating()) {
 			this.#setState({ ...this.#state, status: 'available', message: null });
 		}
@@ -411,6 +416,7 @@ export class PwaUpdateCoordinator {
 			this.#runtime.resumeCommits(`service-worker-update:${requestId}`);
 		}
 		this.#preparedRequests.clear();
+		this.#preparedCritical.clear();
 	}
 
 	#updating(): boolean {
