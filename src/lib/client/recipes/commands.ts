@@ -433,12 +433,11 @@ export const updateRecipeFromEditor = async (
 	return decode(RecipeAggregateSchema, result.aggregates[0], 'decode updated recipe');
 };
 
-export const commitImportedRecipeCandidate = async (
-	database: MaalDatabase,
+const importedCandidateCommand = (
 	context: RecipeCommandContext,
 	candidateInput: RecipeImportedCandidate,
-	recipeId = uuidv7()
-): Promise<RecipeAggregate> => {
+	recipeId: string
+): { recipe: RecipeAggregate; command: LocalCommand } => {
 	const occurredAt = commandTime(context);
 	const candidate = decode(
 		RecipeImportedCandidateSchema,
@@ -461,8 +460,7 @@ export const commitImportedRecipeCandidate = async (
 		...aggregateWithoutSearch,
 		searchTokens: recipeSearchTokens(aggregateWithoutSearch)
 	};
-	const result = await executeRecipeWrite(
-		database,
+	const command = recipeWriteCommand(
 		{ ...context, occurredAt },
 		aggregate.id,
 		RECIPE_CONFLICT_GROUPS,
@@ -477,7 +475,49 @@ export const commitImportedRecipeCandidate = async (
 			return aggregate;
 		}
 	);
+	return { recipe: aggregate, command };
+};
+
+export const commitImportedRecipeCandidate = async (
+	database: MaalDatabase,
+	context: RecipeCommandContext,
+	candidateInput: RecipeImportedCandidate,
+	recipeId = uuidv7()
+): Promise<RecipeAggregate> => {
+	const { command } = importedCandidateCommand(context, candidateInput, recipeId);
+	const result = await executeLocalCommand(database, command);
 	return decode(RecipeAggregateSchema, result.aggregates[0], 'decode imported recipe');
+};
+
+/**
+ * The plan route's "import from URL" gesture: commits the reporter's recipe and plans it as a
+ * household meal in one transaction, so a planning failure leaves no recipe behind.
+ */
+export const commitImportedCandidateAndPlanMeal = async (
+	database: MaalDatabase,
+	context: MealCommandContext,
+	candidateInput: RecipeImportedCandidate,
+	options: PlanMealOptions = {}
+): Promise<{ recipe: RecipeAggregate; meal: MealAggregate }> => {
+	const occurredAt = commandTime(context);
+	const { recipe, command } = importedCandidateCommand(
+		{
+			authSlotId: context.authSlotId,
+			ownerUserId: context.reporterUserId,
+			originDeviceId: context.originDeviceId,
+			occurredAt
+		},
+		candidateInput,
+		uuidv7()
+	);
+	const [created, planned] = await executeLocalCommands(database, [
+		command,
+		planMealCommand({ ...context, occurredAt }, recipe, options)
+	]);
+	return {
+		recipe: decode(RecipeAggregateSchema, created!.aggregates[0], 'decode imported recipe'),
+		meal: decode(MealAggregateSchema, planned!.aggregates[0], 'decode planned meal')
+	};
 };
 
 export const deleteRecipe = async (

@@ -23,7 +23,7 @@
 	import { activeHouseholdKey } from '$lib/client/local/profiles.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import {
-		commitImportedRecipeCandidate,
+		commitImportedCandidateAndPlanMeal,
 		createRecipeAndPlanMeal,
 		listRecipes
 	} from '$lib/client/recipes/index.js';
@@ -131,12 +131,17 @@
 	const importRecipeAndMeal = async (url: string, date?: string): Promise<Meal> => {
 		if (!database || !view) throw new Error('Local recipe storage is still opening.');
 		const candidate = await fetchRecipeUrlCandidate(database, url);
-		const imported = await commitImportedRecipeCandidate(
+		const { meal } = await commitImportedCandidateAndPlanMeal(
 			database,
-			{ ...(await commandContext()), ownerUserId: view.userId },
-			candidate
+			await commandContext(),
+			candidate,
+			{
+				date: date ?? null,
+				sortOrder: null,
+				plannedYield: view.defaultMealServings
+			}
 		);
-		return planRecipe(recipeAggregateToPickerItem(imported), date);
+		return mealAggregateToScheduleMeal(meal, undefined, view.householdTimeZone);
 	};
 
 	const saveUiState = async (state: ScheduleUiState): Promise<void> => {

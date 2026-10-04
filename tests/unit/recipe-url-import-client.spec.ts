@@ -7,7 +7,12 @@ import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 
 import { MaalDatabase, openMaalDatabase } from '$lib/client/local/database.js';
 import { activeHouseholdKey } from '$lib/client/local/profiles.js';
-import { createRecipeFromEditor, type RecipeCommandContext } from '$lib/client/recipes/commands.js';
+import type { MealCommandContext } from '$lib/client/meals/commands.js';
+import {
+	commitImportedCandidateAndPlanMeal,
+	createRecipeFromEditor,
+	type RecipeCommandContext
+} from '$lib/client/recipes/commands.js';
 import {
 	RecipeUrlImportError,
 	confirmUrlImport,
@@ -287,5 +292,60 @@ describe('confirmUrlImport', () => {
 			sourceUrl: 'https://example.com/soup',
 			ingredients: [expect.objectContaining({ sourceFoodLabel: 'tomatoes' })]
 		});
+	});
+});
+
+describe('commitImportedCandidateAndPlanMeal', () => {
+	const mealContext = (): MealCommandContext => ({
+		authSlotId: AUTH_SLOT_ID,
+		householdId: HOUSEHOLD_ID,
+		reporterUserId: USER_ID,
+		originDeviceId: uuidv7()
+	});
+
+	test('commits the recipe and plans its meal in one gesture', async () => {
+		const database = await seededDatabase();
+
+		const { recipe, meal } = await commitImportedCandidateAndPlanMeal(
+			database,
+			mealContext(),
+			candidate(),
+			{ date: '2026-09-21', plannedYield: 4 }
+		);
+
+		expect(await database.recipes.get(recipe.id)).toMatchObject({ title: 'Tomato soup' });
+		expect(meal).toMatchObject({
+			sourceRecipeId: recipe.id,
+			title: 'Tomato soup',
+			date: '2026-09-21',
+			plannedYield: 4
+		});
+		expect(
+			(await database.outbox.toArray()).map(({ scopeKind, scopeId, entityKind }) => ({
+				scopeKind,
+				scopeId,
+				entityKind
+			}))
+		).toEqual([
+			{ scopeKind: 'user', scopeId: USER_ID, entityKind: 'recipe' },
+			{ scopeKind: 'household', scopeId: HOUSEHOLD_ID, entityKind: 'meal' }
+		]);
+	});
+
+	test('leaves no recipe behind when planning the meal fails', async () => {
+		const database = await seededDatabase();
+		const fail = () => {
+			throw new Error('meal write failed');
+		};
+		database.meals.hook('creating', fail);
+
+		await expect(
+			commitImportedCandidateAndPlanMeal(database, mealContext(), candidate(), {
+				date: '2026-09-21'
+			})
+		).rejects.toBeTruthy();
+
+		expect(await database.recipes.count()).toBe(0);
+		expect(await database.outbox.count()).toBe(0);
 	});
 });
