@@ -254,29 +254,6 @@ const planRecipeOn = async (page: Page, date: string) => {
 	return { targetDay };
 };
 
-const moveStoredMealToDate = async (page: Page, date: string) => {
-	await page.evaluate(async (nextDate) => {
-		const database = await new Promise<IDBDatabase>((resolve, reject) => {
-			const request = indexedDB.open('maal-v1:production');
-			request.onerror = () => reject(request.error);
-			request.onsuccess = () => resolve(request.result);
-		});
-		const transaction = database.transaction('meals', 'readwrite');
-		const store = transaction.objectStore('meals');
-		const meal = await new Promise<Record<string, unknown>>((resolve, reject) => {
-			const request = store.getAll();
-			request.onerror = () => reject(request.error);
-			request.onsuccess = () => resolve(request.result[0] as Record<string, unknown>);
-		});
-		store.put({ ...meal, date: nextDate });
-		await new Promise<void>((resolve, reject) => {
-			transaction.oncomplete = () => resolve();
-			transaction.onerror = () => reject(transaction.error);
-		});
-		database.close();
-	}, date);
-};
-
 test('plans while offline and reloads from Dexie without content API requests', async ({
 	context,
 	page
@@ -330,6 +307,7 @@ test('plans while offline and reloads from Dexie without content API requests', 
 });
 
 test('reacts to indexed range writes and preserves keyboard modes and focused check-ins', async ({
+	context,
 	page
 }) => {
 	await page.clock.setFixedTime(new Date('2026-08-24T12:00:00.000Z'));
@@ -337,10 +315,20 @@ test('reacts to indexed range writes and preserves keyboard modes and focused ch
 	await seed(page);
 	const { targetDay } = await planRecipeOn(page, '2026-08-23');
 
-	await moveStoredMealToDate(page, '2010-01-01');
+	// Another tab reschedules the meal through Dexie; this tab's range query must follow it.
+	const otherTab = await context.newPage();
+	await otherTab.setViewportSize({ width: 1280, height: 820 });
+	await otherTab.goto('/plan');
+	const otherDay = (date: string) => otherTab.locator(`[data-meal-drop-date="${date}"]`).first();
+	const movedDay = page.locator('[data-meal-drop-date="2026-08-25"]').first();
+	const otherCard = (date: string) =>
+		otherDay(date).getByRole('button', { name: 'Open Gingery chicken rice bowls' });
+	await dragTo(otherTab, otherCard('2026-08-23'), otherDay('2026-08-25'));
 	await expect(targetDay).not.toContainText('Gingery chicken rice bowls');
-	await moveStoredMealToDate(page, '2026-08-23');
+	await expect(movedDay).toContainText('Gingery chicken rice bowls');
+	await dragTo(otherTab, otherCard('2026-08-25'), otherDay('2026-08-23'));
 	await expect(targetDay).toContainText('Gingery chicken rice bowls');
+	await otherTab.close();
 
 	await page.keyboard.press('m');
 	await expect(page.getByRole('region', { name: 'Monthly schedule' })).toBeVisible();
@@ -434,23 +422,17 @@ test.describe('meal pool', () => {
 
 	test('drops a pool meal at the pointer index below an unordered meal', async ({ page }) => {
 		await seed(page);
-		const { targetDay } = await planRecipeOn(page, '2026-08-23');
-		const [first] = await readStore(page, 'meals');
-		await page.evaluate(async (row) => {
-			const database = await new Promise<IDBDatabase>((resolve, reject) => {
-				const request = indexedDB.open('maal-v1:production');
-				request.onerror = () => reject(request.error);
-				request.onsuccess = () => resolve(request.result);
-			});
-			const transaction = database.transaction('meals', 'readwrite');
-			transaction.objectStore('meals').put({ ...row, sortOrder: null });
-			await new Promise<void>((resolve, reject) => {
-				transaction.oncomplete = () => resolve();
-				transaction.onerror = () => reject(transaction.error);
-			});
-			database.close();
-		}, first!);
-		await addRecipeToPool(page);
+		const targetDay = page.locator('[data-meal-drop-date="2026-08-23"]').first();
+		// Add meal on a day stores the meal without a sortOrder.
+		await page
+			.getByRole('group', { name: 'Add meal on 2026-08-23' })
+			.getByRole('button')
+			.dblclick();
+		await page.getByRole('option', { name: /Gingery chicken rice bowls/ }).click();
+		await closeMealPreview(page);
+		await expect(targetDay).toContainText('Gingery chicken rice bowls');
+		const first = (await readStore(page, 'meals')).find(({ date }) => date === '2026-08-23');
+		expect(first?.sortOrder).toBeNull();
 
 		const firstCard = targetDay.locator(`[data-meal-card-id="${first!.id}"]`);
 		const firstBox = await firstCard.boundingBox();
