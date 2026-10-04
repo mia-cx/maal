@@ -744,7 +744,11 @@ export class BillingRepository {
 					cancel_at_period_end = excluded.cancel_at_period_end,
 					interruption_started_at = excluded.interruption_started_at,
 					grace_until = excluded.grace_until,
-					last_successful_payment_at = COALESCE(excluded.last_successful_payment_at, billing_subscriptions.last_successful_payment_at),
+					-- A payment is a monotonic fact: a projection built from a pre-payment read
+					-- can never roll the timestamp back.
+					last_successful_payment_at = MAX(
+						COALESCE(billing_subscriptions.last_successful_payment_at, excluded.last_successful_payment_at),
+						COALESCE(excluded.last_successful_payment_at, billing_subscriptions.last_successful_payment_at)),
 					last_stripe_event_created_at = excluded.last_stripe_event_created_at,
 					last_stripe_event_id = excluded.last_stripe_event_id,
 					updated_at = excluded.updated_at

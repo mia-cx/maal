@@ -470,6 +470,64 @@ describe('Stripe grace projection', () => {
 		}
 	);
 
+	test('a stale projection cannot roll back the last payment timestamp', async () => {
+		const repository = new BillingRepository(database);
+		const { stripe, subscriptions } = fakeStripe();
+		subscriptions.set('sub_a', sub('sub_a', 'past_due'));
+		const paidAt = t0 + 31 * 86_400;
+		const staleEventAt = paidAt + 100;
+		const now = iso(staleEventAt + 100);
+		const deliver = (event: Stripe.Event) =>
+			processStripeWebhook({ stripe, repository, event, receivedAt: now });
+
+		await deliver(
+			subscriptionEvent('evt_failed_0', t0, 'sub_a', 'customer.subscription.updated', 'past_due')
+		);
+		await deliver(invoicePaidEvent('evt_paid', paidAt, 'sub_a'));
+		expect(await billingRow()).toMatchObject({
+			interruption_started_at: iso(paidAt),
+			grace_until: iso(paidAt + 30 * 86_400),
+			last_successful_payment_at: iso(paidAt)
+		});
+
+		// A non-payment event whose projection was read before the payment committed: the upsert
+		// must keep the monotonic payment timestamp, and the recompute keeps the window at P.
+		await repository.beginStripeEvent({
+			id: 'evt_stale',
+			type: 'invoice.created',
+			receivedAt: now
+		});
+		await repository.commitStripeProjection(
+			'evt_stale',
+			{
+				householdId,
+				stripeCustomerId: 'cus_family',
+				stripeSubscriptionId: 'sub_a',
+				stripePriceId: price.id,
+				subscriberUserId: 'user_alice',
+				status: 'past_due',
+				currentPeriodEnd: iso(t0 + 2_592_000),
+				cancelAtPeriodEnd: false,
+				interruptionStartedAt: iso(t0),
+				graceUntil: iso(t0 + 30 * 86_400),
+				lastSuccessfulPaymentAt: null,
+				eventId: 'evt_stale',
+				eventCreatedAt: iso(staleEventAt)
+			},
+			now,
+			null,
+			undefined,
+			null
+		);
+
+		expect(await billingRow()).toMatchObject({
+			interruption_started_at: iso(paidAt),
+			grace_until: iso(paidAt + 30 * 86_400),
+			last_successful_payment_at: iso(paidAt)
+		});
+		await expect(authorizeHousehold(now)).resolves.toBeTruthy();
+	});
+
 	test.each(['payment-between-failures', 'failures-before-payment'] as const)(
 		'a late recovery payment restarts grace at the first failure after it: %s',
 		async (order) => {
