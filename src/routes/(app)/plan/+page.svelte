@@ -9,14 +9,14 @@
 		liveMealPool,
 		defaultScheduleUiState,
 		mealAggregateToScheduleMeal,
+		mealHeaderCommand,
+		mealScheduleCommand,
 		membershipsToHouseholdMembers,
 		planRecipeAsMeal,
 		readScheduleUiState,
 		recipeAggregateToPickerItem,
 		reorderMeals,
 		saveMealCheckIn,
-		updateMealHeader,
-		updateMealSchedule,
 		writeScheduleUiState,
 		type MealCalendarRange,
 		type MealCalendarRangeResult,
@@ -24,6 +24,7 @@
 		type ScheduleUiState
 	} from '$lib/client/meals/index.js';
 	import { getBrowserDatabase } from '$lib/client/local/browser.js';
+	import { executeLocalCommands, type LocalCommand } from '$lib/client/local/commands.js';
 	import { activeHouseholdKey } from '$lib/client/local/profiles.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import {
@@ -72,6 +73,7 @@
 
 	const scope = $derived(view ? `${view.profileId}:${view.householdId}` : null);
 	const householdId = $derived(view?.householdId ?? null);
+	const locale = $derived(view?.locale ?? null);
 	const dashboardMeals = $derived.by((): Meal[] => {
 		if (!view) return [];
 		// The range and pool queries re-run independently, so a meal crossing between them can
@@ -117,25 +119,31 @@
 	const changeMeal = async (meal: Meal, previous?: Meal): Promise<void> => {
 		if (!database) throw new Error('Local meal storage is still opening.');
 		const context = await commandContext();
+		const commands: LocalCommand[] = [];
 		const headerChanged =
 			previous !== undefined &&
 			(meal.title !== previous.title ||
 				(meal.description ?? '') !== (previous.description ?? '') ||
 				meal.cookTimeMinutes !== previous.cookTimeMinutes);
 		if (headerChanged) {
-			await updateMealHeader(database, context, meal.id, {
-				title: meal.title,
-				description: meal.description ?? null,
-				cookTimeMinutes: meal.cookTimeMinutes ?? null
-			});
+			commands.push(
+				mealHeaderCommand(context, meal.id, {
+					title: meal.title,
+					description: meal.description ?? null,
+					cookTimeMinutes: meal.cookTimeMinutes ?? null
+				})
+			);
 		}
-		await updateMealSchedule(database, context, meal.id, {
-			date: meal.date ?? null,
-			time: meal.time ?? null,
-			sortOrder: meal.sortOrder ?? null,
-			plannedCookUserId: meal.plannedCookWorkosUserId ?? null,
-			plannedYield: meal.servingsPlanned ?? null
-		});
+		commands.push(
+			mealScheduleCommand(context, meal.id, {
+				date: meal.date ?? null,
+				time: meal.time ?? null,
+				sortOrder: meal.sortOrder ?? null,
+				plannedCookUserId: meal.plannedCookWorkosUserId ?? null,
+				plannedYield: meal.servingsPlanned ?? null
+			})
+		);
+		await executeLocalCommands(database, commands);
 	};
 
 	const reorderMealsInOneCommit = async (moves: { meal: Meal }[]): Promise<void> => {
@@ -307,8 +315,8 @@
 	// Unit and temperature preferences for the meal sheet, live for this profile and household.
 	$effect(() => {
 		const opened = database;
-		if (!opened || !scope) return;
-		const { userId, householdId, locale } = untrack(() => view!);
+		if (!opened || !scope || !locale) return;
+		const { userId, householdId } = untrack(() => view!);
 		return bindTaxonomyPreferences(opened, { workosUserId: userId, householdId, locale });
 	});
 

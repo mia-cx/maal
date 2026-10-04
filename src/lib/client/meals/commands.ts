@@ -258,11 +258,12 @@ export const planRecipeAsMeal = async (
 	return decode(MealAggregateSchema, result.aggregates[0], 'decode planned meal');
 };
 
-const mealScheduleCommand = (
+export const mealScheduleCommand = (
 	context: MealCommandContext,
 	mealId: string,
 	patch: MealSchedulePatch
 ): LocalCommand => {
+	const occurredAt = commandTime(context);
 	const decodedPatch = {
 		date: decode(NullableDateSchema, patch.date, 'decode meal date'),
 		time: decode(NullableTimeSchema, patch.time, 'decode meal time'),
@@ -281,7 +282,7 @@ const mealScheduleCommand = (
 		conflictGroup: 'schedule',
 		operation: 'upsert',
 		originDeviceId: context.originDeviceId,
-		occurredAt: commandTime(context),
+		occurredAt,
 		payload: { mealId, conflictGroups: ['schedule'], patch: decodedPatch },
 		payloadSchema: MealMutationPayloadSchema,
 		writes: [
@@ -341,15 +342,14 @@ const MealHeaderPatchSchema = Schema.Struct({
 });
 
 /**
- * Saves the meal sheet's own fields (title, description, cook minutes) under the `header`
+ * Builds the command for the meal sheet's own fields (title, description, cook minutes) under the `header`
  * conflict group. The sheet only offers them for custom meals with no source recipe.
  */
-export const updateMealHeader = async (
-	database: MaalDatabase,
+export const mealHeaderCommand = (
 	context: MealCommandContext,
 	mealId: string,
 	patch: MealHeaderPatch
-): Promise<MealAggregate> => {
+): LocalCommand => {
 	const occurredAt = commandTime(context);
 	const decodedPatch = decode(
 		MealHeaderPatchSchema,
@@ -360,7 +360,7 @@ export const updateMealHeader = async (
 		},
 		'decode meal header'
 	);
-	const result = await executeLocalCommand(database, {
+	return {
 		authSlotId: context.authSlotId,
 		scopeKind: 'household',
 		scopeId: context.householdId,
@@ -384,7 +384,16 @@ export const updateMealHeader = async (
 				})
 			}
 		]
-	});
+	};
+};
+
+export const updateMealHeader = async (
+	database: MaalDatabase,
+	context: MealCommandContext,
+	mealId: string,
+	patch: MealHeaderPatch
+): Promise<MealAggregate> => {
+	const result = await executeLocalCommand(database, mealHeaderCommand(context, mealId, patch));
 	return decode(MealAggregateSchema, result.aggregates[0], 'decode meal header update');
 };
 

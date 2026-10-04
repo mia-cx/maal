@@ -12,6 +12,8 @@ import {
 	liveMealPool,
 	listHouseholdMeals,
 	mealAggregateToScheduleMeal,
+	mealHeaderCommand,
+	mealScheduleCommand,
 	membershipsToHouseholdMembers,
 	planRecipeAsMeal,
 	readMealCalendarRange,
@@ -25,6 +27,7 @@ import {
 	type MealCommandContext
 } from '$lib/client/meals/index.js';
 import { MaalDatabase, openMaalDatabase } from '$lib/client/local/database.js';
+import { executeLocalCommands } from '$lib/client/local/commands.js';
 import {
 	commitImportedRecipeCandidate,
 	permanentlyDeleteRecipe,
@@ -529,6 +532,49 @@ describe('atomic meal reorder', () => {
 });
 
 describe('meal sheet edits', () => {
+	test('rolls back header edits and outbox rows when the schedule write fails', async () => {
+		const database = await openDatabase();
+		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
+		const meal = await planRecipeAsMeal(database, mealContext(), recipe.id, {
+			date: '2026-08-23',
+			time: '18:30'
+		});
+		const originalOutbox = await database.outbox.toArray();
+		const failSchedule = (changes: unknown) => {
+			if (
+				typeof changes === 'object' &&
+				changes !== null &&
+				'date' in changes &&
+				changes.date === '2026-08-25'
+			) {
+				throw new DOMException('Storage is full', 'QuotaExceededError');
+			}
+		};
+		database.meals.hook('updating', failSchedule);
+
+		try {
+			await expect(
+				executeLocalCommands(database, [
+					mealHeaderCommand(mealContext(at(24)), meal.id, {
+						title: 'Leftover soup',
+						description: null,
+						cookTimeMinutes: 20
+					}),
+					mealScheduleCommand(mealContext(at(24)), meal.id, {
+						date: '2026-08-25',
+						time: '19:00',
+						sortOrder: null
+					})
+				])
+			).rejects.toMatchObject({ _tag: 'LocalQuotaExceededError' });
+		} finally {
+			database.meals.hook('updating').unsubscribe(failSchedule);
+		}
+
+		expect(await database.meals.get(meal.id)).toEqual(meal);
+		expect(await database.outbox.toArray()).toEqual(originalOutbox);
+	});
+
 	test('saves a custom meal header with its own outbox row and conflict clock', async () => {
 		const database = await openDatabase();
 		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());

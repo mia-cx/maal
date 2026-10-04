@@ -55,7 +55,7 @@
 	let startEatingTime = $state('');
 	let titleDraft = $state('');
 	let descriptionDraft = $state('');
-	let cookTimeDraft = $state('30');
+	let cookTimeDraft = $state('');
 	let servingsDraft = $state('1');
 	let plannedCookDraft = $state('');
 	let scheduleEditorOpen = $state(false);
@@ -225,9 +225,11 @@
 			title: customMeal ? titleDraft.trim() || 'New meal' : meal.title,
 			description: customMeal ? descriptionDraft.trim() : meal.description,
 			cookTimeMinutes:
-				customMeal && Number.isFinite(cookTime)
-					? Math.max(0, Math.round(cookTime))
-					: meal.cookTimeMinutes,
+				customMeal && cookTimeDraft.trim() === ''
+					? undefined
+					: customMeal && Number.isFinite(cookTime)
+						? Math.max(0, Math.round(cookTime))
+						: meal.cookTimeMinutes,
 			servingsPlanned: normalizedServings(),
 			plannedCookWorkosUserId: plannedCookDraft || undefined
 		};
@@ -262,7 +264,7 @@
 		startCookingTime = meal?.time ? timeOffset(meal.time, -adjustedCookTimeMinutes) : '';
 		titleDraft = meal?.title ?? '';
 		descriptionDraft = meal?.description ?? '';
-		cookTimeDraft = String(meal?.cookTimeMinutes ?? fallbackDurationMinutes);
+		cookTimeDraft = String(meal?.cookTimeMinutes ?? '');
 		servingsDraft = String(Math.max(1, Math.round(meal?.servingsPlanned ?? 1)));
 		plannedCookDraft = meal?.plannedCookWorkosUserId ?? '';
 	};

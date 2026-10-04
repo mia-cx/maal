@@ -601,13 +601,15 @@ test.describe('meal sheet', () => {
 		await seed(page);
 		const { targetDay } = await planRecipeOn(page, '2026-08-23');
 		const [meal] = await readStore(page, 'meals');
-		await putRow(page, 'meals', { ...meal, sourceRecipeId: null });
+		await putRow(page, 'meals', { ...meal, sourceRecipeId: null, cookTimeMinutes: null });
 		await page.reload();
 
 		await targetDay.getByRole('button', { name: 'Open Gingery chicken rice bowls' }).click();
+		await expect(page.getByLabel('Cook minutes')).toHaveValue('');
 		await page.getByLabel('Meal name').fill('Renamed bowls');
 		await page.getByRole('button', { name: 'Save meal' }).click();
 		await expect.poll(async () => (await readStore(page, 'meals'))[0]!.title).toBe('Renamed bowls');
+		expect((await readStore(page, 'meals'))[0]!.cookTimeMinutes).toBeNull();
 		expect(
 			(await readStore(page, 'outbox')).filter(
 				({ aggregateId, conflictGroup }) => aggregateId === meal!.id && conflictGroup === 'header'
@@ -616,6 +618,11 @@ test.describe('meal sheet', () => {
 
 		await page.reload();
 		await expect(targetDay).toContainText('Renamed bowls');
+		await targetDay.getByRole('button', { name: 'Open Renamed bowls' }).click();
+		await expect(page.getByLabel('Cook minutes')).toHaveValue('');
+		await page.getByLabel('Cook minutes').fill('20');
+		await page.getByRole('button', { name: 'Save meal' }).click();
+		await expect.poll(async () => (await readStore(page, 'meals'))[0]!.cookTimeMinutes).toBe(20);
 	});
 
 	test('restores the meal and says why when a sheet save fails', async ({ page }) => {
@@ -628,6 +635,55 @@ test.describe('meal sheet', () => {
 		await page.getByRole('button', { name: 'Save meal' }).click();
 
 		await expect(page.getByText('The meal is not available in this household.')).toBeVisible();
+	});
+
+	test('rebinds temperature preferences after a locale change in another tab', async ({
+		context,
+		page
+	}) => {
+		await seed(page);
+		const unitAliases = await readStore(page, 'unitAliases');
+		for (const [locale, preferredUnitId, id] of [
+			['en-NL', 'celsius', '01990c69-7f00-7000-8000-0000000000c0'],
+			['nl-NL', 'fahrenheit', '01990c69-7f00-7000-8000-0000000000c1']
+		]) {
+			const alias = unitAliases.find(
+				(row) =>
+					row.unitId === preferredUnitId &&
+					row.locale === 'en-US' &&
+					row.alias === (preferredUnitId === 'fahrenheit' ? '°F' : '°C')
+			);
+			expect(alias).toBeDefined();
+			await putRow(page, 'householdUnitDisplayPreferences', {
+				schemaVersion: 1,
+				revision: 1,
+				createdAt: '2026-08-21T12:00:00.000Z',
+				updatedAt: '2026-08-21T12:00:00.000Z',
+				deletedAt: null,
+				conflictClocks: {},
+				id,
+				householdId: 'org_canal_kitchen',
+				baseUnitId: 'celsius',
+				locale,
+				preferredUnitId,
+				preferredUnitAliasScope: 'global',
+				preferredUnitAliasId: alias!.id
+			});
+		}
+		await page.reload();
+		await mealPool(page).getByRole('button', { name: 'Open Gingery chicken rice bowls' }).click();
+		await expect(page.getByText('Roast the chicken at 200°C and build the bowls.')).toBeVisible();
+		await closeMealPreview(page);
+
+		const otherTab = await context.newPage();
+		await otherTab.goto('/household');
+		await otherTab.getByLabel('Locale', { exact: true }).fill('nl-NL');
+		await otherTab.getByRole('button', { name: 'Save household', exact: true }).click();
+		await expect.poll(async () => (await readStore(page, 'households'))[0]!.locale).toBe('nl-NL');
+		await page.bringToFront();
+		await mealPool(page).getByRole('button', { name: 'Open Gingery chicken rice bowls' }).click();
+		await expect(page.getByText(/Roast the chicken at 39\d°F/)).toBeVisible();
+		await otherTab.close();
 	});
 
 	test('shows meal sheet temperatures in the household’s preferred unit', async ({ page }) => {
