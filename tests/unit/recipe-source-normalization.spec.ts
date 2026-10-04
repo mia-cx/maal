@@ -133,6 +133,42 @@ describe('URL import', () => {
 		expect(candidate.instructionEvents[0]?.baseValue).toBeCloseTo(176.67, 2);
 	});
 
+	test('stores a null quantity for non-finite amounts without rejecting the candidate', async () => {
+		const candidate = await importRecipe(['½–1 tsp salt', '1/0 cup flour'], ['Mix.']);
+		expect(candidate.ingredients).toEqual([
+			expect.objectContaining({
+				sourceAmountText: '½–1',
+				sourceQuantity: null,
+				sourceUnitLabel: 'tsp',
+				sourceFoodLabel: 'salt'
+			}),
+			expect.objectContaining({
+				sourceAmountText: '1/0',
+				sourceQuantity: null,
+				sourceUnitLabel: 'cup',
+				sourceFoodLabel: 'flour'
+			})
+		]);
+	});
+
+	test('an editor save accepts a non-finite amount as a null quantity', async () => {
+		const database = await openMaalDatabase(`recipe-normalization-${crypto.randomUUID()}`);
+		databases.push(database);
+		const created = await createRecipeFromEditor(
+			database,
+			context,
+			editorPatch(
+				[{ id: null, amount: '½–1', unit: 'tsp', item: 'salt' }],
+				[{ id: null, position: 1, text: 'Mix.' }]
+			)
+		);
+		expect(created.ingredients[0]).toMatchObject({
+			sourceAmountText: '½–1',
+			sourceQuantity: null,
+			sourceFoodLabel: 'salt'
+		});
+	});
+
 	test('decodes degree entities in imported instruction text', async () => {
 		const candidate = await importRecipe(
 			['flour'],

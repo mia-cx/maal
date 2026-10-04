@@ -360,19 +360,22 @@ export type IngredientUnitAliases = Record<string, string>;
 
 export const parseQuantity = (value: string): number | null => {
 	const trimmed = value.trim();
+	let parsed: number;
 	const mixedFraction = /^(\d+)\s+(\d+)\/(\d+)$/.exec(trimmed);
-	if (mixedFraction) {
-		return Number(mixedFraction[1]) + Number(mixedFraction[2]) / Number(mixedFraction[3]);
-	}
 	const fraction = /^(\d+)\/(\d+)$/.exec(trimmed);
-	if (fraction) return Number(fraction[1]) / Number(fraction[2]);
 	const vulgar = trimmed.match(/[¼½¾⅓⅔⅛⅜⅝⅞]/u)?.[0];
-	if (vulgar) {
-		const whole = Number(trimmed.replace(vulgar, '').trim() || 0);
-		return whole + vulgarFractions[vulgar];
+	if (mixedFraction) {
+		parsed = Number(mixedFraction[1]) + Number(mixedFraction[2]) / Number(mixedFraction[3]);
+	} else if (fraction) {
+		parsed = Number(fraction[1]) / Number(fraction[2]);
+	} else if (vulgar) {
+		parsed = Number(trimmed.replace(vulgar, '').trim() || 0) + vulgarFractions[vulgar];
+	} else {
+		parsed = Number(trimmed);
 	}
-	const number = Number(trimmed);
-	return Number.isFinite(number) ? number : null;
+	// Ranges ("½–1") and zero denominators produce NaN or Infinity; the source text still stands,
+	// but there is no usable quantity.
+	return Number.isFinite(parsed) ? parsed : null;
 };
 
 const commonDivisor = (left: number, right: number): number =>
