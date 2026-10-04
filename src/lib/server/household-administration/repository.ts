@@ -355,9 +355,9 @@ export class HouseholdAdministrationRepository {
 	}
 
 	/** The billing owner who must transfer billing or schedule cancellation before leaving. */
-	async activeBillingOwner(householdId: string, now: string): Promise<string | null> {
+	async activeBillingOwner(householdId: string): Promise<string | null> {
 		const subscription = await new BillingRepository(this.database).subscription(householdId);
-		if (!subscription || billingOwnerMayLeave(subscription, now)) return null;
+		if (!subscription || billingOwnerMayLeave(subscription)) return null;
 		return subscription.subscriberUserId;
 	}
 

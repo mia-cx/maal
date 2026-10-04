@@ -1,6 +1,5 @@
 import type Stripe from 'stripe';
 
-import { subscriptionEnablesRemoteService } from './entitlement.js';
 import { BillingConflictError } from './errors.js';
 import type { BillingRepository, BillingSubscriptionRow } from './repository.js';
 import { subscriptionIsOpen } from './subscriptions.js';
@@ -88,8 +87,7 @@ export const transferBillingOwnership = async (input: {
 		});
 	} catch (cause) {
 		await input.stripe.subscriptions.update(subscription.stripeSubscriptionId, {
-			default_payment_method:
-				stringId(stripeSubscription.default_payment_method ?? null) ?? '',
+			default_payment_method: stringId(stripeSubscription.default_payment_method ?? null) ?? '',
 			metadata: { householdId: input.householdId, workosUserId: input.currentUserId }
 		});
 		await rollbackOwner();
@@ -116,7 +114,11 @@ export const transferBillingOwnership = async (input: {
 		}
 	});
 	try {
-		await detachPayerPaymentMethods(input.stripe, subscription.stripeCustomerId, Date.parse(input.now));
+		await detachPayerPaymentMethods(
+			input.stripe,
+			subscription.stripeCustomerId,
+			Date.parse(input.now)
+		);
 	} catch {
 		return { payerCleanup: 'pending' };
 	}
@@ -175,16 +177,13 @@ export const reconcilePendingPayerCleanups = async (input: {
 /**
  * Whether the billing owner may leave, be removed, or lose admin: when the subscription can no
  * longer bill (terminal in Stripe) or cancellation is already scheduled on a healthy one. An
- * open lapsed subscription still needs them to transfer or finish canceling first.
+ * open subscription that merely stopped enabling service — lapsed, unpaid, out of grace — can
+ * still be revived and would strand the household without a payer, so the owner must transfer
+ * or finish canceling first.
  */
 export const billingOwnerMayLeave = (
-	subscription: Pick<
-		BillingSubscriptionRow,
-		'status' | 'currentPeriodEnd' | 'graceUntil' | 'cancelAtPeriodEnd'
-	>,
-	now: string
+	subscription: Pick<BillingSubscriptionRow, 'status' | 'cancelAtPeriodEnd'>
 ): boolean =>
 	!subscriptionIsOpen(subscription.status) ||
 	(subscription.cancelAtPeriodEnd &&
-		(subscription.status === 'active' || subscription.status === 'trialing')) ||
-	!subscriptionEnablesRemoteService(subscription, now);
+		(subscription.status === 'active' || subscription.status === 'trialing'));

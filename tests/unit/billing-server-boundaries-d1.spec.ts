@@ -222,13 +222,16 @@ const insertSubscription = (row: {
 	currentPeriodEnd: string;
 	cancelAtPeriodEnd?: boolean;
 	subscriptionId?: string;
+	interruptionStartedAt?: string;
+	graceUntil?: string;
 }) =>
 	database
 		.prepare(
 			`INSERT INTO billing_subscriptions
 			 (household_id, stripe_customer_id, stripe_subscription_id, stripe_price_id,
-			  subscriber_user_id, status, current_period_end, cancel_at_period_end, updated_at)
-			 VALUES (?, 'cus_family', ?, 'price_monthly', 'user_alice', ?, ?, ?, ?)`
+			  subscriber_user_id, status, current_period_end, cancel_at_period_end,
+			  interruption_started_at, grace_until, updated_at)
+			 VALUES (?, 'cus_family', ?, 'price_monthly', 'user_alice', ?, ?, ?, ?, ?, ?)`
 		)
 		.bind(
 			householdId,
@@ -236,6 +239,8 @@ const insertSubscription = (row: {
 			row.status,
 			row.currentPeriodEnd,
 			row.cancelAtPeriodEnd ? 1 : 0,
+			row.interruptionStartedAt ?? null,
+			row.graceUntil ?? null,
 			'2026-01-01T00:00:00.000Z'
 		)
 		.run();
@@ -391,7 +396,11 @@ describe('one live subscription per household', () => {
 			processStripeWebhook({ stripe, repository, event, receivedAt: iso(event.created) });
 
 		// D1 still shows sub_old active: its cancellation event has not arrived yet.
-		await insertSubscription({ status: 'active', currentPeriodEnd: iso(t0 + 2_592_000), subscriptionId: 'sub_old' });
+		await insertSubscription({
+			status: 'active',
+			currentPeriodEnd: iso(t0 + 2_592_000),
+			subscriptionId: 'sub_old'
+		});
 		subscriptions.set('sub_old', sub('sub_old', 'canceled'));
 		subscriptions.set('sub_new', sub('sub_new', 'active'));
 		await deliver(subscriptionEvent('evt_new', t0 + 10, 'sub_new'));
@@ -416,7 +425,11 @@ describe('one live subscription per household', () => {
 		const deliver = (event: Stripe.Event) =>
 			processStripeWebhook({ stripe, repository, event, receivedAt: iso(event.created) });
 
-		await insertSubscription({ status: 'active', currentPeriodEnd: iso(t0 + 2_592_000), subscriptionId: 'sub_old' });
+		await insertSubscription({
+			status: 'active',
+			currentPeriodEnd: iso(t0 + 2_592_000),
+			subscriptionId: 'sub_old'
+		});
 		subscriptions.set('sub_old', sub('sub_old', 'active'));
 		subscriptions.set('sub_new', sub('sub_new', 'active'));
 		expect(await deliver(subscriptionEvent('evt_new', t0 + 10, 'sub_new'))).toBe('processed');
@@ -491,7 +504,12 @@ describe('household deletion and billing', () => {
 		const result = await processStripeWebhook({
 			stripe,
 			repository: new BillingRepository(database),
-			event: subscriptionEvent('evt_late_cancel', t0 + 100, 'sub_a', 'customer.subscription.deleted'),
+			event: subscriptionEvent(
+				'evt_late_cancel',
+				t0 + 100,
+				'sub_a',
+				'customer.subscription.deleted'
+			),
 			receivedAt: iso(t0 + 100)
 		});
 		expect(result).toBe('processed');
@@ -558,10 +576,9 @@ describe('billing transfer', () => {
 	test('a failed subscription update restores the D1 owner without touching the customer', async () => {
 		await insertMembership('membership_bob', 'user_bob');
 		await insertSubscription({ status: 'active', currentPeriodEnd: '2026-10-01T00:00:00.000Z' });
-		const { stripe, subscriptions, calls } = fakeStripe(
-			new Map(),
-			{ failOn: 'subscriptions.update' }
-		);
+		const { stripe, subscriptions, calls } = fakeStripe(new Map(), {
+			failOn: 'subscriptions.update'
+		});
 		subscriptions.set('sub_a', sub('sub_a', 'active'));
 		await expect(transferBillingOwnership(transferInput(stripe))).rejects.toThrow(
 			'stripe subscriptions.update failed'
@@ -654,18 +671,37 @@ describe('billing owner leave', () => {
 			cancelAtPeriodEnd: true
 		});
 		const repository = new HouseholdAdministrationRepository(database);
-		await expect(
-			repository.activeBillingOwner(householdId, '2026-09-01T00:00:00.000Z')
-		).resolves.toBeNull();
+		await expect(repository.activeBillingOwner(householdId)).resolves.toBeNull();
 	});
 
 	test('an owner of a renewing subscription must transfer or cancel first', async () => {
 		await insertSubscription({ status: 'active', currentPeriodEnd: '2026-10-01T00:00:00.000Z' });
 		const repository = new HouseholdAdministrationRepository(database);
-		await expect(
-			repository.activeBillingOwner(householdId, '2026-09-01T00:00:00.000Z')
-		).resolves.toBe('user_alice');
+		await expect(repository.activeBillingOwner(householdId)).resolves.toBe('user_alice');
 	});
+
+	test.each(['past_due', 'paused', 'unpaid'] as const)(
+		'an owner of an open %s subscription cannot strand it even after grace expires',
+		async (status) => {
+			await insertSubscription({
+				status,
+				currentPeriodEnd: '2026-01-15T00:00:00.000Z',
+				interruptionStartedAt: '2026-01-15T00:00:00.000Z',
+				graceUntil: '2026-02-14T00:00:00.000Z'
+			});
+			const repository = new HouseholdAdministrationRepository(database);
+			await expect(repository.activeBillingOwner(householdId)).resolves.toBe('user_alice');
+		}
+	);
+
+	test.each(['canceled', 'incomplete_expired'] as const)(
+		'an owner of a %s subscription may leave',
+		async (status) => {
+			await insertSubscription({ status, currentPeriodEnd: '2026-10-01T00:00:00.000Z' });
+			const repository = new HouseholdAdministrationRepository(database);
+			await expect(repository.activeBillingOwner(householdId)).resolves.toBeNull();
+		}
+	);
 });
 
 describe('renewal webhook tolerance', () => {
@@ -694,7 +730,7 @@ describe('renewal webhook tolerance', () => {
 			})
 		).resolves.toBeUndefined();
 		await expect(
-			new HouseholdAdministrationRepository(database).activeBillingOwner(householdId, shortlyAfter)
+			new HouseholdAdministrationRepository(database).activeBillingOwner(householdId)
 		).resolves.toBe('user_alice');
 	});
 
@@ -743,9 +779,7 @@ describe('client capability renewal tolerance', () => {
 			});
 
 		const within = await load(withinTolerance);
-		expect(billingCapabilityIsEnabledAt(within.capability, Date.parse(withinTolerance))).toBe(
-			true
-		);
+		expect(billingCapabilityIsEnabledAt(within.capability, Date.parse(withinTolerance))).toBe(true);
 		await expect(authorizeHousehold(withinTolerance)).resolves.toBeTruthy();
 
 		const past = await load(pastTolerance);

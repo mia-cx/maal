@@ -96,10 +96,7 @@ export const processStripeWebhook = async (input: {
 		// Stripe stops retrying them.
 		const deletion = await input.repository.deletionRequest(householdId);
 		if (deletion?.state === 'purged' || !(await input.repository.householdExists(householdId))) {
-			await input.repository.finishStripeEventWithoutProjection(
-				input.event.id,
-				input.receivedAt
-			);
+			await input.repository.finishStripeEventWithoutProjection(input.event.id, input.receivedAt);
 			return 'processed';
 		}
 		// An event for a different subscription than the projected row is normally a superseded
@@ -115,10 +112,7 @@ export const processStripeWebhook = async (input: {
 		) {
 			const displaced = await input.stripe.subscriptions.retrieve(row.stripeSubscriptionId);
 			if (displaced && subscriptionIsOpen(effectiveStripeStatus(displaced))) {
-				await input.repository.finishStripeEventWithoutProjection(
-					input.event.id,
-					input.receivedAt
-				);
+				await input.repository.finishStripeEventWithoutProjection(input.event.id, input.receivedAt);
 				return 'processed';
 			}
 			replacesEndedSubscriptionId = row.stripeSubscriptionId;

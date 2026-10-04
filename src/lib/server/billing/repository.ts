@@ -1,6 +1,5 @@
 import { and, eq, gte, or } from 'drizzle-orm';
 
-import { BILLING_GRACE_DAYS } from '$lib/domain/billing/capability.js';
 import type { StripeSubscriptionStatus } from '$lib/domain/billing/contracts.js';
 import { getDb } from '$lib/server/db/index.js';
 import {
@@ -286,7 +285,7 @@ export class BillingRepository {
 					input.startedAt,
 					input.claimId
 				),
-			this.subscriptionUpsertStatement(p, input.startedAt),
+			this.subscriptionUpsertStatement(p, input.startedAt, p.stripeSubscriptionId),
 			this.auditStatement({
 				idempotencyKey: `trial:${input.claimId}:started`,
 				householdId: p.householdId,
