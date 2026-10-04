@@ -36,6 +36,7 @@ describe('rewrite-launch D1 reset generator', () => {
 		await writeFile(
 			schemaPath,
 			`CREATE TABLE "users" ("id" text PRIMARY KEY);
+CREATE TABLE \`sessions\` (\`user_id\` text REFERENCES \`users\`(\`id\`));
 CREATE TABLE "_cf_METADATA" ("key" text);
 CREATE TABLE "sqlite_sequence" ("name" text);
 CREATE VIEW "active_users" AS SELECT * FROM "users";
@@ -51,13 +52,32 @@ CREATE TRIGGER "users_audit" AFTER INSERT ON "users" BEGIN SELECT 1; END;
 PRAGMA defer_foreign_keys = ON;
 DROP TRIGGER IF EXISTS "users_audit";
 DROP VIEW IF EXISTS "active_users";
-DROP TABLE IF EXISTS "users";
 DROP TABLE IF EXISTS "d1_migrations";
+DROP TABLE IF EXISTS "sessions";
+DROP TABLE IF EXISTS "users";
 PRAGMA defer_foreign_keys = OFF;
 `
 		);
 		await expect(stat(outputPath)).resolves.toMatchObject({ mode: expect.any(Number) });
 		expect((await stat(outputPath)).mode & 0o777).toBe(0o600);
+	});
+
+	test('refuses a foreign-key cycle it cannot drop children-first', async () => {
+		const directory = await createDirectory();
+		const schemaPath = join(directory, 'maal-staging-before-rewrite.sql');
+		const outputPath = join(directory, 'maal-staging-reset.sql');
+		await writeFile(
+			schemaPath,
+			`CREATE TABLE "a" ("b_id" text REFERENCES "b"("id"));
+CREATE TABLE "b" ("a_id" text REFERENCES "a"("id"));
+`,
+			'utf8'
+		);
+
+		const result = runGenerator('maal-staging', schemaPath, outputPath);
+		expect(result.status).not.toBe(0);
+		expect(result.stderr).toContain('foreign-key cycle between: a, b');
+		await expect(stat(outputPath)).rejects.toMatchObject({ code: 'ENOENT' });
 	});
 
 	test('rejects a database or filename mismatch before writing reset SQL', async () => {

@@ -1,20 +1,24 @@
 # Staging cutover and release proof
 
-Status: **the live run requires #83's stable callback contract to be in the candidate.** Do not call the
-staging candidate release-ready until that dependency is present and the live proof passes. Native Safari
-and Android retained-slot evidence remains tracked separately in #70.
+Status: the stable callback contract (#83) is in the candidate. `src/routes/api/auth/callback/+server.ts` is
+the single WorkOS callback for every slot. The staging candidate is release-ready only after the live proof
+passes. Native Safari and Android retained-slot evidence is tracked separately in #70.
 
 This runbook updates the existing `maal-staging` Worker and D1 database, connects WorkOS staging and a Stripe
-test sandbox, runs disposable release proofs, and removes every proof fixture. It never requires a real user,
+test sandbox, runs disposable release proofs, and removes every proof fixture. The staging origin is
+`https://staging.maal.is`; `<staging-origin>` below means that host. It never requires a real user,
 live Stripe object, or production provider key.
 
 ## Safety contract
 
 - Run commands from a clean checkout of the candidate commit. Never substitute the production hostname,
   production D1 name, a WorkOS production key, or a Stripe live key.
-- Keep the temporary Wrangler copy, operator environment, raw provider output, fixture ledger, and proof
-  evidence outside Git. The harness rejects the production Maal hostname, any Stripe key other than
-  `sk_test_`, any WorkOS key other than `sk_test_`, and a Wrangler file tracked by Git.
+- Every Wrangler command uses the committed `wrangler.jsonc` with `--env staging`. It already holds the
+  staging Worker, D1 binding, and ID, so there is no private copy.
+- Keep the operator environment, raw provider output, fixture ledger, and proof evidence outside Git. The
+  harness rejects the production hostnames (`maal.mia.cx`, `maal.is`, `www.maal.is`), any Stripe key other
+  than `sk_test_`, any WorkOS key other than `sk_test_`, a missing `CLOUDFLARE_ACCOUNT_ID`, and a
+  `wrangler.jsonc` that differs from the candidate commit.
 - Use a fresh private fixture-ledger path for every run. The runtime creates it once with mode `0600` and only
   removes it after WorkOS, Stripe, and D1 report zero remaining fixtures.
 - The output evidence is allowlisted. It contains pass/fail facts, counts, UTC times, and a non-secret
@@ -38,21 +42,25 @@ does not make arbitrary path segments configurable. Source:
 [WorkOS Get authorization URL — Redirect URI and Wildcards](https://workos.com/docs/reference/authkit/authentication/get-authorization-url).
 The hosted and deployed proofs assert the exact URI and fail if `auth-slots` or a slot appears in its path.
 
-## 1. Inspect D1 and prepare the private Wrangler file
+## 1. Inspect D1
 
-Authenticate Wrangler with the `mia.cx` Cloudflare account. Inspect the existing staging database before any
-mutation. Do not create another database:
+Authenticate Wrangler with the `mia.cx` Cloudflare account. Wrangler sees several accounts and
+`wrangler.jsonc` names none, so non-interactive commands need the account in the environment. Take the
+`mia.cx` account ID from `wrangler whoami`. Then inspect the existing staging database before any mutation.
+Do not create another database:
 
 ```sh
 pnpm exec wrangler whoami
+export CLOUDFLARE_ACCOUNT_ID=<mia.cx-account-id>
 pnpm exec wrangler d1 info maal-staging --config wrangler.jsonc --env staging
 ```
 
 Keep the raw command output in the private change record. Do not attach its account or database ID to public
-evidence. Copy `wrangler.jsonc` to `.wrangler/staging-proof.jsonc` without changing the D1 binding or ID. Keep
-these committed contracts unchanged:
+evidence. The committed `wrangler.jsonc` must keep these contracts:
 
 - Worker/environment name: `maal-staging`
+- custom domain route: `staging.maal.is` only, matching `MAAL_STAGING_BASE_URL`; deploy attaches it in the
+  active `maal.is` zone
 - D1 binding/name: `DB` / `maal-staging`
 - migration directory: `drizzle`
 - rate-limit binding: `RECIPE_URL_RATE_LIMIT`
@@ -61,11 +69,12 @@ these committed contracts unchanged:
 - observability enabled, logs at `1`, traces at `0.01`
 - staging-only non-secret var: `MAAL_PROOF_TELEMETRY=staging-only` (omit it from production)
 
-Confirm the private file is ignored and inspect the resolved staging configuration without publishing it:
+Confirm the config matches the candidate commit and inspect the resolved staging configuration without
+publishing it:
 
 ```sh
-git check-ignore --quiet .wrangler/staging-proof.jsonc
-pnpm exec wrangler deploy --dry-run --config .wrangler/staging-proof.jsonc --env staging
+git diff --quiet HEAD -- wrangler.jsonc
+pnpm exec wrangler deploy --dry-run --config wrangler.jsonc --env staging
 ```
 
 Run the local schema contract. Inspect unapplied remote migrations. Export the current schema and record the
@@ -74,14 +83,17 @@ absolute paths outside the repository:
 
 ```sh
 pnpm test:d1-schema
-pnpm exec wrangler d1 migrations list maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging
-pnpm exec wrangler d1 time-travel info maal-staging --config .wrangler/staging-proof.jsonc --env staging
-pnpm exec wrangler d1 export maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging --no-data --output=/absolute/private/path/maal-staging-before-rewrite.sql
+pnpm exec wrangler d1 migrations list maal-staging --remote --config wrangler.jsonc --env staging
+pnpm exec wrangler d1 time-travel info maal-staging --config wrangler.jsonc --env staging
+pnpm exec wrangler d1 export maal-staging --remote --config wrangler.jsonc --env staging --no-data --output=/absolute/private/path/maal-staging-before-rewrite.sql
 node scripts/generate-d1-reset-sql.mjs maal-staging /absolute/private/path/maal-staging-before-rewrite.sql /absolute/private/path/maal-staging-reset.sql
 ```
 
-Review both private SQL files. The generated file must drop every exported application table, view, and
-`d1_migrations`, while leaving `sqlite_*` and `_cf_*` internal objects alone. Stop staging traffic and Stripe
+Review both private SQL files. The generated file must drop every exported trigger, view, application table,
+and `d1_migrations`, while leaving `sqlite_*` and `_cf_*` internal objects alone. Tables drop children first:
+each table drops before every table it references, because D1 fails on a child whose parent is already gone.
+`pnpm exec vitest run tests/unit/d1-reset-rehearsal-d1.spec.ts` executes the generator's output against the
+prototype schemas locally. Stop staging traffic and Stripe
 webhook delivery before the reset. Then require the operator to type the database-specific phrase exactly:
 
 ```sh
@@ -95,17 +107,17 @@ Do not continue if that check exits nonzero. Execute the reviewed reset file onl
 traffic pause, and confirmation are recorded:
 
 ```sh
-pnpm exec wrangler d1 execute maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging --file=/absolute/private/path/maal-staging-reset.sql
-pnpm exec wrangler d1 execute maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging --command "SELECT COUNT(*) AS application_objects FROM sqlite_schema WHERE type IN ('table', 'view', 'trigger') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'" --json
+pnpm exec wrangler d1 execute maal-staging --remote --config wrangler.jsonc --env staging --file=/absolute/private/path/maal-staging-reset.sql
+pnpm exec wrangler d1 execute maal-staging --remote --config wrangler.jsonc --env staging --command "SELECT COUNT(*) AS application_objects FROM sqlite_schema WHERE type IN ('table', 'view', 'trigger') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'" --json
 ```
 
 `application_objects` must equal `0`. A missing table, stale `d1_migrations` row, or any other nonzero result
 blocks the launch. Apply the two-file fresh chain only to that verified empty database:
 
 ```sh
-pnpm exec wrangler d1 migrations apply maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging
-pnpm exec wrangler d1 migrations list maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging
-pnpm exec wrangler d1 execute maal-staging --remote --config .wrangler/staging-proof.jsonc --env staging --command "SELECT name FROM d1_migrations ORDER BY id; SELECT (SELECT COUNT(*) FROM units) AS units, (SELECT COUNT(*) FROM unit_aliases) AS unit_aliases, (SELECT COUNT(*) FROM foods) AS foods, (SELECT COUNT(*) FROM food_aliases) AS food_aliases" --json
+pnpm exec wrangler d1 migrations apply maal-staging --remote --config wrangler.jsonc --env staging
+pnpm exec wrangler d1 migrations list maal-staging --remote --config wrangler.jsonc --env staging
+pnpm exec wrangler d1 execute maal-staging --remote --config wrangler.jsonc --env staging --command "SELECT name FROM d1_migrations ORDER BY id; SELECT (SELECT COUNT(*) FROM units) AS units, (SELECT COUNT(*) FROM unit_aliases) AS unit_aliases, (SELECT COUNT(*) FROM foods) AS foods, (SELECT COUNT(*) FROM food_aliases) AS food_aliases" --json
 ```
 
 The migration list must be empty afterward. `d1_migrations` must contain only
@@ -195,16 +207,16 @@ BILLING_MAINTENANCE_SECRET
 Repeat this command for each name, supplying the value only at Wrangler's prompt:
 
 ```sh
-pnpm exec wrangler secret put <NAME> --config .wrangler/staging-proof.jsonc --env staging
+pnpm exec wrangler secret put <NAME> --config wrangler.jsonc --env staging
 ```
 
 Build first, dry-run the exact artifact, then deploy the staging environment:
 
 ```sh
 pnpm build
-pnpm exec wrangler deploy --dry-run --config .wrangler/staging-proof.jsonc --env staging
-pnpm exec wrangler deploy --config .wrangler/staging-proof.jsonc --env staging
-pnpm exec wrangler deployments list --config .wrangler/staging-proof.jsonc --env staging
+pnpm exec wrangler deploy --dry-run --config wrangler.jsonc --env staging
+pnpm exec wrangler deploy --config wrangler.jsonc --env staging
+pnpm exec wrangler deployments list --config wrangler.jsonc --env staging
 ```
 
 Record the candidate commit, deployment label, active Worker version, D1 Time Travel bookmark, WorkOS mode
@@ -219,7 +231,7 @@ must show `17 3 * * *`; do not create a second dashboard-managed trigger. See
 Open a JSON log tail during smoke/proof traffic:
 
 ```sh
-pnpm exec wrangler tail maal-staging --format json --config .wrangler/staging-proof.jsonc --env staging
+pnpm exec wrangler tail maal-staging --format json --config wrangler.jsonc --env staging
 ```
 
 Expected maintenance records are `maintenance_completed` with non-negative counts. Any
@@ -244,10 +256,10 @@ run with shell tracing enabled.
 
 ```text
 MAAL_STAGING_PROOF_CONFIRM=create-and-remove-disposable-staging-fixtures
-MAAL_STAGING_BASE_URL=https://<staging-origin>
+MAAL_STAGING_BASE_URL=https://staging.maal.is
 MAAL_STAGING_DEPLOYMENT_LABEL=<non-secret-candidate-label>
 MAAL_STAGING_DATABASE_NAME=maal-staging
-MAAL_STAGING_WRANGLER_CONFIG=.wrangler/staging-proof.jsonc
+CLOUDFLARE_ACCOUNT_ID=<mia.cx-account-id>
 MAAL_STAGING_FIXTURE_FILE=/absolute/private/path/maal-staging-fixtures.json
 MAAL_STAGING_EVIDENCE_FILE=/absolute/private/path/maal-staging-evidence.json
 WORKOS_API_KEY=<WorkOS-staging-key>
@@ -267,8 +279,13 @@ pnpm proof:staging contracts
 pnpm proof:staging live
 ```
 
-Run the live command only from a candidate containing #83. It asserts the exact stable callback before creating
-fixtures and fails closed while attempting provider cleanup. Do not waive or hand-edit the result.
+The live command asserts the exact stable callback before creating fixtures and fails closed while attempting
+provider cleanup. Do not waive or hand-edit the result.
+
+The deployed auth-slot step runs all five `playwright.auth-slots.config.ts` projects, two of them on WebKit.
+On a host that cannot launch WebKit, run `pnpm proof:staging live --skip-webkit` instead. It skips only the
+WebKit projects and records them in the evidence under `gates.retainedSlots.deployedRoute`
+(`skippedProjects`, `skipReason`). None of these projects counts toward #70's native matrix.
 
 The gates prove:
 
@@ -308,8 +325,8 @@ pnpm proof:staging:cleanup
 
 Do not delete the ledger manually until cleanup passes. If provider cleanup cannot be completed, stop the
 cutover and give the private ledger—not its contents—to an authorized operator. Store only the sanitized
-evidence file with the release record. Remove the private operator environment, fixture ledger, raw logs, and
-temporary Wrangler file when the staging investigation is over.
+evidence file with the release record. Remove the private operator environment, fixture ledger, and raw logs
+when the staging investigation is over.
 
 ## 8. Rollback-forward
 
@@ -318,7 +335,7 @@ already-applied migration. If only Worker code is bad and the schema remains bac
 activate the previous version:
 
 ```sh
-pnpm exec wrangler rollback --config .wrangler/staging-proof.jsonc --env staging
+pnpm exec wrangler rollback --config wrangler.jsonc --env staging
 ```
 
 Then fix forward, rebuild, dry-run, deploy, and rerun all gates. Cloudflare notes that Worker rollback creates
@@ -334,17 +351,18 @@ The restore command returns a bookmark that can undo the restore; retain both in
 
 Production keeps separate provider objects from staging and uses the existing `maal` Worker and `maal-prod` D1:
 
-1. Confirm #83's stable WorkOS callback is deployed and obtain a fully passing sanitized staging proof.
-2. Copy the tracked config to an ignored production cutover file. Confirm it resolves Worker `maal` and D1
-   `maal-prod`. Keep raw resource IDs only in the private operations record.
+1. Obtain a fully passing sanitized staging proof.
+2. Set `CLOUDFLARE_ACCOUNT_ID` and confirm `wrangler.jsonc` matches the candidate commit and its
+   `--env production` resolves Worker `maal` and D1 `maal-prod`. Keep raw resource IDs only in the private
+   operations record.
 3. Stop production traffic, scheduled work, and Stripe webhook delivery. Inspect the database, capture its
    Time Travel bookmark, export its schema, and generate the private reset file:
 
    ```sh
-   pnpm exec wrangler d1 info maal-prod --config .wrangler/production-cutover.jsonc --env production
-   pnpm exec wrangler d1 migrations list maal-prod --remote --config .wrangler/production-cutover.jsonc --env production
-   pnpm exec wrangler d1 time-travel info maal-prod --config .wrangler/production-cutover.jsonc --env production
-   pnpm exec wrangler d1 export maal-prod --remote --config .wrangler/production-cutover.jsonc --env production --no-data --output=/absolute/private/path/maal-prod-before-rewrite.sql
+   pnpm exec wrangler d1 info maal-prod --config wrangler.jsonc --env production
+   pnpm exec wrangler d1 migrations list maal-prod --remote --config wrangler.jsonc --env production
+   pnpm exec wrangler d1 time-travel info maal-prod --config wrangler.jsonc --env production
+   pnpm exec wrangler d1 export maal-prod --remote --config wrangler.jsonc --env production --no-data --output=/absolute/private/path/maal-prod-before-rewrite.sql
    node scripts/generate-d1-reset-sql.mjs maal-prod /absolute/private/path/maal-prod-before-rewrite.sql /absolute/private/path/maal-prod-reset.sql
    ```
 
@@ -356,17 +374,17 @@ Production keeps separate provider objects from staging and uses the existing `m
    read -r MAAL_RESET_CONFIRMATION
    test "$MAAL_RESET_CONFIRMATION" = 'RESET maal-prod FOR REWRITE LAUNCH' || { unset MAAL_RESET_CONFIRMATION; printf '%s\n' 'Reset cancelled.' >&2; exit 1; }
    unset MAAL_RESET_CONFIRMATION
-   pnpm exec wrangler d1 execute maal-prod --remote --config .wrangler/production-cutover.jsonc --env production --file=/absolute/private/path/maal-prod-reset.sql
-   pnpm exec wrangler d1 execute maal-prod --remote --config .wrangler/production-cutover.jsonc --env production --command "SELECT COUNT(*) AS application_objects FROM sqlite_schema WHERE type IN ('table', 'view', 'trigger') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'" --json
+   pnpm exec wrangler d1 execute maal-prod --remote --config wrangler.jsonc --env production --file=/absolute/private/path/maal-prod-reset.sql
+   pnpm exec wrangler d1 execute maal-prod --remote --config wrangler.jsonc --env production --command "SELECT COUNT(*) AS application_objects FROM sqlite_schema WHERE type IN ('table', 'view', 'trigger') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'" --json
    ```
 
    Stop if the explicit confirmation fails or `application_objects` is not `0`. Apply and verify the fresh
    chain only after the empty check:
 
    ```sh
-   pnpm exec wrangler d1 migrations apply maal-prod --remote --config .wrangler/production-cutover.jsonc --env production
-   pnpm exec wrangler d1 migrations list maal-prod --remote --config .wrangler/production-cutover.jsonc --env production
-   pnpm exec wrangler d1 execute maal-prod --remote --config .wrangler/production-cutover.jsonc --env production --command "SELECT name FROM d1_migrations ORDER BY id; SELECT (SELECT COUNT(*) FROM units) AS units, (SELECT COUNT(*) FROM unit_aliases) AS unit_aliases, (SELECT COUNT(*) FROM foods) AS foods, (SELECT COUNT(*) FROM food_aliases) AS food_aliases" --json
+   pnpm exec wrangler d1 migrations apply maal-prod --remote --config wrangler.jsonc --env production
+   pnpm exec wrangler d1 migrations list maal-prod --remote --config wrangler.jsonc --env production
+   pnpm exec wrangler d1 execute maal-prod --remote --config wrangler.jsonc --env production --command "SELECT name FROM d1_migrations ORDER BY id; SELECT (SELECT COUNT(*) FROM units) AS units, (SELECT COUNT(*) FROM unit_aliases) AS unit_aliases, (SELECT COUNT(*) FROM foods) AS foods, (SELECT COUNT(*) FROM food_aliases) AS food_aliases" --json
    ```
 
 4. Confirm the WorkOS application redirects, roles/permissions, branding, production API key, and Client ID.
@@ -382,5 +400,5 @@ The reset is exclusive to the rewrite launch. Future production versions inspect
 forward-only generated migrations against the same `maal-prod`. They never reset routine releases, create a
 replacement D1, or create a versioned production Worker.
 
-Cut over traffic only when the callback blocker is closed, every staging gate passes, cleanup is verified,
-scheduled maintenance is observable, and an operator has rehearsed rollback-forward.
+Cut over traffic only when every staging gate passes, cleanup is verified, scheduled maintenance is
+observable, and an operator has rehearsed rollback-forward.

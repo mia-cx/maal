@@ -1,8 +1,9 @@
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import authSlotConfig from '../../playwright.auth-slots.config.ts';
 import {
 	readStagingProofD1Telemetry,
 	stagingProofTelemetry,
@@ -23,6 +24,7 @@ import {
 	mergeFixtureIds,
 	mergeStripeEventDeliveries,
 	requireCleanupQuiescence,
+	selectAuthSlotProjects,
 	stableAuthCallback,
 	summarizeAuthEvidence,
 	summarizeBillingEvidence,
@@ -31,12 +33,12 @@ import {
 	writeSanitizedEvidence
 } from '../../scripts/lib/staging-cutover-proof.mjs';
 
-const liveEnvironment = (configPath: string) => ({
+const liveEnvironment = {
 	MAAL_STAGING_PROOF_CONFIRM: STAGING_CONFIRMATION,
 	MAAL_STAGING_BASE_URL: 'https://staging.maal.test',
 	MAAL_STAGING_DEPLOYMENT_LABEL: 'staging-candidate-abc123',
 	MAAL_STAGING_DATABASE_NAME: 'maal-staging',
-	MAAL_STAGING_WRANGLER_CONFIG: configPath,
+	CLOUDFLARE_ACCOUNT_ID: '0123456789abcdef0123456789abcdef',
 	MAAL_STAGING_FIXTURE_FILE: join(tmpdir(), 'maal-proof-private-fixtures.json'),
 	MAAL_STAGING_EVIDENCE_FILE: join(tmpdir(), 'maal-proof-private-evidence.json'),
 	WORKOS_API_KEY: 'sk_test_workos_secret',
@@ -46,7 +48,7 @@ const liveEnvironment = (configPath: string) => ({
 	STRIPE_WEBHOOK_SECRET: 'whsec_staging_secret',
 	STRIPE_PRODUCT_ID: 'prod_private',
 	BILLING_MAINTENANCE_SECRET: 'private-maintenance-secret'
-});
+};
 
 const stagingWrangler = {
 	main: 'src/worker.ts',
@@ -61,6 +63,7 @@ const stagingWrangler = {
 		staging: {
 			name: 'maal-staging',
 			vars: { MAAL_PROOF_TELEMETRY: 'staging-only' },
+			routes: [{ pattern: 'staging.maal.test', custom_domain: true }],
 			triggers: { crons: ['17 3 * * *'] },
 			ratelimits: [
 				{
@@ -83,31 +86,39 @@ const stagingWrangler = {
 
 describe('staging cutover proof safety', () => {
 	test('fails with every missing live operator input and refuses production providers', async () => {
-		await expect(validateLiveEnvironment({}, '/tmp')).rejects.toThrow(
+		const missing = validateLiveEnvironment({}, '/tmp');
+		await expect(missing).rejects.toThrow(
 			'MAAL_STAGING_PROOF_CONFIRM=create-and-remove-disposable-staging-fixtures'
 		);
+		await expect(missing).rejects.toThrow('CLOUDFLARE_ACCOUNT_ID');
+		await expect(missing).rejects.not.toThrow('MAAL_STAGING_WRANGLER_CONFIG');
 		const directory = await mkdtemp(join(tmpdir(), 'maal-staging-proof-'));
 		const configPath = join(directory, 'wrangler.jsonc');
 		await writeFile(configPath, JSON.stringify(stagingWrangler));
 		await expect(
+			validateLiveEnvironment({ ...liveEnvironment, CLOUDFLARE_ACCOUNT_ID: 'mia.cx' }, directory)
+		).rejects.toThrow('CLOUDFLARE_ACCOUNT_ID must be a 32-character');
+		await expect(
 			validateLiveEnvironment(
-				{ ...liveEnvironment(configPath), STRIPE_SECRET_KEY: 'sk_live_forbidden' },
+				{ ...liveEnvironment, STRIPE_SECRET_KEY: 'sk_live_forbidden' },
 				directory
 			)
 		).rejects.toThrow('not a test-mode sk_test_ key');
-		await expect(
-			validateLiveEnvironment(
-				{ ...liveEnvironment(configPath), MAAL_STAGING_BASE_URL: 'https://maal.mia.cx' },
-				directory
-			)
-		).rejects.toThrow('refuses the production Maal hostname');
+		for (const production of ['https://maal.mia.cx', 'https://maal.is', 'https://www.maal.is']) {
+			await expect(
+				validateLiveEnvironment(
+					{ ...liveEnvironment, MAAL_STAGING_BASE_URL: production },
+					directory
+				)
+			).rejects.toThrow('refuses the production Maal hostname');
+		}
 	});
 
 	test('returns only safe deployment facts from a complete staging environment', async () => {
 		const directory = await mkdtemp(join(tmpdir(), 'maal-staging-proof-'));
 		const configPath = join(directory, 'wrangler.jsonc');
 		await writeFile(configPath, JSON.stringify(stagingWrangler));
-		await expect(validateLiveEnvironment(liveEnvironment(configPath), directory)).resolves.toEqual({
+		await expect(validateLiveEnvironment(liveEnvironment, directory)).resolves.toEqual({
 			baseUrl: 'https://staging.maal.test',
 			authCallbackUrl: 'https://staging.maal.test/api/auth/callback',
 			deploymentLabel: 'staging-candidate-abc123',
@@ -119,13 +130,48 @@ describe('staging cutover proof safety', () => {
 		});
 	});
 
+	test('validates the committed wrangler.jsonc that deploy and migrations use', async () => {
+		await expect(
+			validateLiveEnvironment(
+				{ ...liveEnvironment, MAAL_STAGING_BASE_URL: 'https://staging.maal.is' },
+				resolve('.')
+			)
+		).resolves.toMatchObject({
+			baseUrl: 'https://staging.maal.is',
+			wranglerConfigPath: resolve('wrangler.jsonc')
+		});
+	});
+
+	test('skips WebKit auth-slot projects only on request and names them', () => {
+		expect(selectAuthSlotProjects(authSlotConfig.projects, { skipWebkit: false })).toEqual({
+			projects: [
+				'supplemental-desktop-chromium',
+				'supplemental-desktop-firefox',
+				'supplemental-linux-webkit',
+				'supplemental-ios-webkit-emulation',
+				'supplemental-android-chromium-emulation'
+			],
+			skippedProjects: [],
+			skipReason: null
+		});
+		expect(selectAuthSlotProjects(authSlotConfig.projects, { skipWebkit: true })).toEqual({
+			projects: [
+				'supplemental-desktop-chromium',
+				'supplemental-desktop-firefox',
+				'supplemental-android-chromium-emulation'
+			],
+			skippedProjects: ['supplemental-linux-webkit', 'supplemental-ios-webkit-emulation'],
+			skipReason: 'operator-declared-host-cannot-launch-webkit'
+		});
+	});
+
 	test('rejects unsafe origins and malformed staging Wrangler contracts', async () => {
 		const directory = await mkdtemp(join(tmpdir(), 'maal-staging-proof-'));
 		const configPath = join(directory, 'wrangler.jsonc');
 		await writeFile(configPath, JSON.stringify(stagingWrangler));
 		await expect(
 			validateLiveEnvironment(
-				{ ...liveEnvironment(configPath), MAAL_STAGING_BASE_URL: 'https://staging.maal.test/app' },
+				{ ...liveEnvironment, MAAL_STAGING_BASE_URL: 'https://staging.maal.test/app' },
 				directory
 			)
 		).rejects.toThrow('clean HTTPS staging origin');
@@ -134,14 +180,14 @@ describe('staging cutover proof safety', () => {
 		);
 		await expect(
 			validateLiveEnvironment(
-				{ ...liveEnvironment(configPath), MAAL_STAGING_DATABASE_NAME: 'maal-v1-staging' },
+				{ ...liveEnvironment, MAAL_STAGING_DATABASE_NAME: 'maal-v1-staging' },
 				directory
 			)
 		).rejects.toThrow('only accepts MAAL_STAGING_DATABASE_NAME=maal-staging');
 		await expect(
 			validateLiveEnvironment(
 				{
-					...liveEnvironment(configPath),
+					...liveEnvironment,
 					MAAL_STAGING_EVIDENCE_FILE: join(directory, 'evidence.json')
 				},
 				directory
@@ -189,12 +235,20 @@ describe('staging cutover proof safety', () => {
 				env: { staging: { ...stagingWrangler.env.staging, triggers: { crons: ['* * * * *'] } } }
 			},
 			{ ...stagingWrangler, assets: { binding: 'WRONG', directory: 'public' } },
-			{ ...stagingWrangler, observability: { enabled: false } }
+			{ ...stagingWrangler, observability: { enabled: false } },
+			{ ...stagingWrangler, env: { staging: { ...stagingWrangler.env.staging, routes: [] } } },
+			{
+				...stagingWrangler,
+				env: {
+					staging: {
+						...stagingWrangler.env.staging,
+						routes: [{ pattern: 'other.maal.test', custom_domain: true }]
+					}
+				}
+			}
 		]) {
 			await writeFile(configPath, JSON.stringify(invalid));
-			await expect(
-				validateLiveEnvironment(liveEnvironment(configPath), directory)
-			).rejects.toThrow();
+			await expect(validateLiveEnvironment(liveEnvironment, directory)).rejects.toThrow();
 		}
 	});
 

@@ -35,6 +35,7 @@
 		"staging": {
 			"name": "maal-staging",
 			"vars": { "MAAL_PROOF_TELEMETRY": "staging-only" },
+			"routes": [{ "pattern": "staging.maal.is", "custom_domain": true }],
 			"triggers": { "crons": ["17 3 * * *"] },
 			"d1_databases": [
 				{
