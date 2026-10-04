@@ -3,6 +3,16 @@ import type { BillingCapability, StripeSubscriptionStatus } from '$lib/domain/bi
 export const BILLING_GRACE_DAYS = 30 as const;
 export const BILLING_GRACE_MILLISECONDS = BILLING_GRACE_DAYS * 24 * 60 * 60 * 1_000;
 
+/**
+ * How long an `active`/`trialing` capability stays enabled past its projected `currentPeriodEnd`.
+ *
+ * At renewal Stripe advances the period and creates the invoice, then waits about an hour before
+ * it attempts payment, so the subscription legitimately stays `active` while D1 still holds the
+ * old period end until `customer.subscription.updated` lands. A failed payment after that hour
+ * moves the row to `past_due`, which has its own grace window.
+ */
+export const STRIPE_RENEWAL_TOLERANCE_MILLISECONDS = 60 * 60 * 1_000;
+
 export interface BillingProjectionInput {
 	readonly householdId: string;
 	readonly status: StripeSubscriptionStatus | null;
@@ -77,7 +87,9 @@ export const projectBillingCapability = (
 		interruptionStartedAt: input.interruptionStartedAt as `${string}Z` | null,
 		graceUntil: input.graceUntil as `${string}Z` | null,
 		validUntil: enabled
-			? (input.currentPeriodEnd as `${string}Z` | null)
+			? input.currentPeriodEnd !== null
+				? asUtc(Date.parse(input.currentPeriodEnd) + STRIPE_RENEWAL_TOLERANCE_MILLISECONDS)
+				: null
 			: graceActive
 				? (input.graceUntil as `${string}Z`)
 				: null,

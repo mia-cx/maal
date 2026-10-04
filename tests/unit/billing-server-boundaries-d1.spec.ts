@@ -14,8 +14,13 @@ vi.mock('$lib/server/sync/auth.js', () => ({
 
 import { CURRENT_PROTOCOL_VERSION } from '$lib/domain/contracts/versions.js';
 import {
+	billingCapabilityIsEnabledAt,
+	projectBillingCapability
+} from '$lib/domain/billing/capability.js';
+import {
 	BillingRepository,
 	createMaalCheckout,
+	loadBillingProjection,
 	MAAL_PRICE_LOOKUP_KEYS,
 	processStripeWebhook,
 	purgeExpiredHouseholds,
@@ -480,6 +485,56 @@ describe('renewal webhook tolerance', () => {
 	test('disables an active subscription once the tolerance has passed', async () => {
 		await insertSubscription({ status: 'active', currentPeriodEnd: periodEnd });
 		await expect(authorizeHousehold(hoursAfter)).rejects.toMatchObject({
+			code: 'maal_plan_required'
+		});
+	});
+});
+
+describe('client capability renewal tolerance', () => {
+	const periodEnd = '2026-10-01T00:00:00.000Z';
+	const withinTolerance = '2026-10-01T00:10:00.000Z';
+	const pastTolerance = '2026-10-01T01:01:00.000Z';
+	const input = {
+		householdId,
+		status: 'active' as const,
+		subscriberUserId: 'user_alice',
+		stripePriceId: 'price_monthly',
+		currentPeriodEnd: periodEnd,
+		cancelAtPeriodEnd: false,
+		interruptionStartedAt: null,
+		graceUntil: null
+	};
+
+	test('extends validUntil one hour past the projected period end', () => {
+		const capability = projectBillingCapability(input, withinTolerance);
+		expect(capability.validUntil).toBe('2026-10-01T01:00:00.000Z');
+		expect(billingCapabilityIsEnabledAt(capability, Date.parse(withinTolerance))).toBe(true);
+		expect(billingCapabilityIsEnabledAt(capability, Date.parse(pastTolerance))).toBe(false);
+	});
+
+	test('loadBillingProjection matches the server authorizer on both sides of the tolerance', async () => {
+		await insertSubscription({ status: 'active', currentPeriodEnd: periodEnd });
+		const repository = new BillingRepository(database);
+		const { stripe } = fakeStripe();
+		const load = (now: string) =>
+			loadBillingProjection({
+				repository,
+				stripe,
+				productId: 'prod_maal',
+				householdId,
+				workosUserId: 'user_alice',
+				now
+			});
+
+		const within = await load(withinTolerance);
+		expect(billingCapabilityIsEnabledAt(within.capability, Date.parse(withinTolerance))).toBe(
+			true
+		);
+		await expect(authorizeHousehold(withinTolerance)).resolves.toBeTruthy();
+
+		const past = await load(pastTolerance);
+		expect(billingCapabilityIsEnabledAt(past.capability, Date.parse(pastTolerance))).toBe(false);
+		await expect(authorizeHousehold(pastTolerance)).rejects.toMatchObject({
 			code: 'maal_plan_required'
 		});
 	});

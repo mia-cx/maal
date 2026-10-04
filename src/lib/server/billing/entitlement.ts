@@ -1,12 +1,4 @@
-/**
- * How long an `active`/`trialing` row stays enabled past its projected `current_period_end`.
- *
- * At renewal Stripe advances the period and creates the invoice, then waits about an hour before
- * it attempts payment, so the subscription legitimately stays `active` while D1 still holds the
- * old period end until `customer.subscription.updated` lands. A failed payment after that hour
- * moves the row to `past_due`, which has its own grace window.
- */
-export const STRIPE_RENEWAL_TOLERANCE_MILLISECONDS = 60 * 60 * 1_000;
+import { STRIPE_RENEWAL_TOLERANCE_MILLISECONDS } from '$lib/domain/billing/capability.js';
 
 /** The earliest projected period end that still enables an `active` or `trialing` row at `now`. */
 export const renewalCutoff = (now: string): string =>
