@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+	NATIVE_AUTH_SLOT_TARGETS,
 	createNativeEvidenceTemplate,
 	inspectSessionSetCookie,
 	requestCookieNames,
-	validateNativeEvidence
+	validateNativeEvidence,
+	validateNativeMatrix
 } from '../../scripts/lib/auth-slot-proof-evidence.ts';
 
 const ALICE_SLOT = '00112233445566778899aabbccddeeff';
@@ -52,6 +54,123 @@ describe('auth-slot proof evidence', () => {
 		expect(requestCookieNames(null)).toEqual([]);
 	});
 
+	it('measures the sealed identity cookie with the same policy', () => {
+		const line = `__Secure-maal_identity_${ALICE_SLOT}=sealed; Path=/api/auth-slots/${ALICE_SLOT}/; HttpOnly; Secure; SameSite=Lax`;
+		expect(
+			inspectSessionSetCookie([{ name: 'set-cookie', value: line }], ALICE_SLOT, 'identity')
+		).toMatchObject({ name: `__Secure-maal_identity_${ALICE_SLOT}`, bytes: line.length });
+		expect(() =>
+			inspectSessionSetCookie([{ name: 'set-cookie', value: line }], ALICE_SLOT)
+		).toThrow(/did not set __Secure-maal_session_/);
+		const oversized = line.replace('=sealed;', `=${'x'.repeat(4096)};`);
+		expect(() =>
+			inspectSessionSetCookie([{ name: 'set-cookie', value: oversized }], ALICE_SLOT, 'identity')
+		).toThrow(/bytes/);
+	});
+
+	it('starts every observed fact unset so an unfilled template cannot pass', () => {
+		const template = createNativeEvidenceTemplate('native-macos-safari');
+		expect(Object.values(template.checks).every((check) => check === null)).toBe(true);
+		expect(template.d1Opened).toBeNull();
+		expect(template.cleanup).toMatchObject({
+			aliceDeleted: null,
+			bobDeleted: null,
+			remainingDisposableUsers: null
+		});
+
+		const evidence = completeEvidence();
+		expect(() => validateNativeEvidence({ ...evidence, checks: template.checks })).toThrow(
+			/checks.stableRegisteredCallback must pass/
+		);
+		expect(() => validateNativeEvidence({ ...evidence, d1Opened: null })).toThrow(/measured/);
+		expect(() =>
+			validateNativeEvidence({ ...evidence, cleanup: { ...evidence.cleanup, bobDeleted: null } })
+		).toThrow(/Bob deletion/);
+	});
+
+	it('requires identity cookies that stay on their own slot', () => {
+		const evidence = completeEvidence();
+		expect(() => validateNativeEvidence({ ...evidence, identityCookies: undefined })).toThrow(
+			/identityCookies must be an object/
+		);
+		expect(() =>
+			validateNativeEvidence({
+				...evidence,
+				identityCookies: {
+					...evidence.identityCookies,
+					aliceInitial: identityEvidence(BOB_SLOT, 300)
+				}
+			})
+		).toThrow(/Alice identity cookies must use the Alice slot/);
+		expect(() =>
+			validateNativeEvidence({
+				...evidence,
+				identityCookies: {
+					...evidence.identityCookies,
+					bobInitial: identityEvidence(BOB_SLOT, 4096)
+				}
+			})
+		).toThrow(/identityCookies.bobInitial.bytes is invalid/);
+		expect(() =>
+			validateNativeEvidence({
+				...evidence,
+				requestCookieNames: {
+					...evidence.requestCookieNames,
+					bobSlot: [...evidence.requestCookieNames.bobSlot, `__Secure-maal_identity_${ALICE_SLOT}`]
+				}
+			})
+		).toThrow(/Bob route received an Alice cookie/);
+	});
+
+	it('accepts exactly one file per native target', () => {
+		const files = NATIVE_AUTH_SLOT_TARGETS.map((target) => ({ ...completeEvidence(), target }));
+		const [macos, ios, android] = files;
+		expect(() => validateNativeMatrix(files)).not.toThrow();
+		expect(() => validateNativeMatrix([macos, ios, android, macos])).toThrow(/exactly three/);
+		expect(() => validateNativeMatrix([macos, macos, android])).toThrow(
+			/more than one file for native-macos-safari/
+		);
+		expect(() => validateNativeMatrix([macos, ios])).toThrow(/exactly three/);
+	});
+
+	it.each(['appAsset', 'aliceSlot', 'bobSlot'] as const)(
+		'rejects unexpected and duplicate retained cookies on %s',
+		(route) => {
+			const evidence = completeEvidence();
+			for (const name of [
+				`__Secure-maal_session_${'a'.repeat(32)}`,
+				`__Secure-maal_identity_${'a'.repeat(32)}`,
+				`__Secure-maal_session_${route === 'bobSlot' ? BOB_SLOT : ALICE_SLOT}`,
+				`__Secure-maal_identity_${route === 'bobSlot' ? BOB_SLOT : ALICE_SLOT}`
+			]) {
+				expect(() =>
+					validateNativeEvidence({
+						...evidence,
+						requestCookieNames: {
+							...evidence.requestCookieNames,
+							[route]: [...evidence.requestCookieNames[route], name]
+						}
+					})
+				).toThrow(/auth-slot cookies?/);
+			}
+		}
+	);
+
+	it('allows unrelated cookies without losing duplicate retained-cookie names', () => {
+		const evidence = completeEvidence();
+		expect(() =>
+			validateNativeEvidence({
+				...evidence,
+				requestCookieNames: {
+					appAsset: ['maal_proof_trace'],
+					aliceSlot: ['maal_proof_trace', ...evidence.requestCookieNames.aliceSlot],
+					bobSlot: ['maal_proof_trace', ...evidence.requestCookieNames.bobSlot]
+				}
+			})
+		).not.toThrow();
+		expect(requestCookieNames('one=first; one=second')).toEqual(['one', 'one']);
+	});
+
 	it('accepts complete native evidence and rejects secret-bearing or incomplete files', () => {
 		const evidence = completeEvidence();
 		expect(() => validateNativeEvidence(evidence)).not.toThrow();
@@ -83,13 +202,38 @@ function completeEvidence() {
 			aliceRefresh: cookieEvidence(ALICE_SLOT, 2210),
 			aliceReauthentication: cookieEvidence(ALICE_SLOT, 2220)
 		},
+		identityCookies: {
+			aliceInitial: identityEvidence(ALICE_SLOT, 300),
+			bobInitial: identityEvidence(BOB_SLOT, 300),
+			aliceReauthentication: identityEvidence(ALICE_SLOT, 300)
+		},
 		requestCookieNames: {
 			appAsset: [],
-			aliceSlot: [`__Secure-maal_session_${ALICE_SLOT}`],
-			bobSlot: [`__Secure-maal_session_${BOB_SLOT}`]
+			aliceSlot: [`__Secure-maal_identity_${ALICE_SLOT}`, `__Secure-maal_session_${ALICE_SLOT}`],
+			bobSlot: [`__Secure-maal_identity_${BOB_SLOT}`, `__Secure-maal_session_${BOB_SLOT}`]
 		},
-		cleanup: { ...template.cleanup, verifiedAtUtc: '2026-08-22T01:10:00.000Z' }
+		checks: {
+			stableRegisteredCallback: true,
+			opaqueOneUseFlowState: true,
+			distinctIdentities: true,
+			aliceSurvivedBobLogin: true,
+			bobSurvivedAliceRefresh: true,
+			bobSurvivedAliceRevocation: true,
+			aliceReauthenticationBoundIdentity: true,
+			bobSurvivedAliceRemoval: true
+		},
+		d1Opened: false,
+		cleanup: {
+			aliceDeleted: true,
+			bobDeleted: true,
+			remainingDisposableUsers: 0,
+			verifiedAtUtc: '2026-08-22T01:10:00.000Z'
+		}
 	};
+}
+
+function identityEvidence(slotId: string, bytes: number) {
+	return { ...cookieEvidence(slotId, bytes), name: `__Secure-maal_identity_${slotId}` };
 }
 
 function cookieEvidence(slotId: string, bytes: number) {

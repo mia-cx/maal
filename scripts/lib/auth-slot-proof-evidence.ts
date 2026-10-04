@@ -1,4 +1,4 @@
-export const AUTH_SLOT_PROOF_SCHEMA_VERSION = 2 as const;
+export const AUTH_SLOT_PROOF_SCHEMA_VERSION = 3 as const;
 export const NATIVE_AUTH_SLOT_TARGETS = [
 	'native-macos-safari',
 	'native-ios-safari',
@@ -6,6 +6,22 @@ export const NATIVE_AUTH_SLOT_TARGETS = [
 ] as const;
 
 export type NativeAuthSlotTarget = (typeof NATIVE_AUTH_SLOT_TARGETS)[number];
+
+/** The two sealed cookies the callback sets per slot: the WorkOS session and the slot's identity. */
+export type AuthSlotCookieKind = 'session' | 'identity';
+
+const NATIVE_CHECKS = [
+	'stableRegisteredCallback',
+	'opaqueOneUseFlowState',
+	'distinctIdentities',
+	'aliceSurvivedBobLogin',
+	'bobSurvivedAliceRefresh',
+	'bobSurvivedAliceRevocation',
+	'aliceReauthenticationBoundIdentity',
+	'bobSurvivedAliceRemoval'
+] as const;
+
+type NativeCheck = (typeof NATIVE_CHECKS)[number];
 
 export interface CookieEvidence {
 	readonly name: string;
@@ -35,10 +51,17 @@ export interface NativeAuthSlotEvidence {
 		readonly version: string;
 		readonly userAgent: string;
 	};
+	/** Sealed WorkOS session cookies, `__Secure-maal_session_<slot>`. */
 	readonly cookies: {
 		readonly aliceInitial: CookieEvidence;
 		readonly bobInitial: CookieEvidence;
 		readonly aliceRefresh: CookieEvidence;
+		readonly aliceReauthentication: CookieEvidence;
+	};
+	/** Sealed identity cookies, `__Secure-maal_identity_<slot>`. Only the callback sets them. */
+	readonly identityCookies: {
+		readonly aliceInitial: CookieEvidence;
+		readonly bobInitial: CookieEvidence;
 		readonly aliceReauthentication: CookieEvidence;
 	};
 	readonly requestCookieNames: {
@@ -46,16 +69,7 @@ export interface NativeAuthSlotEvidence {
 		readonly aliceSlot: readonly string[];
 		readonly bobSlot: readonly string[];
 	};
-	readonly checks: {
-		readonly stableRegisteredCallback: true;
-		readonly opaqueOneUseFlowState: true;
-		readonly distinctIdentities: true;
-		readonly aliceSurvivedBobLogin: true;
-		readonly bobSurvivedAliceRefresh: true;
-		readonly bobSurvivedAliceRevocation: true;
-		readonly aliceReauthenticationBoundIdentity: true;
-		readonly bobSurvivedAliceRemoval: true;
-	};
+	readonly checks: { readonly [Check in NativeCheck]: true };
 	readonly d1Opened: boolean;
 	readonly cleanup: {
 		readonly aliceDeleted: true;
@@ -64,6 +78,21 @@ export interface NativeAuthSlotEvidence {
 		readonly verifiedAtUtc: string;
 	};
 }
+
+/** What `init` writes. Every observed fact starts unset, so an unfilled template fails validation. */
+export type NativeEvidenceTemplate = Omit<
+	NativeAuthSlotEvidence,
+	'checks' | 'd1Opened' | 'cleanup'
+> & {
+	readonly checks: { readonly [Check in NativeCheck]: null };
+	readonly d1Opened: null;
+	readonly cleanup: {
+		readonly aliceDeleted: null;
+		readonly bobDeleted: null;
+		readonly remainingDisposableUsers: null;
+		readonly verifiedAtUtc: string;
+	};
+};
 
 const FORBIDDEN_KEYS = new Set([
 	'accessToken',
@@ -79,11 +108,18 @@ const FORBIDDEN_KEYS = new Set([
 	'state'
 ]);
 
+const cookieName = (kind: AuthSlotCookieKind, slotId: string) => `__Secure-maal_${kind}_${slotId}`;
+
+/**
+ * Measures one slot cookie from raw `Set-Cookie` header values and returns only safe metadata.
+ * `kind` picks the session cookie (default) or the identity cookie.
+ */
 export function inspectSessionSetCookie(
 	headers: readonly { readonly name: string; readonly value: string }[],
-	slotId: string
+	slotId: string,
+	kind: AuthSlotCookieKind = 'session'
 ): CookieEvidence {
-	const expectedName = `__Secure-maal_session_${slotId}`;
+	const expectedName = cookieName(kind, slotId);
 	const line = headers
 		.filter(({ name }) => name.toLowerCase() === 'set-cookie')
 		.map(({ value }) => value)
@@ -133,12 +169,11 @@ export function requestCookieNames(header: string | null | undefined) {
 		.sort();
 }
 
-export function createNativeEvidenceTemplate(target: NativeAuthSlotTarget): NativeAuthSlotEvidence {
-	const slotPath = '<exact slot path>';
+export function createNativeEvidenceTemplate(target: NativeAuthSlotTarget): NativeEvidenceTemplate {
 	const cookie: CookieEvidence = {
 		name: '<cookie name>',
 		bytes: 0,
-		path: slotPath,
+		path: '<exact slot path>',
 		secure: true,
 		httpOnly: true,
 		sameSite: 'Lax' as const,
@@ -169,22 +204,27 @@ export function createNativeEvidenceTemplate(target: NativeAuthSlotTarget): Nati
 			aliceRefresh: { ...cookie },
 			aliceReauthentication: { ...cookie }
 		},
+		identityCookies: {
+			aliceInitial: { ...cookie },
+			bobInitial: { ...cookie },
+			aliceReauthentication: { ...cookie }
+		},
 		requestCookieNames: { appAsset: [], aliceSlot: [], bobSlot: [] },
 		checks: {
-			stableRegisteredCallback: true,
-			opaqueOneUseFlowState: true,
-			distinctIdentities: true,
-			aliceSurvivedBobLogin: true,
-			bobSurvivedAliceRefresh: true,
-			bobSurvivedAliceRevocation: true,
-			aliceReauthenticationBoundIdentity: true,
-			bobSurvivedAliceRemoval: true
+			stableRegisteredCallback: null,
+			opaqueOneUseFlowState: null,
+			distinctIdentities: null,
+			aliceSurvivedBobLogin: null,
+			bobSurvivedAliceRefresh: null,
+			bobSurvivedAliceRevocation: null,
+			aliceReauthenticationBoundIdentity: null,
+			bobSurvivedAliceRemoval: null
 		},
-		d1Opened: false,
+		d1Opened: null,
 		cleanup: {
-			aliceDeleted: true,
-			bobDeleted: true,
-			remainingDisposableUsers: 0,
+			aliceDeleted: null,
+			bobDeleted: null,
+			remainingDisposableUsers: null,
 			verifiedAtUtc: '<ISO-8601 UTC timestamp>'
 		}
 	};
@@ -204,12 +244,16 @@ export function validateNativeEvidence(value: unknown): asserts value is NativeA
 		'device',
 		'browser',
 		'cookies',
+		'identityCookies',
 		'requestCookieNames',
 		'checks',
 		'd1Opened',
 		'cleanup'
 	]);
-	assert(value.schemaVersion === 2, 'schemaVersion must be 2');
+	assert(
+		value.schemaVersion === AUTH_SLOT_PROOF_SCHEMA_VERSION,
+		`schemaVersion must be ${AUTH_SLOT_PROOF_SCHEMA_VERSION}`
+	);
 	assert(value.kind === 'native-device', 'kind must be native-device');
 	assert(
 		NATIVE_AUTH_SLOT_TARGETS.includes(value.target as NativeAuthSlotTarget),
@@ -238,70 +282,92 @@ export function validateNativeEvidence(value: unknown): asserts value is NativeA
 		'aliceRefresh',
 		'aliceReauthentication'
 	]);
-	validateCookieEvidence(value.cookies.aliceInitial, 'cookies.aliceInitial');
-	validateCookieEvidence(value.cookies.bobInitial, 'cookies.bobInitial');
-	validateCookieEvidence(value.cookies.aliceRefresh, 'cookies.aliceRefresh');
-	validateCookieEvidence(value.cookies.aliceReauthentication, 'cookies.aliceReauthentication');
-	assert(
-		value.cookies.aliceInitial.name !== value.cookies.bobInitial.name,
-		'Alice and Bob must use distinct cookies'
+	validateCookieEvidence(value.cookies.aliceInitial, 'cookies.aliceInitial', 'session');
+	validateCookieEvidence(value.cookies.bobInitial, 'cookies.bobInitial', 'session');
+	validateCookieEvidence(value.cookies.aliceRefresh, 'cookies.aliceRefresh', 'session');
+	validateCookieEvidence(
+		value.cookies.aliceReauthentication,
+		'cookies.aliceReauthentication',
+		'session'
 	);
+	const alicePath = value.cookies.aliceInitial.path;
+	const bobPath = value.cookies.bobInitial.path;
+	assert(alicePath !== bobPath, 'Alice and Bob must use distinct cookies');
 	assert(
-		value.cookies.aliceRefresh.name === value.cookies.aliceInitial.name &&
-			value.cookies.aliceReauthentication.name === value.cookies.aliceInitial.name,
+		value.cookies.aliceRefresh.path === alicePath &&
+			value.cookies.aliceReauthentication.path === alicePath,
 		'Alice session responses must use the Alice cookie'
 	);
+
+	assertObject(value.identityCookies, 'identityCookies');
+	assertKeys(value.identityCookies, 'identityCookies', [
+		'aliceInitial',
+		'bobInitial',
+		'aliceReauthentication'
+	]);
+	validateCookieEvidence(
+		value.identityCookies.aliceInitial,
+		'identityCookies.aliceInitial',
+		'identity'
+	);
+	validateCookieEvidence(
+		value.identityCookies.bobInitial,
+		'identityCookies.bobInitial',
+		'identity'
+	);
+	validateCookieEvidence(
+		value.identityCookies.aliceReauthentication,
+		'identityCookies.aliceReauthentication',
+		'identity'
+	);
+	assert(
+		value.identityCookies.aliceInitial.path === alicePath &&
+			value.identityCookies.aliceReauthentication.path === alicePath,
+		'Alice identity cookies must use the Alice slot'
+	);
+	assert(
+		value.identityCookies.bobInitial.path === bobPath,
+		'Bob identity cookie must use the Bob slot'
+	);
+
 	assertObject(value.requestCookieNames, 'requestCookieNames');
 	assertKeys(value.requestCookieNames, 'requestCookieNames', ['appAsset', 'aliceSlot', 'bobSlot']);
-	const appAssetCookieNames = value.requestCookieNames.appAsset;
-	const aliceSlotCookieNames = value.requestCookieNames.aliceSlot;
-	const bobSlotCookieNames = value.requestCookieNames.bobSlot;
-	assertStringArray(appAssetCookieNames, 'requestCookieNames.appAsset');
-	assertStringArray(aliceSlotCookieNames, 'requestCookieNames.aliceSlot');
-	assertStringArray(bobSlotCookieNames, 'requestCookieNames.bobSlot');
+	const { appAsset, aliceSlot, bobSlot } = value.requestCookieNames;
+	assertStringArray(appAsset, 'requestCookieNames.appAsset');
+	assertStringArray(aliceSlot, 'requestCookieNames.aliceSlot');
+	assertStringArray(bobSlot, 'requestCookieNames.bobSlot');
+	const aliceCookies = [value.cookies.aliceInitial.name, value.identityCookies.aliceInitial.name];
+	const bobCookies = [value.cookies.bobInitial.name, value.identityCookies.bobInitial.name];
+	const retainedCookie = /^__Secure-maal_(session|identity)_/;
 	assert(
-		!appAssetCookieNames.includes(value.cookies.aliceInitial.name) &&
-			!appAssetCookieNames.includes(value.cookies.bobInitial.name),
-		'app assets must receive no retained session cookie'
+		!appAsset.some((name) => retainedCookie.test(name)),
+		'app assets must receive no retained auth-slot cookie'
 	);
 	assert(
-		aliceSlotCookieNames.includes(value.cookies.aliceInitial.name),
-		'Alice route must receive the Alice session cookie'
+		aliceCookies.every((name) => aliceSlot.includes(name)),
+		'Alice route must receive the Alice session and identity cookies'
+	);
+	assert(!bobCookies.some((name) => aliceSlot.includes(name)), 'Alice route received a Bob cookie');
+	assert(
+		bobCookies.every((name) => bobSlot.includes(name)),
+		'Bob route must receive the Bob session and identity cookies'
 	);
 	assert(
-		!aliceSlotCookieNames.includes(value.cookies.bobInitial.name),
-		'Alice route received Bob session cookie'
+		!aliceCookies.some((name) => bobSlot.includes(name)),
+		'Bob route received an Alice cookie'
 	);
 	assert(
-		bobSlotCookieNames.includes(value.cookies.bobInitial.name),
-		'Bob route must receive the Bob session cookie'
+		aliceSlot.filter((name) => retainedCookie.test(name)).length === aliceCookies.length,
+		'Alice route must receive exactly its own auth-slot cookies'
 	);
 	assert(
-		!bobSlotCookieNames.includes(value.cookies.aliceInitial.name),
-		'Bob route received Alice session cookie'
+		bobSlot.filter((name) => retainedCookie.test(name)).length === bobCookies.length,
+		'Bob route must receive exactly its own auth-slot cookies'
 	);
 
 	assertObject(value.checks, 'checks');
-	assertKeys(value.checks, 'checks', [
-		'stableRegisteredCallback',
-		'opaqueOneUseFlowState',
-		'distinctIdentities',
-		'aliceSurvivedBobLogin',
-		'bobSurvivedAliceRefresh',
-		'bobSurvivedAliceRevocation',
-		'aliceReauthenticationBoundIdentity',
-		'bobSurvivedAliceRemoval'
-	]);
-	for (const check of [
-		'stableRegisteredCallback',
-		'opaqueOneUseFlowState',
-		'distinctIdentities',
-		'aliceSurvivedBobLogin',
-		'bobSurvivedAliceRefresh',
-		'bobSurvivedAliceRevocation',
-		'aliceReauthenticationBoundIdentity',
-		'bobSurvivedAliceRemoval'
-	] as const) {
+	assertKeys(value.checks, 'checks', NATIVE_CHECKS);
+	for (const check of NATIVE_CHECKS) {
 		assert(value.checks[check] === true, `checks.${check} must pass`);
 	}
 	assert(typeof value.d1Opened === 'boolean', 'd1Opened must be measured');
@@ -321,10 +387,31 @@ export function validateNativeEvidence(value: unknown): asserts value is NativeA
 	assertUtc(value.cleanup.verifiedAtUtc, 'cleanup.verifiedAtUtc');
 }
 
-function validateCookieEvidence(value: unknown, label: string): asserts value is CookieEvidence {
+/** Validates the release matrix: exactly one valid evidence file per native target. */
+export function validateNativeMatrix(
+	files: readonly unknown[]
+): asserts files is readonly NativeAuthSlotEvidence[] {
+	assert(
+		files.length === NATIVE_AUTH_SLOT_TARGETS.length,
+		`The native matrix needs exactly three files, one each for ${NATIVE_AUTH_SLOT_TARGETS.join(', ')}`
+	);
+	const seen = new Set<NativeAuthSlotTarget>();
+	for (const file of files) {
+		validateNativeEvidence(file);
+		assert(!seen.has(file.target), `The native matrix has more than one file for ${file.target}`);
+		seen.add(file.target);
+	}
+}
+
+function validateCookieEvidence(
+	value: unknown,
+	label: string,
+	kind: AuthSlotCookieKind
+): asserts value is CookieEvidence {
 	assertObject(value, label);
 	assertKeys(value, label, ['name', 'bytes', 'path', 'secure', 'httpOnly', 'sameSite', 'hostOnly']);
-	assertString(value.name, `${label}.name`, /^__Secure-maal_session_[a-f0-9]{32}$/);
+	const prefix = cookieName(kind, '');
+	assertString(value.name, `${label}.name`, new RegExp(`^${prefix}[a-f0-9]{32}$`));
 	assert(typeof value.bytes === 'number', `${label}.bytes must be a number`);
 	assert(
 		Number.isInteger(value.bytes) && value.bytes > 0 && value.bytes < 4096,
@@ -335,7 +422,7 @@ function validateCookieEvidence(value: unknown, label: string): asserts value is
 	assert(value.httpOnly === true, `${label}.httpOnly must be true`);
 	assert(value.sameSite === 'Lax', `${label}.sameSite must be Lax`);
 	assert(value.hostOnly === true, `${label}.hostOnly must be true`);
-	const slotId = value.name.slice('__Secure-maal_session_'.length);
+	const slotId = value.name.slice(prefix.length);
 	assert(
 		value.path === `/api/auth-slots/${slotId}/`,
 		`${label} name and Path select different slots`

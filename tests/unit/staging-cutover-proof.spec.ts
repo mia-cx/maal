@@ -425,6 +425,34 @@ describe('staging cutover proof safety', () => {
 		).toBeNull();
 	});
 
+	test('traces native document navigations with a staging-only proof cookie', () => {
+		const environment = {
+			DB: { prepare: () => 'statement' },
+			MAAL_PROOF_TELEMETRY: 'staging-only'
+		} as unknown as Env & { MAAL_PROOF_TELEMETRY: string };
+		for (const path of ['/api/auth-slots/slot/authorize', '/api/auth/callback', '/', '/mcp']) {
+			const request = new Request(`https://staging.maal.test${path}`, {
+				headers: { cookie: 'unrelated=value; maal_proof_trace=native-target-123' }
+			});
+			const telemetry = stagingProofTelemetry(request, environment);
+			expect(telemetry?.label).toBe('native-target-123');
+			expect(telemetry?.evidence.d1Opened).toBe(false);
+			telemetry?.environment.DB.prepare('SELECT 1');
+			expect(telemetry?.evidence.d1Opened).toBe(true);
+			expect(
+				stagingProofTelemetry(request, { ...environment, MAAL_PROOF_TELEMETRY: undefined })
+			).toBeNull();
+		}
+		for (const cookie of ['', 'maal_proof_trace=bad/label', 'other_maal_proof_trace=valid']) {
+			expect(
+				stagingProofTelemetry(
+					new Request('https://staging.maal.test/api/auth/callback', { headers: { cookie } }),
+					environment
+				)
+			).toBeNull();
+		}
+	});
+
 	test('allowlists provider evidence and writes a new private file', async () => {
 		const auth = summarizeAuthEvidence({
 			result: 'passed',

@@ -6,7 +6,8 @@ import {
 	NATIVE_AUTH_SLOT_TARGETS,
 	createNativeEvidenceTemplate,
 	inspectSessionSetCookie,
-	validateNativeEvidence
+	validateNativeEvidence,
+	validateNativeMatrix
 } from './lib/auth-slot-proof-evidence.ts';
 
 const [command, ...args] = process.argv.slice(2);
@@ -46,13 +47,21 @@ async function init([target, output]) {
 	process.stdout.write(`Created private evidence template: ${output}\n`);
 }
 
-async function inspectCookie([slotId]) {
+async function inspectCookie([slotId, ...flags]) {
 	assert(
 		/^[a-f0-9]{32}$/.test(slotId ?? ''),
 		'inspect-cookie requires a 32-character auth-slot ID'
 	);
+	assert(
+		flags.length === 0 || (flags.length === 1 && flags[0] === '--identity'),
+		'inspect-cookie accepts only --identity after the slot ID'
+	);
 	const rawLine = await readStdin();
-	const evidence = inspectSessionSetCookie([{ name: 'set-cookie', value: rawLine.trim() }], slotId);
+	const evidence = inspectSessionSetCookie(
+		[{ name: 'set-cookie', value: rawLine.trim() }],
+		slotId,
+		flags.includes('--identity') ? 'identity' : 'session'
+	);
 	process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
 }
 
@@ -100,23 +109,15 @@ async function cleanupFixtures([input]) {
 
 async function validate(paths, requireMatrix) {
 	assert(paths.length > 0, 'validate requires at least one evidence path');
-	const targets = new Set();
-	for (const path of paths) {
-		const evidence = JSON.parse(await readFile(path, 'utf8'));
+	const files = await Promise.all(
+		paths.map(async (path) => JSON.parse(await readFile(path, 'utf8')))
+	);
+	if (requireMatrix) validateNativeMatrix(files);
+	for (const [index, evidence] of files.entries()) {
 		validateNativeEvidence(evidence);
-		targets.add(evidence.target);
-		process.stdout.write(`Validated ${evidence.target}: ${path}\n`);
+		process.stdout.write(`Validated ${evidence.target}: ${paths[index]}\n`);
 	}
-	if (requireMatrix) {
-		for (const target of NATIVE_AUTH_SLOT_TARGETS) {
-			assert(targets.has(target), `Native matrix is missing ${target}`);
-		}
-		assert(
-			targets.size === NATIVE_AUTH_SLOT_TARGETS.length,
-			'Native matrix has duplicate or unknown targets'
-		);
-		process.stdout.write('Validated the complete native auth-slot matrix.\n');
-	}
+	if (requireMatrix) process.stdout.write('Validated the complete native auth-slot matrix.\n');
 }
 
 async function readStdin() {
@@ -132,7 +133,7 @@ function usage() {
 		[
 			'Usage:',
 			'  pnpm proof:auth-slots:evidence init <native-target> <private-output.json>',
-			'  pnpm proof:auth-slots:evidence inspect-cookie <slot-id> < private-set-cookie.txt',
+			'  pnpm proof:auth-slots:evidence inspect-cookie <slot-id> [--identity] < private-set-cookie.txt',
 			'  pnpm proof:auth-slots:evidence fixtures-create <private-fixtures.json>',
 			'  pnpm proof:auth-slots:evidence fixtures-cleanup <private-fixtures.json>',
 			'  pnpm proof:auth-slots:evidence validate <evidence.json> [...]',
