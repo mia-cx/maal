@@ -294,7 +294,14 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		);
 		return changes
 			.map(({ aggregate }) => checkInFromSnapshot(aggregate))
-			.filter((row): row is MealCheckIn => row !== null);
+			.filter(
+				(row): row is MealCheckIn =>
+					row !== null &&
+					// Re-apply the filters: the check-in may have moved between the
+					// ID listing and this aggregate read.
+					(filter.mealId === undefined || row.mealId === filter.mealId) &&
+					(filter.reporterUserId === undefined || row.reporterUserId === filter.reporterUserId)
+			);
 	}
 
 	async writeMealCheckIn(input: {
