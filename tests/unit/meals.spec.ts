@@ -343,6 +343,7 @@ describe('indexed calendar ranges', () => {
 		subscription.unsubscribe();
 	});
 
+	// Seeds twelve years of history; this checks bounded reads, not a five-second budget.
 	test('keeps reads bounded with twelve years of meals and check-ins', async () => {
 		const database = await openDatabase();
 		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
@@ -424,7 +425,7 @@ describe('indexed calendar ranges', () => {
 		expect(checkInWhere).toHaveBeenCalledWith('mealId');
 		expect(mealFullScan).not.toHaveBeenCalled();
 		expect(checkInFullScan).not.toHaveBeenCalled();
-	});
+	}, 30_000);
 
 	test('returns an empty range without touching the check-in index', async () => {
 		const database = await openDatabase();
