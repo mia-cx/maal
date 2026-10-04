@@ -22,7 +22,12 @@
 	import { getBrowserDatabase } from '$lib/client/local/browser.js';
 	import { activeHouseholdKey } from '$lib/client/local/profiles.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
-	import { createRecipeAndPlanMeal, listRecipes } from '$lib/client/recipes/index.js';
+	import {
+		commitImportedCandidateAndPlanMeal,
+		createRecipeAndPlanMeal,
+		listRecipes
+	} from '$lib/client/recipes/index.js';
+	import { fetchRecipeUrlCandidate } from '$lib/client/recipes/url-import.js';
 	import ScheduleDashboard from '$lib/components/dashboard/schedule-dashboard.svelte';
 	import type {
 		HouseholdMember,
@@ -119,6 +124,22 @@
 			await commandContext(),
 			recipeMenuItemToEditorPatch(recipe),
 			{ date: date ?? null, sortOrder: null, plannedYield: view.defaultMealServings }
+		);
+		return mealAggregateToScheduleMeal(meal, undefined, view.householdTimeZone);
+	};
+
+	const importRecipeAndMeal = async (url: string, date?: string): Promise<Meal> => {
+		if (!database || !view) throw new Error('Local recipe storage is still opening.');
+		const candidate = await fetchRecipeUrlCandidate(database, url);
+		const { meal } = await commitImportedCandidateAndPlanMeal(
+			database,
+			await commandContext(),
+			candidate,
+			{
+				date: date ?? null,
+				sortOrder: null,
+				plannedYield: view.defaultMealServings
+			}
 		);
 		return mealAggregateToScheduleMeal(meal, undefined, view.householdTimeZone);
 	};
@@ -248,6 +269,7 @@
 				onmealdelete={removeMeal}
 				onmealcheckin={checkIn}
 				oncreaterecipe={createRecipeAndMeal}
+				onimporturl={importRecipeAndMeal}
 				onloadedrangechange={updateRenderedMealRange}
 				onuistatechange={saveUiState}
 			/>

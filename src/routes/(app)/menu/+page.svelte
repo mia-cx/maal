@@ -4,7 +4,6 @@
 	import { onMount } from 'svelte';
 
 	import {
-		commitImportedRecipeCandidate,
 		createRecipeFromEditor,
 		deleteRecipe,
 		listRecoverableRecipes,
@@ -15,6 +14,7 @@
 		type RecipeCommandContext
 	} from '$lib/client/recipes/index.js';
 	import { liveRecipeStatistics } from '$lib/client/recipes/statistics.js';
+	import { confirmUrlImport, fetchRecipeUrlCandidate } from '$lib/client/recipes/url-import.js';
 	import { getBrowserDatabase } from '$lib/client/local/browser.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import { DomainIdSchema } from '$lib/domain/contracts/primitives.js';
@@ -22,7 +22,7 @@
 	import { MyMenuDashboard, type RecipeMenuItem } from '$lib/components/menu/index.js';
 	import type { RecipeMenuStats } from '$lib/menu/recipe-defaults.js';
 	import {
-		mergeEditorIntoImportedCandidate,
+		importedCandidateToMenuItem,
 		recipeAggregateToMenuItem,
 		recipeMenuItemToEditorPatch
 	} from '$lib/menu/recipe-local-adapter.js';
@@ -61,11 +61,7 @@
 		if (!database) throw new Error('Local recipe storage is still opening.');
 		const context = await commandContext();
 		if (recipe.importedCandidate) {
-			await commitImportedRecipeCandidate(
-				database,
-				context,
-				mergeEditorIntoImportedCandidate(recipe.importedCandidate, recipe)
-			);
+			await confirmUrlImport(database, context, recipe.importedCandidate, recipe);
 			return;
 		}
 		const patch = recipeMenuItemToEditorPatch(recipe);
@@ -74,6 +70,12 @@
 			return;
 		}
 		await updateRecipeFromEditor(database, context, recipe.id, patch);
+	};
+
+	const importRecipeFromUrl = async (url: string): Promise<RecipeMenuItem> => {
+		if (!database) throw new Error('Local recipe storage is still opening.');
+		const candidate = await fetchRecipeUrlCandidate(database, url);
+		return importedCandidateToMenuItem(candidate, `draft-recipe-${crypto.randomUUID()}`);
 	};
 
 	const deleteLocalRecipe = async (recipe: RecipeMenuItem) => {
@@ -161,6 +163,7 @@
 	{recipes}
 	{archivedRecipes}
 	onsave={saveRecipe}
+	onimporturl={importRecipeFromUrl}
 	ondelete={deleteLocalRecipe}
 	onrestore={restoreLocalRecipe}
 	onpermanentdelete={permanentlyDeleteLocalRecipes}
