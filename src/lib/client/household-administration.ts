@@ -1,8 +1,9 @@
 import { Data, Schema } from 'effect';
-import { uuidv7 } from 'uuidv7';
 
 import {
+	HouseholdAdministrationErrorCodeSchema,
 	HouseholdAdministrationProjectionResponseSchema,
+	type HouseholdAdministrationErrorCode,
 	HouseholdInviteResponseSchema,
 	HouseholdMemberRemovalResponseSchema,
 	HouseholdMembershipResponseSchema,
@@ -22,7 +23,7 @@ import {
 import { requireCachedPermission } from '$lib/domain/household/permissions.js';
 import type { MaalDatabase } from '$lib/client/local/database.js';
 import { detachHouseholdSnapshot } from '$lib/client/local/households.js';
-import { LocalProfileMissing } from '$lib/client/local/profiles.js';
+import { LocalProfileMissing, markProfileReauthRequired } from '$lib/client/local/profiles.js';
 
 const LegacyHouseholdMembershipResponseSchema = Schema.Struct({
 	schemaVersion: Schema.Literal(1),
@@ -38,7 +39,13 @@ export class HouseholdAdministrationUnavailable extends Data.TaggedError(
 )<{
 	readonly operation: string;
 	readonly status: number | null;
+	/** The server's `HouseholdAdministrationError` code, when the response carried one. */
+	readonly code?: HouseholdAdministrationErrorCode;
 }> {}
+
+const ErrorResponseSchema = Schema.Struct({
+	error: Schema.Struct({ code: HouseholdAdministrationErrorCodeSchema })
+});
 
 export class HouseholdAdministrationDecodeError extends Data.TaggedError(
 	'HouseholdAdministrationDecodeError'
@@ -53,7 +60,8 @@ const requestJson = async <A>(
 	url: string,
 	operation: string,
 	init: RequestInit,
-	schema: Schema.Schema<A>
+	schema: Schema.Schema<A>,
+	session: { database: MaalDatabase; authSlotId: string }
 ): Promise<A> => {
 	let response: Response;
 	try {
@@ -62,7 +70,18 @@ const requestJson = async <A>(
 		throw new HouseholdAdministrationUnavailable({ operation, status: null });
 	}
 	if (!response.ok) {
-		throw new HouseholdAdministrationUnavailable({ operation, status: response.status });
+		// The server rejected this slot's session: surface the reauth affordance before the error.
+		if (response.status === 401) {
+			await markProfileReauthRequired(session.database, session.authSlotId);
+		}
+		const body = Schema.decodeUnknownOption(ErrorResponseSchema)(
+			await response.json().catch(() => null)
+		);
+		throw new HouseholdAdministrationUnavailable({
+			operation,
+			status: response.status,
+			...(body._tag === 'Some' ? { code: body.value.error.code } : {})
+		});
 	}
 	try {
 		return Schema.decodeUnknownSync(schema)(await response.json());
@@ -112,11 +131,22 @@ const slotHouseholdPath = (authSlotId: string, householdId: string, suffix: stri
 const slotHouseholdBasePath = (authSlotId: string, householdId: string): string =>
 	`/api/auth-slots/${encodeURIComponent(authSlotId)}/households/${encodeURIComponent(householdId)}`;
 
+const administrationState = (database: MaalDatabase, householdId: string): Promise<string> =>
+	database.transaction('r', database.memberships, database.householdInvites, async () =>
+		JSON.stringify(
+			await Promise.all([
+				database.memberships.where('householdId').equals(householdId).toArray(),
+				database.householdInvites.where('householdId').equals(householdId).toArray()
+			])
+		)
+	);
+
 const commitHouseholdProjection = async (
 	database: MaalDatabase,
 	profileId: string,
 	projection: HouseholdAdministrationProjection,
-	selectHousehold: boolean
+	selectHousehold: boolean,
+	expectedState?: string
 ): Promise<void> => {
 	const householdId = projection.household.householdId;
 	await database.transaction(
@@ -128,7 +158,10 @@ const commitHouseholdProjection = async (
 			database.userAttributions,
 			database.remoteProjectionMeta,
 			database.uiState,
-			database.outbox
+			database.outbox,
+			database.profiles,
+			database.authSlots,
+			database.syncScopes
 		],
 		async () => {
 			const [existingHousehold, existingMemberships, existingInvites, pendingHouseholdMutation] =
@@ -148,6 +181,12 @@ const commitHouseholdProjection = async (
 						)
 						.first()
 				]);
+			// A completed action wins over a refresh that started from an older projection.
+			if (
+				expectedState !== undefined &&
+				expectedState !== JSON.stringify([existingMemberships, existingInvites])
+			)
+				return;
 			const household =
 				existingHousehold && pendingHouseholdMutation
 					? {
@@ -164,21 +203,41 @@ const commitHouseholdProjection = async (
 						}
 					: projection.household;
 			await database.households.put(household);
-			await database.memberships.bulkPut(projection.members.map(({ membership }) => membership));
-			const projectedMembershipIds = new Set(
-				projection.members.map(({ membership }) => membership.membershipId)
+			const projectedByUser = new Map(
+				projection.members.map(({ membership }) => [membership.workosUserId, membership])
 			);
+			for (const existing of existingMemberships) {
+				const projected = projectedByUser.get(existing.workosUserId);
+				if (projected && projected.membershipId !== existing.membershipId) {
+					// Rejoining creates a new WorkOS ID for the same unique household/user pair.
+					await database.memberships.delete(existing.membershipId);
+				}
+			}
+			await database.memberships.bulkPut(projection.members.map(({ membership }) => membership));
 			for (const existing of existingMemberships) {
 				if (
 					existing.source === 'workos' &&
 					existing.status === 'active' &&
-					!projectedMembershipIds.has(existing.membershipId)
+					!projectedByUser.has(existing.workosUserId)
 				) {
-					await database.memberships.update(existing.membershipId, {
-						status: 'revoked',
-						updatedAt: projection.membership.lastVerifiedAt,
-						denialCode: 'workos_membership_missing'
-					});
+					const localProfile = await database.profiles
+						.where('workosUserId')
+						.equals(existing.workosUserId)
+						.first();
+					if (localProfile) {
+						await detachHouseholdSnapshot(database, {
+							profileId: localProfile.profileId,
+							householdId,
+							denialCode: 'workos_membership_missing',
+							detachedAt: projection.membership.lastVerifiedAt as `${string}Z`
+						});
+					} else {
+						await database.memberships.update(existing.membershipId, {
+							status: 'revoked',
+							updatedAt: projection.membership.lastVerifiedAt,
+							denialCode: 'workos_membership_missing'
+						});
+					}
 				}
 			}
 			await database.householdInvites.bulkPut([...projection.invites]);
@@ -246,10 +305,17 @@ export interface CreatedHouseholdInvite {
 	readonly invite: HouseholdInviteSummary;
 }
 
+/**
+ * Creates the WorkOS organization for a new household. `idempotencyKey` identifies one submit
+ * intent: reuse it when retrying the same request so a lost response cannot create a duplicate.
+ */
 export const createRemoteHousehold = async (
 	database: MaalDatabase,
 	profileId: string,
-	input: { name: string; locale: string; timezone: string | null },
+	{
+		idempotencyKey,
+		...input
+	}: { name: string; locale: string; timezone: string | null; idempotencyKey: string },
 	fetcher: Fetch = globalThis.fetch
 ): Promise<{ householdId: string }> => {
 	const slot = await profileSlot(database, profileId);
@@ -259,10 +325,11 @@ export const createRemoteHousehold = async (
 		'create household',
 		{
 			method: 'POST',
-			headers: { 'content-type': 'application/json', 'idempotency-key': uuidv7() },
+			headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
 			body: JSON.stringify(input)
 		},
-		CreateJoinResponseSchema
+		CreateJoinResponseSchema,
+		{ database, authSlotId: slot.authSlotId }
 	);
 	await commitCreateJoinProjection(database, profileId, response.payload, true);
 	return { householdId: response.payload.household.householdId };
@@ -284,12 +351,18 @@ export const joinRemoteHousehold = async (
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({ code })
 		},
-		CreateJoinResponseSchema
+		CreateJoinResponseSchema,
+		{ database, authSlotId: slot.authSlotId }
 	);
 	await commitCreateJoinProjection(database, profileId, response.payload, true);
 	return { householdId: response.payload.household.householdId };
 };
 
+/**
+ * Replaces the local member and invite projection with the server's verified one. When the server
+ * says the profile's membership is no longer active, the household becomes a detached snapshot
+ * before the error propagates.
+ */
 export const refreshRemoteHousehold = async (
 	database: MaalDatabase,
 	profileId: string,
@@ -297,14 +370,42 @@ export const refreshRemoteHousehold = async (
 	fetcher: Fetch = globalThis.fetch
 ): Promise<HouseholdAdministrationProjection> => {
 	const { authSlotId } = await profileSlot(database, profileId);
+	const expectedState = await administrationState(database, householdId);
 	const response = await requestJson(
 		fetcher,
 		slotHouseholdBasePath(authSlotId, householdId),
 		'refresh household',
 		{ method: 'GET' },
-		HouseholdAdministrationProjectionResponseSchema
-	);
-	await commitHouseholdProjection(database, profileId, response.payload, false);
+		HouseholdAdministrationProjectionResponseSchema,
+		{ database, authSlotId }
+	).catch(async (cause: unknown) => {
+		if (
+			cause instanceof HouseholdAdministrationUnavailable &&
+			cause.code === 'membership_inactive'
+		) {
+			await database.transaction(
+				'rw',
+				[
+					database.profiles,
+					database.authSlots,
+					database.memberships,
+					database.householdInvites,
+					database.outbox,
+					database.syncScopes
+				],
+				async () => {
+					if (expectedState !== (await administrationState(database, householdId))) return;
+					await detachHouseholdSnapshot(database, {
+						profileId,
+						householdId,
+						denialCode: 'membership_inactive'
+					});
+				}
+			);
+		}
+		throw cause;
+	});
+	await commitHouseholdProjection(database, profileId, response.payload, false, expectedState);
 	return response.payload;
 };
 
@@ -326,7 +427,8 @@ export const createHouseholdInvite = async (
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({ ...decoded, code })
 		},
-		HouseholdInviteResponseSchema
+		HouseholdInviteResponseSchema,
+		{ database, authSlotId }
 	);
 	await database.householdInvites.put(response.payload);
 	return { code, invite: response.payload };
@@ -345,7 +447,8 @@ export const revokeHouseholdInvite = async (
 		`${slotHouseholdPath(authSlotId, householdId, 'invites')}/${encodeURIComponent(inviteId)}`,
 		'revoke household invite',
 		{ method: 'DELETE' },
-		HouseholdInviteResponseSchema
+		HouseholdInviteResponseSchema,
+		{ database, authSlotId }
 	);
 	await database.householdInvites.put(response.payload);
 	return response.payload;
@@ -374,7 +477,8 @@ export const updateHouseholdMemberRole = async (
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({ roleSlug: decoded.roleSlug })
 		},
-		HouseholdMembershipResponseSchema
+		HouseholdMembershipResponseSchema,
+		{ database, authSlotId }
 	);
 	await database.memberships.put(response.payload);
 	return response.payload;
@@ -393,12 +497,37 @@ export const removeHouseholdMember = async (
 		`${slotHouseholdPath(authSlotId, householdId, 'members')}/${encodeURIComponent(membershipId)}`,
 		'remove household member',
 		{ method: 'DELETE' },
-		HouseholdMemberRemovalResponseSchema
+		HouseholdMemberRemovalResponseSchema,
+		{ database, authSlotId }
 	);
-	await database.memberships.update(membershipId, {
-		status: 'revoked',
-		updatedAt: new Date().toISOString() as `${string}Z`
-	});
+	await database.transaction(
+		'rw',
+		[
+			database.memberships,
+			database.profiles,
+			database.authSlots,
+			database.outbox,
+			database.syncScopes
+		],
+		async () => {
+			const removed = await database.memberships.get(membershipId);
+			const localProfile = removed
+				? await database.profiles.where('workosUserId').equals(removed.workosUserId).first()
+				: undefined;
+			if (localProfile) {
+				await detachHouseholdSnapshot(database, {
+					profileId: localProfile.profileId,
+					householdId,
+					denialCode: 'workos_membership_missing'
+				});
+			} else {
+				await database.memberships.update(membershipId, {
+					status: 'revoked',
+					updatedAt: new Date().toISOString() as `${string}Z`
+				});
+			}
+		}
+	);
 };
 
 export const leaveRemoteHousehold = async (
@@ -413,7 +542,8 @@ export const leaveRemoteHousehold = async (
 		`${slotHouseholdBasePath(authSlotId, householdId)}/membership`,
 		'leave household',
 		{ method: 'DELETE' },
-		HouseholdMemberRemovalResponseSchema
+		HouseholdMemberRemovalResponseSchema,
+		{ database, authSlotId }
 	);
 	await detachHouseholdSnapshot(database, {
 		profileId,

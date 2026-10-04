@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages.js';
 	import { untrack } from 'svelte';
+	import { uuidv7 } from 'uuidv7';
 
 	import {
 		createRemoteHousehold,
@@ -14,32 +15,51 @@
 	let {
 		database,
 		profileId,
-		defaultHouseholdName = ''
-	}: { database: MaalDatabase; profileId: string; defaultHouseholdName?: string } = $props();
+		defaultHouseholdName = '',
+		inviteCode: initialInviteCode = '',
+		oncomplete
+	}: {
+		database: MaalDatabase;
+		profileId: string;
+		defaultHouseholdName?: string;
+		/** Prefills the join field, e.g. from a shared `/invite/<code>` link. */
+		inviteCode?: string;
+		/** Runs after the new or joined household is committed to Dexie and selected. */
+		oncomplete?: (householdId: string) => void | Promise<void>;
+	} = $props();
 	let householdName = $state(untrack(() => defaultHouseholdName));
-	let inviteCode = $state('');
+	let inviteCode = $state(untrack(() => initialInviteCode));
 	let busy = $state(false);
 	let error = $state<string | null>(null);
+	// One idempotency key per submitted name, so retrying after a lost response reuses it.
+	let createIntent: { name: string; idempotencyKey: string } | null = null;
 
 	const createHousehold = async (event: SubmitEvent) => {
 		event.preventDefault();
 		const name = householdName.trim();
 		if (!name || busy) return;
+		if (createIntent?.name !== name) createIntent = { name, idempotencyKey: uuidv7() };
+		const { idempotencyKey } = createIntent;
 		busy = true;
 		error = null;
+		let householdId: string;
 		try {
 			const profile = await database.profiles.get(profileId);
 			if (!profile) throw new Error('profile missing');
-			await createRemoteHousehold(database, profileId, {
+			({ householdId } = await createRemoteHousehold(database, profileId, {
 				name,
 				locale: profile.locale,
-				timezone: profile.timezone
-			});
+				timezone: profile.timezone,
+				idempotencyKey
+			}));
 		} catch {
 			error = m.household_could_not_create_try_again();
+			return;
 		} finally {
 			busy = false;
 		}
+		createIntent = null;
+		await oncomplete?.(householdId);
 	};
 
 	const joinHousehold = async () => {
@@ -47,13 +67,16 @@
 		if (!code || busy) return;
 		busy = true;
 		error = null;
+		let householdId: string;
 		try {
-			await joinRemoteHousehold(database, profileId, code);
+			({ householdId } = await joinRemoteHousehold(database, profileId, code));
 		} catch {
 			error = m.household_could_not_open_invite();
+			return;
 		} finally {
 			busy = false;
 		}
+		await oncomplete?.(householdId);
 	};
 </script>
 

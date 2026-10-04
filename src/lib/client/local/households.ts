@@ -30,6 +30,10 @@ export class DetachedSnapshotRequired extends Data.TaggedError('DetachedSnapshot
 	readonly profileId: string;
 }> {}
 
+export class LocalOnlyHouseholdRequired extends Data.TaggedError('LocalOnlyHouseholdRequired')<{
+	readonly householdId: string;
+}> {}
+
 const nowUtc = (): `${string}Z` => new Date().toISOString() as `${string}Z`;
 
 const actorContext = async (
@@ -234,12 +238,14 @@ export const detachHouseholdSnapshot = async (
 	if (!membership) throw new LocalHouseholdMissing({ householdId: input.householdId });
 	const slot = await database.authSlots.where('profileId').equals(input.profileId).first();
 	const detachedAt = Schema.decodeUnknownSync(UtcInstantSchema)(input.detachedAt ?? nowUtc());
+	const ownSlotIds = new Set([slot?.authSlotId, `signed-out:${input.profileId}`]);
 
 	await database.transaction(
 		'rw',
 		database.memberships,
 		database.outbox,
 		database.syncScopes,
+		database.profiles,
 		async () => {
 			await database.memberships.update(membership.membershipId, {
 				status: 'detached',
@@ -252,10 +258,20 @@ export const detachHouseholdSnapshot = async (
 					(mutation) =>
 						mutation.scopeKind === 'household' &&
 						mutation.scopeId === input.householdId &&
-						(!slot || mutation.authSlotId === slot.authSlotId) &&
+						ownSlotIds.has(mutation.authSlotId) &&
 						mutation.status !== 'acknowledged'
 				)
 				.modify({ status: 'quarantined' });
+			const localUsers = new Set(
+				(await database.profiles.toArray()).map(({ workosUserId }) => workosUserId)
+			);
+			const remainingMember = await database.memberships
+				.where('householdId')
+				.equals(input.householdId)
+				.filter(({ status, workosUserId }) => status === 'active' && localUsers.has(workosUserId))
+				.first();
+			// The scope/lease is shared by local profiles; another active member can still sync it.
+			if (remainingMember) return;
 			await database.syncScopes
 				.filter((scope) => scope.scopeKind === 'household' && scope.scopeId === input.householdId)
 				.modify({
@@ -266,6 +282,56 @@ export const detachHouseholdSnapshot = async (
 				});
 		}
 	);
+};
+
+const householdScopedStores = [
+	'foodHouseholdAliases',
+	'foodHouseholdEntries',
+	'unitHouseholdAliases',
+	'unitHouseholdEntries',
+	'householdFoodDisplayPreferences',
+	'householdUnitDisplayPreferences'
+] as const;
+
+/**
+ * Deletes a local-only household (created by import or fork) and everything scoped to it from this
+ * device. Remote households go through billing-aware deletion instead and are refused here.
+ */
+export const deleteLocalHousehold = async (
+	database: MaalDatabase,
+	input: { profileId: string; householdId: string }
+): Promise<void> => {
+	const { householdId } = input;
+	const household = await database.households.get(householdId);
+	if (!household) throw new LocalHouseholdMissing({ householdId });
+	if (!household.localOnly) throw new LocalOnlyHouseholdRequired({ householdId });
+	await actorContext(database, input.profileId, householdId, 'households:write');
+
+	await database.transaction('rw', database.tables, async () => {
+		const mealIds = new Set(
+			(await database.meals.where('householdId').equals(householdId).primaryKeys()).map(String)
+		);
+		await database.mealCheckIns
+			.filter((checkIn) => typeof checkIn.mealId === 'string' && mealIds.has(checkIn.mealId))
+			.delete();
+		await database.meals.where('householdId').equals(householdId).delete();
+		await database.households.delete(householdId);
+		await database.memberships.where('householdId').equals(householdId).delete();
+		await database.householdInvites.where('householdId').equals(householdId).delete();
+		await database.householdAppliances.where('householdId').equals(householdId).delete();
+		for (const tableName of householdScopedStores) {
+			await database.table(tableName).where('householdId').equals(householdId).delete();
+		}
+		await database.billingCapabilities.delete(householdId);
+		await database.outbox.filter((mutation) => mutation.scopeId === householdId).delete();
+		await database.syncScopes.filter((scope) => scope.scopeId === householdId).delete();
+		await database.backfillCheckpoints
+			.filter((checkpoint) => checkpoint.scopeId === householdId)
+			.delete();
+		await database.uiState
+			.filter((entry) => entry.key.startsWith('activeHouseholdId:') && entry.value === householdId)
+			.delete();
+	});
 };
 
 const collectIds = (value: unknown, ids: Set<string>): void => {
@@ -328,16 +394,8 @@ export const forkDetachedHouseholdSnapshot = async (
 		.where('householdId')
 		.equals(input.householdId)
 		.toArray();
-	const householdStoreNames = [
-		'foodHouseholdAliases',
-		'foodHouseholdEntries',
-		'unitHouseholdAliases',
-		'unitHouseholdEntries',
-		'householdFoodDisplayPreferences',
-		'householdUnitDisplayPreferences'
-	] as const;
-	const scopedRows = new Map<(typeof householdStoreNames)[number], Record<string, unknown>[]>();
-	for (const tableName of householdStoreNames) {
+	const scopedRows = new Map<(typeof householdScopedStores)[number], Record<string, unknown>[]>();
+	for (const tableName of householdScopedStores) {
 		scopedRows.set(
 			tableName,
 			(await database
@@ -400,7 +458,7 @@ export const forkDetachedHouseholdSnapshot = async (
 		if (forkedMeals.length) await database.meals.bulkAdd(forkedMeals);
 		if (forkedCheckIns.length) await database.mealCheckIns.bulkAdd(forkedCheckIns);
 		if (forkedAppliances.length) await database.householdAppliances.bulkAdd(forkedAppliances);
-		for (const tableName of householdStoreNames) {
+		for (const tableName of householdScopedStores) {
 			const rows = (scopedRows.get(tableName) ?? []).map((row) => ({
 				...clone(row),
 				householdId: newHouseholdId

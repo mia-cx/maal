@@ -8,6 +8,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
 	addOrUpdateLocalProfile,
 	clearProfilePin,
+	deleteLocalHousehold,
 	detachHouseholdSnapshot,
 	forkDetachedHouseholdSnapshot,
 	listHouseholdsForProfile,
@@ -516,11 +517,12 @@ describe('offline households and cached authority', () => {
 			{ household: createdHousehold, membership: createdMembership },
 			{ household: joinedHousehold, membership: joinedMembership }
 		];
-		const requests: Array<{ url: string; body: unknown }> = [];
+		const requests: Array<{ url: string; body: unknown; idempotencyKey: string | null }> = [];
 		const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			requests.push({
 				url: String(input),
-				body: init?.body ? JSON.parse(String(init.body)) : null
+				body: init?.body ? JSON.parse(String(init.body)) : null,
+				idempotencyKey: new Headers(init?.headers).get('idempotency-key')
 			});
 			const payload = responses.shift();
 			if (!payload) throw new Error('Unexpected request');
@@ -531,7 +533,12 @@ describe('offline households and cached authority', () => {
 			createRemoteHousehold(
 				database,
 				alice.profileId,
-				{ name: 'Created home', locale: 'en-NL', timezone: 'Europe/Amsterdam' },
+				{
+					name: 'Created home',
+					locale: 'en-NL',
+					timezone: 'Europe/Amsterdam',
+					idempotencyKey: 'create-intent-1'
+				},
 				fetcher as typeof fetch
 			)
 		).resolves.toEqual({ householdId: createdHousehold.householdId });
@@ -542,7 +549,8 @@ describe('offline households and cached authority', () => {
 		expect(requests).toEqual([
 			expect.objectContaining({
 				url: `/api/auth-slots/${'a'.repeat(32)}/households`,
-				body: { name: 'Created home', locale: 'en-NL', timezone: 'Europe/Amsterdam' }
+				body: { name: 'Created home', locale: 'en-NL', timezone: 'Europe/Amsterdam' },
+				idempotencyKey: 'create-intent-1'
 			}),
 			expect.objectContaining({
 				url: `/api/auth-slots/${'a'.repeat(32)}/households/join`,
@@ -675,5 +683,73 @@ describe('offline households and cached authority', () => {
 			.filter((candidate) => candidate.mealId === copiedMeal?.id)
 			.first();
 		expect(copiedCheckIn?.id).not.toBe(checkInId);
+	});
+
+	test('deletes a local-only household and its content but refuses a remote household', async () => {
+		const database = await openDatabase();
+		const alice = profile({ workosUserId: 'user_alice' });
+		const remote = household();
+		const local = household({ householdId: uuidv7(), name: 'Imported kitchen', localOnly: true });
+		await database.profiles.add(alice);
+		await database.households.bulkAdd([remote, local]);
+		await database.memberships.bulkAdd([
+			membership({ workosUserId: alice.workosUserId }),
+			membership({
+				workosUserId: alice.workosUserId,
+				householdId: local.householdId,
+				source: 'localFork'
+			})
+		]);
+		const mealId = uuidv7();
+		await database.meals.add({
+			id: mealId,
+			householdId: local.householdId,
+			date: '2026-08-22',
+			status: 'planned',
+			sortOrder: 1000,
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+			deletedAt: null,
+			conflictClocks: {}
+		});
+		await database.mealCheckIns.add({
+			id: uuidv7(),
+			mealId,
+			reporterUserId: alice.workosUserId,
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: timestamp,
+			updatedAt: timestamp,
+			deletedAt: null,
+			conflictClocks: {}
+		});
+		await database.uiState.put({
+			key: `activeHouseholdId:${alice.profileId}`,
+			value: local.householdId
+		});
+
+		await deleteLocalHousehold(database, {
+			profileId: alice.profileId,
+			householdId: local.householdId
+		});
+
+		await expect(database.households.get(local.householdId)).resolves.toBeUndefined();
+		await expect(database.meals.count()).resolves.toBe(0);
+		await expect(database.mealCheckIns.count()).resolves.toBe(0);
+		await expect(
+			database.uiState.get(`activeHouseholdId:${alice.profileId}`)
+		).resolves.toBeUndefined();
+		await expect(listHouseholdsForProfile(database, alice.profileId)).resolves.toMatchObject([
+			{ household: { householdId: remote.householdId } }
+		]);
+		await expect(
+			deleteLocalHousehold(database, {
+				profileId: alice.profileId,
+				householdId: remote.householdId
+			})
+		).rejects.toMatchObject({ _tag: 'LocalOnlyHouseholdRequired' });
+		await expect(database.households.get(remote.householdId)).resolves.toEqual(remote);
 	});
 });

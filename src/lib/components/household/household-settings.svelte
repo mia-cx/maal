@@ -9,6 +9,7 @@
 	import {
 		createHouseholdInvite,
 		leaveRemoteHousehold,
+		refreshRemoteHousehold,
 		removeHouseholdMember,
 		revokeHouseholdInvite,
 		updateHouseholdMemberRole,
@@ -16,6 +17,7 @@
 	} from '$lib/client/household-administration.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import {
+		deleteLocalHousehold,
 		forkDetachedHouseholdSnapshot,
 		updateHouseholdAppliances,
 		updateHouseholdSettings
@@ -75,6 +77,7 @@
 	let originDeviceId = $state<string | null>(null);
 	let appliances = $state<ApplianceView[]>([]);
 	let loadedRevision = $state<string | null>(null);
+	let loadedAppliances: string | null = null;
 	let name = $state('');
 	let locale = $state('en-US');
 	let timezone = $state('');
@@ -137,6 +140,36 @@
 	] as const;
 	const roleLabel = (role: string): string =>
 		roleOptions.find((option) => option.value === role)?.label ?? role;
+	// Household administration is a permitted remote action for free users (spec §2), so this
+	// settings surface, and only this one, pulls the verified member and invite projection.
+	const canRefresh = $derived(
+		Boolean(
+			household &&
+			!household.localOnly &&
+			membership?.source === 'workos' &&
+			membership.status === 'active'
+		)
+	);
+	let refreshing = false;
+	let refreshedOnOpen = false;
+	const refreshFromServer = async () => {
+		if (refreshing || !canRefresh || !navigator.onLine) return;
+		refreshing = true;
+		try {
+			await refreshRemoteHousehold(database, profileId, householdId);
+		} catch {
+			// Opportunistic, like a sync pull: the last verified projection stays on screen, and an
+			// inactive membership has already been detached by refreshRemoteHousehold.
+		} finally {
+			refreshing = false;
+		}
+	};
+	$effect(() => {
+		if (!canRefresh || refreshedOnOpen) return;
+		refreshedOnOpen = true;
+		void refreshFromServer();
+	});
+
 	const inviteExpiryOptions = inviteExpiryDays.map((days) => ({
 		value: String(days) as '1' | '7' | '30',
 		label: m.household_invite_expiry_option({
@@ -183,17 +216,20 @@
 				authSlotId: nextAuthSlot?.authSlotId ?? null,
 				originDeviceId: typeof device?.value === 'string' ? device.value : null,
 				membership: nextMembership ?? null,
-				members: nextMembers.map((candidate) => {
-					const local = profilesByUser.get(candidate.workosUserId);
-					const attribution = attributionsByUser.get(candidate.workosUserId);
-					return {
-						...candidate,
-						name: local?.displayName ?? attribution?.displayName ?? candidate.workosUserId,
-						email: local?.email ?? attribution?.email ?? null,
-						localProfileId: local?.profileId ?? null
-					};
-				}),
+				members: nextMembers
+					.filter(({ status }) => status === 'active')
+					.map((candidate) => {
+						const local = profilesByUser.get(candidate.workosUserId);
+						const attribution = attributionsByUser.get(candidate.workosUserId);
+						return {
+							...candidate,
+							name: local?.displayName ?? attribution?.displayName ?? candidate.workosUserId,
+							email: local?.email ?? attribution?.email ?? null,
+							localProfileId: local?.profileId ?? null
+						};
+					}),
 				invites: nextInvites,
+				applianceRevision: JSON.stringify(nextAppliances),
 				appliances: applianceValues.map((appliance) => {
 					const stored = nextAppliances.find((candidate) => candidate.appliance === appliance);
 					return {
@@ -213,7 +249,10 @@
 			membership = value.membership;
 			members = value.members;
 			invites = value.invites;
-			appliances = value.appliances;
+			if (loadedAppliances !== value.applianceRevision) {
+				loadedAppliances = value.applianceRevision;
+				appliances = value.appliances;
+			}
 			if (
 				value.household &&
 				loadedRevision !== `${value.household.householdId}:${value.household.revision}`
@@ -297,7 +336,7 @@
 
 	const copyInvite = async () => {
 		if (!createdInvite) return;
-		await navigator.clipboard.writeText(createdInvite.code);
+		await navigator.clipboard.writeText(`${location.origin}/invite/${createdInvite.code}`);
 		message = m.household_invite_url_copied();
 	};
 
@@ -364,6 +403,19 @@
 		}
 	};
 
+	const deleteLocalCopy = async () => {
+		pending = true;
+		message = '';
+		try {
+			await deleteLocalHousehold(database, { profileId, householdId });
+			deleteHouseholdOpen = false;
+		} catch {
+			message = 'The household could not be deleted from this device.';
+		} finally {
+			pending = false;
+		}
+	};
+
 	const deleteHousehold = async () => {
 		pending = true;
 		message = '';
@@ -395,6 +447,8 @@
 		}
 	};
 </script>
+
+<svelte:window onfocus={() => void refreshFromServer()} ononline={() => void refreshFromServer()} />
 
 <Dialog.Root bind:open={inviteOpen}>
 	<Dialog.Content class="sm:max-w-md">
@@ -499,22 +553,36 @@
 		<Dialog.Header>
 			<Dialog.Title>{m.household_delete_household_2()}</Dialog.Title>
 			<Dialog.Description>
-				Maal will cancel the subscription, issue a prorated cash refund for unused paid time, and
-				keep the remote household recoverable for 30 days. Local data remains available.
+				{#if household?.localOnly}
+					Maal will delete this household and its meals and check-ins from this device. It has no
+					copy anywhere else.
+				{:else}
+					Maal will cancel the subscription, issue a prorated cash refund for unused paid time, and
+					keep the remote household recoverable for 30 days. Local data remains available.
+				{/if}
 			</Dialog.Description>
 		</Dialog.Header>
 		<Dialog.Footer>
 			<Button type="button" variant="outline" onclick={() => (deleteHouseholdOpen = false)}
 				>{m.settings_cancel()}</Button
 			>
-			<Button
-				type="button"
-				variant="destructive"
-				disabled={pending}
-				onclick={() => void deleteHousehold()}
-			>
-				{pending ? 'Cancelling and refunding…' : m.household_delete_household()}
-			</Button>
+			{#if household?.localOnly}
+				<Button
+					type="button"
+					variant="destructive"
+					disabled={pending}
+					onclick={() => void deleteLocalCopy()}>{m.household_delete_household()}</Button
+				>
+			{:else}
+				<Button
+					type="button"
+					variant="destructive"
+					disabled={pending}
+					onclick={() => void deleteHousehold()}
+				>
+					{pending ? 'Cancelling and refunding…' : m.household_delete_household()}
+				</Button>
+			{/if}
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
@@ -831,14 +899,23 @@
 		<section class="grid gap-3 border-t border-border pt-4">
 			<h2 class="text-sm font-medium">{m.household_danger_zone()}</h2>
 			<div class="flex flex-wrap gap-2">
-				<Button
-					type="button"
-					variant="outline"
-					disabled={!canLeave}
-					title={leaveDisabledReason ?? undefined}
-					onclick={() => (leaveHouseholdOpen = true)}>{m.household_leave_household()}</Button
-				>
-				{#if canManage && !household.localOnly}
+				{#if !household.localOnly}
+					<Button
+						type="button"
+						variant="outline"
+						disabled={!canLeave}
+						title={leaveDisabledReason ?? undefined}
+						onclick={() => (leaveHouseholdOpen = true)}>{m.household_leave_household()}</Button
+					>
+				{/if}
+				{#if canManage && household.localOnly}
+					<Button
+						type="button"
+						variant="destructive"
+						disabled={pending}
+						onclick={() => (deleteHouseholdOpen = true)}>{m.household_delete_household()}</Button
+					>
+				{:else if canManage}
 					{#if household.deletionState === 'recoverable'}
 						<Button
 							type="button"
@@ -859,9 +936,10 @@
 			{#if !canLeave && leaveDisabledReason}<p class="text-xs text-muted-foreground">
 					{leaveDisabledReason}
 				</p>{/if}
-			<p class="text-xs text-muted-foreground">
-				Household deletion is available after its Maal plan is cancelled and any refund is complete.
-			</p>
+			{#if !household.localOnly}<p class="text-xs text-muted-foreground">
+					Household deletion is available after its Maal plan is cancelled and any refund is
+					complete.
+				</p>{/if}
 		</section>
 	</div>
 {:else}
