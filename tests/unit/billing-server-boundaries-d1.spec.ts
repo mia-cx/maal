@@ -510,7 +510,7 @@ describe('Stripe grace projection', () => {
 				cancelAtPeriodEnd: false,
 				interruptionStartedAt: iso(t0),
 				graceUntil: iso(t0 + 30 * 86_400),
-				lastSuccessfulPaymentAt: null,
+				lastSuccessfulPaymentAt: iso(t0 - 100),
 				eventId: 'evt_stale',
 				eventCreatedAt: iso(staleEventAt)
 			},
