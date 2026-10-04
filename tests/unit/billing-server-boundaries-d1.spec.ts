@@ -345,6 +345,48 @@ describe('one live subscription per household', () => {
 			status: 'active'
 		});
 	});
+
+	test('a replacement lands when Stripe confirms the projected subscription ended', async () => {
+		const repository = new BillingRepository(database);
+		const { stripe, subscriptions } = fakeStripe();
+		const deliver = (event: Stripe.Event) =>
+			processStripeWebhook({ stripe, repository, event, receivedAt: iso(event.created) });
+
+		// D1 still shows sub_old active: its cancellation event has not arrived yet.
+		await insertSubscription({ status: 'active', currentPeriodEnd: iso(t0 + 2_592_000), subscriptionId: 'sub_old' });
+		subscriptions.set('sub_old', sub('sub_old', 'canceled'));
+		subscriptions.set('sub_new', sub('sub_new', 'active'));
+		await deliver(subscriptionEvent('evt_new', t0 + 10, 'sub_new'));
+		await deliver(invoicePaidEvent('evt_new_paid', t0 + 15, 'sub_new'));
+		expect(await billingRow()).toMatchObject({
+			stripe_subscription_id: 'sub_new',
+			status: 'active',
+			last_successful_payment_at: iso(t0 + 15)
+		});
+
+		// The late cancellation for the replaced subscription must not overwrite it.
+		await deliver(subscriptionEvent('evt_old_cancelled', t0 + 20, 'sub_old'));
+		expect(await billingRow()).toMatchObject({
+			stripe_subscription_id: 'sub_new',
+			status: 'active'
+		});
+	});
+
+	test('a replacement is ignored while the projected subscription is still open in Stripe', async () => {
+		const repository = new BillingRepository(database);
+		const { stripe, subscriptions } = fakeStripe();
+		const deliver = (event: Stripe.Event) =>
+			processStripeWebhook({ stripe, repository, event, receivedAt: iso(event.created) });
+
+		await insertSubscription({ status: 'active', currentPeriodEnd: iso(t0 + 2_592_000), subscriptionId: 'sub_old' });
+		subscriptions.set('sub_old', sub('sub_old', 'active'));
+		subscriptions.set('sub_new', sub('sub_new', 'active'));
+		expect(await deliver(subscriptionEvent('evt_new', t0 + 10, 'sub_new'))).toBe('processed');
+		expect(await billingRow()).toMatchObject({
+			stripe_subscription_id: 'sub_old',
+			status: 'active'
+		});
+	});
 });
 
 describe('household deletion and billing', () => {

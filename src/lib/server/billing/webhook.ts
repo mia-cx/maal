@@ -2,7 +2,11 @@ import Stripe from 'stripe';
 
 import { reconcileHouseholdDeletionRefund } from './deletion.js';
 import type { BillingRepository } from './repository.js';
-import { projectionFromStripeSubscription } from './subscriptions.js';
+import {
+	effectiveStripeStatus,
+	projectionFromStripeSubscription,
+	subscriptionIsOpen
+} from './subscriptions.js';
 
 const utcFromSeconds = (seconds: number): `${string}Z` =>
 	new Date(seconds * 1_000).toISOString() as `${string}Z`;
@@ -88,6 +92,27 @@ export const processStripeWebhook = async (input: {
 			await input.repository.finishStripeEventWithoutProjection(input.event.id, input.receivedAt);
 			return 'ignored';
 		}
+		// An event for a different subscription than the projected row is normally a superseded
+		// duplicate, but a replacement subscription can legitimately arrive before the old one's
+		// cancellation event. When the row's subscription is still open in D1, ask Stripe whether
+		// it actually ended; only then may this event replace it.
+		const row = await input.repository.subscription(householdId);
+		let replacesEndedSubscriptionId: string | undefined;
+		if (
+			row !== null &&
+			row.stripeSubscriptionId !== subscription.id &&
+			subscriptionIsOpen(row.status)
+		) {
+			const displaced = await input.stripe.subscriptions.retrieve(row.stripeSubscriptionId);
+			if (displaced && subscriptionIsOpen(effectiveStripeStatus(displaced))) {
+				await input.repository.finishStripeEventWithoutProjection(
+					input.event.id,
+					input.receivedAt
+				);
+				return 'processed';
+			}
+			replacesEndedSubscriptionId = row.stripeSubscriptionId;
+		}
 		const eventCreatedAt = utcFromSeconds(input.event.created);
 		const paidPeriodSucceeded =
 			input.event.type === 'invoice.paid' || input.event.type === 'invoice.payment_succeeded';
@@ -103,7 +128,8 @@ export const processStripeWebhook = async (input: {
 				paidPeriodSucceeded
 			}),
 			input.receivedAt,
-			paidPeriodSucceeded ? eventCreatedAt : null
+			paidPeriodSucceeded ? eventCreatedAt : null,
+			replacesEndedSubscriptionId
 		);
 		return 'processed';
 	} catch (cause) {

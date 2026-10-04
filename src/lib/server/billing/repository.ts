@@ -347,10 +347,15 @@ export class BillingRepository {
 		eventId: string,
 		projection: SubscriptionProjectionWrite,
 		processedAt: string,
-		paidAt: string | null = null
+		paidAt: string | null = null,
+		replacesEndedSubscriptionId?: string
 	): Promise<void> {
 		await this.database.batch([
-			this.subscriptionUpsertStatement(projection, processedAt),
+			this.subscriptionUpsertStatement(
+				projection,
+				processedAt,
+				replacesEndedSubscriptionId ?? projection.stripeSubscriptionId
+			),
 			...(paidAt ? [this.paymentResetStatement(projection, paidAt)] : []),
 			this.database
 				.prepare(
@@ -588,7 +593,8 @@ export class BillingRepository {
 
 	private subscriptionUpsertStatement(
 		projection: SubscriptionProjectionWrite,
-		updatedAt: string
+		updatedAt: string,
+		replacedSubscriptionId: string
 	): D1PreparedStatement {
 		return this.database
 			.prepare(
@@ -613,9 +619,11 @@ export class BillingRepository {
 					last_stripe_event_id = excluded.last_stripe_event_id,
 					updated_at = excluded.updated_at
 				-- One subscription per household: a superseded one never overwrites the current row
-				-- unless the current subscription has ended.
+				-- unless the current subscription has ended, or Stripe confirmed it ended and the
+				-- webhook caller marked this projection as its replacement.
 				WHERE (billing_subscriptions.stripe_subscription_id = excluded.stripe_subscription_id
-					OR billing_subscriptions.status IN ('canceled', 'incomplete_expired'))
+					OR billing_subscriptions.status IN ('canceled', 'incomplete_expired')
+					OR billing_subscriptions.stripe_subscription_id = ?)
 				AND (billing_subscriptions.last_stripe_event_created_at IS NULL
 					OR excluded.last_stripe_event_created_at > billing_subscriptions.last_stripe_event_created_at
 					OR (excluded.last_stripe_event_created_at = billing_subscriptions.last_stripe_event_created_at
@@ -656,7 +664,8 @@ export class BillingRepository {
 				projection.lastSuccessfulPaymentAt,
 				projection.eventCreatedAt,
 				projection.eventId,
-				updatedAt
+				updatedAt,
+				replacedSubscriptionId
 			);
 	}
 
