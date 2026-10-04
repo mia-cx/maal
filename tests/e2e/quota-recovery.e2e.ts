@@ -1,6 +1,9 @@
 import { readFile } from 'node:fs/promises';
 
 import { expect, test, type Page } from '@playwright/test';
+import { BlobReader, TextWriter, ZipReader, configure } from '@zip.js/zip.js';
+
+configure({ useWebWorkers: false });
 
 const databaseName = 'maal-v1:production';
 
@@ -142,11 +145,17 @@ test('quota aborts a command atomically and leaves recovery export usable', asyn
 		page.getByText('Your local data is ready for a read-only recovery export.')
 	).toBeVisible();
 	const downloadPromise = page.waitForEvent('download');
-	await page.getByRole('button', { name: 'Download recovery JSON' }).click();
+	await page.getByRole('button', { name: 'Download recovery archive' }).click();
 	const download = await downloadPromise;
 	const path = await download.path();
 	if (!path) throw new TypeError('The recovery download did not produce an artifact.');
-	const artifact = await readFile(path, 'utf8');
-	expect(artifact).toContain('Saved before quota');
-	expect(artifact).not.toContain('Must not partially save');
+	const reader = new ZipReader(new BlobReader(new Blob([await readFile(path)])));
+	const recipesEntry = (await reader.getEntries()).find(
+		({ filename }) => filename === 'recipes.json'
+	);
+	const recipes =
+		recipesEntry && !recipesEntry.directory ? await recipesEntry.getData(new TextWriter()) : '';
+	await reader.close();
+	expect(recipes).toContain('Saved before quota');
+	expect(recipes).not.toContain('Must not partially save');
 });
