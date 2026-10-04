@@ -138,6 +138,69 @@ describe('shared remote D1 domain port', () => {
 		});
 	});
 
+	test('returns the committed aggregate when the write batch throws after committing', async () => {
+		const port = new D1RemoteDomainPort(database);
+		const meal = await port.writeHouseholdMeal({
+			actorUserId: MCP_TEST_USER,
+			householdId: MCP_TEST_HOUSEHOLD,
+			aggregate: cloneRecipeAsMeal({
+				recipe: await port.writeUserRecipe({
+					actorUserId: MCP_TEST_USER,
+					aggregate: createRecipeAggregate({
+						ownerUserId: MCP_TEST_USER,
+						candidate: candidateFromToolRecipe({
+							title: 'Race soup',
+							ingredients: ['1 onion'],
+							instructions: ['Simmer.']
+						})
+					}),
+					conflictGroups: allRecipeConflictGroups,
+					operation: 'upsert'
+				}),
+				householdId: MCP_TEST_HOUSEHOLD,
+				date: '2026-08-24'
+			}),
+			conflictGroups: allMealConflictGroups,
+			operation: 'upsert'
+		});
+		const checkIn = makeCheckIn({
+			existing: null,
+			mealId: meal.id,
+			reporterUserId: MCP_TEST_USER,
+			verdict: 'repeat',
+			cookTimeMinutes: 20,
+			reason: 'Committed, then the connection dropped'
+		});
+		let failed = false;
+		const flaky: D1Database = new Proxy(database, {
+			get(target, property) {
+				if (property !== 'batch') {
+					const value = Reflect.get(target, property);
+					return typeof value === 'function' ? value.bind(target) : value;
+				}
+				return async (statements: D1PreparedStatement[]) => {
+					const result = await target.batch(statements);
+					if (!failed) {
+						failed = true;
+						throw new Error('batch committed, then the response was lost');
+					}
+					return result;
+				};
+			}
+		});
+		const flakyPort = new D1RemoteDomainPort(flaky);
+		await expect(
+			flakyPort.writeMealCheckIn({
+				actorUserId: MCP_TEST_USER,
+				householdId: MCP_TEST_HOUSEHOLD,
+				aggregate: checkIn
+			})
+		).resolves.toMatchObject({ id: checkIn.id, mealId: meal.id, verdict: 'repeat' });
+		await expect(port.listMealCheckIns(MCP_TEST_HOUSEHOLD, meal.id)).resolves.toEqual([
+			expect.objectContaining({ id: checkIn.id })
+		]);
+	});
+
 	test('reads only active normalized households', async () => {
 		const port = new D1RemoteDomainPort(database);
 		await expect(port.listHouseholds([MCP_TEST_HOUSEHOLD])).resolves.toEqual([

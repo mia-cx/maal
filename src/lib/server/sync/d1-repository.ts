@@ -852,7 +852,27 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			.bind(input.mutation.mutationId)
 			.first<ReceiptRow>();
 		if (existingReceipt) {
-			return { receipt: receiptFromRow(existingReceipt, true), aggregate: null };
+			const receipt = receiptFromRow(existingReceipt, true);
+			// A batch that committed but threw retries here; the write did land, so
+			// return the stored aggregate instead of null.
+			const aggregate =
+				receipt.status === 'accepted' || receipt.status === 'duplicate'
+					? ((await readLatestChangedAggregate(
+							this.database,
+							input.actorUserId,
+							input.mutation.entityKind,
+							input.mutation.entityId
+						)) ??
+						(
+							await readSnapshotChanges(this.database, input.actorUserId, [
+								{
+									entityKind: input.mutation.entityKind,
+									entityId: input.mutation.entityId
+								}
+							])
+						)[0]?.aggregate)
+					: null;
+			return { receipt, aggregate: aggregate ?? null };
 		}
 		const rejected = async (code: string) => ({
 			receipt: await rejectMutation(

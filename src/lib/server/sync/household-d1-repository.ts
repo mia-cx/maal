@@ -893,7 +893,21 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 			.bind(input.mutation.mutationId)
 			.first<ReceiptRow>();
 		if (existingReceipt) {
-			return { receipt: receiptFromRow(existingReceipt, true), aggregate: null };
+			const receipt = receiptFromRow(existingReceipt, true);
+			// A batch that committed but threw retries here; the write did land, so
+			// return the stored aggregate instead of null.
+			const aggregate =
+				receipt.status === 'accepted' || receipt.status === 'duplicate'
+					? ((
+							await readSnapshotChanges(this.database, input.householdId, [
+								{
+									entityKind: input.mutation.entityKind,
+									entityId: input.mutation.entityId
+								}
+							])
+						)[0]?.aggregate ?? null)
+					: null;
+			return { receipt, aggregate };
 		}
 		const rejected = async (code: string) => ({
 			receipt: await this.reject({ ...input, code }),
