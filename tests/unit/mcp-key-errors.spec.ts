@@ -9,6 +9,8 @@ beforeAll(() => overwriteGetLocale(() => 'en'));
 
 describe('MCP key error messages', () => {
 	test.each([
+		['auth_slot_missing', 'Sign in to this profile again to manage MCP keys.'],
+		['auth_slot_expired', 'Sign in to this profile again to manage MCP keys.'],
 		['household_forbidden', 'You can only scope MCP keys to your households.'],
 		['household_required', 'Choose at least one household.'],
 		['not_found', 'MCP key not found.'],

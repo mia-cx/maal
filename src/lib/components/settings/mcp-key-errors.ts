@@ -3,6 +3,8 @@ import * as m from '$lib/paraglide/messages';
 
 /** Translated messages for the error codes the MCP key routes return. */
 const MESSAGE_BY_CODE: Readonly<Record<string, () => string>> = {
+	auth_slot_missing: m.settings_mcp_keys_sign_in_again,
+	auth_slot_expired: m.settings_mcp_keys_sign_in_again,
 	household_forbidden: m.settings_you_can_only_scope_mcp_keys_to_your_househol,
 	household_required: m.settings_choose_at_least_one_household,
 	not_found: m.settings_mcp_key_not_found,
