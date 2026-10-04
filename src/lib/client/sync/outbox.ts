@@ -83,17 +83,26 @@ const ownedGroups = (row: OutboxRecord, aggregate: Record<string, unknown>): str
  * may say `delete`: an earlier edit of a since-trashed record goes up as the edit it was, ahead of
  * the deletion, so the server's operation/`deletedAt` check passes and no edit is lost on restore.
  *
- * `load` receives each aggregate's newest row. The result keeps the scope's occurrence order.
+ * `load` receives each aggregate's newest row. Stop hydrating once later groups cannot enter the
+ * outgoing batch; earlier folded candidates must still be inspected to preserve occurrence order.
+ * Keep the cache for one drain so unsent candidates are not rehydrated in every batch. A newer local
+ * mutation changes the cache key and reloads the aggregate.
  */
 export const coalesceOutbox = async (
 	rows: readonly OutboxRecord[],
-	load: (newest: OutboxRecord) => Promise<OutboxAggregate>
+	load: (newest: OutboxRecord) => Promise<OutboxAggregate>,
+	aggregates: Map<string, OutboxAggregate>,
+	limit = PUSH_BATCH_SIZE
 ): Promise<CoalescedMutation[]> => {
 	const ordered = rows.toSorted(byOccurrence);
 	const byAggregate = Map.groupBy(ordered, (row) => `${row.entityKind}\u0000${row.aggregateId}`);
-	const planned: CoalescedMutation[] = [];
+	let planned: CoalescedMutation[] = [];
 	for (const group of byAggregate.values()) {
-		const { aggregate, deletionGroup } = await load(group.at(-1)!);
+		if (planned.length >= limit && byOccurrence(group[0]!, planned.at(-1)!.host) > 0) break;
+		const newest = group.at(-1)!;
+		const loaded = aggregates.get(newest.mutationId) ?? (await load(newest));
+		aggregates.set(newest.mutationId, loaded);
+		const { aggregate, deletionGroup } = loaded;
 		const purged = 'purgedAt' in aggregate;
 		let folded: OutboxRecord[] = [];
 		for (const [index, row] of group.entries()) {
@@ -119,8 +128,11 @@ export const coalesceOutbox = async (
 			});
 			folded = [];
 		}
+		planned = planned
+			.toSorted((left, right) => byOccurrence(left.host, right.host))
+			.slice(0, limit);
 	}
-	return planned.toSorted((left, right) => byOccurrence(left.host, right.host));
+	return planned;
 };
 
 /** Every row a coalesced mutation answers for. */

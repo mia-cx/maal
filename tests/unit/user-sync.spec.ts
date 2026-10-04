@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.js';
 import { acquireSyncLease, renewSyncLease } from '$lib/client/local/leases.js';
+import type { OutboxRecord } from '$lib/client/local/records.js';
+import { coalesceOutbox, coveredRows, type OutboxAggregate } from '$lib/client/sync/outbox.js';
 import {
 	BACKFILL_SINGLE_RECORD_MAX_BYTES,
 	FOREGROUND_PULL_INTERVAL_MS,
@@ -1129,6 +1131,77 @@ const outboxRowFor = async (database: MaalDatabase, aggregateId: string) =>
 	(await database.outbox.where('aggregateId').equals(aggregateId).toArray())[0]!;
 
 describe('user outbox recovery', () => {
+	test('bounds hydration without splitting folded intent or changing occurrence order', async () => {
+		const originDeviceId = uuidv7();
+		const rows: OutboxRecord[] = Array.from({ length: 104 }, (_, index) => ({
+			mutationId: uuidv7(),
+			authSlotId,
+			scopeKind: 'user',
+			scopeId: userId,
+			status: 'pending',
+			occurredAt: new Date(Date.parse(timestamp) + index * 1000).toISOString() as `${string}Z`,
+			aggregateId: index >= 1 && index <= 3 ? `other-${index}` : 'folded',
+			entityKind: 'unitUserEntry',
+			conflictGroup: 'row',
+			operation: 'upsert',
+			originDeviceId,
+			payload: null,
+			nextAttemptAt: timestamp,
+			attempts: 0
+		}));
+		const load = vi.fn(async (row: OutboxRecord) => ({
+			aggregate: {
+				deletedAt: null,
+				conflictClocks: {
+					row: { mutationId: row.mutationId, originDeviceId, occurredAt: row.occurredAt }
+				}
+			},
+			deletionGroup: 'row'
+		}));
+		const cache = new Map<string, OutboxAggregate>();
+		const batch = await coalesceOutbox(rows, load, cache, 2);
+		expect(batch.map(({ host }) => host)).toEqual([rows[1], rows[2]]);
+		expect(load.mock.calls.map(([row]) => row.aggregateId)).toEqual([
+			'folded',
+			'other-1',
+			'other-2'
+		]);
+		const folded = rows.filter(({ aggregateId }) => aggregateId === 'folded');
+		const [planned] = await coalesceOutbox(folded, load, cache, 1);
+		expect(planned?.host).toEqual(folded.at(-1));
+		expect(planned?.folded).toEqual(folded.slice(0, -1));
+		expect(load).toHaveBeenCalledTimes(3);
+
+		// Interleaved superseded rows need a lookahead, but the next batch must reuse those reads.
+		const initial = Array.from({ length: 120 }, (_, index) => ({
+			...rows[0]!,
+			mutationId: uuidv7(),
+			aggregateId: `aggregate-${index}`,
+			occurredAt: new Date(Date.parse(timestamp) + index * 1000).toISOString() as `${string}Z`
+		}));
+		const latest = initial.map((row, index) => ({
+			...row,
+			mutationId: uuidv7(),
+			occurredAt: new Date(
+				Date.parse(timestamp) + (120 + index) * 1000
+			).toISOString() as `${string}Z`
+		}));
+		let remaining = [...initial, ...latest];
+		load.mockClear();
+		const sent: OutboxRecord[] = [];
+		while (remaining.length > 0) {
+			const planned = await coalesceOutbox(remaining, load, cache);
+			sent.push(...planned.map(({ host }) => host));
+			const covered = new Set(coveredRows(planned).map(({ mutationId }) => mutationId));
+			remaining = remaining.filter(({ mutationId }) => !covered.has(mutationId));
+		}
+		expect(sent).toEqual(latest);
+		expect(load).toHaveBeenCalledTimes(120);
+		const newer = { ...latest[0]!, mutationId: uuidv7() };
+		expect((await coalesceOutbox([newer], load, cache))[0]?.host).toEqual(newer);
+		expect(load).toHaveBeenCalledTimes(121);
+	});
+
 	test('keeps a pending local hard delete when a pull brings the record back', async () => {
 		const database = await openDatabase();
 		const originDeviceId = await deviceIdOf(database);
@@ -1301,7 +1374,7 @@ describe('user outbox recovery', () => {
 	test('drains a backlog larger than one push batch in a single run', async () => {
 		const database = await openDatabase();
 		const context = { database, authSlotId, originDeviceId: await deviceIdOf(database) };
-		for (let index = 0; index < 60; index += 1) {
+		for (let index = 0; index < 120; index += 1) {
 			await upsertTaxonomyRecord(
 				{ ...context, occurredAt: timestamp },
 				'unitUserEntry',
@@ -1310,6 +1383,7 @@ describe('user outbox recovery', () => {
 		}
 		await seedPaidProfile(database);
 		const pushes: PushRequest[] = [];
+		const table = vi.spyOn(database, 'table');
 		const coordinator = createUserSyncCoordinator({
 			database,
 			authSlotId,
@@ -1320,7 +1394,8 @@ describe('user outbox recovery', () => {
 
 		await expect(coordinator.syncNow()).resolves.toBe('complete');
 
-		expect(pushes.map(({ mutations }) => mutations.length)).toEqual([50, 10]);
+		expect(pushes.map(({ mutations }) => mutations.length)).toEqual([50, 50, 20]);
+		expect(table.mock.calls.filter(([store]) => store === 'unitUserEntries')).toHaveLength(120);
 		expect(
 			await database.outbox
 				.where('[scopeKind+scopeId+status]')
@@ -1354,6 +1429,50 @@ describe('user outbox recovery', () => {
 });
 
 describe('user sync scheduling', () => {
+	test.each(['mutation', 'capability', 'online', 'visible'] as const)(
+		'lets a %s notification preempt the foreground poll',
+		async (trigger) => {
+			vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+			const database = await openDatabase();
+			await seedPaidProfile(database);
+			const transport = noOpTransport();
+			const pull = vi.spyOn(transport, 'pull');
+			const listeners = new Map<string, () => void>();
+			const coordinator = createUserSyncCoordinator({
+				database,
+				authSlotId,
+				workosUserId: userId,
+				transport,
+				environment: {
+					...environment(),
+					on: (event, listener) => {
+						listeners.set(event, listener);
+						return () => listeners.delete(event);
+					}
+				}
+			});
+			coordinator.start();
+			try {
+				const waitForPulls = (count: number) =>
+					vi.waitFor(async () => {
+						expect(pull).toHaveBeenCalledTimes(count);
+						expect((await database.syncScopes.get(['user', userId]))?.leaseOwner).toBeNull();
+					});
+				await vi.advanceTimersByTimeAsync(0);
+				await waitForPulls(1);
+				if (trigger === 'mutation') coordinator.notifyLocalMutation();
+				else if (trigger === 'capability') coordinator.resumeAfterCapabilityRefresh();
+				else listeners.get(trigger)!();
+				await vi.advanceTimersByTimeAsync(trigger === 'mutation' ? 250 : 0);
+				await waitForPulls(2);
+				await vi.advanceTimersByTimeAsync(FOREGROUND_PULL_INTERVAL_MS);
+				await waitForPulls(3);
+			} finally {
+				coordinator.stop();
+			}
+		}
+	);
+
 	test('pulls again while paid and foregrounded, but a free profile never polls', async () => {
 		vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
 		vi.setSystemTime(new Date(timestamp));

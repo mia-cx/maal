@@ -1,6 +1,7 @@
 import { Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
 
+import { byOccurrence } from '$lib/client/sync/outbox.js';
 import {
 	LocalDecodeError,
 	LocalPersistenceError,
@@ -164,7 +165,36 @@ const commitPreparedCommand = async (
 	for (const write of command.writes) {
 		const clock = clockFor(write.mutationId ?? mutationId);
 		const table = database.table(write.store);
-		const stored = await table.get(write.aggregateId);
+		// A deferred household edit may no longer be the shared record after another profile's pull.
+		// Continue this slot's newest intent, not an older snapshot or the pulled replacement.
+		const pending =
+			command.scopeKind === 'household'
+				? await database.outbox
+						.where('aggregateId')
+						.equals(write.aggregateId)
+						.filter(
+							(row) =>
+								row.scopeKind === command.scopeKind &&
+								row.scopeId === command.scopeId &&
+								(row.status === 'pending' ||
+									row.status === 'sending' ||
+									row.status === 'quarantined') &&
+								row.backfill !== true
+						)
+						.toArray()
+				: [];
+		const deferred = pending
+			.filter((row) => row.authSlotId === command.authSlotId)
+			.toSorted(byOccurrence)
+			.at(-1);
+		const shared = await table.get(write.aggregateId);
+		// A shared write must not erase another slot's unsent edits, including restored intent.
+		for (const row of pending) {
+			if (row.authSlotId !== command.authSlotId && row.snapshot === undefined) {
+				await database.outbox.update(row.mutationId, { snapshot: shared });
+			}
+		}
+		const stored = deferred?.snapshot ?? shared;
 		const current = stored
 			? decode(write.schema, stored, `decode ${write.store} aggregate`)
 			: undefined;

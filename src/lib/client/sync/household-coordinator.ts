@@ -55,7 +55,6 @@ import {
 	expandReceipts,
 	firstRejectionCode,
 	markSending,
-	PUSH_BATCH_SIZE,
 	pushIsolatingRejections,
 	requeue,
 	requeueUnanswered,
@@ -521,6 +520,7 @@ export const createHouseholdSyncCoordinator = (
 	let terminalBlocked = false;
 	let retryAttempt = 0;
 	let timer: ReturnType<typeof setTimeout> | null = null;
+	let timerDueAt = 0;
 	let unsubscribe: (() => void)[] = [];
 
 	const deviceId = async (): Promise<string> => {
@@ -579,7 +579,10 @@ export const createHouseholdSyncCoordinator = (
 	};
 
 	/** Sends one batch of coalesced rows. Null means nothing was due. */
-	const pushInteractive = async (id: string): Promise<PushOutcome | null> => {
+	const pushInteractive = async (
+		id: string,
+		aggregates: Map<string, OutboxAggregate>
+	): Promise<PushOutcome | null> => {
 		const rows = await selectInteractiveOutbox(
 			options.database,
 			options.authSlotId,
@@ -587,11 +590,11 @@ export const createHouseholdSyncCoordinator = (
 			now()
 		);
 		if (rows.length === 0) return null;
-		const planned = (
-			await coalesceOutbox(rows, (row) =>
-				loadAggregate(options.database, options.householdId, options.workosUserId, row)
-			)
-		).slice(0, PUSH_BATCH_SIZE);
+		const planned = await coalesceOutbox(
+			rows,
+			(row) => loadAggregate(options.database, options.householdId, options.workosUserId, row),
+			aggregates
+		);
 		const sent = coveredRows(planned);
 		await markSending(options.database, sent);
 		try {
@@ -757,12 +760,13 @@ export const createHouseholdSyncCoordinator = (
 			// Drain: every batch moves its rows out of the due set, so this ends.
 			let pushed = false;
 			let rejectionCode: string | null = null;
-			let outcome = await pushInteractive(id);
+			const aggregates = new Map<string, OutboxAggregate>();
+			let outcome = await pushInteractive(id, aggregates);
 			while (outcome !== null) {
 				pushed ||= outcome.committedThrough !== null;
 				rejectionCode ??= outcome.rejectionCode;
 				await renewCurrentLease();
-				outcome = await pushInteractive(id);
+				outcome = await pushInteractive(id, aggregates);
 			}
 			await renewCurrentLease();
 			if (pushed) await pullAll(id, renewCurrentLease);
@@ -808,7 +812,13 @@ export const createHouseholdSyncCoordinator = (
 	};
 
 	const schedule = (delay = 0): void => {
-		if (!started || terminalBlocked || timer !== null) return;
+		if (!started || terminalBlocked) return;
+		const dueAt = Date.now() + delay;
+		if (timer !== null) {
+			if (dueAt >= timerDueAt) return;
+			clearTimeout(timer);
+		}
+		timerDueAt = dueAt;
 		timer = setTimeout(() => {
 			timer = null;
 			void run().catch((error: unknown) => {
