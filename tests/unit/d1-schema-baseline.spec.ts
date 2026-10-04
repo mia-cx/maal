@@ -15,8 +15,7 @@ import {
 	schemaFingerprint
 } from './d1-test-migrations.js';
 
-const PRE_BASELINE_SCHEMA_FINGERPRINT =
-	'34996c8b649513416979b0ac7bdabbd514f62d314a894cd8e8eb9745e1238d10';
+const SCHEMA_FINGERPRINT = 'f131561283d8224ac6a454f1f056477f8e35da1d99de2732d83ddd7f7602dfe9';
 
 const instances: Miniflare[] = [];
 
@@ -41,17 +40,18 @@ describe('rewrite D1 migration baseline', () => {
 		const migrations = await readD1MigrationFiles();
 		expect(migrations.map(({ name }) => name)).toEqual([
 			'0000_rewrite_baseline.sql',
-			'0001_global_taxonomy_seed.sql'
+			'0001_global_taxonomy_seed.sql',
+			'0002_dry_bug.sql'
 		]);
 
 		const database = await createDatabase();
 		await applyD1Migrations(database, migrations);
 
 		await expect(schemaFingerprint(database)).resolves.toEqual({
-			objects: 137,
+			objects: 138,
 			tables: 54,
-			indexes: 83,
-			sha256: PRE_BASELINE_SCHEMA_FINGERPRINT
+			indexes: 84,
+			sha256: SCHEMA_FINGERPRINT
 		});
 	});
 

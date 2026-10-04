@@ -15,6 +15,13 @@
       "when": 1787405111991,
       "tag": "0001_global_taxonomy_seed",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791094726558,
+      "tag": "0002_dry_bug",
+      "breakpoints": true
     }
   ]
 }

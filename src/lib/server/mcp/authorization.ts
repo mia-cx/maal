@@ -1,6 +1,7 @@
 import type { LiveWorkOSMembership } from '$lib/server/auth-slots/adapter.js';
 import { authSlotAdapterFor } from '$lib/server/auth-slots/index.js';
 import { expandWorkOSPermissions } from '$lib/domain/household/permissions.js';
+import { subscriptionEnablesRemoteService } from '$lib/server/billing/entitlement.js';
 
 import {
 	MCP_KEY_PREFIX,
@@ -52,12 +53,14 @@ const stringArray = (encoded: string): readonly string[] => {
 };
 
 const planAllowsRemote = (row: D1CapabilityRow, now: string): boolean =>
-	((row.billing_status === 'active' || row.billing_status === 'trialing') &&
-		row.current_period_end !== null &&
-		row.current_period_end > now) ||
-	((row.billing_status === 'past_due' || row.billing_status === 'paused') &&
-		row.grace_until !== null &&
-		row.grace_until > now);
+	subscriptionEnablesRemoteService(
+		{
+			status: row.billing_status,
+			currentPeriodEnd: row.current_period_end,
+			graceUntil: row.grace_until
+		},
+		now
+	);
 
 const deletionAllowsRemote = (row: D1CapabilityRow): boolean =>
 	row.deletion_state === null ||

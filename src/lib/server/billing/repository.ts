@@ -1,5 +1,6 @@
 import { and, eq, gte, or } from 'drizzle-orm';
 
+import { BILLING_GRACE_DAYS } from '$lib/domain/billing/capability.js';
 import type { StripeSubscriptionStatus } from '$lib/domain/billing/contracts.js';
 import { getDb } from '$lib/server/db/index.js';
 import {
@@ -7,6 +8,7 @@ import {
 	billingTrialClaims,
 	householdDeletionRequests,
 	householdMemberships,
+	households,
 	stripeEvents
 } from '$lib/server/db/schema/index.js';
 
@@ -284,7 +286,7 @@ export class BillingRepository {
 					input.startedAt,
 					input.claimId
 				),
-			this.subscriptionUpsertStatement(p, input.startedAt),
+			this.subscriptionUpsertStatement(p, input.startedAt, p.stripeSubscriptionId),
 			this.auditStatement({
 				idempotencyKey: `trial:${input.claimId}:started`,
 				householdId: p.householdId,
@@ -329,27 +331,73 @@ export class BillingRepository {
 		return 'acquired';
 	}
 
-	async finishStripeEventWithoutProjection(eventId: string, processedAt: string): Promise<void> {
-		await this.database
-			.prepare(
-				`UPDATE stripe_events SET state = 'processed', processed_at = ?, safe_error_code = NULL WHERE stripe_event_id = ?`
-			)
-			.bind(processedAt, eventId)
-			.run();
+	/**
+	 * Marks an event processed without projecting it. Events that describe a subscription still
+	 * record it — the interruption recompute reads event rows even when the projection was stale.
+	 */
+	async finishStripeEventWithoutProjection(
+		eventId: string,
+		processedAt: string,
+		detail: {
+			householdId: string | null;
+			stripeSubscriptionId: string | null;
+			stripeCreatedAt: string | null;
+			eventStatus: StripeSubscriptionStatus | null;
+		} = { householdId: null, stripeSubscriptionId: null, stripeCreatedAt: null, eventStatus: null }
+	): Promise<void> {
+		await this.database.batch([
+			this.database
+				.prepare(
+					`UPDATE stripe_events SET state = 'processed', processed_at = ?, safe_error_code = NULL,
+						stripe_subscription_id = ?, stripe_created_at = ?, event_status = ?
+					 WHERE stripe_event_id = ?`
+				)
+				.bind(
+					processedAt,
+					detail.stripeSubscriptionId,
+					detail.stripeCreatedAt,
+					detail.eventStatus,
+					eventId
+				),
+			...(detail.householdId && detail.stripeSubscriptionId
+				? [this.interruptionRecomputeStatement(detail.householdId, detail.stripeSubscriptionId)]
+				: [])
+		]);
 	}
 
+	/**
+	 * Applies one Stripe event. Pass `paidAt` (the paid event's Stripe creation time) for a
+	 * successful invoice payment: it resets grace even when a newer event was projected first.
+	 */
 	async commitStripeProjection(
 		eventId: string,
 		projection: SubscriptionProjectionWrite,
-		processedAt: string
+		processedAt: string,
+		paidAt: string | null = null,
+		replacesEndedSubscriptionId?: string,
+		eventStatus: StripeSubscriptionStatus | null = null
 	): Promise<void> {
 		await this.database.batch([
-			this.subscriptionUpsertStatement(projection, processedAt),
+			this.subscriptionUpsertStatement(
+				projection,
+				processedAt,
+				replacesEndedSubscriptionId ?? projection.stripeSubscriptionId
+			),
+			...(paidAt ? [this.paymentResetStatement(projection, paidAt)] : []),
 			this.database
 				.prepare(
-					`UPDATE stripe_events SET state = 'processed', processed_at = ?, safe_error_code = NULL WHERE stripe_event_id = ?`
+					`UPDATE stripe_events SET state = 'processed', processed_at = ?, safe_error_code = NULL,
+						stripe_subscription_id = ?, stripe_created_at = ?, event_status = ?
+					 WHERE stripe_event_id = ?`
 				)
-				.bind(processedAt, eventId)
+				.bind(
+					processedAt,
+					projection.stripeSubscriptionId,
+					projection.eventCreatedAt,
+					eventStatus,
+					eventId
+				),
+			this.interruptionRecomputeStatement(projection.householdId, projection.stripeSubscriptionId)
 		]);
 	}
 
@@ -392,6 +440,18 @@ export class BillingRepository {
 			)
 			.returning();
 		return updated[0] ?? null;
+	}
+
+	async householdExists(householdId: string): Promise<boolean> {
+		return (
+			(
+				await getDb(this.database)
+					.select({ householdId: households.householdId })
+					.from(households)
+					.where(eq(households.householdId, householdId))
+					.limit(1)
+			)[0] !== undefined
+		);
 	}
 
 	async deletionRequest(householdId: string): Promise<HouseholdDeletionRow | null> {
@@ -540,6 +600,43 @@ export class BillingRepository {
 		return { complete: true, rowsDeleted };
 	}
 
+	/**
+	 * Payer cleanups recorded by a billing-owner transfer whose detach never completed. The
+	 * pending record's safe_details carry the Stripe customer and the original cutoff.
+	 */
+	async pendingPayerCleanups(limit = 10): Promise<
+		readonly {
+			idempotencyKey: string;
+			householdId: string | null;
+			safeDetails: string;
+			occurredAt: string;
+		}[]
+	> {
+		const size = boundedSize(limit);
+		return (
+			await this.database
+				.prepare(
+					`SELECT pending.idempotency_key AS idempotencyKey, pending.household_id AS householdId,
+						pending.safe_details AS safeDetails, pending.occurred_at AS occurredAt
+					 FROM billing_audit_events pending
+					 WHERE pending.event_type = 'billing_payer_cleanup_pending'
+					 AND NOT EXISTS (
+						SELECT 1 FROM billing_audit_events done
+						WHERE done.idempotency_key =
+							'payer-cleanup-completed:' || substr(pending.idempotency_key, 15)
+					 )
+					 ORDER BY pending.occurred_at, pending.idempotency_key LIMIT ?`
+				)
+				.bind(size)
+				.all<{
+					idempotencyKey: string;
+					householdId: string | null;
+					safeDetails: string;
+					occurredAt: string;
+				}>()
+		).results;
+	}
+
 	async audit(input: {
 		idempotencyKey: string;
 		householdId: string | null;
@@ -551,9 +648,83 @@ export class BillingRepository {
 		await this.auditStatement(input).run();
 	}
 
+	/**
+	 * A successful payment is a monotonic fact, so it applies outside the event-recency guard: the
+	 * payment timestamp only moves forward, and an open row drops an interruption it ended.
+	 * Interrupted rows provisionally restart an ended window at payment time; the recompute
+	 * later in the same batch replaces it with recorded failure evidence when available.
+	 */
+	private paymentResetStatement(
+		projection: SubscriptionProjectionWrite,
+		paidAt: string
+	): D1PreparedStatement {
+		return this.database
+			.prepare(
+				`UPDATE billing_subscriptions SET
+					last_successful_payment_at = MAX(COALESCE(last_successful_payment_at, ?1), ?1),
+					interruption_started_at = CASE
+						WHEN status IN ('past_due', 'paused') THEN CASE
+							WHEN interruption_started_at > ?1 THEN interruption_started_at
+							ELSE ?1 END
+						WHEN interruption_started_at IS NULL OR interruption_started_at > ?1
+							THEN interruption_started_at
+						ELSE NULL END,
+					grace_until = CASE
+						WHEN status IN ('past_due', 'paused') THEN CASE
+							WHEN interruption_started_at > ?1 THEN grace_until
+							ELSE strftime('%Y-%m-%dT%H:%M:%fZ', ?1, '+${BILLING_GRACE_DAYS} days') END
+						WHEN interruption_started_at IS NULL OR interruption_started_at > ?1 THEN grace_until
+						ELSE NULL END
+				 WHERE household_id = ?2 AND stripe_subscription_id = ?3`
+			)
+			.bind(paidAt, projection.householdId, projection.stripeSubscriptionId);
+	}
+
+	/**
+	 * Derives the interruption window purely from recorded facts: the first processed event after
+	 * the last successful payment that reported the subscription interrupted. Runs last in every
+	 * batch that writes an event row, so ordering cannot matter — a stale snapshot landing after
+	 * the payment it precedes still back-dates the window to the first failure. When no
+	 * interrupted event is recorded yet, an interruption at or before the last payment is over:
+	 * the window opens provisionally at that payment until the next failure lands. Open rows are
+	 * left alone; a payment clears their stale interruption.
+	 */
+	private interruptionRecomputeStatement(
+		householdId: string,
+		stripeSubscriptionId: string
+	): D1PreparedStatement {
+		const firstFailureAfterPayment = `(SELECT MIN(stripe_created_at) FROM stripe_events
+							WHERE stripe_subscription_id = ?2 AND state = 'processed'
+								AND event_status IN ('past_due', 'paused')
+								AND stripe_created_at > COALESCE(
+									billing_subscriptions.last_successful_payment_at, ''))`;
+		const fallbackStart = `CASE
+							WHEN interruption_started_at IS NULL
+								OR interruption_started_at <= COALESCE(
+									billing_subscriptions.last_successful_payment_at, '')
+								THEN billing_subscriptions.last_successful_payment_at
+							ELSE interruption_started_at END`;
+		return this.database
+			.prepare(
+				`UPDATE billing_subscriptions SET
+					interruption_started_at = COALESCE(
+						${firstFailureAfterPayment},
+						${fallbackStart}),
+					grace_until = strftime('%Y-%m-%dT%H:%M:%fZ',
+						COALESCE(
+							${firstFailureAfterPayment},
+							${fallbackStart}),
+						'+${BILLING_GRACE_DAYS} days')
+				 WHERE household_id = ?1 AND stripe_subscription_id = ?2
+					AND status IN ('past_due', 'paused')`
+			)
+			.bind(householdId, stripeSubscriptionId);
+	}
+
 	private subscriptionUpsertStatement(
 		projection: SubscriptionProjectionWrite,
-		updatedAt: string
+		updatedAt: string,
+		replacedSubscriptionId: string
 	): D1PreparedStatement {
 		return this.database
 			.prepare(
@@ -573,11 +744,21 @@ export class BillingRepository {
 					cancel_at_period_end = excluded.cancel_at_period_end,
 					interruption_started_at = excluded.interruption_started_at,
 					grace_until = excluded.grace_until,
-					last_successful_payment_at = COALESCE(excluded.last_successful_payment_at, billing_subscriptions.last_successful_payment_at),
+					-- A payment is a monotonic fact: a projection built from a pre-payment read
+					-- can never roll the timestamp back.
+					last_successful_payment_at = MAX(
+						COALESCE(billing_subscriptions.last_successful_payment_at, excluded.last_successful_payment_at),
+						COALESCE(excluded.last_successful_payment_at, billing_subscriptions.last_successful_payment_at)),
 					last_stripe_event_created_at = excluded.last_stripe_event_created_at,
 					last_stripe_event_id = excluded.last_stripe_event_id,
 					updated_at = excluded.updated_at
-				WHERE billing_subscriptions.last_stripe_event_created_at IS NULL
+				-- One subscription per household: a superseded one never overwrites the current row
+				-- unless the current subscription has ended, or Stripe confirmed it ended and the
+				-- webhook caller marked this projection as its replacement.
+				WHERE (billing_subscriptions.stripe_subscription_id = excluded.stripe_subscription_id
+					OR billing_subscriptions.status IN ('canceled', 'incomplete_expired')
+					OR billing_subscriptions.stripe_subscription_id = ?)
+				AND (billing_subscriptions.last_stripe_event_created_at IS NULL
 					OR excluded.last_stripe_event_created_at > billing_subscriptions.last_stripe_event_created_at
 					OR (excluded.last_stripe_event_created_at = billing_subscriptions.last_stripe_event_created_at
 						AND excluded.updated_at > billing_subscriptions.updated_at)
@@ -601,7 +782,7 @@ export class BillingRepository {
 									WHEN 'past_due' THEN 1 WHEN 'paused' THEN 1 ELSE 2 END
 								AND excluded.last_stripe_event_id > COALESCE(billing_subscriptions.last_stripe_event_id, '')
 							)
-						))`
+						)))`
 			)
 			.bind(
 				projection.householdId,
@@ -617,7 +798,8 @@ export class BillingRepository {
 				projection.lastSuccessfulPaymentAt,
 				projection.eventCreatedAt,
 				projection.eventId,
-				updatedAt
+				updatedAt,
+				replacedSubscriptionId
 			);
 	}
 

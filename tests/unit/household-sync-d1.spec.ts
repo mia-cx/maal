@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
 import { HouseholdSchema } from '$lib/domain/household/contracts.js';
 import { MealAggregateSchema, MealCheckInSchema } from '$lib/domain/meals/schema.js';
+import { renewalCutoff } from '$lib/server/billing/entitlement.js';
 import {
 	D1HouseholdSyncRepository,
 	d1HouseholdSyncCapabilityAuthorizer,
@@ -361,7 +362,7 @@ describe('D1 household sync', () => {
 		).resolves.toMatchObject({ householdId });
 		await database
 			.prepare('UPDATE billing_subscriptions SET current_period_end = ? WHERE household_id = ?')
-			.bind(timestamp, householdId)
+			.bind(renewalCutoff(timestamp), householdId)
 			.run();
 		await expect(
 			d1HouseholdSyncCapabilityAuthorizer.authorize({
