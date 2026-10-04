@@ -303,7 +303,7 @@ test('every editable taxonomy kind survives Dexie -> mutation -> D1 -> Dexie unc
 	const deviceId = uuidv7();
 	await applyUserBootstrap(
 		replica,
-		userId,
+		{ authSlotId, workosUserId: userId },
 		await bootstrapUserSync(userRepository, userId, {
 			protocolVersion: CURRENT_PROTOCOL_VERSION,
 			deviceId,
@@ -316,7 +316,7 @@ test('every editable taxonomy kind survives Dexie -> mutation -> D1 -> Dexie unc
 	);
 	await applyHouseholdBootstrap(
 		replica,
-		householdId,
+		{ authSlotId, householdId },
 		await bootstrapHouseholdSync(householdRepository, householdId, {
 			protocolVersion: CURRENT_PROTOCOL_VERSION,
 			deviceId,

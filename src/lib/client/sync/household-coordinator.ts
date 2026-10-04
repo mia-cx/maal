@@ -45,6 +45,7 @@ import {
 	resolveLocalHouseholdSyncCapability,
 	type LocalHouseholdSyncCapability
 } from './household-capability.js';
+import { backfillIneligibleKeys, claimBackfillSlot, mealPriorityKey } from './backfill.js';
 import type { HouseholdSyncTransport } from './household-transport.js';
 import { FOREGROUND_PULL_INTERVAL_MS, type UserSyncEnvironment } from './coordinator.js';
 import {
@@ -250,12 +251,7 @@ const priorityKeyFor = (
 ): string => {
 	const entityId = entityKind === 'household' ? record.householdId : record.id;
 	if (entityKind !== 'meal') return `5:${String(entityId)}`;
-	const date = typeof record.date === 'string' ? record.date : null;
-	if (date === null) return `4:${String(record.id)}`;
-	const today = now.toISOString().slice(0, 10);
-	if (date >= today) return `0:${date}:${String(record.id)}`;
-	const inverse = String(9_999_999_999_999 - Date.parse(`${date}T00:00:00.000Z`)).padStart(13, '0');
-	return `1:${inverse}:${String(record.id)}`;
+	return mealPriorityKey(record.date, String(record.id), now);
 };
 
 const belongsToHousehold = async (
@@ -282,8 +278,11 @@ const recordsForBackfill = async (
 ): Promise<{ record: Record<string, unknown>; priorityKey: string }[]> => {
 	const descriptor = HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS[entityKind];
 	const rows = (await database.table(descriptor.store).toArray()) as Record<string, unknown>[];
+	const ineligible = await backfillIneligibleKeys(database, 'household', householdId);
 	const selected: { record: Record<string, unknown>; priorityKey: string }[] = [];
 	for (const record of rows) {
+		const entityId = entityKind === 'household' ? record.householdId : record.id;
+		if (ineligible.has(`${entityKind}\u0000${String(entityId)}`)) continue;
 		if (!(await belongsToHousehold(database, householdId, workosUserId, entityKind, record)))
 			continue;
 		const priorityKey = priorityKeyFor(entityKind, record, now);
@@ -522,6 +521,7 @@ export const createHouseholdSyncCoordinator = (
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let timerDueAt = 0;
 	let unsubscribe: (() => void)[] = [];
+	const applyScope = { authSlotId: options.authSlotId, householdId: options.householdId };
 
 	const deviceId = async (): Promise<string> => {
 		const record = await options.database.meta.get('deviceId');
@@ -551,7 +551,7 @@ export const createHouseholdSyncCoordinator = (
 					after: scope?.cursor ?? 0,
 					limit: PULL_PAGE_SIZE
 				});
-				await applyHouseholdPullPage(options.database, options.householdId, response, now());
+				await applyHouseholdPullPage(options.database, applyScope, response, now());
 				await renewLease();
 				if (!response.hasMore) return;
 			} catch (error) {
@@ -561,6 +561,9 @@ export const createHouseholdSyncCoordinator = (
 					options.householdId
 				);
 				let afterEntityKey: string | null = null;
+				// Each page is a fresh snapshot, so an edit committed between pages can sit below the
+				// last page's sequence. The cursor stays at the first page's so the next pull gets it.
+				let throughSequence = Number.POSITIVE_INFINITY;
 				do {
 					const response = await options.transport.bootstrap(options.authSlotId, {
 						protocolVersion: CURRENT_PROTOCOL_VERSION,
@@ -570,7 +573,13 @@ export const createHouseholdSyncCoordinator = (
 						afterEntityKey,
 						limit: PULL_PAGE_SIZE
 					});
-					await applyHouseholdBootstrap(options.database, options.householdId, response, now());
+					throughSequence = Math.min(throughSequence, response.throughSequence);
+					await applyHouseholdBootstrap(
+						options.database,
+						applyScope,
+						{ ...response, throughSequence },
+						now()
+					);
 					await renewLease();
 					afterEntityKey = response.nextEntityKey;
 				} while (afterEntityKey !== null);
@@ -627,7 +636,7 @@ export const createHouseholdSyncCoordinator = (
 		}
 	};
 
-	const runBackfill = async (id: string): Promise<number | null> => {
+	const runBackfill = async (id: string): Promise<number | 'waiting' | null> => {
 		if (environment.isSaveDataEnabled()) return null;
 		const prepared = await prepareBackfill(
 			options.database,
@@ -638,6 +647,9 @@ export const createHouseholdSyncCoordinator = (
 			now()
 		);
 		if (!prepared) return null;
+		if (!(await claimBackfillSlot(options.database, 'household', options.householdId, now()))) {
+			return 'waiting';
+		}
 		const mutations = await Promise.all(
 			prepared.rows.map((row) =>
 				hydrateMutation(options.database, options.householdId, options.workosUserId, row)
@@ -772,7 +784,7 @@ export const createHouseholdSyncCoordinator = (
 			if (pushed) await pullAll(id, renewCurrentLease);
 			const backfilledThrough = await runBackfill(id);
 			await renewCurrentLease();
-			if (backfilledThrough !== null) await pullAll(id, renewCurrentLease);
+			if (typeof backfilledThrough === 'number') await pullAll(id, renewCurrentLease);
 			currentState = 'complete';
 			retryAttempt = 0;
 			await options.database.syncScopes.update(['household', options.householdId], {

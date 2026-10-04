@@ -14,12 +14,14 @@ import {
 	FOREGROUND_PULL_INTERVAL_MS,
 	applyUserMutationReceipts,
 	applyUserPullPage,
+	buildUserSnapshotManifest,
 	createUserSyncCoordinator,
 	applyUserBootstrap,
 	startDeviceSync,
 	type UserSyncEnvironment,
 	type UserSyncTransport
 } from '$lib/client/sync/index.js';
+import { createRecipeFromEditor } from '$lib/client/recipes/commands.js';
 import { deleteTaxonomyRecord, upsertTaxonomyRecord } from '$lib/client/taxonomy/commands.js';
 import { CURRENT_PROTOCOL_VERSION } from '$lib/domain/contracts/versions.js';
 import { UnitUserEntrySchema, type UnitUserEntry } from '$lib/domain/taxonomy/schema.js';
@@ -53,6 +55,7 @@ const databases: MaalDatabase[] = [];
 const timestamp = '2026-08-21T12:00:00.000Z' as const;
 const userId = 'user_alice';
 const authSlotId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const userScope = { authSlotId, workosUserId: userId };
 
 beforeEach(() => {
 	// Pin subscription validity without intercepting Dexie or coordinator timers.
@@ -193,7 +196,7 @@ describe('foreground user coordinator', () => {
 		const first = userUnit({ id: firstId, canonicalLabel: 'first spoon' });
 		const second = userUnit({ id: secondId, canonicalLabel: 'second spoon' });
 
-		await applyUserBootstrap(database, userId, {
+		await applyUserBootstrap(database, userScope, {
 			protocolVersion: 1,
 			aggregates: [
 				{
@@ -511,7 +514,7 @@ describe('foreground user coordinator', () => {
 				attempts: 0
 			}))
 		);
-		await applyUserPullPage(database, userId, {
+		await applyUserPullPage(database, userScope, {
 			...emptyPull(1),
 			changes: [
 				{
@@ -1228,7 +1231,7 @@ describe('user outbox recovery', () => {
 			snapshot: { ...remote, deletedAt: timestamp }
 		});
 
-		await applyUserPullPage(database, userId, {
+		await applyUserPullPage(database, userScope, {
 			...emptyPull(1),
 			changes: [
 				{
@@ -1560,5 +1563,249 @@ describe('user sync scheduling', () => {
 			manager.stop();
 			vi.unstubAllGlobals();
 		}
+	});
+});
+
+/** A server change carrying a complete unit entry, as pull and bootstrap return it. */
+const unitChange = (unit: UnitUserEntry, sequence: number): SyncChange => {
+	const mutationId = uuidv7();
+	return {
+		sequence,
+		mutationId,
+		originDeviceId: uuidv7(),
+		entityKind: 'unitUserEntry',
+		entityId: unit.id,
+		conflictGroups: ['row'],
+		operation: 'upsert',
+		resultingRevision: sequence,
+		occurredAt: timestamp,
+		receivedAt: timestamp,
+		aggregate: {
+			...unit,
+			revision: sequence,
+			conflictClocks: { row: { occurredAt: timestamp, originDeviceId: uuidv7(), mutationId } }
+		},
+		tombstoneExpiresAt: null
+	};
+};
+
+const backfilledIds = (requests: readonly BackfillRequest[]): string[] =>
+	requests.flatMap(({ mutations }) => mutations.map(({ entityId }) => entityId));
+
+/** A backfill endpoint that records each request and commits nothing. */
+const recordingBackfill =
+	(requests: BackfillRequest[]): UserSyncTransport['backfill'] =>
+	async (_slot, request) => {
+		requests.push(request);
+		return {
+			protocolVersion: 1,
+			receipts: [],
+			committedThrough: 0,
+			checkpoint: request.checkpoint
+		};
+	};
+
+describe('bootstrap reconciliation', () => {
+	test('backfills only records the server has never acknowledged', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const [pulled, pushed, localOnly] = ['pulled', 'pushed', 'local'].map((canonicalLabel) =>
+			userUnit({ canonicalLabel })
+		) as [UnitUserEntry, UnitUserEntry, UnitUserEntry];
+		await applyUserPullPage(database, userScope, {
+			...emptyPull(1),
+			changes: [unitChange(pulled, 1)]
+		});
+		const context = { database, authSlotId, originDeviceId: await deviceIdOf(database) };
+		await upsertTaxonomyRecord(
+			{ ...context, occurredAt: timestamp },
+			'unitUserEntry',
+			unitDraft(pushed.id)
+		);
+		// Imported or pre-outbox data: present locally, with no outbox history at all.
+		await database.unitUserEntries.put(localOnly);
+		const backfills: BackfillRequest[] = [];
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: {
+				...validatingTransport(),
+				pull: async (_slot, request) => emptyPull(Math.max(1, request.after)),
+				backfill: recordingBackfill(backfills)
+			},
+			environment: environment({ saveData: false })
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(backfilledIds(backfills)).toEqual([localOnly.id]);
+	});
+
+	test('counts a pulled record as server-acknowledged, so its later absence deletes it', async () => {
+		const database = await openDatabase();
+		const unit = userUnit();
+
+		await applyUserPullPage(database, userScope, {
+			...emptyPull(1),
+			changes: [unitChange(unit, 1)]
+		});
+
+		const manifest = await buildUserSnapshotManifest(database, userId);
+		expect(manifest).toEqual([
+			expect.objectContaining({ entityId: unit.id, previousServerAck: true })
+		]);
+		expect(reconciliationInstructions(manifest, new Set())).toEqual([
+			{ entityKind: 'unitUserEntry', entityId: unit.id, action: 'delete_acknowledged_absence' }
+		]);
+	});
+
+	test('keeps an edit committed between bootstrap pages', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const [first, second] = [
+			userUnit({ canonicalLabel: 'first' }),
+			userUnit({ canonicalLabel: 'second' })
+		].toSorted((left, right) => left.id.localeCompare(right.id));
+		const log: SyncChange[] = [unitChange(first, 1), unitChange(second, 2)];
+		const latest = () =>
+			[...Map.groupBy(log, ({ entityId }) => entityId).values()].map((changes) => changes.at(-1)!);
+		const repository: UserSyncRepository = {
+			...acceptingRepository(),
+			bootstrap: async (_workosUserId, page) => {
+				const held = latest().toSorted((left, right) =>
+					syncEntityKey(left.entityKind, left.entityId).localeCompare(
+						syncEntityKey(right.entityKind, right.entityId)
+					)
+				);
+				const start = held.findIndex(
+					(change) =>
+						syncEntityKey(change.entityKind, change.entityId) > (page.afterEntityKey ?? '')
+				);
+				const selected = held.slice(start < 0 ? 0 : start, (start < 0 ? 0 : start) + page.limit);
+				const last = selected.at(-1);
+				return {
+					retainedFloor: 0,
+					bootstrapGeneration: 1,
+					latestSequence: log.at(-1)!.sequence,
+					aggregates: selected,
+					authoritativeIds: new Set(
+						latest().map((change) => syncEntityKey(change.entityKind, change.entityId))
+					),
+					nextEntityKey:
+						last && (start < 0 ? 0 : start) + selected.length < held.length
+							? syncEntityKey(last.entityKind, last.entityId)
+							: null
+				};
+			}
+		};
+		let pulls = 0;
+		let bootstrapPages = 0;
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: {
+				...noOpTransport(),
+				pull: async (_slot, request) => {
+					pulls += 1;
+					if (pulls === 1) {
+						throw new SyncBootstrapRequired({
+							code: 'cursor_expired',
+							message: 'expired',
+							retainedFloor: 1,
+							bootstrapGeneration: 1
+						});
+					}
+					const changes = log.filter(({ sequence }) => sequence > request.after);
+					return { ...emptyPull(log.at(-1)!.sequence), changes };
+				},
+				bootstrap: async (_slot, request) => {
+					const page = await bootstrapUserSync(repository, userId, { ...request, limit: 1 });
+					bootstrapPages += 1;
+					// Another device edits the first entity while this device is still paging.
+					if (bootstrapPages === 1) log.push(unitChange({ ...first, toBaseFactor: 99 }, 3));
+					return page;
+				}
+			},
+			environment: environment()
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(bootstrapPages).toBe(2);
+		expect((await database.unitUserEntries.get(first.id))?.toBaseFactor).toBe(99);
+		expect((await database.syncScopes.get(['user', userId]))?.cursor).toBe(3);
+	});
+});
+
+describe('device backfill budget', () => {
+	test('sends one backfill batch per device every 30 seconds across scopes', async () => {
+		const database = await openDatabase();
+		const bob = 'user_bob';
+		await database.unitUserEntries.bulkPut([userUnit(), userUnit({ workosUserId: bob })]);
+		const backfills: BackfillRequest[] = [];
+		const coordinatorFor = (workosUserId: string, slot: string) =>
+			createUserSyncCoordinator({
+				database,
+				authSlotId: slot,
+				workosUserId,
+				transport: { ...noOpTransport(), backfill: recordingBackfill(backfills) },
+				capabilityResolver: async () => ({
+					enabled: true,
+					stale: false,
+					householdId: 'household_paid'
+				}),
+				environment: environment({ saveData: false })
+			});
+
+		await coordinatorFor(userId, authSlotId).syncNow();
+		await coordinatorFor(bob, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb').syncNow();
+
+		expect(backfills.map(({ audience }) => audience.id)).toEqual([userId]);
+	});
+
+	test('backfills recipes cooked by upcoming meals first', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const context = { authSlotId, ownerUserId: userId, originDeviceId: await deviceIdOf(database) };
+		const patch = {
+			title: 'Soup',
+			description: null,
+			imageUrl: null,
+			sourceUrl: null,
+			sourceSiteName: null,
+			sourceAuthorName: null,
+			sourcePublisherName: null,
+			sourceIsBasedOnUrl: null,
+			prepTimeMinutes: null,
+			cookTimeMinutes: null,
+			yield: null,
+			ingredients: [],
+			instructions: []
+		};
+		const unplanned = await createRecipeFromEditor(database, context, patch);
+		const planned = await createRecipeFromEditor(database, context, { ...patch, title: 'Stew' });
+		// Recipes from before the outbox existed: present locally with no sync history.
+		await database.outbox.clear();
+		await database.meals.put({
+			id: uuidv7(),
+			householdId: 'household_paid',
+			date: '2026-08-22',
+			sourceRecipeId: planned.id,
+			deletedAt: null
+		} as never);
+		const backfills: BackfillRequest[] = [];
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: { ...noOpTransport(), backfill: recordingBackfill(backfills) },
+			environment: environment({ saveData: false })
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(backfilledIds(backfills)).toEqual([planned.id, unplanned.id]);
 	});
 });

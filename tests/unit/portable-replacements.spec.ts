@@ -409,30 +409,34 @@ describe('portable replacements', () => {
 		expect([...pushed, ...backfilled].some(({ entityId }) => entityId === bob.id)).toBe(false);
 
 		const clock = { occurredAt: at(13), mutationId: uuidv7(), originDeviceId: uuidv7() };
-		await applyHouseholdPullPage(database, householdId, {
-			...emptyPull(100),
-			changes: [
-				{
-					sequence: 100,
-					...clock,
-					actorUserId: 'user_bob',
-					entityKind: 'meal_check_in',
-					entityId: bob.id,
-					conflictGroups: ['response'],
-					operation: 'upsert',
-					resultingRevision: 2,
-					receivedAt: at(13),
-					tombstoneExpiresAt: null,
-					aggregate: Schema.encodeSync(MealCheckInSchema)({
-						...bob,
-						reason: 'Authoritative Bob',
-						updatedAt: at(13),
-						revision: 2,
-						conflictClocks: { response: clock }
-					})
-				}
-			]
-		});
+		await applyHouseholdPullPage(
+			database,
+			{ authSlotId, householdId },
+			{
+				...emptyPull(100),
+				changes: [
+					{
+						sequence: 100,
+						...clock,
+						actorUserId: 'user_bob',
+						entityKind: 'meal_check_in',
+						entityId: bob.id,
+						conflictGroups: ['response'],
+						operation: 'upsert',
+						resultingRevision: 2,
+						receivedAt: at(13),
+						tombstoneExpiresAt: null,
+						aggregate: Schema.encodeSync(MealCheckInSchema)({
+							...bob,
+							reason: 'Authoritative Bob',
+							updatedAt: at(13),
+							revision: 2,
+							conflictClocks: { response: clock }
+						})
+					}
+				]
+			}
+		);
 		await expect(database.mealCheckIns.get(bob.id)).resolves.toMatchObject({
 			reason: 'Authoritative Bob',
 			revision: 2

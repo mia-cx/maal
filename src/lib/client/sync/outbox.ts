@@ -306,3 +306,60 @@ export const pruneAcknowledgedOutbox = async (
 		});
 	}
 };
+
+/** The fields of a pulled or bootstrapped change that say what the server committed. */
+export interface CommittedChange {
+	readonly sequence: number;
+	readonly mutationId: string;
+	readonly originDeviceId: string;
+	readonly entityKind: string;
+	readonly entityId: string;
+	readonly conflictGroups: readonly [string, ...string[]];
+	readonly operation: 'upsert' | 'delete';
+	readonly occurredAt: string;
+}
+
+/** The auth slot and scope a coordinator applies server changes for. */
+export interface OutboxScope {
+	readonly authSlotId: string;
+	readonly scopeKind: ScopeKind;
+	readonly scopeId: string;
+}
+
+/**
+ * Records changes received from the server as acknowledged rows, so a record this device got by pull
+ * or bootstrap counts as server-known exactly like one it pushed: its absence from a later snapshot
+ * deletes it, and backfill never re-uploads it. A change whose mutation already has a row (this
+ * device's own push) adds nothing. Call inside a transaction that includes the outbox.
+ */
+export const recordServerChanges = async (
+	database: MaalDatabase,
+	scope: OutboxScope,
+	changes: readonly CommittedChange[],
+	now: Date
+): Promise<void> => {
+	const existing = await database.outbox.bulkGet(changes.map(({ mutationId }) => mutationId));
+	const markers = changes
+		.filter((_, index) => existing[index] === undefined)
+		.map((change): OutboxRecord => ({
+			mutationId: change.mutationId,
+			authSlotId: scope.authSlotId,
+			scopeKind: scope.scopeKind,
+			scopeId: scope.scopeId,
+			status: 'acknowledged',
+			occurredAt: change.occurredAt as `${string}Z`,
+			aggregateId: change.entityId,
+			entityKind: change.entityKind,
+			conflictGroup: change.conflictGroups[0],
+			operation: change.operation,
+			originDeviceId: change.originDeviceId,
+			payload: null,
+			nextAttemptAt: change.occurredAt as `${string}Z`,
+			attempts: 0,
+			acknowledgedSequence: change.sequence,
+			acknowledgedAt: utc(now)
+		}));
+	if (markers.length === 0) return;
+	await database.outbox.bulkPut(markers);
+	await pruneAcknowledgedOutbox(database, markers);
+};
