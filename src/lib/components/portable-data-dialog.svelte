@@ -26,8 +26,8 @@
 		open = $bindable(false)
 	}: { database: MaalDatabase; profileId: string | null; open?: boolean } = $props();
 
-	let archive = $state<PortableArchive | null>(null);
-	let plan = $state<PortableImportPlan | null>(null);
+	let archive = $state.raw<PortableArchive | null>(null);
+	let plan = $state.raw<PortableImportPlan | null>(null);
 	let resolutions = $state<Record<string, ImportResolution>>({});
 	let fileName = $state('');
 	let pending = $state(false);
