@@ -1,6 +1,7 @@
 import { Schema } from 'effect';
 
 import type { MaalDatabase } from '$lib/client/local/database.js';
+import { runMealRetention } from '$lib/client/meals/retention.js';
 import { UtcInstantSchema, type UtcInstant } from '$lib/domain/contracts/primitives.js';
 
 import { runRecipeRetention } from './commands.js';
@@ -57,6 +58,7 @@ export const runForegroundRecipeRetention = async (
 	};
 };
 
+/** Runs recipe and meal retention now, every six hours, and whenever the app becomes visible. */
 export const startForegroundRecipeRetention = (database: MaalDatabase): void => {
 	let running = false;
 	const run = async (): Promise<void> => {
@@ -67,6 +69,11 @@ export const startForegroundRecipeRetention = (database: MaalDatabase): void => 
 			await runForegroundRecipeRetention(database);
 		} catch {
 			console.error(JSON.stringify({ event: 'local_recipe_retention_failed' }));
+		}
+		try {
+			await runMealRetention(database);
+		} catch {
+			console.error(JSON.stringify({ event: 'local_meal_retention_failed' }));
 		} finally {
 			running = false;
 		}

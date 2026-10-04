@@ -179,7 +179,7 @@ export const collectPortableArchive = async (
 	const meals = (await database.meals.toArray())
 		.map((record) => decode(StoredMealSchema, record, 'decode meal for export'))
 		.filter(isMealAggregate)
-		.filter(({ householdId }) => householdIds.has(householdId));
+		.filter(({ householdId, deletedAt }) => householdIds.has(householdId) && deletedAt === null);
 	const mealIds = new Set(meals.map(({ id }) => id));
 	const checkIns = (await database.mealCheckIns.toArray())
 		.map((record) => decode(MealCheckInSchema, record, 'decode check-in for export'))

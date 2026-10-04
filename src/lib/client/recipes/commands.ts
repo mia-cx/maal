@@ -1,8 +1,18 @@
 import { Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
 
-import { executeLocalCommand } from '$lib/client/local/commands.js';
+import {
+	executeLocalCommand,
+	executeLocalCommands,
+	type LocalCommand
+} from '$lib/client/local/commands.js';
 import type { MaalDatabase } from '$lib/client/local/database.js';
+import {
+	planMealCommand,
+	recipeProvenanceDetachCommands,
+	type MealCommandContext,
+	type PlanMealOptions
+} from '$lib/client/meals/commands.js';
 import { LocalDecodeError } from '$lib/domain/contracts/errors.js';
 import {
 	DomainIdSchema,
@@ -10,6 +20,7 @@ import {
 	type UtcInstant
 } from '$lib/domain/contracts/primitives.js';
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
+import { MealAggregateSchema, type MealAggregate } from '$lib/domain/meals/schema.js';
 import {
 	RECIPE_CONFLICT_GROUPS,
 	RecipeAggregateSchema,
@@ -89,7 +100,7 @@ const decode = <A, I>(schema: Schema.Schema<A, I>, value: unknown, operation: st
 	}
 };
 
-const commandTime = (context: RecipeCommandContext): UtcInstant =>
+const commandTime = (context: Pick<RecipeCommandContext, 'occurredAt'>): UtcInstant =>
 	decode(
 		UtcInstantSchema,
 		context.occurredAt ?? new Date().toISOString(),
@@ -215,45 +226,47 @@ const reconcileInstructions = (
 		});
 };
 
-const executeRecipeWrite = (
-	database: MaalDatabase,
+const recipeWriteCommand = (
 	context: RecipeCommandContext,
 	recipeId: string,
 	conflictGroups: readonly string[],
 	payload: unknown,
 	update: (current: unknown | undefined) => unknown,
 	operation: 'upsert' | 'delete' = 'upsert'
-) =>
-	executeLocalCommand(database, {
-		authSlotId: context.authSlotId,
-		scopeKind: 'user',
-		scopeId: context.ownerUserId,
-		entityKind: 'recipe',
-		aggregateId: recipeId,
-		conflictGroup: conflictGroups.length === 1 ? conflictGroups[0]! : 'aggregate',
-		operation,
-		originDeviceId: context.originDeviceId,
-		occurredAt: commandTime(context),
-		payload,
-		payloadSchema: operation === 'delete' ? RecipeDeletePayloadSchema : RecipeMutationPayloadSchema,
-		writes: [
-			{
-				store: 'recipes',
-				aggregateId: recipeId,
-				identity: { id: recipeId, ownerUserId: context.ownerUserId },
-				conflictGroups,
-				schema: StoredRecipeSchema,
-				update
-			}
-		]
-	});
+): LocalCommand => ({
+	authSlotId: context.authSlotId,
+	scopeKind: 'user',
+	scopeId: context.ownerUserId,
+	entityKind: 'recipe',
+	aggregateId: recipeId,
+	conflictGroup: conflictGroups.length === 1 ? conflictGroups[0]! : 'aggregate',
+	operation,
+	originDeviceId: context.originDeviceId,
+	occurredAt: commandTime(context),
+	payload,
+	payloadSchema: operation === 'delete' ? RecipeDeletePayloadSchema : RecipeMutationPayloadSchema,
+	writes: [
+		{
+			store: 'recipes',
+			aggregateId: recipeId,
+			identity: { id: recipeId, ownerUserId: context.ownerUserId },
+			conflictGroups,
+			schema: StoredRecipeSchema,
+			update
+		}
+	]
+});
 
-export const createRecipeFromEditor = async (
+const executeRecipeWrite = (
 	database: MaalDatabase,
+	...command: Parameters<typeof recipeWriteCommand>
+) => executeLocalCommand(database, recipeWriteCommand(...command));
+
+const createRecipeCommand = (
 	context: RecipeCommandContext,
 	patchInput: RecipeEditorPatch,
-	recipeId = uuidv7()
-): Promise<RecipeAggregate> => {
+	recipeId: string
+): { recipe: RecipeAggregate; command: LocalCommand } => {
 	const occurredAt = commandTime(context);
 	const patch = decode(RecipeEditorPatchSchema, patchInput, 'decode recipe editor patch');
 	const ingredients = reconcileIngredients([], patch.ingredients, occurredAt);
@@ -308,8 +321,7 @@ export const createRecipeFromEditor = async (
 		...candidateWithoutSearch,
 		searchTokens: recipeSearchTokens(candidateWithoutSearch)
 	};
-	const result = await executeRecipeWrite(
-		database,
+	const command = recipeWriteCommand(
 		{ ...context, occurredAt },
 		candidate.id,
 		RECIPE_CONFLICT_GROUPS,
@@ -324,7 +336,49 @@ export const createRecipeFromEditor = async (
 			return candidate;
 		}
 	);
+	return { recipe: candidate, command };
+};
+
+export const createRecipeFromEditor = async (
+	database: MaalDatabase,
+	context: RecipeCommandContext,
+	patchInput: RecipeEditorPatch,
+	recipeId = uuidv7()
+): Promise<RecipeAggregate> => {
+	const { command } = createRecipeCommand(context, patchInput, recipeId);
+	const result = await executeLocalCommand(database, command);
 	return decode(RecipeAggregateSchema, result.aggregates[0], 'decode created recipe');
+};
+
+/**
+ * The plan route's "new recipe" gesture: creates the reporter's recipe and plans it as a household meal
+ * in one transaction, so a failure leaves neither behind.
+ */
+export const createRecipeAndPlanMeal = async (
+	database: MaalDatabase,
+	context: MealCommandContext,
+	patchInput: RecipeEditorPatch,
+	options: PlanMealOptions = {}
+): Promise<{ recipe: RecipeAggregate; meal: MealAggregate }> => {
+	const occurredAt = commandTime(context);
+	const { recipe, command } = createRecipeCommand(
+		{
+			authSlotId: context.authSlotId,
+			ownerUserId: context.reporterUserId,
+			originDeviceId: context.originDeviceId,
+			occurredAt
+		},
+		patchInput,
+		uuidv7()
+	);
+	const [created, planned] = await executeLocalCommands(database, [
+		command,
+		planMealCommand({ ...context, occurredAt }, recipe, options)
+	]);
+	return {
+		recipe: decode(RecipeAggregateSchema, created!.aggregates[0], 'decode created recipe'),
+		meal: decode(MealAggregateSchema, planned!.aggregates[0], 'decode planned meal')
+	};
 };
 
 export const updateRecipeFromEditor = async (
@@ -475,8 +529,7 @@ const purgeRecipe = async (
 ): Promise<RecipePurgeTombstone> => {
 	const purgedAt = commandTime(context);
 	const retainUntil = new Date(Date.parse(purgedAt) + 365 * 86_400_000).toISOString() as UtcInstant;
-	const result = await executeRecipeWrite(
-		database,
+	const purge = recipeWriteCommand(
 		{ ...context, occurredAt: purgedAt },
 		recipeId,
 		['deletion'],
@@ -500,9 +553,22 @@ const purgeRecipe = async (
 		},
 		'delete'
 	);
+	// The recoverable delete keeps meal provenance so a restore brings the history back; only the
+	// purge severs it, together with the content, in the same transaction.
+	const detach = await recipeProvenanceDetachCommands(
+		database,
+		{
+			authSlotId: context.authSlotId,
+			reporterUserId: context.ownerUserId,
+			originDeviceId: context.originDeviceId,
+			occurredAt: purgedAt
+		},
+		recipeId
+	);
+	const [result] = await executeLocalCommands(database, [purge, ...detach]);
 	return decode(
 		StoredRecipeSchema,
-		result.aggregates[0],
+		result!.aggregates[0],
 		'decode recipe tombstone'
 	) as RecipePurgeTombstone;
 };

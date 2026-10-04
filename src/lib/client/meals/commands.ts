@@ -1,8 +1,9 @@
 import { Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
 
-import { executeLocalCommand } from '$lib/client/local/commands.js';
+import { executeLocalCommand, type LocalCommand } from '$lib/client/local/commands.js';
 import type { MaalDatabase } from '$lib/client/local/database.js';
+import { resolveLocalHouseholdSyncCapability } from '$lib/client/sync/household-capability.js';
 import { LocalDecodeError } from '$lib/domain/contracts/errors.js';
 import {
 	DomainIdSchema,
@@ -23,13 +24,16 @@ import {
 	type MealAggregate,
 	type MealCheckIn,
 	type MealStatus,
-	type MealVerdict
+	type MealVerdict,
+	type StoredMeal
 } from '$lib/domain/meals/schema.js';
 import {
 	StoredRecipeSchema,
 	isRecipeAggregate,
 	type RecipeAggregate
 } from '$lib/domain/recipes/schema.js';
+
+import { mealTombstone } from './retention.js';
 
 const NullableDateSchema = Schema.NullOr(LocalDateSchema);
 const NullableTimeSchema = Schema.NullOr(LocalTimeSchema);
@@ -83,7 +87,7 @@ const decode = <A, I>(schema: Schema.Schema<A, I>, value: unknown, operation: st
 	}
 };
 
-const commandTime = (context: MealCommandContext): UtcInstant =>
+const commandTime = (context: Pick<MealCommandContext, 'occurredAt'>): UtcInstant =>
 	decode(
 		UtcInstantSchema,
 		context.occurredAt ?? new Date().toISOString(),
@@ -189,18 +193,17 @@ const clonedRecipeSnapshot = (
 	);
 };
 
-export const planRecipeAsMeal = async (
-	database: MaalDatabase,
+/** Builds the command that plans `recipe` as a new meal; callers may commit it with other commands. */
+export const planMealCommand = (
 	context: MealCommandContext,
-	recipeId: string,
+	recipe: RecipeAggregate,
 	options: PlanMealOptions = {},
 	mealId = uuidv7()
-): Promise<MealAggregate> => {
+): LocalCommand => {
 	const occurredAt = commandTime(context);
-	const recipe = requireRecipe(await database.recipes.get(recipeId), 'read recipe for meal');
 	const id = decode(DomainIdSchema, mealId, 'decode meal ID');
 	const snapshot = clonedRecipeSnapshot(recipe, context.householdId, id, occurredAt, options);
-	const result = await executeLocalCommand(database, {
+	return {
 		authSlotId: context.authSlotId,
 		scopeKind: 'household',
 		scopeId: context.householdId,
@@ -213,7 +216,7 @@ export const planRecipeAsMeal = async (
 		payload: {
 			mealId: id,
 			conflictGroups: [...MEAL_CONFLICT_GROUPS],
-			patch: { sourceRecipeId: recipeId, ...options }
+			patch: { sourceRecipeId: recipe.id, ...options }
 		},
 		payloadSchema: MealMutationPayloadSchema,
 		writes: [
@@ -233,7 +236,21 @@ export const planRecipeAsMeal = async (
 				}
 			}
 		]
-	});
+	};
+};
+
+export const planRecipeAsMeal = async (
+	database: MaalDatabase,
+	context: MealCommandContext,
+	recipeId: string,
+	options: PlanMealOptions = {},
+	mealId = uuidv7()
+): Promise<MealAggregate> => {
+	const recipe = requireRecipe(await database.recipes.get(recipeId), 'read recipe for meal');
+	const result = await executeLocalCommand(
+		database,
+		planMealCommand(context, recipe, options, mealId)
+	);
 	return decode(MealAggregateSchema, result.aggregates[0], 'decode planned meal');
 };
 
@@ -420,13 +437,31 @@ export const saveMealCheckIn = async (
 	};
 };
 
+/**
+ * Deletes a meal and detaches its check-ins. When the household does not sync for this user, no remote
+ * acknowledgement will come, so the content is removed at once and only the minimal tombstone is kept.
+ * Synced content waits for `runMealRetention` after the server acknowledges the deletion.
+ */
 export const deleteMeal = async (
 	database: MaalDatabase,
 	context: MealCommandContext,
 	mealId: string
-): Promise<MealAggregate> => {
+): Promise<StoredMeal> => {
 	const occurredAt = commandTime(context);
-	const checkIns = await database.mealCheckIns.where('mealId').equals(mealId).toArray();
+	const { enabled: synced } = await resolveLocalHouseholdSyncCapability(
+		database,
+		context.reporterUserId,
+		context.householdId,
+		new Date(occurredAt)
+	);
+	// Only a check-in's reporter may upload it, so only those get a clock and an outbox row. Other
+	// reporters' check-ins are detached locally; the server nulls their meal reference on delete.
+	const checkIns = (await database.mealCheckIns.where('mealId').equals(mealId).toArray()).map(
+		(row) => ({
+			id: row.id,
+			mutationId: row.reporterUserId === context.reporterUserId ? uuidv7() : undefined
+		})
+	);
 	const result = await executeLocalCommand(database, {
 		authSlotId: context.authSlotId,
 		scopeKind: 'household',
@@ -437,6 +472,19 @@ export const deleteMeal = async (
 		operation: 'delete',
 		originDeviceId: context.originDeviceId,
 		occurredAt,
+		additionalMutations: checkIns.flatMap(({ id, mutationId }) =>
+			mutationId === undefined
+				? []
+				: [
+						{
+							mutationId,
+							entityKind: 'meal_check_in',
+							aggregateId: id,
+							conflictGroup: 'response',
+							operation: 'upsert' as const
+						}
+					]
+		),
 		payload: { mealId, conflictGroups: ['deletion'], patch: { deletedAt: occurredAt } },
 		payloadSchema: MealMutationPayloadSchema,
 		writes: [
@@ -445,15 +493,19 @@ export const deleteMeal = async (
 				aggregateId: mealId,
 				conflictGroups: ['deletion'],
 				schema: StoredMealSchema,
-				update: (current) => ({
-					...requireMeal(current, context.householdId, 'delete meal'),
-					deletedAt: occurredAt
-				})
+				update: (current) => {
+					const deleted = {
+						...requireMeal(current, context.householdId, 'delete meal'),
+						deletedAt: occurredAt
+					};
+					return synced ? deleted : mealTombstone(deleted, occurredAt);
+				}
 			},
-			...checkIns.map((row) => ({
+			...checkIns.map(({ id, mutationId }) => ({
 				store: 'mealCheckIns' as const,
-				aggregateId: row.id,
-				conflictGroups: ['response'],
+				aggregateId: id,
+				mutationId,
+				conflictGroups: mutationId === undefined ? [] : ['response'],
 				schema: MealCheckInSchema,
 				update: (current: unknown) => ({
 					...decode(MealCheckInSchema, current, 'detach deleted meal check-in'),
@@ -462,45 +514,61 @@ export const deleteMeal = async (
 			}))
 		]
 	});
-	return decode(MealAggregateSchema, result.aggregates[0], 'decode deleted meal');
+	return decode(StoredMealSchema, result.aggregates[0], 'decode deleted meal');
 };
 
-export const detachDeletedRecipeFromMeals = async (
+/**
+ * Builds the commands that null `sourceRecipeId` on every live meal copied from a purged recipe, across
+ * the households the recipe owner (`reporterUserId`) belongs to. Deleted meals are skipped: their
+ * content is on its way out and they cannot be edited. Commit these with the purge in one transaction.
+ */
+export const recipeProvenanceDetachCommands = async (
 	database: MaalDatabase,
-	context: MealCommandContext,
+	context: Omit<MealCommandContext, 'householdId'>,
 	recipeId: string
-): Promise<number> => {
-	const candidates = (
-		await database.meals.where('householdId').equals(context.householdId).toArray()
-	)
-		.map((row) => decode(StoredMealSchema, row, 'decode meal provenance'))
-		.filter((row): row is MealAggregate => isMealAggregate(row) && row.sourceRecipeId === recipeId);
-	for (const meal of candidates) {
-		await executeLocalCommand(database, {
-			authSlotId: context.authSlotId,
-			scopeKind: 'household',
-			scopeId: context.householdId,
-			entityKind: 'meal',
-			aggregateId: meal.id,
-			conflictGroup: 'header',
-			operation: 'upsert',
-			originDeviceId: context.originDeviceId,
-			occurredAt: commandTime(context),
-			payload: { mealId: meal.id, conflictGroups: ['header'], patch: { sourceRecipeId: null } },
-			payloadSchema: MealMutationPayloadSchema,
-			writes: [
-				{
-					store: 'meals',
-					aggregateId: meal.id,
-					conflictGroups: ['header'],
-					schema: StoredMealSchema,
-					update: (current) => ({
-						...requireMeal(current, context.householdId, 'detach recipe provenance'),
-						sourceRecipeId: null
-					})
-				}
-			]
-		});
+): Promise<LocalCommand[]> => {
+	const occurredAt = commandTime(context);
+	// Detached snapshots are read-only and never upload, so only active memberships are touched.
+	const memberships = await database.memberships
+		.where('workosUserId')
+		.equals(context.reporterUserId)
+		.filter(({ status }) => status === 'active')
+		.toArray();
+	const commands: LocalCommand[] = [];
+	for (const { householdId } of memberships) {
+		const linked = (await database.meals.where('householdId').equals(householdId).toArray())
+			.map((row) => decode(StoredMealSchema, row, 'decode meal provenance'))
+			.filter(
+				(row): row is MealAggregate =>
+					isMealAggregate(row) && row.deletedAt === null && row.sourceRecipeId === recipeId
+			);
+		for (const meal of linked) {
+			commands.push({
+				authSlotId: context.authSlotId,
+				scopeKind: 'household',
+				scopeId: householdId,
+				entityKind: 'meal',
+				aggregateId: meal.id,
+				conflictGroup: 'header',
+				operation: 'upsert',
+				originDeviceId: context.originDeviceId,
+				occurredAt,
+				payload: { mealId: meal.id, conflictGroups: ['header'], patch: { sourceRecipeId: null } },
+				payloadSchema: MealMutationPayloadSchema,
+				writes: [
+					{
+						store: 'meals',
+						aggregateId: meal.id,
+						conflictGroups: ['header'],
+						schema: StoredMealSchema,
+						update: (current) => ({
+							...requireMeal(current, householdId, 'detach recipe provenance'),
+							sourceRecipeId: null
+						})
+					}
+				]
+			});
+		}
 	}
-	return candidates.length;
+	return commands;
 };
