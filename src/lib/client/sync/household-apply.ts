@@ -10,23 +10,64 @@ import type {
 } from '$lib/sync/household-contracts.js';
 import {
 	decodeHouseholdSyncAggregate,
-	HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS
+	HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS,
+	type DecodedHouseholdSyncAggregate
 } from '$lib/sync/household-entities.js';
+
+import { pruneAcknowledgedOutbox, scopeOutbox } from './outbox.js';
 
 const keyFor = (entityKind: string, entityId: string): string => `${entityKind}\u0000${entityId}`;
 
+/**
+ * Unacknowledged household intent from auth slots that still exist. Rows queued under a slot that is
+ * gone (`signed-out:<profileId>`, waiting for that profile to sign in again) are not pushed by anyone
+ * here, so they must not mask other profiles' pulls of the same household. Preserve their upload
+ * snapshot before replacing the shared record. Needs `authSlots`, `outbox`, and the affected stores
+ * in the surrounding transaction.
+ */
 const pendingHouseholdOutbox = async (
 	database: MaalDatabase,
-	householdId: string
-): Promise<OutboxRecord[]> =>
-	(await database.outbox.toArray()).filter(
-		(record) =>
-			record.scopeKind === 'household' &&
-			record.scopeId === householdId &&
-			(record.status === 'pending' ||
-				record.status === 'sending' ||
-				record.status === 'quarantined')
+	householdId: string,
+	replacements: readonly (Pick<
+		DecodedHouseholdSyncAggregate,
+		'entityKind' | 'entityId' | 'store'
+	> & {
+		aggregate?: unknown;
+	})[]
+): Promise<OutboxRecord[]> => {
+	const rows = await scopeOutbox(database, 'household', householdId, [
+		'pending',
+		'sending',
+		'quarantined'
+	]);
+	const slots = await database.authSlots.bulkGet([
+		...new Set(rows.map(({ authSlotId }) => authSlotId))
+	]);
+	const live = new Set(slots.flatMap((slot) => (slot ? [slot.authSlotId] : [])));
+	const deferred = Map.groupBy(
+		rows.filter(({ authSlotId }) => !live.has(authSlotId)),
+		(row) => keyFor(row.entityKind, row.aggregateId)
 	);
+	for (const replacement of replacements) {
+		const affected = deferred.get(keyFor(replacement.entityKind, replacement.entityId)) ?? [];
+		if (affected.length === 0) continue;
+		const local = affected.some((row) => row.snapshot === undefined)
+			? await database.table(replacement.store).get(replacement.entityId)
+			: undefined;
+		for (const row of affected) {
+			const snapshot = row.snapshot ?? local;
+			await database.outbox.update(row.mutationId, {
+				snapshot,
+				...(replacement.aggregate === undefined
+					? {}
+					: { authoritativeSnapshot: replacement.aggregate })
+			});
+			// A page may replace the same aggregate more than once; capture intent only once.
+			row.snapshot = snapshot;
+		}
+	}
+	return rows.filter(({ authSlotId }) => live.has(authSlotId));
+};
 
 const decodeChanges = (
 	householdId: string,
@@ -66,9 +107,9 @@ export const applyHouseholdPullPage = async (
 	const tables = [...new Set(decoded.map(({ store }) => database.table(store)))];
 	await database.transaction(
 		'rw',
-		[...tables, database.mealCheckIns, database.outbox, database.syncScopes],
+		[...tables, database.mealCheckIns, database.outbox, database.authSlots, database.syncScopes],
 		async () => {
-			const pending = await pendingHouseholdOutbox(database, householdId);
+			const pending = await pendingHouseholdOutbox(database, householdId, decoded);
 			const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));
 			const pendingByKey = Map.groupBy(pending, (row) => keyFor(row.entityKind, row.aggregateId));
 			const localIntent = new Map<string, unknown>();
@@ -93,9 +134,14 @@ export const applyHouseholdPullPage = async (
 					await detachMealCheckIns(database, aggregate.entityId);
 				}
 			}
+			// Pending intent wins until acknowledged, including a hard delete that left no record.
 			for (const aggregate of decoded) {
-				const local = localIntent.get(keyFor(aggregate.entityKind, aggregate.entityId));
-				if (local !== undefined) await database.table(aggregate.store).put(local);
+				const key = keyFor(aggregate.entityKind, aggregate.entityId);
+				if (!localIntent.has(key)) continue;
+				const local = localIntent.get(key);
+				const table = database.table(aggregate.store);
+				if (local === undefined) await table.delete(aggregate.entityId);
+				else await table.put(local);
 			}
 			const current = await database.syncScopes.get(['household', householdId]);
 			if (
@@ -150,12 +196,13 @@ export const applyHouseholdMutationReceipts = async (
 	);
 	await database.transaction(
 		'rw',
-		[...new Set(tables), database.mealCheckIns, database.outbox],
+		[...new Set(tables), database.mealCheckIns, database.outbox, database.authSlots],
 		async () => {
 			const restorations = new Map<
 				string,
 				NonNullable<(typeof resolved)[number]['authoritative']>
 			>();
+			const acknowledged: OutboxRecord[] = [];
 			for (const { receipt, row, authoritative } of resolved) {
 				if (!row) continue;
 				if (receipt.status === 'accepted' || receipt.status === 'duplicate') {
@@ -164,6 +211,7 @@ export const applyHouseholdMutationReceipts = async (
 						acknowledgedSequence: receipt.sequence,
 						acknowledgedAt: now.toISOString()
 					});
+					acknowledged.push(row);
 					continue;
 				}
 				if (!('errorCode' in receipt)) continue;
@@ -175,9 +223,10 @@ export const applyHouseholdMutationReceipts = async (
 				if (authoritative)
 					restorations.set(keyFor(authoritative.entityKind, authoritative.entityId), authoritative);
 			}
+			await pruneAcknowledgedOutbox(database, acknowledged);
 			const unresolvedKeys = new Set(
-				(await pendingHouseholdOutbox(database, householdId)).map((row) =>
-					keyFor(row.entityKind, row.aggregateId)
+				(await pendingHouseholdOutbox(database, householdId, [...restorations.values()])).map(
+					(row) => keyFor(row.entityKind, row.aggregateId)
 				)
 			);
 			for (const [key, authoritative] of restorations) {
@@ -205,9 +254,24 @@ export const applyHouseholdBootstrap = async (
 	}
 	await database.transaction(
 		'rw',
-		[...new Set(tables), database.mealCheckIns, database.outbox, database.syncScopes],
+		[
+			...new Set(tables),
+			database.mealCheckIns,
+			database.outbox,
+			database.authSlots,
+			database.syncScopes
+		],
 		async () => {
-			const pending = await pendingHouseholdOutbox(database, householdId);
+			const pending = await pendingHouseholdOutbox(database, householdId, [
+				...decoded,
+				...response.instructions
+					.filter(({ action }) => action === 'delete_acknowledged_absence')
+					.map(({ entityKind, entityId }) => ({
+						entityKind,
+						entityId,
+						store: HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS[entityKind].store
+					}))
+			]);
 			const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));
 			for (const aggregate of decoded) {
 				const key = keyFor(aggregate.entityKind, aggregate.entityId);
@@ -255,13 +319,17 @@ const belongsToHousehold = async (
 		const meal = await database.meals.get(record.mealId);
 		return meal?.householdId === householdId;
 	}
-	return (await database.outbox.toArray()).some(
-		(row) =>
-			row.scopeKind === 'household' &&
-			row.scopeId === householdId &&
-			row.entityKind === entityKind &&
-			row.aggregateId === record.id
-	);
+	const row = await database.outbox
+		.where('aggregateId')
+		.equals(String(record.id))
+		.filter(
+			(candidate) =>
+				candidate.scopeKind === 'household' &&
+				candidate.scopeId === householdId &&
+				candidate.entityKind === entityKind
+		)
+		.first();
+	return row !== undefined;
 };
 
 export const buildHouseholdSnapshotManifest = async (
@@ -269,14 +337,9 @@ export const buildHouseholdSnapshotManifest = async (
 	householdId: string
 ): Promise<HouseholdSnapshotManifestEntry[]> => {
 	const acknowledged = new Set(
-		(await database.outbox.toArray())
-			.filter(
-				(row) =>
-					row.scopeKind === 'household' &&
-					row.scopeId === householdId &&
-					row.status === 'acknowledged'
-			)
-			.map((row) => keyFor(row.entityKind, row.aggregateId))
+		(await scopeOutbox(database, 'household', householdId, ['acknowledged'])).map((row) =>
+			keyFor(row.entityKind, row.aggregateId)
+		)
 	);
 	const manifest: HouseholdSnapshotManifestEntry[] = [];
 	for (const [entityKind, descriptor] of Object.entries(HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS) as [

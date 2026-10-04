@@ -10,20 +10,12 @@ import type {
 	UserSyncEntityKind
 } from '$lib/sync/contracts.js';
 
+import { pruneAcknowledgedOutbox, scopeOutbox } from './outbox.js';
+
 const keyFor = (entityKind: string, entityId: string): string => `${entityKind}\u0000${entityId}`;
 
-const pendingUserOutbox = async (
-	database: MaalDatabase,
-	workosUserId: string
-): Promise<OutboxRecord[]> => {
-	const records = await database.outbox.toArray();
-	return records.filter(
-		(record) =>
-			record.scopeKind === 'user' &&
-			record.scopeId === workosUserId &&
-			(record.status === 'pending' || record.status === 'sending')
-	);
-};
+const pendingUserOutbox = (database: MaalDatabase, workosUserId: string): Promise<OutboxRecord[]> =>
+	scopeOutbox(database, 'user', workosUserId);
 
 const decodedChanges = (
 	workosUserId: string,
@@ -75,9 +67,14 @@ export const applyUserPullPage = async (
 			}
 			await database.table(aggregate.store).put(aggregate.aggregate);
 		}
+		// Pending intent wins until acknowledged, including a hard delete that left no record.
 		for (const aggregate of decoded) {
-			const local = localIntent.get(keyFor(aggregate.entityKind, aggregate.entityId));
-			if (local !== undefined) await database.table(aggregate.store).put(local);
+			const key = keyFor(aggregate.entityKind, aggregate.entityId);
+			if (!localIntent.has(key)) continue;
+			const local = localIntent.get(key);
+			const table = database.table(aggregate.store);
+			if (local === undefined) await table.delete(aggregate.entityId);
+			else await table.put(local);
 		}
 		const current = await database.syncScopes.get(['user', workosUserId]);
 		if (
@@ -131,6 +128,7 @@ export const applyUserMutationReceipts = async (
 	);
 	await database.transaction('rw', [...new Set(tables), database.outbox], async () => {
 		const restorations = new Map<string, NonNullable<(typeof resolved)[number]['authoritative']>>();
+		const acknowledged: OutboxRecord[] = [];
 		for (const { receipt, row, authoritative } of resolved) {
 			if (!row) continue;
 			if (receipt.status === 'accepted' || receipt.status === 'duplicate') {
@@ -139,6 +137,7 @@ export const applyUserMutationReceipts = async (
 					acknowledgedSequence: receipt.sequence,
 					acknowledgedAt: now.toISOString()
 				});
+				acknowledged.push(row);
 				continue;
 			}
 			if (!('errorCode' in receipt)) continue;
@@ -150,6 +149,7 @@ export const applyUserMutationReceipts = async (
 			if (authoritative)
 				restorations.set(keyFor(authoritative.entityKind, authoritative.entityId), authoritative);
 		}
+		await pruneAcknowledgedOutbox(database, acknowledged);
 		const unresolvedKeys = new Set(
 			(await pendingUserOutbox(database, workosUserId)).map((row) =>
 				keyFor(row.entityKind, row.aggregateId)
@@ -218,9 +218,9 @@ export const buildUserSnapshotManifest = async (
 	workosUserId: string
 ): Promise<SnapshotManifestEntry[]> => {
 	const acknowledged = new Set(
-		(await database.outbox.toArray())
-			.filter((row) => row.scopeKind === 'user' && row.status === 'acknowledged')
-			.map((row) => keyFor(row.entityKind, row.aggregateId))
+		(await scopeOutbox(database, 'user', workosUserId, ['acknowledged'])).map((row) =>
+			keyFor(row.entityKind, row.aggregateId)
+		)
 	);
 	const manifest: SnapshotManifestEntry[] = [];
 	for (const [entityKind, descriptor] of Object.entries(USER_SYNC_ENTITY_DESCRIPTORS) as [

@@ -39,13 +39,31 @@ import {
 	buildUserSnapshotManifest
 } from './apply.js';
 import { resolveLocalUserSyncCapability, type LocalUserSyncCapability } from './capability.js';
+import {
+	byOccurrence,
+	coalesceOutbox,
+	coveredRows,
+	deletionGroupFor,
+	expandReceipts,
+	firstRejectionCode,
+	markSending,
+	pushIsolatingRejections,
+	requeue,
+	requeueUnanswered,
+	retryDelay,
+	scopeOutbox,
+	type CoalescedMutation,
+	type OutboxAggregate,
+	type PushOutcome
+} from './outbox.js';
 import type { UserSyncTransport } from './transport.js';
 
-const PUSH_BATCH_SIZE = 50;
 export const BACKFILL_BATCH_SIZE = 25;
 export const BACKFILL_MAX_BYTES = 256 * 1024;
 export const BACKFILL_SINGLE_RECORD_MAX_BYTES = 1024 * 1024;
 export const BACKFILL_INTERVAL_MS = 30_000;
+/** How often a paid, visible, online scope pulls when nothing else triggers a run. */
+export const FOREGROUND_PULL_INTERVAL_MS = 60_000;
 const LEASE_TTL_MS = 20_000;
 const PULL_PAGE_SIZE = 100;
 
@@ -125,33 +143,56 @@ const isTerminal = (error: unknown): boolean =>
 	error instanceof SyncCapabilityDenied ||
 	error instanceof SyncPermissionDenied;
 
-const retryDelay = (attempt: number): number => Math.min(60_000, 1_000 * 2 ** Math.min(attempt, 6));
-
 const backfillFlag = (record: OutboxRecord): boolean => record.backfill === true;
 
+/** Every due interactive row of the scope, oldest first. Rows of other auth slots stay put. */
 const selectInteractiveOutbox = async (
 	database: MaalDatabase,
 	authSlotId: string,
 	workosUserId: string,
 	now: Date
 ): Promise<OutboxRecord[]> =>
-	(await database.outbox.toArray())
+	(await scopeOutbox(database, 'user', workosUserId))
 		.filter(
 			(row) =>
 				row.authSlotId === authSlotId &&
-				row.scopeKind === 'user' &&
-				row.scopeId === workosUserId &&
 				!backfillFlag(row) &&
-				(row.status === 'pending' || row.status === 'sending') &&
 				Date.parse(row.nextAttemptAt) <= now.getTime()
 		)
-		.toSorted(
-			(left, right) =>
-				Date.parse(left.occurredAt) - Date.parse(right.occurredAt) ||
-				left.mutationId.localeCompare(right.mutationId)
-		)
-		.slice(0, PUSH_BATCH_SIZE);
+		.toSorted(byOccurrence);
 
+const loadAggregate = async (
+	database: MaalDatabase,
+	workosUserId: string,
+	row: OutboxRecord
+): Promise<OutboxAggregate> => {
+	const entityKind = Schema.decodeUnknownSync(UserSyncEntityKindSchema)(row.entityKind);
+	const descriptor = USER_SYNC_ENTITY_DESCRIPTORS[entityKind];
+	const source = row.snapshot ?? (await database.table(descriptor.store).get(row.aggregateId));
+	return {
+		aggregate: decodeUserSyncAggregate(entityKind, row.aggregateId, workosUserId, source).aggregate,
+		deletionGroup: deletionGroupFor(descriptor.conflictGroups)
+	};
+};
+
+const toMutation = ({
+	host,
+	conflictGroups,
+	operation,
+	aggregate
+}: CoalescedMutation): SyncMutation => ({
+	schemaVersion: CURRENT_SCHEMA_VERSION,
+	mutationId: host.mutationId,
+	originDeviceId: host.originDeviceId,
+	entityKind: Schema.decodeUnknownSync(UserSyncEntityKindSchema)(host.entityKind),
+	entityId: host.aggregateId,
+	conflictGroups,
+	operation,
+	occurredAt: host.occurredAt,
+	aggregate
+});
+
+/** Backfill rows carry their own snapshot and groups, so they are sent exactly as prepared. */
 const hydrateMutation = async (
 	database: MaalDatabase,
 	workosUserId: string,
@@ -182,35 +223,6 @@ const hydrateMutation = async (
 	};
 };
 
-const requeue = async (
-	database: MaalDatabase,
-	rows: readonly OutboxRecord[],
-	now: Date
-): Promise<void> => {
-	await database.transaction('rw', database.outbox, async () => {
-		for (const row of rows) {
-			const attempts = row.attempts + 1;
-			const delay = backfillFlag(row)
-				? Math.max(BACKFILL_INTERVAL_MS, retryDelay(attempts))
-				: retryDelay(attempts);
-			await database.outbox.update(row.mutationId, {
-				status: 'pending',
-				attempts,
-				nextAttemptAt: utc(new Date(now.getTime() + delay))
-			});
-		}
-	});
-};
-
-const markSending = async (
-	database: MaalDatabase,
-	rows: readonly OutboxRecord[]
-): Promise<void> => {
-	await database.transaction('rw', database.outbox, async () => {
-		for (const row of rows) await database.outbox.update(row.mutationId, { status: 'sending' });
-	});
-};
-
 const checkpointKey = (
 	workosUserId: string,
 	entityKind: UserSyncEntityKind
@@ -237,13 +249,8 @@ const existingBackfillRows = async (
 	authSlotId: string,
 	workosUserId: string
 ): Promise<OutboxRecord[]> =>
-	(await database.outbox.toArray()).filter(
-		(row) =>
-			row.authSlotId === authSlotId &&
-			row.scopeKind === 'user' &&
-			row.scopeId === workosUserId &&
-			backfillFlag(row) &&
-			(row.status === 'pending' || row.status === 'sending')
+	(await scopeOutbox(database, 'user', workosUserId)).filter(
+		(row) => row.authSlotId === authSlotId && backfillFlag(row)
 	);
 
 const prepareBackfill = async (
@@ -443,8 +450,10 @@ export const createUserSyncCoordinator = (
 	let active: Promise<UserSyncRunState> | null = null;
 	let started = false;
 	let terminalBlocked = false;
+	let deniedCapability: string | null = null;
 	let retryAttempt = 0;
 	let timer: ReturnType<typeof setTimeout> | null = null;
+	let timerDueAt = 0;
 	let unsubscribe: (() => void)[] = [];
 
 	const deviceId = async (): Promise<string> => {
@@ -498,7 +507,11 @@ export const createUserSyncCoordinator = (
 		}
 	};
 
-	const pushInteractive = async (id: string): Promise<number | null> => {
+	/** Sends one batch of coalesced rows. Null means nothing was due. */
+	const pushInteractive = async (
+		id: string,
+		aggregates: Map<string, OutboxAggregate>
+	): Promise<PushOutcome | null> => {
 		const rows = await selectInteractiveOutbox(
 			options.database,
 			options.authSlotId,
@@ -506,28 +519,33 @@ export const createUserSyncCoordinator = (
 			now()
 		);
 		if (rows.length === 0) return null;
-		const mutations = await Promise.all(
-			rows.map((row) => hydrateMutation(options.database, options.workosUserId, row))
+		const planned = await coalesceOutbox(
+			rows,
+			(row) => loadAggregate(options.database, options.workosUserId, row),
+			aggregates
 		);
-		await markSending(options.database, rows);
+		const sent = coveredRows(planned);
+		await markSending(options.database, sent);
 		try {
 			const scope = await options.database.syncScopes.get(['user', options.workosUserId]);
-			const response = await options.transport.push(options.authSlotId, {
-				protocolVersion: CURRENT_PROTOCOL_VERSION,
-				deviceId: id,
-				audience: { kind: 'user', id: options.workosUserId },
-				baseCursor: scope?.cursor ?? null,
-				mutations
-			});
-			await applyUserMutationReceipts(
-				options.database,
-				options.workosUserId,
-				response.receipts,
-				now()
+			const pushed = await pushIsolatingRejections(planned.map(toMutation), (mutations) =>
+				options.transport.push(options.authSlotId, {
+					protocolVersion: CURRENT_PROTOCOL_VERSION,
+					deviceId: id,
+					audience: { kind: 'user', id: options.workosUserId },
+					baseCursor: scope?.cursor ?? null,
+					mutations: [...mutations]
+				})
 			);
-			return response.committedThrough;
+			const receipts = expandReceipts(planned, pushed.receipts);
+			await applyUserMutationReceipts(options.database, options.workosUserId, receipts, now());
+			await requeueUnanswered(options.database, sent, receipts, now(), BACKFILL_INTERVAL_MS);
+			return {
+				committedThrough: pushed.committedThrough,
+				rejectionCode: firstRejectionCode(receipts)
+			};
 		} catch (error) {
-			await requeue(options.database, rows, now());
+			await requeue(options.database, sent, now(), BACKFILL_INTERVAL_MS);
 			throw error;
 		}
 	};
@@ -573,26 +591,47 @@ export const createUserSyncCoordinator = (
 			});
 			return response.committedThrough;
 		} catch (error) {
-			await requeue(options.database, prepared.rows, now());
+			await requeue(options.database, prepared.rows, now(), BACKFILL_INTERVAL_MS);
 			throw error;
 		}
 	};
 
+	/**
+	 * The memberships and billing rows the user capability is decided from. A server denial holds
+	 * until these change, so a plan refresh resumes sync and an unchanged retry costs no request.
+	 */
+	const capabilityInputs = async (): Promise<{ householdIds: string[]; fingerprint: string }> => {
+		const memberships = (
+			await options.database.memberships
+				.where('[workosUserId+status]')
+				.equals([options.workosUserId, 'active'])
+				.toArray()
+		)
+			.filter(({ permissions }) => permissions.includes('recipes:read'))
+			.toSorted((left, right) => left.householdId.localeCompare(right.householdId));
+		const householdIds = memberships.map(({ householdId }) => householdId);
+		const capabilities = await options.database.billingCapabilities.bulkGet(householdIds);
+		return {
+			householdIds,
+			fingerprint: JSON.stringify([memberships.map(({ permissions }) => permissions), capabilities])
+		};
+	};
+
 	const markTerminal = async (error: unknown): Promise<void> => {
-		terminalBlocked = true;
 		if (error instanceof SyncUnauthenticated) {
+			terminalBlocked = true;
 			currentState = 'reauthRequired';
 			await markProfileReauthRequired(options.database, options.authSlotId);
 		} else {
 			currentState = 'blocked';
-			const capabilities = await options.database.billingCapabilities.toArray();
+			// Only this user's households decide this scope; other profiles' households are untouched.
+			const { householdIds } = await capabilityInputs();
 			await options.database.transaction('rw', options.database.billingCapabilities, async () => {
-				for (const capability of capabilities) {
-					await options.database.billingCapabilities.update(capability.householdId, {
-						stale: true
-					});
+				for (const householdId of householdIds) {
+					await options.database.billingCapabilities.update(householdId, { stale: true });
 				}
 			});
+			deniedCapability = (await capabilityInputs()).fingerprint;
 		}
 		await options.database.syncScopes.update(['user', options.workosUserId], {
 			state: 'blocked',
@@ -609,6 +648,12 @@ export const createUserSyncCoordinator = (
 		if (!environment.isVisible()) return (currentState = 'hidden');
 		const capability = await resolveCapability(options.database, options.workosUserId, now());
 		if (!capability.enabled) return (currentState = 'disabled');
+		if (deniedCapability !== null) {
+			if ((await capabilityInputs()).fingerprint === deniedCapability) {
+				return (currentState = 'blocked');
+			}
+			deniedCapability = null;
+		}
 		const acquired = await acquireSyncLease(options.database, {
 			scopeKind: 'user',
 			scopeId: options.workosUserId,
@@ -624,8 +669,18 @@ export const createUserSyncCoordinator = (
 			const id = await deviceId();
 			await pullAll(id);
 			lease = await renew(lease);
-			const pushedThrough = await pushInteractive(id);
-			if (pushedThrough !== null) await pullAll(id);
+			// Drain: every batch moves its rows out of the due set, so this ends.
+			let pushed = false;
+			let rejectionCode: string | null = null;
+			const aggregates = new Map<string, OutboxAggregate>();
+			let outcome = await pushInteractive(id, aggregates);
+			while (outcome !== null) {
+				pushed ||= outcome.committedThrough !== null;
+				rejectionCode ??= outcome.rejectionCode;
+				lease = await renew(lease);
+				outcome = await pushInteractive(id, aggregates);
+			}
+			if (pushed) await pullAll(id);
 			lease = await renew(lease);
 			const backfilledThrough = await runBackfill(id);
 			if (backfilledThrough !== null) await pullAll(id);
@@ -634,8 +689,9 @@ export const createUserSyncCoordinator = (
 			await options.database.syncScopes.update(['user', options.workosUserId], {
 				state: 'idle',
 				lastSuccessAt: utc(now()),
-				lastErrorCode: null
+				lastErrorCode: rejectionCode
 			});
+			schedule(backfilledThrough === null ? FOREGROUND_PULL_INTERVAL_MS : BACKFILL_INTERVAL_MS);
 			return currentState;
 		} catch (error) {
 			if (isTerminal(error)) {
@@ -656,7 +712,13 @@ export const createUserSyncCoordinator = (
 	};
 
 	const schedule = (delay = 0): void => {
-		if (!started || terminalBlocked || timer !== null) return;
+		if (!started || terminalBlocked) return;
+		const dueAt = Date.now() + delay;
+		if (timer !== null) {
+			if (dueAt >= timerDueAt) return;
+			clearTimeout(timer);
+		}
+		timerDueAt = dueAt;
 		timer = setTimeout(() => {
 			timer = null;
 			void run().catch((error: unknown) => {
@@ -696,7 +758,6 @@ export const createUserSyncCoordinator = (
 			schedule(250);
 		},
 		resumeAfterCapabilityRefresh() {
-			terminalBlocked = false;
 			retryAttempt = 0;
 			schedule();
 		},

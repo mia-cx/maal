@@ -104,6 +104,7 @@ export const startDeviceSync = (
 	const capabilityChanged = (): void => {
 		queueMicrotask(() => {
 			void reconcileAuthSlots().then(() => {
+				for (const coordinator of coordinators.values()) coordinator.resumeAfterCapabilityRefresh();
 				for (const coordinator of householdCoordinators.values()) {
 					coordinator.resumeAfterCapabilityRefresh();
 				}

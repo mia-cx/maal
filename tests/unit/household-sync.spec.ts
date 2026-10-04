@@ -6,10 +6,13 @@ import { uuidv7 } from 'uuidv7';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.js';
+import { projectAuthCallback } from '$lib/client/auth-slot-projection.js';
+import type { AuthSlotId } from '$lib/auth-slots/index.js';
 import {
 	HOUSEHOLD_BACKFILL_INTERVAL_MS,
 	HOUSEHOLD_BACKFILL_MAX_BYTES,
 	HOUSEHOLD_BACKFILL_SINGLE_RECORD_MAX_BYTES,
+	FOREGROUND_PULL_INTERVAL_MS,
 	applyHouseholdBootstrap,
 	applyHouseholdMutationReceipts,
 	applyHouseholdPullPage,
@@ -19,7 +22,8 @@ import {
 } from '$lib/client/sync/index.js';
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
 import { MealAggregateSchema, type MealAggregate } from '$lib/domain/meals/schema.js';
-import { SyncPermissionDenied } from '$lib/sync/contracts.js';
+import { deleteMeal, setMealStatus, updateMealSchedule } from '$lib/client/meals/commands.js';
+import { SyncPermissionDenied, SyncTransportError } from '$lib/sync/contracts.js';
 import type {
 	HouseholdBackfillRequest,
 	HouseholdPullRequest,
@@ -380,6 +384,107 @@ class MemoryHouseholdServer {
 }
 
 describe('foreground household coordinator', () => {
+	test.each(['mutation', 'capability', 'online', 'visible'] as const)(
+		'lets a %s notification preempt the foreground poll',
+		async (trigger) => {
+			vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+			const database = await openDatabase('scheduling');
+			await seedProfile(database, {
+				userId: 'user_alice',
+				profileId: 'profile_alice',
+				authSlotId: 'slot_alice',
+				paid: true
+			});
+			const transport = new MemoryHouseholdServer().transport('user_alice');
+			const pull = vi.spyOn(transport, 'pull');
+			const listeners = new Map<string, () => void>();
+			const coordinator = createHouseholdSyncCoordinator({
+				database,
+				authSlotId: 'slot_alice',
+				workosUserId: 'user_alice',
+				householdId,
+				transport,
+				environment: {
+					...environment(),
+					on: (event, listener) => {
+						listeners.set(event, listener);
+						return () => listeners.delete(event);
+					}
+				}
+			});
+			coordinator.start();
+			try {
+				const waitForPulls = (count: number) =>
+					vi.waitFor(async () => {
+						expect(pull).toHaveBeenCalledTimes(count);
+						expect(
+							(await database.syncScopes.get(['household', householdId]))?.leaseOwner
+						).toBeNull();
+					});
+				await vi.advanceTimersByTimeAsync(0);
+				await waitForPulls(1);
+				if (trigger === 'mutation') coordinator.notifyLocalMutation();
+				else if (trigger === 'capability') coordinator.resumeAfterCapabilityRefresh();
+				else listeners.get(trigger)!();
+				await vi.advanceTimersByTimeAsync(trigger === 'mutation' ? 250 : 0);
+				await waitForPulls(2);
+				await vi.advanceTimersByTimeAsync(FOREGROUND_PULL_INTERVAL_MS);
+				await waitForPulls(3);
+			} finally {
+				coordinator.stop();
+			}
+		}
+	);
+
+	test('hydrates each aggregate once while draining a multi-batch backlog', async () => {
+		const database = await openDatabase('bounded-hydration');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: true
+		});
+		const originDeviceId = String((await database.meta.get('deviceId'))!.value);
+		for (let index = 0; index < 120; index += 1) {
+			await addLocalMealIntent(database, {
+				mealId: uuidv7(),
+				mutationId: uuidv7(),
+				authSlotId: 'slot_alice',
+				originDeviceId,
+				date: '2026-08-25'
+			});
+		}
+		const transport = new MemoryHouseholdServer().transport('user_alice');
+		const push = vi.spyOn(transport, 'push');
+		// Empty pulls isolate interactive hydration from application of server changes.
+		transport.pull = async (_slot, request) => ({
+			protocolVersion: 1,
+			changes: [],
+			throughSequence: request.after,
+			retainedFloor: 0,
+			bootstrapGeneration: 1,
+			hasMore: false
+		});
+		const table = vi.spyOn(database, 'table');
+		const coordinator = createHouseholdSyncCoordinator({
+			database,
+			authSlotId: 'slot_alice',
+			workosUserId: 'user_alice',
+			householdId,
+			transport,
+			environment: environment()
+		});
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+		expect(push.mock.calls.map(([, request]) => request.mutations.length)).toEqual([50, 50, 20]);
+		expect(table.mock.calls.filter(([store]) => store === 'meals')).toHaveLength(120);
+		expect(
+			await database.outbox
+				.where('[scopeKind+scopeId+status]')
+				.equals(['household', householdId, 'pending'])
+				.count()
+		).toBe(0);
+	});
+
 	test('applies entity-key bootstrap pages whose commit sequences are not monotonic', async () => {
 		const database = await openDatabase('bootstrap-key-order');
 		const deviceId = String((await database.meta.get('deviceId'))!.value);
@@ -642,6 +747,12 @@ describe('foreground household coordinator', () => {
 
 	test('keeps a newer pending meal until every mutation masking the remote meal is rejected', async () => {
 		const database = await openDatabase('multiple-rejected-masked-pull');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: false
+		});
 		const mealId = uuidv7();
 		const firstMutationId = uuidv7();
 		const secondMutationId = uuidv7();
@@ -1004,4 +1115,472 @@ describe('foreground household coordinator', () => {
 		);
 		expect(outbox.find(({ authSlotId }) => authSlotId === 'slot_bob')?.status).toBe('pending');
 	});
+
+	test('pushes a schedule edit and a later delete as an upsert then the delete', async () => {
+		const database = await openDatabase('edit-delete');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: true
+		});
+		const originDeviceId = String((await database.meta.get('deviceId'))!.value);
+		const mealId = uuidv7();
+		await addLocalMealIntent(database, {
+			mealId,
+			mutationId: uuidv7(),
+			authSlotId: 'slot_alice',
+			originDeviceId,
+			date: '2026-08-25'
+		});
+		await deleteMeal(
+			database,
+			{
+				authSlotId: 'slot_alice',
+				householdId,
+				reporterUserId: 'user_alice',
+				originDeviceId,
+				occurredAt: '2026-08-21T12:01:00.000Z'
+			},
+			mealId
+		);
+		let sequence = 0;
+		const repository: HouseholdSyncRepository = {
+			readScopeState: async () => ({
+				retainedFloor: 0,
+				latestSequence: sequence,
+				bootstrapGeneration: 1
+			}),
+			pull: vi.fn(),
+			bootstrap: vi.fn(),
+			commit: async ({ mutation }) => ({
+				mutationId: mutation.mutationId,
+				status: 'accepted',
+				sequence: ++sequence,
+				resultingRevision: 1
+			}),
+			prune: vi.fn()
+		};
+		const pushes: HouseholdSyncMutation[][] = [];
+		const transport: HouseholdSyncTransport = {
+			...new MemoryHouseholdServer().transport('user_alice'),
+			push: async (_slot, request) => {
+				pushes.push([...request.mutations]);
+				try {
+					return await pushHouseholdSync(repository, householdId, 'user_alice', request);
+				} catch (error) {
+					throw new SyncTransportError({
+						code: (error as { code?: string }).code ?? 'unknown',
+						message: 'The sync request was rejected.',
+						retryable: false
+					});
+				}
+			}
+		};
+		const coordinator = createHouseholdSyncCoordinator({
+			database,
+			authSlotId: 'slot_alice',
+			workosUserId: 'user_alice',
+			householdId,
+			transport,
+			environment: environment()
+		});
+		vi.setSystemTime(new Date('2026-08-21T12:05:00.000Z'));
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(
+			pushes
+				.flat()
+				.map(({ operation, conflictGroups, aggregate }) => [
+					operation,
+					conflictGroups,
+					(aggregate as { deletedAt: string | null }).deletedAt
+				])
+		).toEqual([
+			['upsert', ['schedule'], null],
+			['delete', ['deletion'], '2026-08-21T12:01:00.000Z']
+		]);
+		expect(
+			(await database.outbox.toArray()).map(({ operation, status }) => [operation, status])
+		).toEqual([['delete', 'acknowledged']]);
+	});
+
+	test('keeps a pending local hard delete when a pull brings the meal back', async () => {
+		const database = await openDatabase('hard-delete');
+		await seedProfile(database, {
+			userId: 'user_alice',
+			profileId: 'profile_alice',
+			authSlotId: 'slot_alice',
+			paid: false
+		});
+		const originDeviceId = String((await database.meta.get('deviceId'))!.value);
+		const remoteMutationId = uuidv7();
+		const remote = meal(uuidv7(), remoteMutationId, uuidv7());
+		const mutationId = uuidv7();
+		await database.outbox.add({
+			mutationId,
+			authSlotId: 'slot_alice',
+			scopeKind: 'household',
+			scopeId: householdId,
+			status: 'pending',
+			occurredAt: timestamp,
+			aggregateId: remote.id,
+			entityKind: 'meal',
+			conflictGroup: 'deletion',
+			operation: 'delete',
+			originDeviceId,
+			payload: null,
+			nextAttemptAt: timestamp,
+			attempts: 0,
+			backfillConflictGroups: ['deletion'],
+			snapshot: { ...remote, deletedAt: timestamp }
+		});
+
+		await applyHouseholdPullPage(database, householdId, {
+			protocolVersion: 1,
+			changes: [
+				{
+					sequence: 1,
+					mutationId: remoteMutationId,
+					originDeviceId: uuidv7(),
+					actorUserId: 'user_bob',
+					entityKind: 'meal',
+					entityId: remote.id,
+					conflictGroups: ['schedule'],
+					operation: 'upsert',
+					resultingRevision: 2,
+					occurredAt: timestamp,
+					receivedAt: timestamp,
+					aggregate: remote,
+					tombstoneExpiresAt: null
+				}
+			],
+			throughSequence: 1,
+			retainedFloor: 0,
+			bootstrapGeneration: 1,
+			hasMore: false
+		});
+
+		expect(await database.meals.get(remote.id)).toBeUndefined();
+		expect(await database.outbox.get(mutationId)).toMatchObject({ status: 'pending' });
+	});
+
+	test.each([
+		['pull', false, false],
+		['bootstrap', false, false],
+		['bootstrap absence', false, false],
+		['receipt', false, false],
+		['pull', true, false],
+		['pull', false, true]
+	] as const)(
+		"preserves a signed-out profile's edit and deletion through %s, rebind, and push (later edits: %s, purged: %s)",
+		async (replacement, laterEdits, purged) => {
+			const database = await openDatabase('signed-out');
+			await seedProfile(database, {
+				userId: 'user_alice',
+				profileId: 'profile_alice',
+				authSlotId: 'slot_alice',
+				paid: true
+			});
+			const bobSlot = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' as AuthSlotId;
+			const authenticate = () =>
+				projectAuthCallback(
+					database,
+					{
+						authSlotId: bobSlot,
+						authStatus: 'authenticated'
+					},
+					{
+						now: timestamp,
+						fetcher: async () =>
+							Response.json({
+								schemaVersion: 1,
+								authSlotId: bobSlot,
+								status: 'authenticated',
+								workosUserId: 'user_bob',
+								email: 'bob@example.test',
+								firstName: 'Bob',
+								lastName: null,
+								profilePictureUrl: null,
+								verifiedAt: timestamp,
+								households: []
+							})
+					}
+				);
+			const { profileId } = await authenticate();
+			if (!profileId) throw new Error('Expected an authenticated local profile.');
+			await seedProfile(database, {
+				userId: 'user_bob',
+				profileId,
+				authSlotId: bobSlot,
+				paid: true
+			});
+			await database.authSlots.delete(bobSlot);
+			await database.profiles.update(profileId, { authState: 'signedOut' });
+			const originDeviceId = String((await database.meta.get('deviceId'))!.value);
+			const context = {
+				authSlotId: `signed-out:${profileId}`,
+				householdId,
+				reporterUserId: 'user_bob',
+				originDeviceId,
+				occurredAt: timestamp
+			};
+			const mealId = uuidv7();
+			const deletedId = uuidv7();
+			await database.meals.bulkPut([
+				meal(mealId, uuidv7(), originDeviceId),
+				meal(deletedId, uuidv7(), originDeviceId)
+			]);
+			let local = await updateMealSchedule(database, context, mealId, {
+				date: '2026-08-25',
+				time: '19:00',
+				sortOrder: 1
+			});
+			if (purged) await database.billingCapabilities.delete(householdId);
+			const deleted = await deleteMeal(database, context, deletedId);
+			expect('purgedAt' in deleted).toBe(purged);
+			const deferred = await database.outbox.toArray();
+			expect(deferred.every((row) => row.snapshot === undefined)).toBe(true);
+			const remote = [mealId, deletedId].map((id, index): HouseholdSyncChange => {
+				const mutationId = uuidv7();
+				return {
+					sequence: index + 1,
+					mutationId,
+					originDeviceId: uuidv7(),
+					actorUserId: 'user_carol',
+					entityKind: 'meal',
+					entityId: id,
+					conflictGroups: ['header'],
+					operation: 'upsert',
+					resultingRevision: 2,
+					occurredAt: timestamp,
+					receivedAt: timestamp,
+					aggregate: meal(id, mutationId, uuidv7(), { title: 'Remote soup' }),
+					tombstoneExpiresAt: null
+				};
+			});
+			const page = {
+				protocolVersion: 1 as const,
+				throughSequence: 1,
+				retainedFloor: 0,
+				bootstrapGeneration: 1,
+				hasMore: false
+			};
+			if (replacement === 'pull') {
+				// Repeated changes for one key must not replace its saved intent with the first remote value.
+				await applyHouseholdPullPage(database, householdId, {
+					...page,
+					throughSequence: 3,
+					changes: [...remote, { ...remote[0]!, sequence: 3 }]
+				});
+			} else if (replacement === 'receipt') {
+				const rows = remote.map((change) => ({
+					...deferred.find((row) => row.aggregateId === change.entityId)!,
+					mutationId: uuidv7(),
+					authSlotId: 'slot_alice',
+					authoritativeSnapshot: change.aggregate
+				}));
+				await database.outbox.bulkAdd(rows);
+				await applyHouseholdMutationReceipts(
+					database,
+					householdId,
+					rows.map(({ mutationId }) => ({
+						mutationId,
+						status: 'rejected',
+						sequence: null,
+						resultingRevision: null,
+						errorCode: 'historical_loser'
+					}))
+				);
+			} else {
+				await applyHouseholdBootstrap(database, householdId, {
+					...page,
+					throughSequence: 2,
+					aggregates: replacement === 'bootstrap' ? remote : [],
+					instructions:
+						replacement === 'bootstrap absence'
+							? remote.map(({ entityKind, entityId }) => ({
+									entityKind,
+									entityId,
+									action: 'delete_acknowledged_absence' as const
+								}))
+							: [],
+					nextEntityKey: null
+				});
+			}
+			for (const id of [mealId, deletedId]) {
+				if (replacement === 'bootstrap absence')
+					expect(await database.meals.get(id)).toBeUndefined();
+				else expect(await database.meals.get(id)).toMatchObject({ title: 'Remote soup' });
+			}
+			for (const row of deferred) {
+				expect(await database.outbox.get(row.mutationId)).toMatchObject({
+					authSlotId: context.authSlotId,
+					status: 'pending',
+					snapshot: row.aggregateId === mealId ? local : deleted
+				});
+			}
+			if (laterEdits) {
+				local = await setMealStatus(
+					database,
+					{ ...context, occurredAt: '2026-08-21T12:01:00.000Z' },
+					mealId,
+					'cooked'
+				);
+				expect(local.date).toBe('2026-08-25');
+				// Alice has no saved snapshot yet, but must not erase Bob's newest restored intent.
+				await updateMealSchedule(
+					database,
+					{
+						...context,
+						authSlotId: 'slot_alice',
+						reporterUserId: 'user_alice',
+						occurredAt: '2026-08-21T12:01:10.000Z'
+					},
+					mealId,
+					{ date: '2026-08-27', time: '21:00', sortOrder: 3 }
+				);
+				local = await setMealStatus(
+					database,
+					{ ...context, occurredAt: '2026-08-21T12:01:20.000Z' },
+					mealId,
+					'cooked'
+				);
+				expect(local.date).toBe('2026-08-25');
+				await applyHouseholdPullPage(database, householdId, {
+					...page,
+					throughSequence: 4,
+					changes: [{ ...remote[0]!, sequence: 4 }]
+				});
+				await updateMealSchedule(
+					database,
+					{
+						...context,
+						authSlotId: 'slot_alice',
+						reporterUserId: 'user_alice',
+						occurredAt: '2026-08-21T12:01:30.000Z'
+					},
+					mealId,
+					{ date: '2026-08-27', time: '21:00', sortOrder: 3 }
+				);
+			}
+			await authenticate();
+			if (purged)
+				await seedProfile(database, {
+					userId: 'user_bob',
+					profileId,
+					authSlotId: bobSlot,
+					paid: true
+				});
+			for (const row of deferred)
+				expect((await database.outbox.get(row.mutationId))?.authSlotId).toBe(bobSlot);
+			if (laterEdits) {
+				local = await updateMealSchedule(
+					database,
+					{ ...context, authSlotId: bobSlot, occurredAt: '2026-08-21T12:02:00.000Z' },
+					mealId,
+					{ date: '2026-08-26', time: '20:00', sortOrder: 2 }
+				);
+				expect(local.status).toBe('cooked');
+				local = await setMealStatus(
+					database,
+					{ ...context, authSlotId: bobSlot, occurredAt: '2026-08-21T12:03:00.000Z' },
+					mealId,
+					'skipped'
+				);
+				expect(local.date).toBe('2026-08-26');
+				vi.setSystemTime(new Date('2026-08-21T12:05:00.000Z'));
+			}
+			let sequence = 4;
+			const repository: HouseholdSyncRepository = {
+				readScopeState: async () => ({
+					retainedFloor: 0,
+					latestSequence: sequence,
+					bootstrapGeneration: 1
+				}),
+				pull: vi.fn(),
+				bootstrap: vi.fn(),
+				prune: vi.fn(),
+				commit: async ({ mutation }) => ({
+					mutationId: mutation.mutationId,
+					status: 'accepted',
+					sequence: ++sequence,
+					resultingRevision: 1
+				})
+			};
+			const transport = new MemoryHouseholdServer().transport('user_bob');
+			transport.pull = async (_slot, request) => ({
+				...page,
+				changes: [],
+				throughSequence: request.after
+			});
+			const push = vi.fn<HouseholdSyncTransport['push']>(async (_slot, request) =>
+				pushHouseholdSync(repository, householdId, 'user_bob', request)
+			);
+			transport.push = push;
+			const coordinator = createHouseholdSyncCoordinator({
+				database,
+				authSlotId: bobSlot,
+				workosUserId: 'user_bob',
+				householdId,
+				transport,
+				environment: environment()
+			});
+			await expect(coordinator.syncNow()).resolves.toBe('complete');
+			expect(push).toHaveBeenCalledTimes(1);
+			const sent = push.mock.calls[0]![1].mutations;
+			expect(
+				sent
+					.filter(({ entityId }) => entityId === mealId)
+					.map(({ operation, aggregate }) => ({ operation, aggregate }))
+			).toEqual(
+				Array.from({ length: laterEdits ? 2 : 1 }, () => ({
+					operation: 'upsert',
+					aggregate: local
+				}))
+			);
+			expect(sent.find(({ entityId }) => entityId === deletedId)).toMatchObject({
+				mutationId: deferred.find(({ aggregateId }) => aggregateId === deletedId)!.mutationId,
+				operation: 'delete',
+				aggregate: deleted
+			});
+			if (!laterEdits)
+				expect(sent.find(({ entityId }) => entityId === mealId)?.mutationId).toBe(
+					deferred.find(({ aggregateId }) => aggregateId === mealId)!.mutationId
+				);
+			const remaining = (await database.outbox.toArray()).filter(
+				({ authSlotId }) => authSlotId === bobSlot
+			);
+			expect(remaining.map(({ aggregateId, status }) => [aggregateId, status])).toEqual(
+				expect.arrayContaining([
+					[mealId, 'acknowledged'],
+					[deletedId, 'acknowledged']
+				])
+			);
+			expect(remaining.every((row) => row.snapshot === undefined)).toBe(true);
+			if (laterEdits) {
+				const aliceCoordinator = createHouseholdSyncCoordinator({
+					database,
+					authSlotId: 'slot_alice',
+					workosUserId: 'user_alice',
+					householdId,
+					transport,
+					environment: environment()
+				});
+				await expect(aliceCoordinator.syncNow()).resolves.toBe('complete');
+				expect(push.mock.calls[1]?.[1].mutations).toHaveLength(1);
+				expect(push.mock.calls[1]?.[1].mutations[0]).toMatchObject({
+					operation: 'upsert',
+					conflictGroups: ['schedule'],
+					aggregate: { date: '2026-08-27' }
+				});
+			}
+			expect(
+				(await database.outbox.toArray()).some(
+					({ status }) => status === 'pending' || status === 'sending'
+				)
+			).toBe(false);
+		}
+	);
 });

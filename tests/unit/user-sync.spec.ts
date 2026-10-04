@@ -7,15 +7,20 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.js';
 import { acquireSyncLease, renewSyncLease } from '$lib/client/local/leases.js';
+import type { OutboxRecord } from '$lib/client/local/records.js';
+import { coalesceOutbox, coveredRows, type OutboxAggregate } from '$lib/client/sync/outbox.js';
 import {
 	BACKFILL_SINGLE_RECORD_MAX_BYTES,
+	FOREGROUND_PULL_INTERVAL_MS,
 	applyUserMutationReceipts,
 	applyUserPullPage,
 	createUserSyncCoordinator,
 	applyUserBootstrap,
+	startDeviceSync,
 	type UserSyncEnvironment,
 	type UserSyncTransport
 } from '$lib/client/sync/index.js';
+import { deleteTaxonomyRecord, upsertTaxonomyRecord } from '$lib/client/taxonomy/commands.js';
 import { CURRENT_PROTOCOL_VERSION } from '$lib/domain/contracts/versions.js';
 import { UnitUserEntrySchema, type UnitUserEntry } from '$lib/domain/taxonomy/schema.js';
 import {
@@ -1067,5 +1072,492 @@ describe('server ordering and bootstrap rules', () => {
 		await expect(bootstrapUserSync(repository, userId, request)).rejects.toMatchObject({
 			_tag: 'SyncIdentityMismatch'
 		});
+	});
+});
+
+const deviceIdOf = async (database: MaalDatabase): Promise<string> =>
+	String((await database.meta.get('deviceId'))!.value);
+
+const unitDraft = (id: string, label = 'cup') => ({
+	id,
+	workosUserId: userId,
+	canonicalLabel: label,
+	baseUnitId: 'grams',
+	toBaseFactor: 3.5,
+	toBaseOffset: 0,
+	adoptionStatus: 'accepted' as const
+});
+
+const acceptingRepository = (): UserSyncRepository => {
+	let sequence = 0;
+	return {
+		readScopeState: async () => ({
+			retainedFloor: 0,
+			latestSequence: sequence,
+			bootstrapGeneration: 1
+		}),
+		pull: vi.fn(),
+		bootstrap: vi.fn(),
+		commit: async ({ mutation }) => ({
+			mutationId: mutation.mutationId,
+			status: 'accepted',
+			sequence: ++sequence,
+			resultingRevision: 1
+		}),
+		prune: vi.fn()
+	};
+};
+
+const refused = (code: string): SyncTransportError =>
+	new SyncTransportError({ code, message: 'The sync request was rejected.', retryable: false });
+
+/** Runs the real server push validation, and fails like the fetch transport does on a 400. */
+const validatingTransport = (pushes: PushRequest[] = []): UserSyncTransport => {
+	const repository = acceptingRepository();
+	return {
+		...noOpTransport(),
+		push: async (_slot, request) => {
+			pushes.push(request);
+			try {
+				return await pushUserSync(repository, userId, request);
+			} catch (error) {
+				throw refused((error as { code?: string }).code ?? 'unknown');
+			}
+		}
+	};
+};
+
+const outboxRowFor = async (database: MaalDatabase, aggregateId: string) =>
+	(await database.outbox.where('aggregateId').equals(aggregateId).toArray())[0]!;
+
+describe('user outbox recovery', () => {
+	test('bounds hydration without splitting folded intent or changing occurrence order', async () => {
+		const originDeviceId = uuidv7();
+		const rows: OutboxRecord[] = Array.from({ length: 104 }, (_, index) => ({
+			mutationId: uuidv7(),
+			authSlotId,
+			scopeKind: 'user',
+			scopeId: userId,
+			status: 'pending',
+			occurredAt: new Date(Date.parse(timestamp) + index * 1000).toISOString() as `${string}Z`,
+			aggregateId: index >= 1 && index <= 3 ? `other-${index}` : 'folded',
+			entityKind: 'unitUserEntry',
+			conflictGroup: 'row',
+			operation: 'upsert',
+			originDeviceId,
+			payload: null,
+			nextAttemptAt: timestamp,
+			attempts: 0
+		}));
+		const load = vi.fn(async (row: OutboxRecord) => ({
+			aggregate: {
+				deletedAt: null,
+				conflictClocks: {
+					row: { mutationId: row.mutationId, originDeviceId, occurredAt: row.occurredAt }
+				}
+			},
+			deletionGroup: 'row'
+		}));
+		const cache = new Map<string, OutboxAggregate>();
+		const batch = await coalesceOutbox(rows, load, cache, 2);
+		expect(batch.map(({ host }) => host)).toEqual([rows[1], rows[2]]);
+		expect(load.mock.calls.map(([row]) => row.aggregateId)).toEqual([
+			'folded',
+			'other-1',
+			'other-2'
+		]);
+		const folded = rows.filter(({ aggregateId }) => aggregateId === 'folded');
+		const [planned] = await coalesceOutbox(folded, load, cache, 1);
+		expect(planned?.host).toEqual(folded.at(-1));
+		expect(planned?.folded).toEqual(folded.slice(0, -1));
+		expect(load).toHaveBeenCalledTimes(3);
+
+		// Interleaved superseded rows need a lookahead, but the next batch must reuse those reads.
+		const initial = Array.from({ length: 120 }, (_, index) => ({
+			...rows[0]!,
+			mutationId: uuidv7(),
+			aggregateId: `aggregate-${index}`,
+			occurredAt: new Date(Date.parse(timestamp) + index * 1000).toISOString() as `${string}Z`
+		}));
+		const latest = initial.map((row, index) => ({
+			...row,
+			mutationId: uuidv7(),
+			occurredAt: new Date(
+				Date.parse(timestamp) + (120 + index) * 1000
+			).toISOString() as `${string}Z`
+		}));
+		let remaining = [...initial, ...latest];
+		load.mockClear();
+		const sent: OutboxRecord[] = [];
+		while (remaining.length > 0) {
+			const planned = await coalesceOutbox(remaining, load, cache);
+			sent.push(...planned.map(({ host }) => host));
+			const covered = new Set(coveredRows(planned).map(({ mutationId }) => mutationId));
+			remaining = remaining.filter(({ mutationId }) => !covered.has(mutationId));
+		}
+		expect(sent).toEqual(latest);
+		expect(load).toHaveBeenCalledTimes(120);
+		const newer = { ...latest[0]!, mutationId: uuidv7() };
+		expect((await coalesceOutbox([newer], load, cache))[0]?.host).toEqual(newer);
+		expect(load).toHaveBeenCalledTimes(121);
+	});
+
+	test('keeps a pending local hard delete when a pull brings the record back', async () => {
+		const database = await openDatabase();
+		const originDeviceId = await deviceIdOf(database);
+		const remote = userUnit({ revision: 4, toBaseFactor: 9 });
+		const mutationId = uuidv7();
+		// A hard delete removes the record and leaves only its pending outbox intent.
+		await database.outbox.add({
+			mutationId,
+			authSlotId,
+			scopeKind: 'user',
+			scopeId: userId,
+			status: 'pending',
+			occurredAt: timestamp,
+			aggregateId: remote.id,
+			entityKind: 'unitUserEntry',
+			conflictGroup: 'row',
+			operation: 'delete',
+			originDeviceId,
+			payload: null,
+			nextAttemptAt: timestamp,
+			attempts: 0,
+			backfillConflictGroups: ['row'],
+			snapshot: { ...remote, deletedAt: timestamp }
+		});
+
+		await applyUserPullPage(database, userId, {
+			...emptyPull(1),
+			changes: [
+				{
+					sequence: 1,
+					mutationId: uuidv7(),
+					originDeviceId: uuidv7(),
+					entityKind: 'unitUserEntry',
+					entityId: remote.id,
+					conflictGroups: ['row'],
+					operation: 'upsert',
+					resultingRevision: 4,
+					occurredAt: timestamp,
+					receivedAt: timestamp,
+					aggregate: remote,
+					tombstoneExpiresAt: null
+				}
+			]
+		});
+
+		expect(await database.unitUserEntries.get(remote.id)).toBeUndefined();
+		expect(await database.outbox.get(mutationId)).toMatchObject({
+			status: 'pending',
+			authoritativeSnapshot: remote
+		});
+	});
+
+	test('pushes an edit followed by a delete as the delete and keeps only the newest acknowledgement', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const context = { database, authSlotId, originDeviceId: await deviceIdOf(database) };
+		const id = uuidv7();
+		await upsertTaxonomyRecord(
+			{ ...context, occurredAt: '2026-08-21T11:00:00.000Z' },
+			'unitUserEntry',
+			unitDraft(id)
+		);
+		await deleteTaxonomyRecord(
+			{ ...context, occurredAt: '2026-08-21T11:01:00.000Z' },
+			'unitUserEntry',
+			id
+		);
+		const pushes: PushRequest[] = [];
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: validatingTransport(pushes),
+			environment: environment()
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(pushes.flatMap(({ mutations }) => mutations.map(({ operation }) => operation))).toEqual([
+			'delete'
+		]);
+		const rows = await database.outbox.toArray();
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({ operation: 'delete', status: 'acknowledged', payload: null });
+	});
+
+	test('rejects only the mutation the server refuses, shows its code, and commits the rest', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const context = { database, authSlotId, originDeviceId: await deviceIdOf(database) };
+		const [badId, goodId] = [uuidv7(), uuidv7()];
+		await upsertTaxonomyRecord(
+			{ ...context, occurredAt: timestamp },
+			'unitUserEntry',
+			unitDraft(badId, 'bad')
+		);
+		await upsertTaxonomyRecord(
+			{ ...context, occurredAt: timestamp },
+			'unitUserEntry',
+			unitDraft(goodId, 'good')
+		);
+		const accepting = validatingTransport();
+		let pushes = 0;
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: {
+				...accepting,
+				push: async (slot, request) => {
+					pushes += 1;
+					if (request.mutations.some(({ entityId }) => entityId === badId)) {
+						throw refused('invalid_complete_aggregate');
+					}
+					return accepting.push(slot, request);
+				}
+			},
+			environment: environment()
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(await outboxRowFor(database, badId)).toMatchObject({
+			status: 'rejected',
+			rejectionCode: 'invalid_complete_aggregate'
+		});
+		expect(await outboxRowFor(database, goodId)).toMatchObject({ status: 'acknowledged' });
+		expect((await database.syncScopes.get(['user', userId]))?.lastErrorCode).toBe(
+			'invalid_complete_aggregate'
+		);
+		const sent = pushes;
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+		expect(pushes).toBe(sent);
+	});
+
+	test('keeps rows pending when the server refuses the request itself', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const context = { database, authSlotId, originDeviceId: await deviceIdOf(database) };
+		await upsertTaxonomyRecord(
+			{ ...context, occurredAt: timestamp },
+			'unitUserEntry',
+			unitDraft(uuidv7())
+		);
+		await upsertTaxonomyRecord(
+			{ ...context, occurredAt: timestamp },
+			'unitUserEntry',
+			unitDraft(uuidv7(), 'mug')
+		);
+		const push = vi.fn(async () => {
+			throw refused('contract_mismatch');
+		});
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: { ...noOpTransport(), push },
+			environment: environment()
+		});
+
+		await expect(coordinator.syncNow()).rejects.toMatchObject({ code: 'contract_mismatch' });
+
+		expect(push).toHaveBeenCalledTimes(1);
+		expect((await database.outbox.toArray()).map(({ status }) => status)).toEqual([
+			'pending',
+			'pending'
+		]);
+	});
+
+	test('drains a backlog larger than one push batch in a single run', async () => {
+		const database = await openDatabase();
+		const context = { database, authSlotId, originDeviceId: await deviceIdOf(database) };
+		for (let index = 0; index < 120; index += 1) {
+			await upsertTaxonomyRecord(
+				{ ...context, occurredAt: timestamp },
+				'unitUserEntry',
+				unitDraft(uuidv7(), `unit ${index}`)
+			);
+		}
+		await seedPaidProfile(database);
+		const pushes: PushRequest[] = [];
+		const table = vi.spyOn(database, 'table');
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: validatingTransport(pushes),
+			environment: environment()
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(pushes.map(({ mutations }) => mutations.length)).toEqual([50, 50, 20]);
+		expect(table.mock.calls.filter(([store]) => store === 'unitUserEntries')).toHaveLength(120);
+		expect(
+			await database.outbox
+				.where('[scopeKind+scopeId+status]')
+				.equals(['user', userId, 'pending'])
+				.count()
+		).toBe(0);
+	});
+
+	test('reads the outbox only through its indexes during a sync run', async () => {
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const context = { database, authSlotId, originDeviceId: await deviceIdOf(database) };
+		await upsertTaxonomyRecord(
+			{ ...context, occurredAt: timestamp },
+			'unitUserEntry',
+			unitDraft(uuidv7())
+		);
+		const scan = vi.spyOn(database.outbox, 'toArray');
+		const coordinator = createUserSyncCoordinator({
+			database,
+			authSlotId,
+			workosUserId: userId,
+			transport: validatingTransport(),
+			environment: environment()
+		});
+
+		await expect(coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(scan).not.toHaveBeenCalled();
+	});
+});
+
+describe('user sync scheduling', () => {
+	test.each(['mutation', 'capability', 'online', 'visible'] as const)(
+		'lets a %s notification preempt the foreground poll',
+		async (trigger) => {
+			vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+			const database = await openDatabase();
+			await seedPaidProfile(database);
+			const transport = noOpTransport();
+			const pull = vi.spyOn(transport, 'pull');
+			const listeners = new Map<string, () => void>();
+			const coordinator = createUserSyncCoordinator({
+				database,
+				authSlotId,
+				workosUserId: userId,
+				transport,
+				environment: {
+					...environment(),
+					on: (event, listener) => {
+						listeners.set(event, listener);
+						return () => listeners.delete(event);
+					}
+				}
+			});
+			coordinator.start();
+			try {
+				const waitForPulls = (count: number) =>
+					vi.waitFor(async () => {
+						expect(pull).toHaveBeenCalledTimes(count);
+						expect((await database.syncScopes.get(['user', userId]))?.leaseOwner).toBeNull();
+					});
+				await vi.advanceTimersByTimeAsync(0);
+				await waitForPulls(1);
+				if (trigger === 'mutation') coordinator.notifyLocalMutation();
+				else if (trigger === 'capability') coordinator.resumeAfterCapabilityRefresh();
+				else listeners.get(trigger)!();
+				await vi.advanceTimersByTimeAsync(trigger === 'mutation' ? 250 : 0);
+				await waitForPulls(2);
+				await vi.advanceTimersByTimeAsync(FOREGROUND_PULL_INTERVAL_MS);
+				await waitForPulls(3);
+			} finally {
+				coordinator.stop();
+			}
+		}
+	);
+
+	test('pulls again while paid and foregrounded, but a free profile never polls', async () => {
+		vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+		vi.setSystemTime(new Date(timestamp));
+		const paid = await openDatabase();
+		await seedPaidProfile(paid);
+		const free = await openDatabase();
+		const pulls = { paid: 0, free: 0 };
+		const counting = (key: keyof typeof pulls): UserSyncTransport => ({
+			...noOpTransport(),
+			pull: async (_slot, request) => {
+				pulls[key] += 1;
+				return emptyPull(request.after);
+			}
+		});
+		const coordinators = [
+			createUserSyncCoordinator({
+				database: paid,
+				authSlotId,
+				workosUserId: userId,
+				transport: counting('paid'),
+				environment: environment()
+			}),
+			createUserSyncCoordinator({
+				database: free,
+				authSlotId,
+				workosUserId: userId,
+				transport: counting('free'),
+				environment: environment()
+			})
+		];
+		for (const coordinator of coordinators) coordinator.start();
+		try {
+			await vi.advanceTimersByTimeAsync(0);
+			await vi.waitFor(() => expect(pulls.paid).toBe(1));
+			await vi.advanceTimersByTimeAsync(FOREGROUND_PULL_INTERVAL_MS);
+			await vi.waitFor(() => expect(pulls.paid).toBe(2));
+			await vi.advanceTimersByTimeAsync(FOREGROUND_PULL_INTERVAL_MS * 3);
+			expect(pulls.free).toBe(0);
+		} finally {
+			for (const coordinator of coordinators) coordinator.stop();
+		}
+	});
+
+	test('resumes after a plan denial clears, and leaves other households alone', async () => {
+		vi.stubGlobal('navigator', { onLine: true });
+		const database = await openDatabase();
+		await seedPaidProfile(database);
+		const otherHousehold = {
+			...(await database.billingCapabilities.get('household_paid'))!,
+			householdId: 'household_other',
+			subscriberUserId: 'user_bob'
+		};
+		await database.billingCapabilities.put(otherHousehold);
+		let pulls = 0;
+		const transport: UserSyncTransport = {
+			...noOpTransport(),
+			pull: async (_slot, request) => {
+				pulls += 1;
+				if (pulls === 1) {
+					throw new SyncCapabilityDenied({ code: 'maal_plan_required', message: 'lapsed' });
+				}
+				return emptyPull(request.after);
+			}
+		};
+		const manager = startDeviceSync(database, transport);
+		try {
+			await vi.waitFor(async () =>
+				expect((await database.syncScopes.get(['user', userId]))?.state).toBe('blocked')
+			);
+			expect((await database.billingCapabilities.get('household_paid'))?.stale).toBe(true);
+			expect((await database.billingCapabilities.get('household_other'))?.stale).toBe(false);
+			// The stale write itself must not retry the denied request.
+			await new Promise((resolve) => setTimeout(resolve, 300));
+			expect(pulls).toBe(1);
+
+			// A plan refresh writes a fresh, enabled capability.
+			await database.billingCapabilities.update('household_paid', {
+				stale: false,
+				validUntil: '2026-10-21T12:00:00.000Z'
+			});
+
+			await vi.waitFor(() => expect(pulls).toBe(2), { timeout: 2_000 });
+		} finally {
+			manager.stop();
+			vi.unstubAllGlobals();
+		}
 	});
 });
