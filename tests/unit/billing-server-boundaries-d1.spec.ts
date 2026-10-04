@@ -320,6 +320,38 @@ describe('Stripe grace projection', () => {
 		}
 	);
 
+	test.each(['failure-payment-failure', 'failure-failure-payment'] as const)(
+		'a recovery payment after the next failure keeps that failure as the grace start: %s',
+		async (order) => {
+			const repository = new BillingRepository(database);
+			const { stripe, subscriptions } = fakeStripe();
+			subscriptions.set('sub_a', sub('sub_a', 'past_due'));
+			const deliver = (event: Stripe.Event) =>
+				processStripeWebhook({ stripe, repository, event, receivedAt: iso(event.created) });
+			// F0 at t0, payment at t0+500, the next failure F1 at t0+600.
+			const f0 = subscriptionEvent('evt_failed_0', t0, 'sub_a');
+			const paid = invoicePaidEvent('evt_paid', t0 + 500, 'sub_a');
+			const f1 = subscriptionEvent('evt_failed_1', t0 + 600, 'sub_a');
+			await deliver(f0);
+			if (order === 'failure-payment-failure') {
+				await deliver(paid);
+				// The recovered subscription holds a provisional window, so the household
+				// stays enabled while the account catches up.
+				expect(await authorizeHousehold(iso(t0 + 501))).toBeTruthy();
+				await deliver(f1);
+			} else {
+				await deliver(f1);
+				await deliver(paid);
+			}
+			expect(await billingRow()).toMatchObject({
+				status: 'past_due',
+				interruption_started_at: iso(t0 + 600),
+				grace_until: iso(t0 + 600 + 30 * 86_400),
+				last_successful_payment_at: iso(t0 + 500)
+			});
+		}
+	);
+
 	test('a paid invoice older than a newer failure keeps the newer grace window', async () => {
 		const repository = new BillingRepository(database);
 		const { stripe, subscriptions } = fakeStripe();

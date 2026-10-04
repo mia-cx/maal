@@ -1,5 +1,6 @@
 import { and, eq, gte, or } from 'drizzle-orm';
 
+import { BILLING_GRACE_DAYS } from '$lib/domain/billing/capability.js';
 import type { StripeSubscriptionStatus } from '$lib/domain/billing/contracts.js';
 import { getDb } from '$lib/server/db/index.js';
 import {
@@ -613,10 +614,12 @@ export class BillingRepository {
 	}
 
 	/**
-	 * A successful payment is a monotonic fact, so it applies outside the event-recency guard. For
-	 * an interrupted row the window is left untouched: its timestamps stay at or before the new
-	 * last_successful_payment_at, which marks them ended for the next failure event. For an
-	 * uninterrupted row only a stale interruption newer than the payment is kept.
+	 * A successful payment is a monotonic fact, so it applies outside the event-recency guard. On
+	 * an interrupted row an interruption at or before the payment is over: if a later event (the
+	 * next failure) already projected, the window restarts at that event's time, otherwise it opens
+	 * provisionally at the payment time — either way it reads as ended for the next failure event,
+	 * which replaces it with a fresh start. Uninterrupted rows only keep a newer interruption.
+	 * All SET expressions read pre-update values.
 	 */
 	private paymentResetStatement(
 		projection: SubscriptionProjectionWrite,
@@ -627,12 +630,21 @@ export class BillingRepository {
 				`UPDATE billing_subscriptions SET
 					last_successful_payment_at = MAX(COALESCE(last_successful_payment_at, ?1), ?1),
 					interruption_started_at = CASE
-						WHEN status IN ('past_due', 'paused') THEN interruption_started_at
+						WHEN status IN ('past_due', 'paused') THEN CASE
+							WHEN interruption_started_at IS NOT NULL AND interruption_started_at > ?1
+								THEN interruption_started_at
+							WHEN last_stripe_event_created_at > ?1 THEN last_stripe_event_created_at
+							ELSE ?1 END
 						WHEN interruption_started_at IS NULL OR interruption_started_at > ?1
 							THEN interruption_started_at
 						ELSE NULL END,
 					grace_until = CASE
-						WHEN status IN ('past_due', 'paused') THEN grace_until
+						WHEN status IN ('past_due', 'paused') THEN CASE
+							WHEN interruption_started_at IS NOT NULL AND interruption_started_at > ?1
+								THEN grace_until
+							WHEN last_stripe_event_created_at > ?1
+								THEN strftime('%Y-%m-%dT%H:%M:%fZ', last_stripe_event_created_at, '+${BILLING_GRACE_DAYS} days')
+							ELSE strftime('%Y-%m-%dT%H:%M:%fZ', ?1, '+${BILLING_GRACE_DAYS} days') END
 						WHEN interruption_started_at IS NULL OR interruption_started_at > ?1 THEN grace_until
 						ELSE NULL END
 				 WHERE household_id = ?2 AND stripe_subscription_id = ?3`
