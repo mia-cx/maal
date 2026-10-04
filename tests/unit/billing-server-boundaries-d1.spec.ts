@@ -545,6 +545,47 @@ describe('Stripe grace projection', () => {
 		});
 	});
 
+	test.each(['retry-before-failure', 'retry-after-failure'] as const)(
+		'an older invoice retry cannot anchor grace after a delayed recovery payment: %s',
+		async (order) => {
+			const repository = new BillingRepository(database);
+			const { stripe, subscriptions } = fakeStripe();
+			const deliver = (event: Stripe.Event) =>
+				processStripeWebhook({ stripe, repository, event, receivedAt: iso(t0 + 86_500) });
+			const failure = (id: string, created: number) =>
+				subscriptionEvent(id, created, 'sub_a', 'customer.subscription.updated', 'past_due');
+			const retry = {
+				...invoicePaidEvent('evt_old_invoice_retry', t0 + 550, 'sub_a'),
+				type: 'invoice.payment_failed'
+			} as Stripe.Event;
+
+			subscriptions.set('sub_a', sub('sub_a', 'past_due'));
+			await deliver(failure('evt_failed_0', t0));
+			if (order === 'retry-before-failure') {
+				subscriptions.set('sub_a', sub('sub_a', 'active'));
+				await deliver(retry);
+				expect(await billingRow()).toMatchObject({ status: 'active' });
+			}
+			subscriptions.set('sub_a', sub('sub_a', 'past_due'));
+			await deliver(failure('evt_failed_1', t0 + 86_400));
+			if (order === 'retry-after-failure') await deliver(retry);
+			await deliver(invoicePaidEvent('evt_paid', t0 + 500, 'sub_a'));
+
+			expect(await billingRow()).toMatchObject({
+				status: 'past_due',
+				interruption_started_at: iso(t0 + 86_400),
+				grace_until: iso(t0 + 86_400 + 30 * 86_400),
+				last_successful_payment_at: iso(t0 + 500)
+			});
+			expect(
+				await database
+					.prepare('SELECT event_status FROM stripe_events WHERE stripe_event_id = ?')
+					.bind(retry.id)
+					.first()
+			).toEqual({ event_status: null });
+		}
+	);
+
 	test('a paid invoice older than a newer failure keeps the newer grace window', async () => {
 		const repository = new BillingRepository(database);
 		const { stripe, subscriptions } = fakeStripe();

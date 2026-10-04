@@ -53,8 +53,7 @@ const statusReportedByEvent = (event: Stripe.Event): StripeSubscriptionStatus | 
 	if (event.type.startsWith('customer.subscription.') && object.object === 'subscription') {
 		return effectiveStripeStatus(object as Stripe.Subscription);
 	}
-	if (event.type === 'invoice.payment_failed') return 'past_due';
-	if (event.type === 'invoice.paid' || event.type === 'invoice.payment_succeeded') return 'active';
+	// Invoice outcomes do not establish the subscription's status at the event time.
 	return null;
 };
 
