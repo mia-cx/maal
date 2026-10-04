@@ -45,7 +45,7 @@ describe('authenticated household discovery', () => {
 					householdId: 'org_family',
 					householdName: 'Family kitchen',
 					roleSlug: 'admin',
-					permissions: ['households:write', 'meals:read', 'unknown:permission'],
+					permissions: ['households:write', 'meals:read'],
 					workosCreatedAt: now
 				}
 			],

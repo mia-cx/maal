@@ -6,10 +6,8 @@ import {
 	type BillingCapability
 } from '$lib/domain/billing/contracts.js';
 import {
-	householdPermissionValues,
 	HouseholdRoleSchema,
 	type Household,
-	type HouseholdPermission,
 	type Membership
 } from '$lib/domain/household/contracts.js';
 import type { HouseholdDiscoveryEntry } from '$lib/domain/household/administration.js';
@@ -42,11 +40,6 @@ interface DiscoveryRow {
 	deletion_state: string | null;
 	stripe_cancellation_id: string | null;
 }
-
-const supportedPermissions = (permissions: readonly string[]): readonly HouseholdPermission[] =>
-	permissions.filter((permission): permission is HouseholdPermission =>
-		(householdPermissionValues as readonly string[]).includes(permission)
-	);
 
 const localDeletionState = (state: string | null): Household['deletionState'] =>
 	state === 'purged'
@@ -94,8 +87,7 @@ export const discoverActiveHouseholds = async (input: {
 }): Promise<readonly HouseholdDiscoveryEntry[]> => {
 	const memberships = input.liveMemberships.map((live) => ({
 		live,
-		roleSlug: Schema.decodeUnknownSync(HouseholdRoleSchema)(live.roleSlug),
-		permissions: supportedPermissions(live.permissions)
+		roleSlug: Schema.decodeUnknownSync(HouseholdRoleSchema)(live.roleSlug)
 	}));
 	if (memberships.length === 0) return [];
 
@@ -104,7 +96,7 @@ export const discoverActiveHouseholds = async (input: {
 			.prepare('INSERT INTO users (workos_user_id) VALUES (?) ON CONFLICT DO NOTHING')
 			.bind(input.workosUserId)
 	];
-	for (const { live, roleSlug, permissions } of memberships) {
+	for (const { live, roleSlug } of memberships) {
 		writes.push(
 			input.database
 				.prepare(
@@ -134,7 +126,7 @@ export const discoverActiveHouseholds = async (input: {
 					live.householdId,
 					input.workosUserId,
 					roleSlug,
-					JSON.stringify(permissions),
+					JSON.stringify(live.permissions),
 					live.directoryManaged ? 1 : 0,
 					live.workosCreatedAt ?? input.now,
 					input.now,
@@ -145,7 +137,7 @@ export const discoverActiveHouseholds = async (input: {
 	await input.database.batch(writes);
 
 	return Promise.all(
-		memberships.map(async ({ live, roleSlug, permissions }): Promise<HouseholdDiscoveryEntry> => {
+		memberships.map(async ({ live, roleSlug }): Promise<HouseholdDiscoveryEntry> => {
 			const row = await input.database
 				.prepare(
 					`SELECT h.*,
@@ -183,7 +175,7 @@ export const discoverActiveHouseholds = async (input: {
 				householdId: live.householdId,
 				workosUserId: input.workosUserId,
 				roleSlug,
-				permissions,
+				permissions: live.permissions,
 				status: 'active',
 				directoryManaged: live.directoryManaged ?? false,
 				workosCreatedAt: (live.workosCreatedAt ?? input.now) as `${string}Z`,

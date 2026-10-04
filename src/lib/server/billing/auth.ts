@@ -2,6 +2,7 @@ import type { RequestEvent } from '@sveltejs/kit';
 import { and, eq } from 'drizzle-orm';
 
 import type { HouseholdPermission } from '$lib/domain/household/contracts.js';
+import { expandWorkOSPermissions } from '$lib/domain/household/permissions.js';
 import {
 	authSlotAdapterFor,
 	authSlotCookieName,
@@ -59,12 +60,16 @@ export const requireBillingActor = async (
 	} catch {
 		throw new BillingAuthorizationError('membership_projection_invalid');
 	}
+	if (!Array.isArray(permissions)) throw new BillingAuthorizationError('permission_denied');
+	const projectedPermissions = expandWorkOSPermissions(
+		permissions.filter((value): value is string => typeof value === 'string')
+	);
 	if (
-		!Array.isArray(permissions) ||
 		membership.membershipId !== liveMembership.membershipId ||
 		membership.roleSlug !== liveMembership.roleSlug ||
 		(permission !== null &&
-			(!permissions.includes(permission) || !liveMembership.permissions.includes(permission)))
+			(!projectedPermissions.includes(permission) ||
+				!liveMembership.permissions.includes(permission)))
 	) {
 		throw new BillingAuthorizationError('permission_denied');
 	}

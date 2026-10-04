@@ -2,7 +2,7 @@ import type { RequestEvent } from '@sveltejs/kit';
 import { Miniflare } from 'miniflare';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
-import type { HouseholdRole } from '$lib/domain/household/contracts.js';
+import type { HouseholdPermission, HouseholdRole } from '$lib/domain/household/contracts.js';
 import {
 	HouseholdAdministrationRepository,
 	HouseholdAdministrationService,
@@ -20,7 +20,7 @@ const aliceId = 'user_alice';
 const bobId = 'user_bob';
 const charlieId = 'user_charlie';
 
-const permissionsFor = (roleSlug: HouseholdRole): readonly string[] =>
+const permissionsFor = (roleSlug: HouseholdRole): readonly HouseholdPermission[] =>
 	roleSlug === 'admin'
 		? ['households:write', 'recipes:read', 'recipes:write', 'meals:read', 'meals:write']
 		: roleSlug === 'member'

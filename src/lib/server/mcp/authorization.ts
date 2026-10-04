@@ -1,5 +1,6 @@
 import type { LiveWorkOSMembership } from '$lib/server/auth-slots/adapter.js';
 import { authSlotAdapterFor } from '$lib/server/auth-slots/index.js';
+import { expandWorkOSPermissions } from '$lib/domain/household/permissions.js';
 
 import {
 	MCP_KEY_PREFIX,
@@ -174,7 +175,7 @@ export const authorizeMcpRequest = async (input: {
 		const live = liveByHousehold.get(row.household_id);
 		if (!live) continue;
 		if (key.grantMode === 'selected' && !selected.has(row.household_id)) continue;
-		const projectedPermissions = new Set(stringArray(row.permissions));
+		const projectedPermissions = new Set(expandWorkOSPermissions(stringArray(row.permissions)));
 		effectiveHouseholds.push({
 			householdId: row.household_id,
 			householdName: live.householdName,

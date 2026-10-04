@@ -12,6 +12,7 @@ import {
 	pullHouseholdSync,
 	pushHouseholdSync
 } from '$lib/server/sync/index.js';
+import type { LiveWorkOSMembership } from '$lib/server/auth-slots/adapter.js';
 import type { HouseholdSyncMutation } from '$lib/sync/household-contracts.js';
 import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js';
 
@@ -22,7 +23,7 @@ const timestamp = '2026-08-21T12:00:00.000Z' as const;
 const deviceId = uuidv7();
 let miniflare: Miniflare;
 let database: D1Database;
-const liveMembership = (overrides: Record<string, unknown> = {}) => ({
+const liveMembership = (overrides: Partial<LiveWorkOSMembership> = {}): LiveWorkOSMembership => ({
 	membershipId: 'membership_alice',
 	householdId,
 	householdName: 'Family',
@@ -164,6 +165,38 @@ const mealMutation = (
 });
 
 describe('D1 household sync', () => {
+	test.each(['households:write', 'household:manage'])(
+		'expands stored %s without bypassing live permission checks',
+		async (storedPermission) => {
+			await database
+				.prepare('UPDATE household_memberships SET permissions = ? WHERE workos_user_id = ?')
+				.bind(JSON.stringify([storedPermission]), aliceId)
+				.run();
+			for (const permission of ['meals:read', 'meals:write', 'households:write'] as const) {
+				await expect(
+					d1HouseholdSyncCapabilityAuthorizer.authorize({
+						database,
+						workosUserId: aliceId,
+						householdId,
+						activeWorkOSMemberships: [liveMembership()],
+						permission,
+						now: timestamp
+					})
+				).resolves.toEqual({ householdId, permission });
+			}
+			await expect(
+				d1HouseholdSyncCapabilityAuthorizer.authorize({
+					database,
+					workosUserId: aliceId,
+					householdId,
+					activeWorkOSMemberships: [liveMembership({ permissions: ['meals:read'] })],
+					permission: 'meals:write',
+					now: timestamp
+				})
+			).rejects.toMatchObject({ code: 'household_permission_required' });
+		}
+	);
+
 	test('commits and bootstraps the household settings aggregate', async () => {
 		const repository = new D1HouseholdSyncRepository(database);
 		const mutationId = uuidv7();

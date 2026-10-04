@@ -1,5 +1,6 @@
 import { ServerSyncCapabilityDenied, ServerSyncPermissionDenied } from './errors.js';
 import type { LiveWorkOSMembership } from '$lib/server/auth-slots/adapter.js';
+import { expandWorkOSPermissions } from '$lib/domain/household/permissions.js';
 
 export type UserSyncPermission = 'recipes:read' | 'recipes:write';
 export type HouseholdSyncPermission = 'meals:read' | 'meals:write' | 'households:write';
@@ -56,7 +57,9 @@ const permissionsFor = (encoded: string): readonly string[] => {
 	try {
 		const decoded: unknown = JSON.parse(encoded);
 		return Array.isArray(decoded)
-			? decoded.filter((permission): permission is string => typeof permission === 'string')
+			? expandWorkOSPermissions(
+					decoded.filter((permission): permission is string => typeof permission === 'string')
+				)
 			: [];
 	} catch {
 		return [];

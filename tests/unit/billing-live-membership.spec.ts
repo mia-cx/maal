@@ -66,32 +66,39 @@ const event = () =>
 	}) as never;
 
 describe('billing live membership authorization', () => {
-	test('requires the same live membership ID, role, and permission as the D1 projection', async () => {
-		liveMemberships.mockResolvedValue([
-			{
-				membershipId: 'membership_alice',
-				householdId: 'org_family',
-				householdName: 'Family',
-				roleSlug: 'admin',
-				permissions: ['households:write']
-			}
-		]);
-		await expect(requireBillingActor(event(), 'org_family')).resolves.toMatchObject({
-			workosUserId: 'user_alice'
-		});
+	test.each([{ permissions: ['households:write'] }, { permissions: ['household:manage'] }])(
+		'requires live grants for stored $permissions',
+		async ({ permissions }) => {
+			await database
+				.prepare('UPDATE household_memberships SET permissions = ?')
+				.bind(JSON.stringify(permissions))
+				.run();
+			liveMemberships.mockResolvedValue([
+				{
+					membershipId: 'membership_alice',
+					householdId: 'org_family',
+					householdName: 'Family',
+					roleSlug: 'admin',
+					permissions: ['households:write']
+				}
+			]);
+			await expect(requireBillingActor(event(), 'org_family')).resolves.toMatchObject({
+				workosUserId: 'user_alice'
+			});
 
-		liveMemberships.mockResolvedValue([
-			{
-				membershipId: 'membership_alice',
-				householdId: 'org_family',
-				householdName: 'Family',
-				roleSlug: 'member',
-				permissions: []
-			}
-		]);
-		await expect(requireBillingActor(event(), 'org_family')).rejects.toMatchObject({
-			_tag: 'BillingAuthorizationError',
-			reason: 'permission_denied'
-		});
-	});
+			liveMemberships.mockResolvedValue([
+				{
+					membershipId: 'membership_alice',
+					householdId: 'org_family',
+					householdName: 'Family',
+					roleSlug: 'member',
+					permissions: []
+				}
+			]);
+			await expect(requireBillingActor(event(), 'org_family')).rejects.toMatchObject({
+				_tag: 'BillingAuthorizationError',
+				reason: 'permission_denied'
+			});
+		}
+	);
 });
