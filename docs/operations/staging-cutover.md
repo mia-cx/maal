@@ -241,12 +241,15 @@ webhook deliveries/retries, and WorkOS API errors. Do not copy request headers, 
 or provider objects into evidence. Wrangler configuration is the source of truth for observability and
 triggers; see [Wrangler configuration](https://developers.cloudflare.com/workers/wrangler/configuration/).
 
-For the free-use gate, the staging-only Worker probe marks every proof API response with whether its D1 binding
-was opened and emits `staging_proof_request` with only the deployment label and that boolean. The browser
-requires this telemetry on every same-origin API/MCP call. Only explicit billing-status and household-admin
-calls may open D1; auth calls must not, and any content call fails even if it did not open D1. Correlate the
-same label and UTC window in Workers Logs/traces. Do not export raw logs, URLs, account IDs, database IDs, or
-request headers. Production must not define `MAAL_PROOF_TELEMETRY`.
+For the free-use gate, the staging-only Worker probe marks every traced response with whether its D1 binding
+was opened. It also logs a `staging_proof_request` event to Workers Logs carrying only the deployment label
+(`proofLabel`), the run label (`proofRun`), the route class (`auth`, `billing`, `admin`, or `content`), and
+that boolean. The run starts with a canary `GET /api/auth-slots/<random>/`, which the probe must mark as not
+opening D1. A disabled probe therefore fails the run instead of looking like one that never reached the Worker.
+The browser requires the response marker on every same-origin API/MCP call. Only explicit
+billing-status and household-admin calls may open D1; auth and content routes must not, and any content API
+call fails even if it did not open D1. `proof:staging live` then checks the same rule in Workers Logs (see
+step 6). Production must not define `MAAL_PROOF_TELEMETRY`.
 
 ## 6. Run the guarded proof
 
@@ -282,6 +285,16 @@ pnpm proof:staging live
 The live command asserts the exact stable callback before creating fixtures and fails closed while attempting
 provider cleanup. Do not waive or hand-edit the result.
 
+The free-use step tags its requests with a fresh run label, then queries the Workers Observability telemetry
+API ([Run a query](https://developers.cloudflare.com/api/resources/workers/subresources/observability/subresources/telemetry/methods/query/))
+for that run's `staging_proof_request` events. It polls for up to three minutes while Workers Logs ingests
+the run, and fails when the log holds fewer events than the browser saw traced responses or when any auth
+or content event opened D1. The query authenticates with `CLOUDFLARE_API_TOKEN` when it is set, otherwise
+with the Wrangler login. That login needs Workers Observability access, which `pnpm exec wrangler login`
+requests from Wrangler 4.113 on; a token needs the Workers Observability permission. The command checks this
+access before it creates any fixture. The evidence records only counts under `gates.freeUseLogs`: events
+seen, D1 opens on content, auth, and billing/admin routes, and poll attempts. It never records log lines.
+
 The deployed auth-slot step runs all five `playwright.auth-slots.config.ts` projects, two of them on WebKit.
 On a host that cannot launch WebKit, run `pnpm proof:staging live --skip-webkit` instead. It skips only the
 WebKit projects and records them in the evidence under `gates.retainedSlots.deployedRoute`
@@ -296,8 +309,8 @@ The gates prove:
   recovery, read-only MCP denial, stateless MCP discovery/write, key revocation on the next request, household
   deletion/recovery, retention purge, and zero-remnant cleanup;
 - a local-only recipe created offline and reopened online while every same-origin API/MCP call is checked
-  against an explicit auth/billing/admin allowlist and operator-correlated Cloudflare telemetry reports zero D1
-  opens;
+  against an explicit auth/billing/admin allowlist, and Workers Logs shows no D1 open on any auth or content
+  route for that run;
 - focused unit contracts plus the complete D1 migration/schema contract.
 
 MCP uses the stateless `2026-07-28` request model and `server/discover`; the current protocol removes transport
