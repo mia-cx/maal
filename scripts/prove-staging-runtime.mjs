@@ -767,12 +767,11 @@ async function cleanupD1() {
 	await d1Execute(
 		scopedTables.map(([table, condition]) => `DELETE FROM ${table} WHERE ${condition}`).join('; ')
 	);
+	// Scalar subqueries, not UNION ALL: remote D1 rejects a compound SELECT with this many terms.
 	const result = await d1Execute(
-		`SELECT SUM(count) AS count FROM (` +
-			scopedTables
-				.map(([table, condition]) => `SELECT COUNT(*) AS count FROM ${table} WHERE ${condition}`)
-				.join(' UNION ALL ') +
-			`)`
+		`SELECT ${scopedTables
+			.map(([table, condition]) => `(SELECT COUNT(*) FROM ${table} WHERE ${condition})`)
+			.join(' + ')} AS count`
 	);
 	cleanup.d1RowsRemaining = result?.[0]?.results?.[0]?.count ?? null;
 }
