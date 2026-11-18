@@ -1,6 +1,10 @@
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
+import { STAGING_PROOF_EVENT } from '../../src/lib/server/observability/staging-proof.ts';
+
+export { classifyPermittedFreeUseCall } from '../../src/lib/server/observability/staging-proof.ts';
+
 export const STAGING_CONFIRMATION = 'create-and-remove-disposable-staging-fixtures';
 
 /** The committed config that deploy, migrations, and the runtime proof's D1 commands all use. */
@@ -245,25 +249,114 @@ const privatePath = (value, repositoryRoot, name) => {
 	return path;
 };
 
-const permittedFreeUseCalls = [
-	{ method: 'GET', pattern: /^\/api\/auth-slots\/[^/]+\/$/, routeClass: 'auth' },
-	{ method: 'POST', pattern: /^\/api\/auth-slots\/[^/]+\/refresh$/, routeClass: 'auth' },
-	{
-		method: 'GET',
-		pattern: /^\/api\/auth-slots\/[^/]+\/households\/[^/]+$/,
-		routeClass: 'admin'
-	},
-	{
-		method: 'GET',
-		pattern: /^\/api\/auth-slots\/[^/]+\/billing\/status$/,
-		routeClass: 'billing'
-	}
-];
+/** Bounds the wait for Workers Logs to ingest a free-use run: 12 polls, 15 seconds apart. */
+export const FREE_USE_LOG_POLL = { maxAttempts: 12, pauseMs: 15_000 };
+/** The events view returns at most this many events, so a full page cannot prove completeness. */
+const TELEMETRY_EVENT_LIMIT = 2000;
+/** Starts the log window before the run to absorb clock skew between this host and Cloudflare. */
+const LOG_WINDOW_SKEW_MS = 60_000;
 
-export const classifyPermittedFreeUseCall = (method, pathname) =>
-	permittedFreeUseCalls.find(
-		(candidate) => candidate.method === method.toUpperCase() && candidate.pattern.test(pathname)
-	)?.routeClass ?? null;
+export const telemetryQueryUrl = (accountId) =>
+	`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/observability/telemetry/query`;
+
+/**
+ * The Workers Observability events query for one free-use run: `staging_proof_request` events
+ * tagged with the deployment label and the run label, from just before the run until `now`.
+ * `dry` keeps the ad-hoc query out of the account's saved queries.
+ */
+export const buildFreeUseLogQuery = ({ deploymentLabel, proofRun, startedAt, now }) => ({
+	queryId: `maal-staging-free-use-${proofRun}`,
+	dry: true,
+	view: 'events',
+	limit: TELEMETRY_EVENT_LIMIT,
+	timeframe: { from: new Date(startedAt).getTime() - LOG_WINDOW_SKEW_MS, to: now },
+	parameters: {
+		filterCombination: 'and',
+		filters: [
+			{ key: 'event', operation: 'eq', type: 'string', value: STAGING_PROOF_EVENT },
+			{ key: 'proofLabel', operation: 'eq', type: 'string', value: deploymentLabel },
+			{ key: 'proofRun', operation: 'eq', type: 'string', value: proofRun }
+		]
+	}
+});
+
+/**
+ * Judges one query response against the run. It counts only events whose own fields match the
+ * run, so a filter the API ignores cannot let another run's events in, and it returns counts only.
+ * A content or auth event with a D1 open fails the run; so does logging fewer events than the
+ * browser saw traced responses.
+ */
+export const evaluateFreeUseLogs = (
+	response,
+	{ deploymentLabel, proofRun, tracedRequestCount }
+) => {
+	if (!response?.result) throw new Error('Workers Logs returned no query result.');
+	const rawEvents = response.result.events?.events ?? [];
+	if (rawEvents.length >= TELEMETRY_EVENT_LIMIT) {
+		throw new Error(
+			'Workers Logs returned a full page; the free-use run cannot be proven complete.'
+		);
+	}
+	const events = rawEvents
+		.map(({ source }) => (typeof source === 'string' ? parseJsonObject(source) : source))
+		.filter(
+			(source) =>
+				source?.event === STAGING_PROOF_EVENT &&
+				source.proofLabel === deploymentLabel &&
+				source.proofRun === proofRun
+		);
+	// Anything but an explicit `false` counts as a D1 open, so a malformed event fails closed.
+	const d1Opens = (routeClasses) =>
+		events.filter(({ d1Opened, routeClass }) => d1Opened !== false && routeClasses(routeClass))
+			.length;
+	const observed = {
+		tracedRequestCount: safeInteger(tracedRequestCount) ?? 0,
+		eventCount: events.length,
+		contentD1OpenCount: d1Opens((routeClass) => !['auth', 'billing', 'admin'].includes(routeClass)),
+		authD1OpenCount: d1Opens((routeClass) => routeClass === 'auth'),
+		billingAdminD1OpenCount: d1Opens((routeClass) => ['billing', 'admin'].includes(routeClass))
+	};
+	const checks = {
+		allTracedRequestsLogged:
+			observed.tracedRequestCount > 0 && observed.eventCount >= observed.tracedRequestCount,
+		zeroContentD1Opens: observed.contentD1OpenCount === 0,
+		zeroAuthD1Opens: observed.authD1OpenCount === 0
+	};
+	return {
+		result: Object.values(checks).every(Boolean) ? 'passed' : 'failed',
+		checks,
+		observed
+	};
+};
+
+/**
+ * Polls Workers Logs until every traced request of the run is logged or the bound runs out, then
+ * returns the last evaluation. A D1 open on a content or auth route ends the poll at once.
+ */
+export const pollFreeUseLogs = async ({
+	query,
+	pause,
+	run,
+	maxAttempts = FREE_USE_LOG_POLL.maxAttempts
+}) => {
+	for (let attempt = 1; ; attempt += 1) {
+		const evaluation = evaluateFreeUseLogs(await query(), run);
+		const { allTracedRequestsLogged, ...d1Checks } = evaluation.checks;
+		const settled = allTracedRequestsLogged || !Object.values(d1Checks).every(Boolean);
+		if (settled || attempt >= maxAttempts) {
+			return { ...evaluation, observed: { ...evaluation.observed, pollAttempts: attempt } };
+		}
+		await pause(attempt);
+	}
+};
+
+const parseJsonObject = (value) => {
+	try {
+		return JSON.parse(value);
+	} catch {
+		return null;
+	}
+};
 
 export const fixtureCleanupComplete = (cleanup, failures = []) =>
 	Array.isArray(failures) &&

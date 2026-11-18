@@ -1,5 +1,6 @@
 import { handleScheduledMaintenance } from './lib/server/maintenance/scheduled.js';
 import {
+	stagingProofLogEvent,
 	stagingProofTelemetry,
 	withStagingProofTelemetry
 } from './lib/server/observability/staging-proof.js';
@@ -12,13 +13,7 @@ export default {
 		const telemetry = stagingProofTelemetry(request, env);
 		if (!telemetry) return svelteKitWorker.fetch(request, env, ctx);
 		const response = await svelteKitWorker.fetch(request, telemetry.environment, ctx);
-		console.log(
-			JSON.stringify({
-				event: 'staging_proof_request',
-				proofLabel: telemetry.label,
-				d1Opened: telemetry.evidence.d1Opened
-			})
-		);
+		console.log(stagingProofLogEvent(request, telemetry));
 		return withStagingProofTelemetry(response, telemetry.evidence);
 	},
 	async scheduled(_controller, env) {

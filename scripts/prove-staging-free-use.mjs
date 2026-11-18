@@ -10,14 +10,25 @@ const baseUrl = validateStagingOrigin(process.env.MAAL_STAGING_BASE_URL);
 const browser = await chromium.launch();
 const context = await browser.newContext({
 	extraHTTPHeaders: {
-		'x-maal-proof-trace': process.env.MAAL_STAGING_DEPLOYMENT_LABEL ?? 'staging-free-use-proof'
+		'x-maal-proof-trace': process.env.MAAL_STAGING_DEPLOYMENT_LABEL ?? 'staging-free-use-proof',
+		// `proof:staging live` sets the run label so it can find this run's Workers Logs events.
+		...(process.env.MAAL_STAGING_PROOF_RUN
+			? { 'x-maal-proof-run': process.env.MAAL_STAGING_PROOF_RUN }
+			: {})
 	}
 });
 const page = await context.newPage();
 const remoteRequests = [];
+const tracedResponses = [];
 const pageErrors = [];
 
 page.on('pageerror', (error) => pageErrors.push(error.name));
+// Every Worker response this run traced, including page loads. Responses a service worker
+// answered never reached the Worker on that request, so they are not counted.
+context.on('response', (response) => {
+	if (new URL(response.url()).origin !== baseUrl || response.fromServiceWorker()) return;
+	tracedResponses.push(response.headerValue('x-maal-proof-d1-opened'));
+});
 context.on('request', (request) => {
 	const url = new URL(request.url());
 	if (url.origin !== baseUrl || (!url.pathname.startsWith('/api/') && url.pathname !== '/mcp'))
@@ -62,6 +73,9 @@ try {
 	await page.reload();
 	await page.getByRole('button', { name: 'Open Disposable local-only soup' }).waitFor();
 	await Promise.all(remoteRequests.map(({ telemetry }) => telemetry));
+	const tracedRequestCount = (await Promise.all(tracedResponses)).filter(
+		(value) => value !== null
+	).length;
 	const unpermittedRequests = remoteRequests.filter(({ routeClass }) => routeClass === null);
 	if (unpermittedRequests.length > 0) {
 		throw new Error(
@@ -102,6 +116,7 @@ try {
 					permittedAdminCallCount: countClass('admin'),
 					unpermittedRemoteCallCount: 0,
 					d1OpenCount: remoteRequests.filter(({ d1Opened }) => d1Opened).length,
+					tracedRequestCount,
 					pageErrorCount: 0
 				},
 				secretsPrinted: false,

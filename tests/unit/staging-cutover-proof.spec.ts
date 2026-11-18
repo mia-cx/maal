@@ -6,6 +6,7 @@ import { describe, expect, test } from 'vitest';
 import authSlotConfig from '../../playwright.auth-slots.config.ts';
 import {
 	readStagingProofD1Telemetry,
+	stagingProofLogEvent,
 	stagingProofTelemetry,
 	withStagingProofTelemetry
 } from '../../src/lib/server/observability/staging-proof.ts';
@@ -15,14 +16,17 @@ import {
 	assertPassingAuthProof,
 	assertPassingBillingProof,
 	assertPassingBooleanProof,
+	buildFreeUseLogQuery,
 	classifyPermittedFreeUseCall,
 	disposableStripeCustomers,
 	disposableStripeSubscriptions,
 	disposableWorkOSOrganizations,
 	disposableWorkOSUsers,
+	evaluateFreeUseLogs,
 	fixtureCleanupComplete,
 	mergeFixtureIds,
 	mergeStripeEventDeliveries,
+	pollFreeUseLogs,
 	requireCleanupQuiescence,
 	selectAuthSlotProjects,
 	stableAuthCallback,
@@ -559,5 +563,213 @@ describe('staging cutover proof safety', () => {
 				cleanup: { d1RowsRemaining: 1 }
 			})
 		).toThrow('did not clean up');
+	});
+});
+
+describe('free-use Workers Logs proof', () => {
+	const run = { deploymentLabel: 'candidate-abc', proofRun: 'free-use-run-1' };
+
+	// One event in the Workers Observability `events` view shape, as the Cloudflare API returns it.
+	const logEvent = (source: unknown, id: string) => ({
+		$metadata: { id, service: 'maal-staging', trigger: 'GET /menu', message: 'redacted' },
+		$workers: {
+			eventType: 'fetch',
+			outcome: 'ok',
+			requestId: `request-${id}`,
+			scriptName: 'maal-staging'
+		},
+		dataset: 'cloudflare-workers',
+		source,
+		timestamp: 1_795_000_000_000
+	});
+	const queryResponse = (...events: unknown[]) => ({
+		success: true,
+		errors: [],
+		messages: [{ message: 'Successful request' }],
+		result: { events: { count: events.length, events } }
+	});
+	const proofEvent = (routeClass: string, d1Opened: unknown, proofRun = run.proofRun) => ({
+		event: 'staging_proof_request',
+		proofLabel: run.deploymentLabel,
+		proofRun,
+		routeClass,
+		d1Opened
+	});
+
+	test('the Worker logs the run label and route class but no path', () => {
+		const environment = {
+			DB: { prepare: () => 'statement' },
+			MAAL_PROOF_TELEMETRY: 'staging-only'
+		} as unknown as Env & { MAAL_PROOF_TELEMETRY: string };
+		const request = (path: string, method: string, proofRun: string) =>
+			new Request(`https://staging.maal.test${path}`, {
+				method,
+				headers: { 'x-maal-proof-trace': run.deploymentLabel, 'x-maal-proof-run': proofRun }
+			});
+		const billing = request('/api/auth-slots/slot-1/billing/status', 'GET', run.proofRun);
+		const billingTelemetry = stagingProofTelemetry(billing, environment)!;
+		billingTelemetry.environment.DB.prepare('SELECT 1');
+		expect(stagingProofLogEvent(billing, billingTelemetry)).toEqual({
+			event: 'staging_proof_request',
+			proofLabel: 'candidate-abc',
+			proofRun: 'free-use-run-1',
+			routeClass: 'billing',
+			d1Opened: true
+		});
+		const page = request('/menu?household=hh-1', 'GET', 'bad/run');
+		expect(stagingProofLogEvent(page, stagingProofTelemetry(page, environment)!)).toEqual({
+			event: 'staging_proof_request',
+			proofLabel: 'candidate-abc',
+			proofRun: null,
+			routeClass: 'content',
+			d1Opened: false
+		});
+	});
+
+	test('queries only this run’s proof events from just before the run, without saving the query', () => {
+		expect(
+			buildFreeUseLogQuery({
+				...run,
+				startedAt: '2026-11-18T10:00:00.000Z',
+				now: 1_795_000_000_000
+			})
+		).toEqual({
+			queryId: 'maal-staging-free-use-free-use-run-1',
+			dry: true,
+			view: 'events',
+			limit: 2000,
+			timeframe: { from: Date.parse('2026-11-18T09:59:00.000Z'), to: 1_795_000_000_000 },
+			parameters: {
+				filterCombination: 'and',
+				filters: [
+					{ key: 'event', operation: 'eq', type: 'string', value: 'staging_proof_request' },
+					{ key: 'proofLabel', operation: 'eq', type: 'string', value: 'candidate-abc' },
+					{ key: 'proofRun', operation: 'eq', type: 'string', value: 'free-use-run-1' }
+				]
+			}
+		});
+	});
+
+	test.each([
+		{
+			reason: 'billing and admin may open D1, and another run’s content open is not this run’s',
+			events: [
+				logEvent(proofEvent('content', false), 'a'),
+				logEvent(proofEvent('auth', false), 'b'),
+				logEvent(proofEvent('billing', true), 'c'),
+				logEvent(JSON.stringify(proofEvent('admin', true)), 'd'),
+				logEvent(proofEvent('content', true, 'free-use-run-0'), 'e')
+			],
+			tracedRequestCount: 4,
+			result: 'passed',
+			failed: [],
+			counts: {
+				eventCount: 4,
+				contentD1OpenCount: 0,
+				authD1OpenCount: 0,
+				billingAdminD1OpenCount: 2
+			}
+		},
+		{
+			reason: 'a content route opened D1',
+			events: [logEvent(proofEvent('content', true), 'a')],
+			tracedRequestCount: 1,
+			result: 'failed',
+			failed: ['zeroContentD1Opens'],
+			counts: {
+				eventCount: 1,
+				contentD1OpenCount: 1,
+				authD1OpenCount: 0,
+				billingAdminD1OpenCount: 0
+			}
+		},
+		{
+			reason: 'an auth route opened D1',
+			events: [logEvent(proofEvent('auth', true), 'a')],
+			tracedRequestCount: 1,
+			result: 'failed',
+			failed: ['zeroAuthD1Opens'],
+			counts: {
+				eventCount: 1,
+				contentD1OpenCount: 0,
+				authD1OpenCount: 1,
+				billingAdminD1OpenCount: 0
+			}
+		},
+		{
+			reason: 'an event without a D1 boolean fails closed',
+			events: [logEvent(proofEvent('content', undefined), 'a')],
+			tracedRequestCount: 1,
+			result: 'failed',
+			failed: ['zeroContentD1Opens'],
+			counts: {
+				eventCount: 1,
+				contentD1OpenCount: 1,
+				authD1OpenCount: 0,
+				billingAdminD1OpenCount: 0
+			}
+		},
+		{
+			reason: 'Workers Logs holds fewer events than the browser saw traced responses',
+			events: [logEvent(proofEvent('content', false), 'a')],
+			tracedRequestCount: 2,
+			result: 'failed',
+			failed: ['allTracedRequestsLogged'],
+			counts: {
+				eventCount: 1,
+				contentD1OpenCount: 0,
+				authD1OpenCount: 0,
+				billingAdminD1OpenCount: 0
+			}
+		}
+	])('judges a run: $reason', ({ events, tracedRequestCount, result, failed, counts }) => {
+		const evaluation = evaluateFreeUseLogs(queryResponse(...events), {
+			...run,
+			tracedRequestCount
+		});
+		expect(evaluation.result).toBe(result);
+		expect(
+			Object.entries(evaluation.checks)
+				.filter(([, passed]) => !passed)
+				.map(([name]) => name)
+		).toEqual(failed);
+		expect(evaluation.observed).toEqual({ tracedRequestCount, ...counts });
+	});
+
+	test('waits a bounded time for log ingestion and stops early on a D1 open', async () => {
+		const late = [
+			queryResponse(),
+			queryResponse(logEvent(proofEvent('content', false), 'a')),
+			queryResponse(
+				logEvent(proofEvent('content', false), 'a'),
+				logEvent(proofEvent('billing', true), 'b')
+			)
+		];
+		const pauses: number[] = [];
+		const ingested = await pollFreeUseLogs({
+			query: async () => late.shift(),
+			pause: async (attempt: number) => void pauses.push(attempt),
+			run: { ...run, tracedRequestCount: 2 }
+		});
+		expect(ingested.result).toBe('passed');
+		expect(ingested.observed.pollAttempts).toBe(3);
+		expect(pauses).toEqual([1, 2]);
+
+		const neverIngested = await pollFreeUseLogs({
+			query: async () => queryResponse(),
+			pause: async () => {},
+			run: { ...run, tracedRequestCount: 1 },
+			maxAttempts: 4
+		});
+		expect(neverIngested.result).toBe('failed');
+		expect(neverIngested.observed.pollAttempts).toBe(4);
+
+		const opened = await pollFreeUseLogs({
+			query: async () => queryResponse(logEvent(proofEvent('content', true), 'a')),
+			pause: async () => {},
+			run: { ...run, tracedRequestCount: 2 }
+		});
+		expect(opened.checks.zeroContentD1Opens).toBe(false);
+		expect(opened.observed.pollAttempts).toBe(1);
 	});
 });

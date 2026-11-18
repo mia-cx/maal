@@ -1,11 +1,18 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 import authSlotConfig from '../playwright.auth-slots.config.ts';
 import {
+	FREE_USE_LOG_POLL,
 	STAGING_WRANGLER_CONFIG,
+	buildFreeUseLogQuery,
+	evaluateFreeUseLogs,
+	pollFreeUseLogs,
+	telemetryQueryUrl,
 	assertPassingAuthProof,
 	assertPassingBillingProof,
 	assertPassingBooleanProof,
@@ -89,6 +96,16 @@ switch (command) {
 			);
 		}
 		const startedAt = new Date().toISOString();
+		const freeUseRun = {
+			deploymentLabel: config.deploymentLabel,
+			proofRun: `free-use-${randomUUID()}`
+		};
+		const queryFreeUseLogs = await workersLogsQuery(freeUseRun);
+		// Fails before any fixture exists when the Cloudflare credentials cannot read Workers Logs.
+		evaluateFreeUseLogs(await queryFreeUseLogs(startedAt), {
+			...freeUseRun,
+			tracedRequestCount: 0
+		});
 		const output = config.evidencePath;
 		const providerEnvironment = {
 			...process.env,
@@ -123,9 +140,19 @@ switch (command) {
 		const runtime = summarizeBooleanProof(
 			await runJson('pnpm', ['test:proof:staging:runtime'], providerEnvironment)
 		);
+		const freeUseStartedAt = new Date().toISOString();
 		const freeUse = summarizeBooleanProof(
-			await runJson('pnpm', ['test:proof:staging:free-use'], providerEnvironment)
+			await runJson('pnpm', ['test:proof:staging:free-use'], {
+				...providerEnvironment,
+				MAAL_STAGING_PROOF_RUN: freeUseRun.proofRun
+			})
 		);
+		assertPassingBooleanProof('freeUse', freeUse);
+		const freeUseLogs = await pollFreeUseLogs({
+			query: () => queryFreeUseLogs(freeUseStartedAt),
+			pause: () => sleep(FREE_USE_LOG_POLL.pauseMs),
+			run: { ...freeUseRun, tracedRequestCount: freeUse.observed.tracedRequestCount }
+		});
 		assertPassingAuthProof('authApi', authApi, [
 			'bobSurvivedAliceRefresh',
 			'bobSurvivedAliceRevocation'
@@ -136,7 +163,7 @@ switch (command) {
 		]);
 		assertPassingBillingProof('billing', billing);
 		assertPassingBooleanProof('runtime', runtime);
-		assertPassingBooleanProof('freeUse', freeUse);
+		assertPassingBooleanProof('freeUseLogs', freeUseLogs);
 		const path = await writeSanitizedEvidence(output, {
 			schemaVersion: 1,
 			result: 'passed',
@@ -156,7 +183,8 @@ switch (command) {
 				},
 				billing,
 				runtime,
-				freeUse
+				freeUse,
+				freeUseLogs
 			},
 			nativeBrowserMatrix: { issue: 70, status: 'external-proof-required' },
 			secretsIncluded: false,
@@ -231,6 +259,56 @@ function runJson(executable, args, environment) {
 			}
 		});
 	});
+}
+
+/**
+ * Returns a read-only Workers Logs query for one free-use run. It authenticates with
+ * `CLOUDFLARE_API_TOKEN` when set, otherwise with the operator's Wrangler login. Neither the
+ * token nor the response body is printed.
+ */
+async function workersLogsQuery(run) {
+	const token = process.env.CLOUDFLARE_API_TOKEN?.trim() || (await wranglerToken());
+	return async (startedAt) => {
+		const response = await fetch(telemetryQueryUrl(process.env.CLOUDFLARE_ACCOUNT_ID), {
+			method: 'POST',
+			headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+			body: JSON.stringify(buildFreeUseLogQuery({ ...run, startedAt, now: Date.now() }))
+		});
+		if (response.status === 401 || response.status === 403) {
+			throw new Error(
+				`Workers Logs query returned HTTP ${response.status}. Run \`pnpm exec wrangler login\` again so the login carries Workers Observability access, or set CLOUDFLARE_API_TOKEN to a token with Workers Observability permission.`
+			);
+		}
+		if (!response.ok) throw new Error(`Workers Logs query returned HTTP ${response.status}.`);
+		return response.json();
+	};
+}
+
+async function wranglerToken() {
+	let output = '';
+	await new Promise((resolvePromise, rejectPromise) => {
+		const child = spawn('pnpm', ['exec', 'wrangler', 'auth', 'token', '--json'], {
+			cwd: root,
+			stdio: ['ignore', 'pipe', 'ignore']
+		});
+		child.stdout.on('data', (chunk) => (output += chunk.toString()));
+		child.once('error', rejectPromise);
+		child.once('exit', (code) =>
+			code === 0
+				? resolvePromise()
+				: rejectPromise(new Error('Wrangler is not logged in; run `pnpm exec wrangler login`.'))
+		);
+	});
+	let token;
+	try {
+		token = JSON.parse(output).token;
+	} catch {
+		token = undefined;
+	}
+	if (typeof token !== 'string' || !token) {
+		throw new Error('Wrangler returned no bearer token; set CLOUDFLARE_API_TOKEN instead.');
+	}
+	return token;
 }
 
 async function gitCommit() {
