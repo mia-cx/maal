@@ -698,6 +698,111 @@ describe('D1 user sync repository', () => {
 		await expect(
 			database.prepare('SELECT deleted_at FROM recipes WHERE id = ?').bind(entityId).first()
 		).resolves.toEqual({ deleted_at: null });
+		const restored = (await repository.pull(userId, 0, 100)).changes.at(-1);
+		expect(restored).toMatchObject({ mutationId: restoreId });
+		expect(restored).not.toHaveProperty('reinstated');
+	});
+
+	test('a recipe edit made within three hours of reaching D1 brings the deleted recipe back', async () => {
+		const repository = new D1UserSyncRepository(database);
+		const entityId = uuidv7();
+		const createId = uuidv7();
+		const original = recipeAggregate(entityId, createId);
+		await repository.commit({
+			actorUserId: userId,
+			deviceId,
+			mode: 'live',
+			receivedAt: timestamp,
+			mutation: {
+				schemaVersion: 1,
+				mutationId: createId,
+				originDeviceId: deviceId,
+				entityKind: 'recipe',
+				entityId,
+				conflictGroups: ['aggregate'],
+				operation: 'upsert',
+				occurredAt: timestamp,
+				aggregate: original
+			}
+		});
+		const deleteId = uuidv7();
+		const deletedAt = '2026-08-22T12:00:00.000Z' as const;
+		await repository.commit({
+			actorUserId: userId,
+			deviceId,
+			mode: 'live',
+			receivedAt: deletedAt,
+			mutation: {
+				schemaVersion: 1,
+				mutationId: deleteId,
+				originDeviceId: deviceId,
+				entityKind: 'recipe',
+				entityId,
+				conflictGroups: ['deletion'],
+				operation: 'delete',
+				occurredAt: deletedAt,
+				aggregate: {
+					...original,
+					revision: 2,
+					updatedAt: deletedAt,
+					deletedAt,
+					conflictClocks: {
+						...original.conflictClocks,
+						deletion: { occurredAt: deletedAt, originDeviceId: deviceId, mutationId: deleteId }
+					}
+				}
+			}
+		});
+
+		const otherDevice = uuidv7();
+		const editId = uuidv7();
+		const editedAt = '2026-08-22T09:30:00.000Z' as const;
+		const edit = (mutationId: string, occurredAt: `${string}Z`, title: string) => ({
+			schemaVersion: 1 as const,
+			mutationId,
+			originDeviceId: otherDevice,
+			entityKind: 'recipe' as const,
+			entityId,
+			conflictGroups: ['header'] as [string],
+			operation: 'upsert' as const,
+			occurredAt,
+			aggregate: {
+				...original,
+				title,
+				updatedAt: occurredAt,
+				conflictClocks: {
+					...original.conflictClocks,
+					header: { occurredAt, originDeviceId: otherDevice, mutationId }
+				}
+			}
+		});
+		await expect(
+			repository.commit({
+				actorUserId: userId,
+				deviceId: otherDevice,
+				mode: 'live',
+				receivedAt: '2026-08-22T12:30:00.000Z',
+				mutation: edit(uuidv7(), '2026-08-22T09:29:59.999Z', 'Stale soup')
+			})
+		).resolves.toMatchObject({ status: 'rejected', errorCode: 'tombstoned_entity' });
+		await expect(
+			repository.commit({
+				actorUserId: userId,
+				deviceId: otherDevice,
+				mode: 'live',
+				receivedAt: '2026-08-22T12:30:00.000Z',
+				mutation: edit(editId, editedAt, 'Weeknight soup')
+			})
+		).resolves.toMatchObject({ status: 'accepted' });
+
+		await expect(
+			database.prepare('SELECT title, deleted_at FROM recipes WHERE id = ?').bind(entityId).first()
+		).resolves.toEqual({ title: 'Weeknight soup', deleted_at: null });
+		expect((await repository.pull(userId, 0, 100)).changes.at(-1)).toMatchObject({
+			mutationId: editId,
+			reinstated: true,
+			conflictGroups: ['header', 'deletion']
+		});
 	});
 
 	test('keeps an offline recipe edit that was trashed before it synced, through restore', async () => {

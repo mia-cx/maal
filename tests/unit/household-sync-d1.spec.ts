@@ -503,7 +503,7 @@ describe('D1 household sync', () => {
 		).resolves.toEqual({ id: checkInId });
 	});
 
-	test('is idempotent, rejects cross-profile check-ins, and keeps meal tombstones authoritative', async () => {
+	test('is idempotent, rejects cross-profile check-ins, and keeps meal tombstones authoritative over stale edits', async () => {
 		const repository = new D1HouseholdSyncRepository(database);
 		const mealId = uuidv7();
 		const mutationId = uuidv7();
@@ -571,11 +571,12 @@ describe('D1 household sync', () => {
 			mode: 'live',
 			receivedAt: '2026-08-22T12:00:01.000Z'
 		});
+		// Made a day before it reached D1: older than the 3-hour default threshold.
 		const resurrection = await repository.commit({
 			householdId,
 			actorUserId: bobId,
 			deviceId,
-			mutation: mealMutation(mealId, uuidv7(), '2026-08-23T12:00:00.000Z'),
+			mutation: mealMutation(mealId, uuidv7(), '2026-08-22T12:00:00.500Z'),
 			mode: 'live',
 			receivedAt: '2026-08-23T12:00:01.000Z'
 		});
@@ -587,6 +588,114 @@ describe('D1 household sync', () => {
 			id: mealId,
 			purgedAt: '2026-08-22T12:00:01.000Z'
 		});
+	});
+
+	test("an edit younger than the household's synced threshold brings a deleted meal back", async () => {
+		const repository = new D1HouseholdSyncRepository(database);
+		const settingsMutationId = uuidv7();
+		await repository.commit({
+			householdId,
+			actorUserId: aliceId,
+			deviceId,
+			mutation: {
+				schemaVersion: 1,
+				mutationId: settingsMutationId,
+				originDeviceId: deviceId,
+				entityKind: 'household',
+				entityId: householdId,
+				conflictGroups: ['settings'],
+				operation: 'upsert',
+				occurredAt: timestamp,
+				aggregate: Schema.decodeUnknownSync(HouseholdSchema)({
+					schemaVersion: 1,
+					revision: 1,
+					createdAt: timestamp,
+					updatedAt: timestamp,
+					deletedAt: null,
+					conflictClocks: {
+						settings: {
+							occurredAt: timestamp,
+							originDeviceId: deviceId,
+							mutationId: settingsMutationId
+						}
+					},
+					householdId,
+					name: 'Family',
+					locale: 'en-NL',
+					timezone: 'Europe/Amsterdam',
+					weekStartsOn: 1,
+					defaultPlannedYield: 4,
+					preferredDinnerTime: null,
+					stalenessThresholdMinutes: 60,
+					createdByUserId: aliceId,
+					deletionState: 'active',
+					localOnly: false
+				})
+			},
+			mode: 'live',
+			receivedAt: timestamp
+		});
+		const mealId = uuidv7();
+		await repository.commit({
+			householdId,
+			actorUserId: aliceId,
+			deviceId,
+			mutation: mealMutation(mealId, uuidv7(), timestamp),
+			mode: 'live',
+			receivedAt: timestamp
+		});
+		await repository.commit({
+			householdId,
+			actorUserId: aliceId,
+			deviceId,
+			mutation: {
+				...mealMutation(mealId, uuidv7(), '2026-08-22T12:00:00.000Z', {
+					deletedAt: '2026-08-22T12:00:00.000Z'
+				}),
+				operation: 'delete',
+				conflictGroups: ['deletion']
+			},
+			mode: 'live',
+			receivedAt: '2026-08-22T12:00:00.000Z'
+		});
+
+		// Two hours old: inside the 3-hour default, outside this household's 1 hour.
+		const stale = await repository.commit({
+			householdId,
+			actorUserId: bobId,
+			deviceId,
+			mutation: mealMutation(mealId, uuidv7(), '2026-08-22T10:30:00.000Z', {
+				title: 'Stale soup'
+			}),
+			mode: 'live',
+			receivedAt: '2026-08-22T12:30:00.000Z'
+		});
+		expect(stale).toMatchObject({ status: 'rejected', errorCode: 'tombstoned_entity' });
+
+		const recent = await repository.commit({
+			householdId,
+			actorUserId: bobId,
+			deviceId,
+			mutation: mealMutation(mealId, uuidv7(), '2026-08-22T11:45:00.000Z', {
+				title: 'Bob’s soup'
+			}),
+			mode: 'live',
+			receivedAt: '2026-08-22T12:30:00.000Z'
+		});
+		expect(recent).toMatchObject({ status: 'accepted' });
+		const page = await repository.pull(householdId, 0, 100);
+		expect(page.changes.at(-1)).toMatchObject({
+			entityId: mealId,
+			operation: 'upsert',
+			reinstated: true,
+			aggregate: expect.objectContaining({ title: 'Bob’s soup', deletedAt: null })
+		});
+		await expect(
+			database
+				.prepare('SELECT title FROM meals WHERE id = ?')
+				.bind(mealId)
+				.first<{ title: string }>()
+		).resolves.toEqual({ title: 'Bob’s soup' });
 	});
 
 	test('requires bootstrap below the retained floor', async () => {

@@ -11,7 +11,8 @@ const databaseName = 'maal-local';
 const expectedMigrations = [
 	'0000_rewrite_baseline.sql',
 	'0001_global_taxonomy_seed.sql',
-	'0002_dry_bug.sql'
+	'0002_dry_bug.sql',
+	'0003_household_staleness_threshold.sql'
 ];
 
 const run = (persistenceDirectory, args, expectedSuccess = true) => {
@@ -115,6 +116,13 @@ try {
 	execute(
 		emptyPersistenceDirectory,
 		"INSERT INTO users (workos_user_id) VALUES ('user_1'), ('user_2'); INSERT INTO households (household_id, created_by_user_id) VALUES ('org_1', 'user_1'), ('org_2', 'user_2');"
+	);
+	assert.deepEqual(
+		query(
+			emptyPersistenceDirectory,
+			"SELECT staleness_threshold_minutes FROM households WHERE household_id = 'org_1'"
+		),
+		[{ staleness_threshold_minutes: 180 }]
 	);
 	execute(
 		emptyPersistenceDirectory,

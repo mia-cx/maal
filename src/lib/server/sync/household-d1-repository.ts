@@ -1,4 +1,8 @@
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
+import {
+	DEFAULT_STALENESS_THRESHOLD_MINUTES,
+	isRecentEdit
+} from '$lib/domain/household/staleness.js';
 import { isMealAggregate, type MealAggregate } from '$lib/domain/meals/schema.js';
 import type { MutationReceipt } from '$lib/sync/contracts.js';
 import type {
@@ -82,7 +86,7 @@ interface VersionRow {
 
 interface StoredChangePayload {
 	schemaVersion: 1;
-	payload: { conflictGroups: string[]; aggregate: unknown };
+	payload: { conflictGroups: string[]; aggregate: unknown; reinstated?: true };
 }
 
 const HOUSEHOLD_TABLES = {
@@ -105,6 +109,7 @@ const HOUSEHOLD_TABLE_COLUMNS = {
 		'weekStartsOn',
 		'defaultPlannedYield',
 		'preferredDinnerTime',
+		'stalenessThresholdMinutes',
 		'createdByUserId',
 		'schemaVersion',
 		'revision',
@@ -336,7 +341,11 @@ const decodeStoredPayload = (encoded: string): StoredChangePayload => {
 	if (typeof payload !== 'object' || payload === null) {
 		throw new TypeError('Malformed persisted sync payload.');
 	}
-	const candidate = payload as { conflictGroups?: unknown; aggregate?: unknown };
+	const candidate = payload as {
+		conflictGroups?: unknown;
+		aggregate?: unknown;
+		reinstated?: unknown;
+	};
 	if (
 		!Array.isArray(candidate.conflictGroups) ||
 		!candidate.conflictGroups.every((group) => typeof group === 'string')
@@ -345,7 +354,11 @@ const decodeStoredPayload = (encoded: string): StoredChangePayload => {
 	}
 	return {
 		schemaVersion: CURRENT_SCHEMA_VERSION,
-		payload: { conflictGroups: candidate.conflictGroups, aggregate: candidate.aggregate }
+		payload: {
+			conflictGroups: candidate.conflictGroups,
+			aggregate: candidate.aggregate,
+			...(candidate.reinstated === true ? { reinstated: true as const } : {})
+		}
 	};
 };
 
@@ -364,7 +377,8 @@ const changeFromRow = (row: ChangeRow): HouseholdSyncChange => {
 		occurredAt: row.occurred_at as `${string}Z`,
 		receivedAt: row.received_at as `${string}Z`,
 		aggregate: stored.payload.aggregate,
-		tombstoneExpiresAt: row.tombstone_expires_at as `${string}Z` | null
+		tombstoneExpiresAt: row.tombstone_expires_at as `${string}Z` | null,
+		...(stored.payload.reinstated ? { reinstated: true as const } : {})
 	};
 };
 
@@ -954,7 +968,19 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 			)
 			.bind(input.householdId, input.mutation.entityKind, input.mutation.entityId, input.receivedAt)
 			.first<{ present: number }>();
-		if (activeTombstone && input.mutation.operation === 'upsert') {
+		const stalenessThresholdMinutes =
+			(
+				await this.database
+					.prepare('SELECT staleness_threshold_minutes FROM households WHERE household_id = ?')
+					.bind(input.householdId)
+					.first<{ staleness_threshold_minutes: number }>()
+			)?.staleness_threshold_minutes ?? DEFAULT_STALENESS_THRESHOLD_MINUTES;
+		const reinstated = activeTombstone !== null && input.mutation.operation === 'upsert';
+		if (
+			reinstated &&
+			(decodedIncoming.aggregate.deletedAt !== null ||
+				!isRecentEdit(input.mutation.occurredAt, input.receivedAt, stalenessThresholdMinutes))
+		) {
 			return rejected('tombstoned_entity');
 		}
 
@@ -978,7 +1004,8 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 										mutationId: version.winning_mutation_id
 									}
 								: null,
-							input.mutation
+							input.mutation,
+							stalenessThresholdMinutes
 						);
 					});
 		if (acceptedGroups.length === 0) {
@@ -1034,7 +1061,11 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 		);
 		const payload = JSON.stringify({
 			schemaVersion: CURRENT_SCHEMA_VERSION,
-			payload: { conflictGroups: acceptedGroups, aggregate: decodedResult.aggregate }
+			payload: {
+				conflictGroups: acceptedGroups,
+				aggregate: decodedResult.aggregate,
+				...(reinstated ? { reinstated: true } : {})
+			}
 		});
 		const receiptRetainUntil = new Date(
 			Date.parse(input.receivedAt) + 365 * 86_400_000

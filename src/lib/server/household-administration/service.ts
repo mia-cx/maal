@@ -435,6 +435,7 @@ export class HouseholdAdministrationService {
 			weekStartsOn: stored.row.week_starts_on === 0 ? 0 : 1,
 			defaultPlannedYield: stored.row.default_planned_yield,
 			preferredDinnerTime: stored.row.preferred_dinner_time as Household['preferredDinnerTime'],
+			stalenessThresholdMinutes: stored.row.staleness_threshold_minutes,
 			createdByUserId: stored.row.created_by_user_id,
 			deletionState: stored.deletionState,
 			localOnly: false,

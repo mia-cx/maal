@@ -86,7 +86,9 @@ export const HouseholdSyncChangeSchema = Schema.Struct({
 	occurredAt: UtcInstantSchema,
 	receivedAt: UtcInstantSchema,
 	aggregate: Schema.Unknown,
-	tombstoneExpiresAt: Schema.NullOr(UtcInstantSchema)
+	tombstoneExpiresAt: Schema.NullOr(UtcInstantSchema),
+	/** Present when this upsert brought back a tombstoned entity (spec §8.4). */
+	reinstated: Schema.optional(Schema.Literal(true))
 });
 export type HouseholdSyncChange = typeof HouseholdSyncChangeSchema.Type;
 

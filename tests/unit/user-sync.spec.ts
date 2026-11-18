@@ -38,10 +38,7 @@ import {
 	type PushRequest,
 	type SyncChange
 } from '$lib/sync/contracts.js';
-import {
-	BACKFILL_CLOCK_SKEW_MS,
-	incomingWinsHistoricalConflict
-} from '$lib/server/sync/reconciliation.js';
+import { incomingWinsHistoricalConflict } from '$lib/server/sync/reconciliation.js';
 import {
 	bootstrapUserSync,
 	pullUserSync,
@@ -975,30 +972,24 @@ describe('server ordering and bootstrap rules', () => {
 		expect(commit).not.toHaveBeenCalled();
 	});
 
-	test('uses original UTC edit time only beyond the one-hour backfill threshold', () => {
-		const current = { occurredAt: timestamp, originDeviceId: uuidv7(), mutationId: uuidv7() };
-		expect(
-			incomingWinsHistoricalConflict(current, {
-				...current,
-				occurredAt: '2026-08-21T10:59:59.999Z',
-				mutationId: uuidv7()
-			})
-		).toBe(false);
-		expect(
-			incomingWinsHistoricalConflict(current, {
-				...current,
-				occurredAt: new Date(Date.parse(timestamp) - BACKFILL_CLOCK_SKEW_MS).toISOString(),
-				mutationId: uuidv7()
-			})
-		).toBe(true);
-		expect(
-			incomingWinsHistoricalConflict(current, {
-				...current,
-				occurredAt: '2026-07-21T12:00:00.000Z',
-				mutationId: uuidv7()
-			})
-		).toBe(false);
-	});
+	test.each([
+		{ occurredAt: '2026-08-21T08:59:59.999Z', thresholdMinutes: 180, wins: false },
+		{ occurredAt: '2026-08-21T09:00:00.000Z', thresholdMinutes: 180, wins: true },
+		{ occurredAt: '2026-08-21T10:59:59.999Z', thresholdMinutes: 60, wins: false },
+		{ occurredAt: '2026-07-21T12:00:00.000Z', thresholdMinutes: 180, wins: false }
+	])(
+		'an older backfilled edit at $occurredAt wins only within a $thresholdMinutes-minute threshold',
+		({ occurredAt, thresholdMinutes, wins }) => {
+			const current = { occurredAt: timestamp, originDeviceId: uuidv7(), mutationId: uuidv7() };
+			expect(
+				incomingWinsHistoricalConflict(
+					current,
+					{ ...current, occurredAt, mutationId: uuidv7() },
+					thresholdMinutes
+				)
+			).toBe(wins);
+		}
+	);
 
 	test('requires bootstrap below the retained D1 floor and distinguishes acknowledged absence', async () => {
 		const repository = {
