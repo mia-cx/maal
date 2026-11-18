@@ -458,8 +458,9 @@ the only versions today.
   aggregate carries `schemaVersion` (`src/lib/sync/contracts.ts`, `src/lib/domain/contracts/primitives.ts`).
   `sync_changes` stores the versioned payload and `sync_devices` records each device's last app and protocol
   version (§7.5).
-- **Upgrade on arrival.** The server stores each incoming event as-is, with its original version. A pure
-  upcaster turns it into the current schema before it is applied to state, so history is never rewritten.
+- **Upgrade on arrival.** The `sync_changes` row keeps each incoming event as-is: its original payload and
+  `schemaVersion`, never rewritten. A pure upcaster derives a current-schema copy, which is what updates the
+  normalized tables and what pulls serve. Replaying history runs the same upcasters over the stored rows.
 - **Migration paths.** A major version upgrades one major step at a time, because each breaking change carries
   its own risk and its own tests. Within one major version, steps squash into one direct path, for example
   1.1.3 straight to 1.5.1.
