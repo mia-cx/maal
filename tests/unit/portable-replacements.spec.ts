@@ -464,7 +464,8 @@ describe('portable replacements', () => {
 		await database.outbox.clear();
 		await replace(database, archive);
 
-		const historical = { occurredAt: at(12), originDeviceId: uuidv7(), mutationId: uuidv7() };
+		// Over three hours after the archive's clocks, so only the fresh import clocks beat it.
+		const historical = { occurredAt: at(14), originDeviceId: uuidv7(), mutationId: uuidv7() };
 		const mutationIds: string[] = [];
 		for (const [store, original, groups, replacement] of [
 			['recipes', recipe, RECIPE_CONFLICT_GROUPS, true],
