@@ -136,6 +136,9 @@ try {
 	await updatePrivateFixtureLedger();
 
 	stage = 'webhook disorder and idempotency';
+	// A validly signed event whose body claims past due while Stripe still says trialing. The
+	// webhook projects the live Stripe subscription, so the body must not change the plan.
+	// The 30-day grace window itself is proven against D1 in billing-server-boundaries-d1.spec.ts.
 	const createdSecond = Math.floor(Date.now() / 1_000) + 120;
 	const pastDueEvent = stripeEvent(
 		'customer.subscription.updated',
@@ -163,25 +166,29 @@ try {
 		(await postWebhook(staleActiveEvent)).result === 'processed',
 		'Stale event was not acknowledged.'
 	);
-	const graceProjection = await slotJson(
+	const projection = await slotJson(
 		slotId,
 		session,
 		`billing/status?householdId=${encodeURIComponent(created.householdId)}`
 	);
 	assert(
-		graceProjection.capability?.state === 'grace',
-		'The stale event replaced the grace projection.'
+		projection.capability?.state === 'enabled' &&
+			projection.capability?.stripeStatus === subscription.status,
+		'A forged or stale event body changed the projected plan.'
 	);
 	checks.webhookDisorderAndIdempotency = true;
-	checks.thirtyDayGraceProjected = true;
+	checks.forgedEventBodyIgnored = true;
 
 	stage = 'paid subscription activation';
-	await stripe.paymentMethods.attach('pm_card_visa', { customer: created.customerIds[0] });
+	// `pm_card_visa` is a test token: attaching it creates a new method, referenced by its own ID.
+	const card = await stripe.paymentMethods.attach('pm_card_visa', {
+		customer: created.customerIds[0]
+	});
 	await stripe.customers.update(created.customerIds[0], {
-		invoice_settings: { default_payment_method: 'pm_card_visa' }
+		invoice_settings: { default_payment_method: card.id }
 	});
 	const paidSubscription = await stripe.subscriptions.update(subscription.id, {
-		default_payment_method: 'pm_card_visa',
+		default_payment_method: card.id,
 		trial_end: 'now',
 		proration_behavior: 'none',
 		payment_behavior: 'error_if_incomplete',
