@@ -317,8 +317,8 @@ export const evaluateFreeUseLogs = (
 		billingAdminD1OpenCount: d1Opens((routeClass) => ['billing', 'admin'].includes(routeClass))
 	};
 	const checks = {
-		allTracedRequestsLogged:
-			observed.tracedRequestCount > 0 && observed.eventCount >= observed.tracedRequestCount,
+		// Zero traced requests is the healthy case: prerendered pages and assets never invoke the Worker.
+		allTracedRequestsLogged: observed.eventCount >= observed.tracedRequestCount,
 		zeroContentD1Opens: observed.contentD1OpenCount === 0,
 		zeroAuthD1Opens: observed.authD1OpenCount === 0
 	};

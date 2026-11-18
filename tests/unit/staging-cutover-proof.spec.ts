@@ -671,6 +671,19 @@ describe('free-use Workers Logs proof', () => {
 			}
 		},
 		{
+			reason: 'free use that never invoked the Worker logs nothing and passes',
+			events: [],
+			tracedRequestCount: 0,
+			result: 'passed',
+			failed: [],
+			counts: {
+				eventCount: 0,
+				contentD1OpenCount: 0,
+				authD1OpenCount: 0,
+				billingAdminD1OpenCount: 0
+			}
+		},
+		{
 			reason: 'a content route opened D1',
 			events: [logEvent(proofEvent('content', true), 'a')],
 			tracedRequestCount: 1,
