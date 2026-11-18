@@ -157,6 +157,38 @@ test('a successful renewal refresh resumes blocked user sync in the existing dev
 	expect(household.pull).toHaveBeenCalledTimes(2);
 });
 
+test('a renewal refresh that lands while a denied run is still settling resumes user sync after it', async () => {
+	const user = userTransport();
+	vi.mocked(user.pull).mockRejectedValueOnce(
+		new SyncCapabilityDenied({ code: 'maal_plan_required', message: 'Awaiting renewal webhook.' })
+	);
+	const updateScope = database.syncScopes.update.bind(database.syncScopes);
+	let holding = false;
+	let release!: () => void;
+	const released = new Promise<void>((resolve) => (release = resolve));
+	vi.spyOn(database.syncScopes, 'update').mockImplementation((key, changes) => {
+		if (typeof changes !== 'object' || !('state' in changes) || changes.state !== 'blocked') {
+			return updateScope(key, changes);
+		}
+		holding = true;
+		return Dexie.Promise.resolve(released.then(() => updateScope(key, changes)));
+	});
+	manager = startDeviceSync(database, user, householdTransport());
+	await vi.waitFor(() => expect(holding).toBe(true));
+
+	await refreshBillingProjection(database, 'profile_alice', householdId, async () =>
+		Response.json(projection())
+	);
+	// Let the refresh's wake-up fire while the denied run still holds its blocked-scope write.
+	await new Promise((resolve) => setTimeout(resolve, 100));
+	release();
+
+	await vi.waitFor(() => expect(user.pull).toHaveBeenCalledTimes(2));
+	await vi.waitFor(async () => {
+		expect(await database.syncScopes.get(['user', userId])).toMatchObject({ state: 'idle' });
+	});
+});
+
 test('a repeated entitlement denial does not automatically retry its own stale-cache writes', async () => {
 	const user = userTransport();
 	vi.mocked(user.pull).mockRejectedValue(

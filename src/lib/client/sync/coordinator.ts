@@ -476,6 +476,7 @@ export const createUserSyncCoordinator = (
 	let started = false;
 	let terminalBlocked = false;
 	let deniedCapability: string | null = null;
+	let rerunWhenSettled = false;
 	let retryAttempt = 0;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let timerDueAt = 0;
@@ -770,6 +771,9 @@ export const createUserSyncCoordinator = (
 	const run = (): Promise<UserSyncRunState> => {
 		active ??= perform().finally(() => {
 			active = null;
+			if (!rerunWhenSettled) return;
+			rerunWhenSettled = false;
+			schedule();
 		});
 		return active;
 	};
@@ -797,6 +801,8 @@ export const createUserSyncCoordinator = (
 		},
 		resumeAfterCapabilityRefresh() {
 			retryAttempt = 0;
+			// A run still settling its denial would absorb this wake-up, so run once more after it.
+			if (active) rerunWhenSettled = true;
 			schedule();
 		},
 		state: () => currentState
