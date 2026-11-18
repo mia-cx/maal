@@ -31,6 +31,7 @@ const household = (overrides: Partial<Household> = {}): Household => ({
 	weekStartsOn: 1,
 	defaultPlannedYield: 4,
 	preferredDinnerTime: '18:30',
+	stalenessThresholdMinutes: 180,
 	createdByUserId: 'user_alice',
 	deletionState: 'active',
 	localOnly: false,

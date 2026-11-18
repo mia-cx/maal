@@ -46,6 +46,7 @@ const household = (householdId: string): Household => ({
 	weekStartsOn: 1,
 	defaultPlannedYield: 2,
 	preferredDinnerTime: null,
+	stalenessThresholdMinutes: 180,
 	createdByUserId: 'user_alice',
 	deletionState: 'active',
 	localOnly: false,

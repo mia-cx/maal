@@ -24,6 +24,7 @@
 		type ScheduleUiState
 	} from '$lib/client/meals/index.js';
 	import { getBrowserDatabase } from '$lib/client/local/browser.js';
+	import { dismissReinstatement, readReinstatedIds } from '$lib/client/sync/reinstatements.js';
 	import { executeLocalCommands, type LocalCommand } from '$lib/client/local/commands.js';
 	import { activeHouseholdKey } from '$lib/client/local/profiles.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
@@ -66,6 +67,7 @@
 	let uiState = $state<{ scope: string; state: ScheduleUiState } | null>(null);
 	let rangeMeals = $state<MealCalendarRangeResult>(noMeals);
 	let poolMeals = $state<MealCalendarRangeResult>(noMeals);
+	let reinstatedMealIds = $state.raw<ReadonlySet<string>>(new Set());
 	let renderedMealRange = $state<MealCalendarRange | null>(null);
 	let error = $state<string | null>(null);
 	let pendingUiStateWrite: (() => Promise<void>) | null = null;
@@ -90,9 +92,24 @@
 				.filter(({ mealId, reporterUserId }) => mealId !== null && reporterUserId === userId)
 				.map((checkIn) => [checkIn.mealId!, checkIn])
 		);
-		return [...latest.values()].map((meal) =>
-			mealAggregateToScheduleMeal(meal, ownCheckInByMeal.get(meal.id), householdTimeZone)
-		);
+		return [...latest.values()].map((meal) => ({
+			...mealAggregateToScheduleMeal(meal, ownCheckInByMeal.get(meal.id), householdTimeZone),
+			reinstated: reinstatedMealIds.has(meal.id)
+		}));
+	});
+
+	$effect(() => {
+		const opened = database;
+		if (!opened) return;
+		const subscription = liveQuery(() => readReinstatedIds(opened, 'meal')).subscribe({
+			next: (ids) => {
+				reinstatedMealIds = ids;
+			},
+			error: () => {
+				error = readError;
+			}
+		});
+		return () => subscription.unsubscribe();
 	});
 
 	const commandContext = async (): Promise<MealCommandContext> => {
@@ -375,6 +392,9 @@
 					onmealsreorder={reorderMealsInOneCommit}
 					onmealdelete={removeMeal}
 					onmealcheckin={checkIn}
+					onmealopen={(meal) => {
+						if (database && meal.reinstated) void dismissReinstatement(database, 'meal', meal.id);
+					}}
 					oncreaterecipe={createRecipeAndMeal}
 					onimporturl={importRecipeAndMeal}
 					onloadedrangechange={updateRenderedMealRange}

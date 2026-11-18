@@ -13,6 +13,8 @@ import {
 	updateRecipeFromEditor
 } from '$lib/client/recipes/commands.js';
 import { createUserSyncCoordinator, type UserSyncTransport } from '$lib/client/sync/index.js';
+import { readReinstatedIds } from '$lib/client/sync/reinstatements.js';
+import { markRejectionsSeen, readUnseenRejections } from '$lib/client/sync/rejections.js';
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
 import { renewalCutoff } from '$lib/server/billing/entitlement.js';
 import {
@@ -887,5 +889,159 @@ describe('D1 user sync repository', () => {
 			local.close();
 			await Dexie.delete(local.name);
 		}
+	});
+});
+
+describe('a recent edit against a deletion, across two devices', () => {
+	const slotId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+	const patch = {
+		title: 'Soup',
+		description: null,
+		imageUrl: null,
+		sourceUrl: null,
+		sourceSiteName: null,
+		sourceAuthorName: null,
+		sourcePublisherName: null,
+		sourceIsBasedOnUrl: null,
+		prepTimeMinutes: 5,
+		cookTimeMinutes: 20,
+		yield: 4,
+		ingredients: [{ id: null, amount: '2', unit: 'g', item: 'salt' }],
+		instructions: [{ id: null, position: 1, text: 'Simmer.' }]
+	};
+
+	/** One device: its own Dexie and coordinator, pushing to the shared D1 at `serverNow`. */
+	const openDevice = async (repository: D1UserSyncRepository, serverNow: () => Date) => {
+		const local = await openMaalDatabase(`user-sync-d1-${crypto.randomUUID()}`);
+		const profileId = uuidv7();
+		await local.profiles.put({
+			profileId,
+			workosUserId: userId,
+			displayName: 'Alice',
+			email: null,
+			profilePictureUrl: null,
+			locale: 'en-NL',
+			timezone: 'Europe/Amsterdam',
+			pinSalt: null,
+			pinVerifier: null,
+			lockPolicy: 'none',
+			lastUsedAt: timestamp,
+			authState: 'authenticated'
+		});
+		await local.authSlots.put({
+			authSlotId: slotId,
+			profileId,
+			workosUserId: userId,
+			sessionState: 'authenticated',
+			lastRefreshedAt: timestamp,
+			lastVerifiedAt: timestamp,
+			nextRetryAt: null,
+			retryCount: 0
+		});
+		await local.uiState.put({ key: 'activeProfileId', value: profileId });
+		const transport: UserSyncTransport = {
+			pull: (_slot, request) => pullUserSync(repository, userId, request),
+			push: (_slot, request) => pushUserSync(repository, userId, request, serverNow),
+			bootstrap: () => Promise.reject(new Error('unused')),
+			backfill: () => Promise.reject(new Error('unused'))
+		};
+		const coordinator = createUserSyncCoordinator({
+			database: local,
+			authSlotId: slotId,
+			workosUserId: userId,
+			transport,
+			capabilityResolver: async () => ({ enabled: true, stale: false, householdId: 'org_paid' }),
+			environment: {
+				isOnline: () => true,
+				isVisible: () => true,
+				isSaveDataEnabled: () => true,
+				on: () => () => undefined
+			}
+		});
+		const originDeviceId = String((await local.meta.get('deviceId'))!.value);
+		const context = (occurredAt: `${string}Z`) => ({
+			authSlotId: slotId,
+			ownerUserId: userId,
+			originDeviceId,
+			occurredAt
+		});
+		return { local, coordinator, context };
+	};
+
+	const devices: Awaited<ReturnType<typeof openDevice>>[] = [];
+	afterEach(async () => {
+		for (const { local } of devices.splice(0)) {
+			local.close();
+			await Dexie.delete(local.name);
+		}
+	});
+
+	/** Phone edits the recipe offline at 12:10; laptop deletes it at 12:20. */
+	const editAgainstDeletion = async () => {
+		const repository = new D1UserSyncRepository(database);
+		let serverNow = new Date(timestamp);
+		const clock = () => serverNow;
+		const laptop = await openDevice(repository, clock);
+		const phone = await openDevice(repository, clock);
+		devices.push(laptop, phone);
+
+		const recipe = await createRecipeFromEditor(laptop.local, laptop.context(timestamp), patch);
+		await expect(laptop.coordinator.syncNow()).resolves.toBe('complete');
+		await expect(phone.coordinator.syncNow()).resolves.toBe('complete');
+
+		await updateRecipeFromEditor(
+			phone.local,
+			phone.context('2026-08-21T12:10:00.000Z'),
+			recipe.id,
+			{ ...patch, title: 'Phone soup' }
+		);
+		serverNow = new Date('2026-08-21T12:20:00.000Z');
+		await deleteRecipe(laptop.local, laptop.context('2026-08-21T12:20:00.000Z'), recipe.id);
+		await expect(laptop.coordinator.syncNow()).resolves.toBe('complete');
+
+		return {
+			recipeId: recipe.id,
+			laptop,
+			phone,
+			phoneSyncsAt: async (at: `${string}Z`) => {
+				serverNow = new Date(at);
+				await expect(phone.coordinator.syncNow()).resolves.toBe('complete');
+			}
+		};
+	};
+
+	test('an edit that reaches D1 within three hours brings the recipe back, marked Reinstated', async () => {
+		const { recipeId, laptop, phone, phoneSyncsAt } = await editAgainstDeletion();
+
+		await phoneSyncsAt('2026-08-21T12:40:00.000Z');
+		await expect(laptop.coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(await laptop.local.recipes.get(recipeId)).toMatchObject({
+			title: 'Phone soup',
+			deletedAt: null
+		});
+		expect(await readReinstatedIds(laptop.local, 'recipe')).toEqual(new Set([recipeId]));
+		// The phone never saw the recipe disappear, so it shows no badge.
+		expect(await readReinstatedIds(phone.local, 'recipe')).toEqual(new Set());
+		await expect(readUnseenRejections(phone.local)).resolves.toEqual([]);
+	});
+
+	test('an edit that reaches D1 after three hours is rejected, and the phone says so', async () => {
+		const { recipeId, phone, phoneSyncsAt } = await editAgainstDeletion();
+
+		await phoneSyncsAt('2026-08-21T15:10:00.001Z');
+
+		expect(await phone.local.recipes.get(recipeId)).toMatchObject({
+			deletedAt: '2026-08-21T12:20:00.000Z'
+		});
+		const notices = await readUnseenRejections(phone.local);
+		expect(notices.map(({ message }) => message)).toEqual([
+			'Your change to “Soup” wasn’t saved because it was deleted.'
+		]);
+		await markRejectionsSeen(
+			phone.local,
+			notices.map(({ mutationId }) => mutationId)
+		);
+		await expect(readUnseenRejections(phone.local)).resolves.toEqual([]);
 	});
 });

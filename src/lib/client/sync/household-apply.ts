@@ -15,6 +15,7 @@ import {
 } from '$lib/sync/household-entities.js';
 
 import { pruneAcknowledgedOutbox, recordServerChanges, scopeOutbox } from './outbox.js';
+import { noteReinstatement } from './reinstatements.js';
 
 /** The auth slot and household a coordinator applies server changes for. */
 export interface HouseholdApplyScope {
@@ -114,13 +115,21 @@ export const applyHouseholdPullPage = async (
 	const tables = [...new Set(decoded.map(({ store }) => database.table(store)))];
 	await database.transaction(
 		'rw',
-		[...tables, database.mealCheckIns, database.outbox, database.authSlots, database.syncScopes],
+		[
+			...tables,
+			database.mealCheckIns,
+			database.outbox,
+			database.authSlots,
+			database.syncScopes,
+			database.reinstatements
+		],
 		async () => {
 			const pending = await pendingHouseholdOutbox(database, householdId, decoded);
 			const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));
 			const pendingByKey = Map.groupBy(pending, (row) => keyFor(row.entityKind, row.aggregateId));
 			const localIntent = new Map<string, unknown>();
-			for (const aggregate of decoded) {
+			for (const [index, aggregate] of decoded.entries()) {
+				await noteReinstatement(database, aggregate.store, response.changes[index]!, now);
 				const key = keyFor(aggregate.entityKind, aggregate.entityId);
 				if (pendingKeys.has(key)) {
 					if (!localIntent.has(key)) {

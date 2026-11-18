@@ -11,6 +11,7 @@
 	import { activeNavItemForPath } from '$lib/components/dashboard/active-nav.js';
 	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
 	import ProfileLockScreen from '$lib/components/profile-lock-screen.svelte';
+	import SyncRejectionNotice from '$lib/components/sync-rejection-notice.svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 
 	const minSidebarWidth = 208;
@@ -187,6 +188,7 @@
 					{@render children()}
 				</main>
 			</Sidebar.Inset>
+			<SyncRejectionNotice {database} />
 		</Sidebar.Provider>
 	{:else}
 		<div class="grid min-h-svh place-items-center bg-background px-6 text-center text-foreground">

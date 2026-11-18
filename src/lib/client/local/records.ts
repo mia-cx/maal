@@ -101,6 +101,17 @@ export interface OutboxRecord {
 	nextAttemptAt: UtcInstant;
 	attempts: number;
 	authoritativeSnapshot?: unknown;
+	/** Why the server or the coordinator refused this row; set with status `rejected`. */
+	rejectionCode?: string;
+	/** When the person dismissed the notice for this rejected row (spec §8.5). */
+	rejectionSeenAt?: UtcInstant;
+}
+
+/** A deleted record that a recent edit brought back, until this device opens it (spec §8.4). */
+export interface ReinstatementRecord {
+	entityKind: string;
+	entityId: string;
+	reinstatedAt: UtcInstant;
 }
 
 export type SyncScopeState = 'idle' | 'syncing' | 'blocked' | 'bootstrapRequired';

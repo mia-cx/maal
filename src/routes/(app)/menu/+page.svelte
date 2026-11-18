@@ -16,6 +16,7 @@
 	import { liveRecipeStatistics } from '$lib/client/recipes/statistics.js';
 	import { confirmUrlImport, fetchRecipeUrlCandidate } from '$lib/client/recipes/url-import.js';
 	import { getBrowserDatabase } from '$lib/client/local/browser.js';
+	import { dismissReinstatement, readReinstatedIds } from '$lib/client/sync/reinstatements.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import { DomainIdSchema } from '$lib/domain/contracts/primitives.js';
 	import type { RecipeAggregate } from '$lib/domain/recipes/schema.js';
@@ -28,9 +29,14 @@
 	} from '$lib/menu/recipe-local-adapter.js';
 
 	let database = $state<MaalDatabase | null>(null);
-	let library = $state.raw<{ recipes: RecipeAggregate[]; archivedRecipes: RecipeAggregate[] }>({
+	let library = $state.raw<{
+		recipes: RecipeAggregate[];
+		archivedRecipes: RecipeAggregate[];
+		reinstatedIds: ReadonlySet<string>;
+	}>({
 		recipes: [],
-		archivedRecipes: []
+		archivedRecipes: [],
+		reinstatedIds: new Set()
 	});
 	let statistics = $state.raw<ReadonlyMap<string, RecipeMenuStats>>(new Map());
 	let activeOwnerUserId = $state<string | null>(null);
@@ -39,8 +45,10 @@
 	let statisticsError = $state<string | null>(null);
 	const visibleError = $derived(loadError ?? statisticsError);
 
-	const toMenuItem = (recipe: RecipeAggregate) =>
-		recipeAggregateToMenuItem(recipe, statistics.get(recipe.id));
+	const toMenuItem = (recipe: RecipeAggregate) => ({
+		...recipeAggregateToMenuItem(recipe, statistics.get(recipe.id)),
+		reinstated: library.reinstatedIds.has(recipe.id)
+	});
 	const recipes = $derived(library.recipes.map(toMenuItem));
 	const archivedRecipes = $derived(library.archivedRecipes.map(toMenuItem));
 
@@ -107,17 +115,27 @@
 				}
 				database = opened;
 				subscription = liveQuery(async () => {
+					const empty = {
+						ownerUserId: null,
+						recipes: [],
+						archivedRecipes: [],
+						reinstatedIds: new Set<string>() as ReadonlySet<string>
+					};
 					const activeProfileId = (await opened.uiState.get('activeProfileId'))?.value;
-					if (typeof activeProfileId !== 'string') {
-						return { ownerUserId: null, recipes: [], archivedRecipes: [] };
-					}
+					if (typeof activeProfileId !== 'string') return empty;
 					const profile = await opened.profiles.get(activeProfileId);
-					if (!profile) return { ownerUserId: null, recipes: [], archivedRecipes: [] };
-					const [active, deleted] = await Promise.all([
+					if (!profile) return empty;
+					const [active, deleted, reinstatedIds] = await Promise.all([
 						listRecipes(opened, profile.workosUserId),
-						listRecoverableRecipes(opened, profile.workosUserId)
+						listRecoverableRecipes(opened, profile.workosUserId),
+						readReinstatedIds(opened, 'recipe')
 					]);
-					return { ownerUserId: profile.workosUserId, recipes: active, archivedRecipes: deleted };
+					return {
+						ownerUserId: profile.workosUserId,
+						recipes: active,
+						archivedRecipes: deleted,
+						reinstatedIds
+					};
 				}).subscribe({
 					next: (next) => {
 						activeOwnerUserId = next.ownerUserId;
@@ -167,4 +185,7 @@
 	ondelete={deleteLocalRecipe}
 	onrestore={restoreLocalRecipe}
 	onpermanentdelete={permanentlyDeleteLocalRecipes}
+	onopen={(recipe) => {
+		if (database && recipe.reinstated) void dismissReinstatement(database, 'recipe', recipe.id);
+	}}
 />

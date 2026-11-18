@@ -47,6 +47,7 @@
 		onmealsreorder,
 		onmealdelete,
 		onmealcheckin,
+		onmealopen,
 		oncreaterecipe,
 		onimporturl,
 		onloadedrangechange,
@@ -68,6 +69,8 @@
 		onmealsreorder?: (moves: { meal: Meal; previous?: Meal }[]) => void | Promise<void>;
 		onmealdelete?: (meal: Meal) => void | Promise<void>;
 		onmealcheckin?: (payload: MealCheckInPayload) => Promise<Meal>;
+		/** The person opened a meal's preview. */
+		onmealopen?: (meal: Meal) => void;
 		oncreaterecipe?: (recipe: RecipeMenuItem, date?: string) => Promise<Meal>;
 		onimporturl?: (url: string, date?: string) => Promise<Meal>;
 		onloadedrangechange?: (range: MealRange) => void;
@@ -257,6 +260,7 @@
 	const previewMeal = (meal: Meal) => {
 		selectedMealId = meal.id;
 		previewOpen = true;
+		onmealopen?.(meal);
 	};
 	const openMealCheckIn = (meal: Meal) => {
 		checkInMeal = meal;

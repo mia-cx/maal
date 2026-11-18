@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import { uuidv7 } from 'uuidv7';
 
 import { LocalMigrationError } from '$lib/domain/contracts/errors.js';
+import { DEFAULT_STALENESS_THRESHOLD_MINUTES } from '$lib/domain/household/staleness.js';
 import {
 	GLOBAL_FOOD_ALIAS_SEED,
 	GLOBAL_FOOD_SEED,
@@ -43,6 +44,7 @@ import type {
 	MetaRecord,
 	OutboxRecord,
 	ProfileRecord,
+	ReinstatementRecord,
 	RemoteProjectionMetaRecord,
 	SyncScopeRecord,
 	UiStateRecord,
@@ -51,7 +53,7 @@ import type {
 import { pauseLocalCommits } from './commit-activity.js';
 import { publishLocalDatabaseEvent } from './database-events.js';
 
-export const CURRENT_DATABASE_VERSION = 5 as const;
+export const CURRENT_DATABASE_VERSION = 6 as const;
 
 export const DATABASE_V1_STORES = {
 	meta: '&key',
@@ -102,9 +104,14 @@ export const DATABASE_V4_STORES = {
 	remoteProjectionMeta: '&key'
 } as const;
 
-export const DATABASE_STORES = {
+export const DATABASE_V5_STORES = {
 	...DATABASE_V4_STORES,
 	userAttributions: '&workosUserId,displayName'
+} as const;
+
+export const DATABASE_STORES = {
+	...DATABASE_V5_STORES,
+	reinstatements: '&[entityKind+entityId]'
 } as const;
 
 export type LocalStoreName = keyof typeof DATABASE_STORES;
@@ -155,6 +162,7 @@ export class MaalDatabase extends Dexie {
 	uiState!: Table<UiStateRecord, string>;
 	remoteProjectionMeta!: Table<RemoteProjectionMetaRecord, string>;
 	userAttributions!: Table<UserAttributionRecord, string>;
+	reinstatements!: Table<ReinstatementRecord, [string, string]>;
 
 	constructor(environment: string) {
 		super(getMaalDatabaseName(environment));
@@ -222,14 +230,22 @@ export class MaalDatabase extends Dexie {
 					}
 				]);
 			});
+		this.version(5).stores(DATABASE_V5_STORES);
 		this.version(CURRENT_DATABASE_VERSION)
 			.stores(DATABASE_STORES)
 			.upgrade(async (transaction) => {
 				const timestamp = nowUtc();
+				await transaction
+					.table<HouseholdRecord, string>('households')
+					.toCollection()
+					.modify((household) => {
+						const mutable = household as { stalenessThresholdMinutes?: number };
+						mutable.stalenessThresholdMinutes ??= DEFAULT_STALENESS_THRESHOLD_MINUTES;
+					});
 				await transaction.table<MetaRecord, string>('meta').bulkPut([
 					{
 						key: 'migrationState',
-						value: { from: 4, to: CURRENT_DATABASE_VERSION, state: 'complete' },
+						value: { from: 5, to: CURRENT_DATABASE_VERSION, state: 'complete' },
 						updatedAt: timestamp
 					},
 					{

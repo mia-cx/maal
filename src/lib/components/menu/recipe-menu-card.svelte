@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { MealFeedbackVerdict } from '$lib/domain/meal-feedback';
 	import { Checkbox } from '$lib/components/ui/checkbox';
+	import ReinstatedBadge from '$lib/components/reinstated-badge.svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { cn } from '$lib/utils';
 	import MessageSquareTextIcon from '@lucide/svelte/icons/message-square-text';
@@ -97,6 +98,7 @@
 						</p>
 					{/if}
 				</div>
+				{#if recipe.reinstated}<ReinstatedBadge />{/if}
 				{#if recipe.latestVerdict}
 					<div class={cn('flex shrink-0 items-center gap-1 text-xs font-medium', reviewToneClass)}>
 						<StarIcon class="size-3.5" />

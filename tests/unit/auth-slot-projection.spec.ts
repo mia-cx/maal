@@ -159,6 +159,7 @@ describe('auth callback projection', () => {
 			weekStartsOn: 1,
 			defaultPlannedYield: 4,
 			preferredDinnerTime: '18:30',
+			stalenessThresholdMinutes: 180,
 			createdByUserId: 'user_alice',
 			deletionState: 'active',
 			localOnly: false,
@@ -251,6 +252,7 @@ describe('auth callback projection', () => {
 			weekStartsOn: 1,
 			defaultPlannedYield: 4,
 			preferredDinnerTime: null,
+			stalenessThresholdMinutes: 180,
 			createdByUserId: 'user_alice',
 			deletionState: 'active',
 			localOnly: false
@@ -566,6 +568,7 @@ describe('auth callback projection', () => {
 				weekStartsOn: 1,
 				defaultPlannedYield: 4,
 				preferredDinnerTime: null,
+				stalenessThresholdMinutes: 180,
 				createdByUserId: 'user_alice',
 				deletionState: 'active',
 				localOnly: false

@@ -42,6 +42,7 @@ export type PortableImportStore = Exclude<
 	| 'syncScopes'
 	| 'backfillCheckpoints'
 	| 'uiState'
+	| 'reinstatements'
 >;
 
 export interface PortableImportPlan {
