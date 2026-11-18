@@ -476,6 +476,7 @@ export const createUserSyncCoordinator = (
 	let started = false;
 	let terminalBlocked = false;
 	let deniedCapability: string | null = null;
+	let rerunWhenSettled = false;
 	let retryAttempt = 0;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let timerDueAt = 0;
@@ -636,9 +637,11 @@ export const createUserSyncCoordinator = (
 
 	/**
 	 * The memberships and billing rows the user capability is decided from. A server denial holds
-	 * until these change, so a plan refresh resumes sync and an unchanged retry costs no request.
+	 * until `fingerprint` changes, so any plan refresh (which clears `stale`) earns one retry and an
+	 * unchanged retry costs no request. `decision` leaves out `stale`, this device's own bookkeeping,
+	 * to tell whether a refresh landed while a request was in flight.
 	 */
-	const capabilityInputs = async (): Promise<{ householdIds: string[]; fingerprint: string }> => {
+	const capabilityInputs = async () => {
 		const memberships = (
 			await options.database.memberships
 				.where('[workosUserId+status]')
@@ -648,28 +651,44 @@ export const createUserSyncCoordinator = (
 			.filter(({ permissions }) => permissions.includes('recipes:read'))
 			.toSorted((left, right) => left.householdId.localeCompare(right.householdId));
 		const householdIds = memberships.map(({ householdId }) => householdId);
+		const permissions = memberships.map(({ permissions }) => permissions);
 		const capabilities = await options.database.billingCapabilities.bulkGet(householdIds);
 		return {
 			householdIds,
-			fingerprint: JSON.stringify([memberships.map(({ permissions }) => permissions), capabilities])
+			fingerprint: JSON.stringify([permissions, capabilities]),
+			decision: JSON.stringify([
+				permissions,
+				capabilities.map((capability) => capability && { ...capability, stale: undefined })
+			])
 		};
 	};
 
-	const markTerminal = async (error: unknown): Promise<void> => {
+	const markTerminal = async (error: unknown, requestDecision: string): Promise<void> => {
 		if (error instanceof SyncUnauthenticated) {
 			terminalBlocked = true;
 			currentState = 'reauthRequired';
 			await markProfileReauthRequired(options.database, options.authSlotId);
 		} else {
 			currentState = 'blocked';
-			// Only this user's households decide this scope; other profiles' households are untouched.
-			const { householdIds } = await capabilityInputs();
-			await options.database.transaction('rw', options.database.billingCapabilities, async () => {
-				for (const householdId of householdIds) {
-					await options.database.billingCapabilities.update(householdId, { stale: true });
+			const { memberships, billingCapabilities } = options.database;
+			// One transaction, so a refresh lands wholly before the denial (and outranks it) or after
+			// it (and changes the fingerprint).
+			deniedCapability = await options.database.transaction(
+				'rw',
+				memberships,
+				billingCapabilities,
+				async () => {
+					const { householdIds, decision } = await capabilityInputs();
+					if (decision !== requestDecision) return null;
+					// Only this user's households decide this scope; other profiles' households are untouched.
+					for (const householdId of householdIds) {
+						await billingCapabilities.update(householdId, { stale: true });
+					}
+					return (await capabilityInputs()).fingerprint;
 				}
-			});
-			deniedCapability = (await capabilityInputs()).fingerprint;
+			);
+			// A refresh during the request is newer than this denial, so try again once it settles.
+			if (deniedCapability === null) rerunWhenSettled = true;
 		}
 		await options.database.syncScopes.update(['user', options.workosUserId], {
 			state: 'blocked',
@@ -686,10 +705,9 @@ export const createUserSyncCoordinator = (
 		if (!environment.isVisible()) return (currentState = 'hidden');
 		const capability = await resolveCapability(options.database, options.workosUserId, now());
 		if (!capability.enabled) return (currentState = 'disabled');
+		const request = await capabilityInputs();
 		if (deniedCapability !== null) {
-			if ((await capabilityInputs()).fingerprint === deniedCapability) {
-				return (currentState = 'blocked');
-			}
+			if (request.fingerprint === deniedCapability) return (currentState = 'blocked');
 			deniedCapability = null;
 		}
 		const acquired = await acquireSyncLease(options.database, {
@@ -733,7 +751,7 @@ export const createUserSyncCoordinator = (
 			return currentState;
 		} catch (error) {
 			if (isTerminal(error)) {
-				await markTerminal(error);
+				await markTerminal(error, request.decision);
 				return currentState;
 			}
 			await options.database.syncScopes.update(['user', options.workosUserId], {
@@ -770,6 +788,9 @@ export const createUserSyncCoordinator = (
 	const run = (): Promise<UserSyncRunState> => {
 		active ??= perform().finally(() => {
 			active = null;
+			if (!rerunWhenSettled) return;
+			rerunWhenSettled = false;
+			schedule();
 		});
 		return active;
 	};
@@ -797,6 +818,8 @@ export const createUserSyncCoordinator = (
 		},
 		resumeAfterCapabilityRefresh() {
 			retryAttempt = 0;
+			// A run still settling its denial would absorb this wake-up, so run once more after it.
+			if (active) rerunWhenSettled = true;
 			schedule();
 		},
 		state: () => currentState
