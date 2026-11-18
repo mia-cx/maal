@@ -203,7 +203,10 @@ async function addProfile(
 		.getByRole('button', { name: /continue|sign in|log in/i })
 		.first()
 		.click();
-	await page.waitForURL((url) => url.searchParams.get('authStatus') === 'authenticated');
+	// Match at commit: the app strips the callback marker with replaceState before `load` fires.
+	await page.waitForURL((url) => url.searchParams.get('authStatus') === 'authenticated', {
+		waitUntil: 'commit'
+	});
 	return (await callbackResponse).headersArray();
 }
 
