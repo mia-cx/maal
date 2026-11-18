@@ -189,6 +189,31 @@ test('a renewal refresh that lands while a denied run is still settling resumes 
 	});
 });
 
+test('a renewal refresh that lands while the denied request is in flight resumes user sync', async () => {
+	const user = userTransport();
+	let deny!: () => void;
+	const denied = new Promise<void>((resolve) => (deny = resolve));
+	vi.mocked(user.pull).mockImplementationOnce(async () => {
+		await denied;
+		throw new SyncCapabilityDenied({ code: 'maal_plan_required', message: 'Awaiting renewal.' });
+	});
+	manager = startDeviceSync(database, user, householdTransport());
+	await vi.waitFor(() => expect(user.pull).toHaveBeenCalledTimes(1));
+
+	await refreshBillingProjection(database, 'profile_alice', householdId, async () =>
+		Response.json({
+			...projection(),
+			capability: { ...projection().capability, validUntil: '2026-09-21T12:00:00.000Z' }
+		})
+	);
+	deny();
+
+	await vi.waitFor(() => expect(user.pull).toHaveBeenCalledTimes(2));
+	await vi.waitFor(async () => {
+		expect(await database.syncScopes.get(['user', userId])).toMatchObject({ state: 'idle' });
+	});
+});
+
 test('a repeated entitlement denial does not automatically retry its own stale-cache writes', async () => {
 	const user = userTransport();
 	vi.mocked(user.pull).mockRejectedValue(
