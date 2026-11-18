@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { randomBytes } from 'node:crypto';
+
 import { chromium } from '@playwright/test';
 
 import {
@@ -58,6 +60,15 @@ context.on('requestfailed', (request) => {
 
 try {
 	await page.goto(`${baseUrl}/menu`, { waitUntil: 'domcontentloaded' });
+	// A canary the deployed probe must mark. Without it, a disabled probe would look like a run
+	// that never reached the Worker. It also gives the Workers Logs gate at least one event to find.
+	const canary = await page.evaluate(
+		async (url) => (await fetch(url)).headers.get('x-maal-proof-d1-opened'),
+		`${baseUrl}/api/auth-slots/${randomBytes(16).toString('hex')}/`
+	);
+	if (canary !== 'false') {
+		throw new Error('The deployed staging probe did not mark the canary auth-slot request.');
+	}
 	await page.waitForFunction(async () =>
 		(await indexedDB.databases()).some((candidate) => candidate.name?.startsWith('maal-v1:'))
 	);
@@ -103,6 +114,7 @@ try {
 			{
 				result: 'passed',
 				checks: {
+					deployedProbeMarkedCanary: true,
 					localRecipeCreatedOffline: true,
 					localRecipeReopenedOnline: true,
 					zeroUnpermittedRemoteCalls: true,

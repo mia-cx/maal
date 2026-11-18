@@ -244,7 +244,9 @@ triggers; see [Wrangler configuration](https://developers.cloudflare.com/workers
 For the free-use gate, the staging-only Worker probe marks every traced response with whether its D1 binding
 was opened. It also logs a `staging_proof_request` event to Workers Logs carrying only the deployment label
 (`proofLabel`), the run label (`proofRun`), the route class (`auth`, `billing`, `admin`, or `content`), and
-that boolean. The browser requires the response marker on every same-origin API/MCP call. Only explicit
+that boolean. The run starts with a canary `GET /api/auth-slots/<random>/`, which the probe must mark as not
+opening D1. A disabled probe therefore fails the run instead of looking like one that never reached the Worker.
+The browser requires the response marker on every same-origin API/MCP call. Only explicit
 billing-status and household-admin calls may open D1; auth and content routes must not, and any content API
 call fails even if it did not open D1. `proof:staging live` then checks the same rule in Workers Logs (see
 step 6). Production must not define `MAAL_PROOF_TELEMETRY`.
