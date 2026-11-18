@@ -286,13 +286,10 @@ describe('foreground user coordinator', () => {
 		});
 	});
 
-	test('stops a plan cancelling at period end at validUntil without content traffic', async () => {
+	test('stops an active cached capability at validUntil without content traffic', async () => {
 		const database = await openDatabase();
 		await seedPaidProfile(database);
-		await database.billingCapabilities.update('household_paid', {
-			validUntil: timestamp,
-			cancelAtPeriodEnd: true
-		});
+		await database.billingCapabilities.update('household_paid', { validUntil: timestamp });
 		const transport = noOpTransport();
 		const requests = [
 			vi.spyOn(transport, 'pull'),

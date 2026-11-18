@@ -75,7 +75,8 @@ const projection = (): BillingProjectionEnvelope => ({
 		currentPeriodEnd: timestamp,
 		interruptionStartedAt: null,
 		graceUntil: null,
-		validUntil: timestamp,
+		// Inside the server's one-hour renewal tolerance, awaiting the renewal webhook.
+		validUntil: '2026-08-21T13:00:00.000Z',
 		cancelAtPeriodEnd: false,
 		stale: false,
 		source: 'stripe-d1'

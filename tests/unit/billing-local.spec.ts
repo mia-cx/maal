@@ -364,25 +364,18 @@ describe('local billing projection', () => {
 		).resolves.toMatchObject({ enabled: true });
 	});
 
-	it('keeps a renewing plan syncing past its cached period end, and stops a cancelling one', async () => {
+	it('closes a renewing plan at validUntil, the same instant the Worker denies it', async () => {
 		database = await openMaalDatabase(`billing-renewal-${crypto.randomUUID()}`);
 		await seedSignedInAlice(database, ['org_kitchen']);
 		await database.billingCapabilities.put(projection().capability);
-		const afterPeriodEnd = new Date('2026-09-21T12:00:01.000Z');
+		// The fixture's `validUntil`, which already carries the server's renewal tolerance.
+		const atValidUntil = new Date('2026-09-21T12:00:00.000Z');
 
 		await expect(
-			resolveLocalHouseholdSyncCapability(database, 'user_alice', 'org_kitchen', afterPeriodEnd)
-		).resolves.toMatchObject({ enabled: true });
-		await expect(
-			resolveLocalUserSyncCapability(database, 'user_alice', afterPeriodEnd)
-		).resolves.toMatchObject({ enabled: true });
-
-		await database.billingCapabilities.update('org_kitchen', { cancelAtPeriodEnd: true });
-		await expect(
-			resolveLocalHouseholdSyncCapability(database, 'user_alice', 'org_kitchen', afterPeriodEnd)
+			resolveLocalHouseholdSyncCapability(database, 'user_alice', 'org_kitchen', atValidUntil)
 		).resolves.toMatchObject({ enabled: false });
 		await expect(
-			resolveLocalUserSyncCapability(database, 'user_alice', afterPeriodEnd)
+			resolveLocalUserSyncCapability(database, 'user_alice', atValidUntil)
 		).resolves.toMatchObject({ enabled: false });
 	});
 
