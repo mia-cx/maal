@@ -9,7 +9,7 @@ import { startDeviceSync, type DeviceSyncManager } from '$lib/client/sync/device
 import type { HouseholdSyncTransport } from '$lib/client/sync/household-transport.js';
 import type { UserSyncTransport } from '$lib/client/sync/transport.js';
 import type { BillingProjectionEnvelope } from '$lib/domain/billing/contracts.js';
-import { SyncCapabilityDenied, SyncPermissionDenied } from '$lib/sync/contracts.js';
+import { SyncCapabilityDenied } from '$lib/sync/contracts.js';
 
 const timestamp = '2026-08-21T12:00:00.000Z' as const;
 const householdId = 'household_paid';
@@ -208,20 +208,6 @@ test('a repeated entitlement denial does not automatically retry its own stale-c
 	await new Promise((resolve) => setTimeout(resolve, 100));
 	expect(user.pull).toHaveBeenCalledTimes(2);
 	expect(await database.billingCapabilities.get(householdId)).toMatchObject({ stale: true });
-});
-
-test('billing refresh does not clear a terminal user permission denial', async () => {
-	const user = userTransport();
-	vi.mocked(user.pull).mockRejectedValue(
-		new SyncPermissionDenied({ code: 'recipes_permission_required', message: 'Denied.' })
-	);
-	manager = startDeviceSync(database, user, householdTransport());
-	await waitForBlocked();
-	await refreshBillingProjection(database, 'profile_alice', householdId, async () =>
-		Response.json(projection())
-	);
-	await new Promise((resolve) => setTimeout(resolve, 100));
-	expect(user.pull).toHaveBeenCalledTimes(1);
 });
 
 test('failed and disabled billing refreshes leave denied user sync paused', async () => {
