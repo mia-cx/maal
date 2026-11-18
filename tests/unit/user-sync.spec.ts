@@ -1511,6 +1511,11 @@ describe('user sync scheduling', () => {
 		try {
 			await vi.advanceTimersByTimeAsync(0);
 			await vi.waitFor(() => expect(pulls.paid).toBe(1));
+			// The run schedules its next pull only after it finishes, so advance the clock after that.
+			await vi.waitFor(async () => {
+				expect(await paid.syncScopes.get(['user', userId])).toMatchObject({ state: 'idle' });
+			});
+			await vi.advanceTimersByTimeAsync(0);
 			await vi.advanceTimersByTimeAsync(FOREGROUND_PULL_INTERVAL_MS);
 			await vi.waitFor(() => expect(pulls.paid).toBe(2));
 			await vi.advanceTimersByTimeAsync(FOREGROUND_PULL_INTERVAL_MS * 3);
