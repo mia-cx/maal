@@ -263,12 +263,13 @@ function runJson(executable, args, environment) {
 
 /**
  * Returns a read-only Workers Logs query for one free-use run. It authenticates with
- * `CLOUDFLARE_API_TOKEN` when set, otherwise with the operator's Wrangler login. Neither the
- * token nor the response body is printed.
+ * `CLOUDFLARE_API_TOKEN` when set, otherwise with the operator's Wrangler login, read on every
+ * query because Wrangler refreshes an OAuth token that expired during the proof matrix. Neither
+ * the token nor the response body is printed.
  */
 async function workersLogsQuery(run) {
-	const token = process.env.CLOUDFLARE_API_TOKEN?.trim() || (await wranglerToken());
 	return async (startedAt) => {
+		const token = process.env.CLOUDFLARE_API_TOKEN?.trim() || (await wranglerToken());
 		const response = await fetch(telemetryQueryUrl(process.env.CLOUDFLARE_ACCOUNT_ID), {
 			method: 'POST',
 			headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
