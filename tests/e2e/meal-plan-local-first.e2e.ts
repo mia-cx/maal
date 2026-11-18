@@ -225,9 +225,11 @@ const readStore = (page: Page, store: string) =>
 	}, store);
 
 const dragTo = async (page: Page, source: Locator, target: Locator, targetY?: number) => {
+	// hover() waits until the card has stopped moving and is the element under the pointer, so the
+	// press can't land on a card that is still sliding into the pool.
+	await source.hover();
 	const [sourceBox, targetBox] = await Promise.all([source.boundingBox(), target.boundingBox()]);
 	if (!sourceBox || !targetBox) throw new Error('The dragged card and its target must be visible.');
-	await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
 	await page.mouse.down();
 	await page.mouse.move(
 		sourceBox.x + sourceBox.width / 2 + 12,
@@ -241,6 +243,8 @@ const dragTo = async (page: Page, source: Locator, target: Locator, targetY?: nu
 		targetY ?? targetBox.y + Math.min(120, targetBox.height / 2),
 		{ steps: 8 }
 	);
+	// Release only once the app has registered the hover, or a busy page drops the meal elsewhere.
+	await expect(target.locator('[data-meal-drop-skeleton]')).toBeVisible();
 	await page.mouse.up();
 };
 
