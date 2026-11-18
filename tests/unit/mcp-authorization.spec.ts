@@ -2,6 +2,7 @@ import type { Miniflare } from 'miniflare';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import type { LiveWorkOSMembership } from '$lib/server/auth-slots/adapter.js';
+import { renewalCutoff } from '$lib/server/billing/entitlement.js';
 import {
 	MAAL_API_SCOPES,
 	MCP_ACTIVE_KEY_LIMIT,
@@ -321,10 +322,10 @@ describe('MCP request authorization', () => {
 		}
 	});
 
-	test('expires active service at the paid period and applies the same gate to key management', async () => {
+	test('expires active service after the renewal tolerance and applies the same gate to key management', async () => {
 		await database
 			.prepare('UPDATE billing_subscriptions SET current_period_end = ?')
-			.bind(MCP_TEST_NOW)
+			.bind(renewalCutoff(MCP_TEST_NOW))
 			.run();
 		const created = await createKey();
 		await expect(authorize(created.key)).rejects.toMatchObject({ _tag: 'McpAuthorizationError' });

@@ -5,6 +5,7 @@ import { timingSafeEqual } from 'node:crypto';
 import {
 	BillingRepository,
 	billingErrorResponse,
+	createStripeClient,
 	purgeExpiredHouseholds
 } from '$lib/server/billing/index.js';
 import { readD1ServerNow } from '$lib/server/maintenance/index.js';
@@ -40,6 +41,7 @@ export const POST: RequestHandler = async (event) => {
 		});
 		const result = await purgeExpiredHouseholds({
 			repository: new BillingRepository(environment.DB),
+			stripe: createStripeClient(environment),
 			now: await readD1ServerNow(environment.DB),
 			deleteWorkOSOrganization: async (householdId) => {
 				try {

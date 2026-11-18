@@ -6,6 +6,7 @@ import {
 	createStripeClient,
 	purgeExpiredHouseholds,
 	reconcileOutstandingHouseholdDeletionRefunds,
+	reconcilePendingPayerCleanups,
 	reconcileStaleTrialClaims
 } from '$lib/server/billing/index.js';
 
@@ -29,6 +30,8 @@ export interface ScheduledMaintenanceResult {
 	readonly trialRollbacksPending: number;
 	readonly deletionRefundsReconciled: number;
 	readonly deletionRefundsPending: number;
+	readonly payerCleanupsCompleted: number;
+	readonly payerCleanupsPending: number;
 }
 
 export const runScheduledMaintenance = async (
@@ -55,6 +58,7 @@ export const runScheduledMaintenance = async (
 	if (!serverNow) throw new TypeError('Scheduled retention did not return D1 server time.');
 	const householdResult = await purgeExpiredHouseholds({
 		repository: new BillingRepository(database),
+		stripe,
 		now: serverNow,
 		deleteWorkOSOrganization
 	});
@@ -68,6 +72,11 @@ export const runScheduledMaintenance = async (
 		stripe,
 		now: serverNow
 	});
+	const payerCleanupResult = await reconcilePendingPayerCleanups({
+		repository: new BillingRepository(database),
+		stripe,
+		now: serverNow
+	});
 	return {
 		...syncResult,
 		householdsPurged: householdResult.purged.length,
@@ -77,7 +86,9 @@ export const runScheduledMaintenance = async (
 		trialRollbacksCompleted: trialResult.rollbacksCompleted,
 		trialRollbacksPending: trialResult.pending,
 		deletionRefundsReconciled: deletionRefundResult.reconciled,
-		deletionRefundsPending: deletionRefundResult.pending
+		deletionRefundsPending: deletionRefundResult.pending,
+		payerCleanupsCompleted: payerCleanupResult.completed,
+		payerCleanupsPending: payerCleanupResult.pending
 	};
 };
 

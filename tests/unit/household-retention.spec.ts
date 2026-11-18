@@ -1,8 +1,12 @@
 import { Miniflare } from 'miniflare';
+import type Stripe from 'stripe';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { BillingRepository, purgeExpiredHouseholds } from '$lib/server/billing/index.js';
 import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js';
+
+// These households have no billing rows, so purge never reaches Stripe.
+const noStripe = {} as Stripe;
 
 let miniflare: Miniflare;
 let database: D1Database;
@@ -79,6 +83,7 @@ describe('scheduled household purge', () => {
 		const repository = new BillingRepository(database);
 		const first = await purgeExpiredHouseholds({
 			repository,
+			stripe: noStripe,
 			now: '2026-08-22T00:00:00.000Z',
 			rowBatchSize: 2,
 			deleteWorkOSOrganization: async (householdId) => {
@@ -115,6 +120,7 @@ describe('scheduled household purge', () => {
 
 		const second = await purgeExpiredHouseholds({
 			repository,
+			stripe: noStripe,
 			now: '2026-08-22T00:00:01.000Z',
 			rowBatchSize: 10,
 			deleteWorkOSOrganization: async (householdId) => {
@@ -156,6 +162,7 @@ describe('scheduled household purge', () => {
 		await expect(
 			purgeExpiredHouseholds({
 				repository,
+				stripe: noStripe,
 				now: '2026-08-22T00:00:02.000Z',
 				deleteWorkOSOrganization: vi.fn(async () => undefined)
 			})
@@ -167,6 +174,7 @@ describe('scheduled household purge', () => {
 		await expect(
 			purgeExpiredHouseholds({
 				repository,
+				stripe: noStripe,
 				now: '2026-08-22T00:00:00.000Z',
 				deleteWorkOSOrganization: async () => {
 					throw new Error('workos unavailable');
@@ -181,6 +189,7 @@ describe('scheduled household purge', () => {
 		await expect(
 			purgeExpiredHouseholds({
 				repository,
+				stripe: noStripe,
 				now: '2026-08-22T00:00:01.000Z',
 				deleteWorkOSOrganization: async () => undefined
 			})
@@ -205,6 +214,7 @@ describe('scheduled household purge', () => {
 
 		const result = await purgeExpiredHouseholds({
 			repository: new BillingRepository(database),
+			stripe: noStripe,
 			now: '2026-08-22T00:00:00.000Z',
 			rowBatchSize: 1,
 			deleteWorkOSOrganization: async () => undefined

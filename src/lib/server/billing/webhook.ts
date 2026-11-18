@@ -1,8 +1,14 @@
 import Stripe from 'stripe';
 
+import type { StripeSubscriptionStatus } from '$lib/domain/billing/contracts.js';
+
 import { reconcileHouseholdDeletionRefund } from './deletion.js';
 import type { BillingRepository } from './repository.js';
-import { projectionFromStripeSubscription } from './subscriptions.js';
+import {
+	effectiveStripeStatus,
+	projectionFromStripeSubscription,
+	subscriptionIsOpen
+} from './subscriptions.js';
 
 const utcFromSeconds = (seconds: number): `${string}Z` =>
 	new Date(seconds * 1_000).toISOString() as `${string}Z`;
@@ -35,6 +41,20 @@ const refundForEvent = async (
 ): Promise<Stripe.Refund | null> => {
 	const object = event.data.object;
 	return object.object === 'refund' ? stripe.refunds.retrieve(object.id) : null;
+};
+
+/**
+ * The subscription status the event itself reported. Stripe delivers the subscription as it was
+ * when the event was created, which can differ from the live status we retrieve for the
+ * projection — recording the reported status keeps the interruption reconstruction honest.
+ */
+const statusReportedByEvent = (event: Stripe.Event): StripeSubscriptionStatus | null => {
+	const object = event.data.object;
+	if (event.type.startsWith('customer.subscription.') && object.object === 'subscription') {
+		return effectiveStripeStatus(object as Stripe.Subscription);
+	}
+	// Invoice outcomes do not establish the subscription's status at the event time.
+	return null;
 };
 
 const supportedEventTypes = new Set([
@@ -88,6 +108,49 @@ export const processStripeWebhook = async (input: {
 			await input.repository.finishStripeEventWithoutProjection(input.event.id, input.receivedAt);
 			return 'ignored';
 		}
+		// Even when the event does not project, the interruption recompute reads its recorded row.
+		const eventDetail = {
+			householdId,
+			stripeSubscriptionId: subscription.id,
+			stripeCreatedAt: utcFromSeconds(input.event.created),
+			eventStatus: statusReportedByEvent(input.event)
+		};
+		// A purged household has no rows to project onto; its late webhooks finish quietly so
+		// Stripe stops retrying them.
+		const deletion = await input.repository.deletionRequest(householdId);
+		if (deletion?.state === 'purged' || !(await input.repository.householdExists(householdId))) {
+			await input.repository.finishStripeEventWithoutProjection(
+				input.event.id,
+				input.receivedAt,
+				eventDetail
+			);
+			return 'processed';
+		}
+		// An event for a different subscription than the projected row is normally a superseded
+		// duplicate, but a replacement subscription can legitimately arrive before the old one's
+		// cancellation event. When the row's subscription is still open in D1, ask Stripe whether
+		// it actually ended; only then may this event replace it.
+		const row = await input.repository.subscription(householdId);
+		let replacesEndedSubscriptionId: string | undefined;
+		if (
+			row !== null &&
+			row.stripeSubscriptionId !== subscription.id &&
+			subscriptionIsOpen(row.status)
+		) {
+			const displaced = await input.stripe.subscriptions.retrieve(row.stripeSubscriptionId);
+			if (displaced && subscriptionIsOpen(effectiveStripeStatus(displaced))) {
+				await input.repository.finishStripeEventWithoutProjection(
+					input.event.id,
+					input.receivedAt,
+					eventDetail
+				);
+				return 'processed';
+			}
+			replacesEndedSubscriptionId = row.stripeSubscriptionId;
+		}
+		const eventCreatedAt = utcFromSeconds(input.event.created);
+		const paidPeriodSucceeded =
+			input.event.type === 'invoice.paid' || input.event.type === 'invoice.payment_succeeded';
 		await input.repository.commitStripeProjection(
 			input.event.id,
 			projectionFromStripeSubscription({
@@ -95,13 +158,15 @@ export const processStripeWebhook = async (input: {
 				householdId,
 				subscriberUserId: subscription.metadata.workosUserId || existing?.subscriberUserId || null,
 				eventId: input.event.id,
-				eventCreatedAt: utcFromSeconds(input.event.created),
-				eventReceivedAt: input.receivedAt,
+				eventCreatedAt,
 				existing,
-				paidPeriodSucceeded:
-					input.event.type === 'invoice.paid' || input.event.type === 'invoice.payment_succeeded'
+				paidPeriodSucceeded,
+				reportsStatus: statusReportedByEvent(input.event) !== null
 			}),
-			input.receivedAt
+			input.receivedAt,
+			paidPeriodSucceeded ? eventCreatedAt : null,
+			replacesEndedSubscriptionId,
+			statusReportedByEvent(input.event)
 		);
 		return 'processed';
 	} catch (cause) {

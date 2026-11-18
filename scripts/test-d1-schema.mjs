@@ -8,7 +8,11 @@ const emptyPersistenceDirectory = mkdtempSync(join(tmpdir(), 'maal-d1-schema-emp
 const prototypePersistenceDirectory = mkdtempSync(join(tmpdir(), 'maal-d1-schema-prototype-'));
 const wrangler = ['exec', 'wrangler', 'd1'];
 const databaseName = 'maal-local';
-const expectedMigrations = ['0000_rewrite_baseline.sql', '0001_global_taxonomy_seed.sql'];
+const expectedMigrations = [
+	'0000_rewrite_baseline.sql',
+	'0001_global_taxonomy_seed.sql',
+	'0002_dry_bug.sql'
+];
 
 const run = (persistenceDirectory, args, expectedSuccess = true) => {
 	const result = spawnSync('pnpm', [...wrangler, ...args, '--persist-to', persistenceDirectory], {

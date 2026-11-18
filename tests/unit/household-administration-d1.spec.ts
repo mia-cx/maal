@@ -483,9 +483,22 @@ describe('household administration Worker service', () => {
 			})
 		).rejects.toMatchObject({ code: 'billing_owner_required' });
 
+		// Grace expiring is not enough: the owner is only freed once the subscription is terminal.
 		await database
 			.prepare(
 				"UPDATE billing_subscriptions SET grace_until = '2026-08-22T07:59:59.999Z' WHERE household_id = 'org_family'"
+			)
+			.run();
+		await expect(
+			service().removeMember({
+				actor: actor(aliceId, ['org_family']),
+				householdId: 'org_family',
+				membershipId: bob.id
+			})
+		).rejects.toMatchObject({ code: 'billing_owner_required' });
+		await database
+			.prepare(
+				"UPDATE billing_subscriptions SET status = 'canceled' WHERE household_id = 'org_family'"
 			)
 			.run();
 		await expect(
