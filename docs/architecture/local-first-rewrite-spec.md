@@ -467,6 +467,10 @@ the only versions today.
 - **Order of operations.** An outdated client flushes its outbox first, so local changes are never trapped
   behind an app update. Once every mutation is acknowledged, the server answers with an update-required
   signal, and the client installs the new version through the PWA update coordinator (§10).
+- **Outside the window.** A client whose protocol the Worker no longer accepts, for example one that stayed
+  offline across two upgrades, cannot flush. The Worker refuses its envelope with update-required and
+  acknowledges nothing, so the client updates with its outbox intact. The new version upcasts the pending
+  mutations with the same pure upcasters before it sends them, so they are never dropped.
 - **Version check.** The client checks for a new version periodically. When an update is required to keep
   syncing, it either reloads or tells the user "Maal has to update to continue syncing to the cloud".
 - **Dexie.** Local schema changes follow the forward-only, non-destructive migration policy in §6 and §10.
