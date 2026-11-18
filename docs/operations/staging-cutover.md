@@ -231,7 +231,7 @@ must show `17 3 * * *`; do not create a second dashboard-managed trigger. See
 Open a JSON log tail during smoke/proof traffic:
 
 ```sh
-pnpm exec wrangler tail maal-staging --format json --config wrangler.jsonc --env staging
+pnpm exec wrangler tail --format json --config wrangler.jsonc --env staging
 ```
 
 Expected maintenance records are `maintenance_completed` with non-negative counts. Any
