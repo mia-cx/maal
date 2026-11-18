@@ -448,6 +448,29 @@ Ordinary changes remain 90 days; tombstones remain one year. A cursor below the 
 `bootstrap_required`. A server-acknowledged local ID absent from the authoritative snapshot is deleted, not
 reintroduced; a never-acknowledged local record remains eligible for backfill.
 
+### 8.4 Old-client support
+
+This section is design only. Nothing here is built until a production deployment exists.
+`CURRENT_PROTOCOL_VERSION = 1` and `CURRENT_SCHEMA_VERSION = 1` in `src/lib/domain/contracts/versions.ts` are
+the only versions today.
+
+- **Version stamps.** Every request and response envelope carries `protocolVersion`, and every mutation and
+  aggregate carries `schemaVersion` (`src/lib/sync/contracts.ts`, `src/lib/domain/contracts/primitives.ts`).
+  `sync_changes` stores the versioned payload and `sync_devices` records each device's last app and protocol
+  version (§7.5).
+- **Upgrade on arrival.** The server stores each incoming event as-is, with its original version. A pure
+  upcaster turns it into the current schema before it is applied to state, so history is never rewritten.
+- **Migration paths.** A major version upgrades one major step at a time, because each breaking change carries
+  its own risk and its own tests. Within one major version, steps squash into one direct path, for example
+  1.1.3 straight to 1.5.1.
+- **Envelope window.** During a rollout the Worker accepts the current and the previous protocol version (§3).
+- **Order of operations.** An outdated client flushes its outbox first, so local changes are never trapped
+  behind an app update. Once every mutation is acknowledged, the server answers with an update-required
+  signal, and the client installs the new version through the PWA update coordinator (§10).
+- **Version check.** The client checks for a new version periodically. When an update is required to keep
+  syncing, it either reloads or tells the user "Maal has to update to continue syncing to the cloud".
+- **Dexie.** Local schema changes follow the forward-only, non-destructive migration policy in §6 and §10.
+
 ## 9. Import and export
 
 V1 portable archives are unencrypted ZIP files with:
@@ -518,3 +541,12 @@ No implementation slice may introduce HTTP-hydrated dashboard state, per-user De
 domain authority, client-timestamp ordering for routine live sync, D1 content traffic for free routine use, or
 a second paid tier. No slice may redesign or substitute an in-scope prototype UI without an explicit later
 product decision.
+
+### 12.1 Future scope (not planned for v1)
+
+- **WebSocket push.** Replace foreground polling with server push of new sequences.
+- **Device-only data for MCP.** Use Cloudflare Tunnels so MCP can read data that exists only on a device and
+  was never synced to D1.
+- **Change history for product analysis.** Keep ordinary changes beyond 90 days to study how people plan and
+  cook. This conflicts with the 90-day retention rule in §8.3, so it needs a privacy decision before any
+  design work.
