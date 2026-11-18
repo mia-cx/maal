@@ -5,6 +5,10 @@ import {
 	RecipeImportedCandidateSchema,
 	type RecipeImportedCandidate
 } from '$lib/domain/recipes/schema.js';
+import {
+	parseIngredientSource,
+	parseInstructionEvents
+} from '$lib/recipes/source-normalization.js';
 
 import { fetchRecipePage } from './fetch.js';
 
@@ -27,6 +31,7 @@ const clean = (value: string): string =>
 		.replaceAll('&amp;', '&')
 		.replaceAll('&quot;', '"')
 		.replaceAll('&#39;', "'")
+		.replace(/&deg;|&#0*176;|&#x0*b0;/gi, '°')
 		.replace(/\s+/g, ' ')
 		.trim();
 
@@ -134,6 +139,16 @@ export const parseRecipeCandidate = async (input: {
 		.map((value) => firstText(value))
 		.filter((value): value is string => value !== null);
 	const instructionLines = instructions(recipe.recipeInstructions);
+	const parsedInstructions = instructionLines.map((line, stepIndex) => ({
+		id: uuidv7(),
+		stepIndex,
+		sectionName: null,
+		text: line,
+		durationMinutes: null,
+		confidence: 1,
+		createdAt: now,
+		updatedAt: now
+	}));
 	const imageUrl = firstText(recipe.image);
 	const categories = [
 		...values(recipe.recipeCategory).map((value) => ['category', value] as const),
@@ -180,30 +195,15 @@ export const parseRecipeCandidate = async (input: {
 		ingredients: ingredientLines.map((line, lineIndex) => ({
 			id: uuidv7(),
 			lineIndex,
-			originalText: line,
-			sourceAmountText: null,
-			sourceQuantity: null,
-			sourceUnitLabel: null,
-			sourceFoodLabel: line,
-			baseFoodId: null,
-			baseQuantity: null,
-			baseUnitId: null,
-			baseUnitFamilyId: null,
+			...parseIngredientSource(line),
 			optional: /\boptional\b/i.test(line),
 			confidence: 1,
 			createdAt: now
 		})),
-		instructions: instructionLines.map((line, stepIndex) => ({
-			id: uuidv7(),
-			stepIndex,
-			sectionName: null,
-			text: line,
-			durationMinutes: null,
-			confidence: 1,
-			createdAt: now,
-			updatedAt: now
-		})),
-		instructionEvents: [],
+		instructions: parsedInstructions,
+		instructionEvents: parsedInstructions.flatMap((instruction) =>
+			parseInstructionEvents(instruction, now)
+		),
 		applianceRequirements: [],
 		classifications: categories
 			.map(([kind, value]) => [kind, firstText(value)] as const)

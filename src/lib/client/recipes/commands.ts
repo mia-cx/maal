@@ -33,6 +33,10 @@ import {
 	type RecipeInstruction,
 	type RecipePurgeTombstone
 } from '$lib/domain/recipes/schema.js';
+import {
+	normalizeIngredientSource,
+	parseInstructionEvents
+} from '$lib/recipes/source-normalization.js';
 
 const NullableStringSchema = Schema.NullOr(Schema.String);
 const NullableNonNegativeIntSchema = Schema.NullOr(Schema.NonNegativeInt);
@@ -153,9 +157,6 @@ export const recipeSearchTokens = (recipe: {
 	return [...new Set(normalized)];
 };
 
-const ingredientOriginalText = (edit: RecipeIngredientEdit): string =>
-	[edit.amount.trim(), edit.unit.trim(), edit.item.trim()].filter(Boolean).join(' ');
-
 const reconcileIngredients = (
 	current: readonly RecipeIngredient[],
 	edits: readonly RecipeIngredientEdit[],
@@ -166,33 +167,30 @@ const reconcileIngredients = (
 		.filter(({ item }) => item.trim().length > 0)
 		.map((edit, lineIndex) => {
 			const existing = edit.id === null ? undefined : byId.get(edit.id);
-			const sourceAmountText = edit.amount.trim() || null;
-			const sourceUnitLabel = edit.unit.trim() || null;
-			const sourceFoodLabel = edit.item.trim();
-			const originalText = ingredientOriginalText(edit);
+			const amount = edit.amount.trim();
+			const unit = edit.unit.trim();
+			const item = edit.item.trim();
+			// An untouched line keeps its stored source text and normalization.
 			if (
 				existing &&
-				existing.lineIndex === lineIndex &&
-				existing.sourceAmountText === sourceAmountText &&
-				existing.sourceUnitLabel === sourceUnitLabel &&
-				existing.sourceFoodLabel === sourceFoodLabel &&
-				existing.originalText === originalText
+				existing.sourceAmountText === (amount || null) &&
+				existing.sourceUnitLabel === (unit || null) &&
+				existing.sourceFoodLabel === item
 			) {
-				return existing;
+				return existing.lineIndex === lineIndex ? existing : { ...existing, lineIndex };
 			}
-			const numericAmount = sourceAmountText === null ? null : Number(sourceAmountText);
+			const normalized = normalizeIngredientSource({
+				originalText: [amount, unit, item].filter(Boolean).join(' '),
+				amount,
+				unit,
+				item
+			});
 			return {
 				id: existing?.id ?? uuidv7(),
 				lineIndex,
-				originalText,
-				sourceAmountText,
-				sourceQuantity: Number.isFinite(numericAmount) ? numericAmount : null,
-				sourceUnitLabel,
-				sourceFoodLabel,
-				baseFoodId: null,
-				baseQuantity: null,
-				baseUnitId: null,
-				baseUnitFamilyId: null,
+				...normalized,
+				// An amount/unit-only edit re-derives units but keeps the resolved food link.
+				baseFoodId: existing?.sourceFoodLabel === item ? existing.baseFoodId : null,
 				optional: existing?.optional ?? false,
 				confidence: 1,
 				createdAt: existing?.createdAt ?? occurredAt
@@ -224,6 +222,30 @@ const reconcileInstructions = (
 				updatedAt: occurredAt
 			};
 		});
+};
+
+/**
+ * Builds the ingredient, instruction, and instruction-event sidecars for an editor save. Edited
+ * lines are parsed again; untouched lines and the events of unchanged instruction text are kept.
+ */
+export const reconcileRecipeLines = (
+	current: Pick<RecipeImportedCandidate, 'ingredients' | 'instructions' | 'instructionEvents'>,
+	patch: Pick<RecipeEditorPatch, 'ingredients' | 'instructions'>,
+	occurredAt: UtcInstant
+): Pick<RecipeImportedCandidate, 'ingredients' | 'instructions' | 'instructionEvents'> => {
+	const instructions = reconcileInstructions(current.instructions, patch.instructions, occurredAt);
+	const previousText = new Map(current.instructions.map(({ id, text }) => [id, text]));
+	return {
+		ingredients: reconcileIngredients(current.ingredients, patch.ingredients, occurredAt),
+		instructions,
+		instructionEvents: instructions.flatMap((instruction) =>
+			previousText.get(instruction.id) === instruction.text
+				? current.instructionEvents.filter(
+						({ recipeInstructionId }) => recipeInstructionId === instruction.id
+					)
+				: parseInstructionEvents(instruction, occurredAt)
+		)
+	};
 };
 
 const recipeWriteCommand = (
@@ -269,8 +291,11 @@ const createRecipeCommand = (
 ): { recipe: RecipeAggregate; command: LocalCommand } => {
 	const occurredAt = commandTime(context);
 	const patch = decode(RecipeEditorPatchSchema, patchInput, 'decode recipe editor patch');
-	const ingredients = reconcileIngredients([], patch.ingredients, occurredAt);
-	const instructions = reconcileInstructions([], patch.instructions, occurredAt);
+	const lines = reconcileRecipeLines(
+		{ ingredients: [], instructions: [], instructionEvents: [] },
+		patch,
+		occurredAt
+	);
 	const candidateWithoutSearch = {
 		schemaVersion: CURRENT_SCHEMA_VERSION,
 		revision: 1,
@@ -308,9 +333,7 @@ const createRecipeCommand = (
 		instructionConfidence: null,
 		nutritionConfidence: null,
 		userNotes: null,
-		ingredients,
-		instructions,
-		instructionEvents: [],
+		...lines,
 		applianceRequirements: [],
 		classifications: [],
 		media: [],
@@ -397,13 +420,6 @@ export const updateRecipeFromEditor = async (
 		{ recipeId, conflictGroups: ['header', 'ingredients', 'instructions'], patch },
 		(current) => {
 			const recipe = requireOwnedRecipe(current, context.ownerUserId, 'update recipe');
-			const ingredients = reconcileIngredients(recipe.ingredients, patch.ingredients, occurredAt);
-			const instructions = reconcileInstructions(
-				recipe.instructions,
-				patch.instructions,
-				occurredAt
-			);
-			const retainedInstructionIds = new Set(instructions.map(({ id }) => id));
 			const nextWithoutSearch = {
 				...recipe,
 				title: patch.title.trim(),
@@ -417,11 +433,7 @@ export const updateRecipeFromEditor = async (
 				prepTimeMinutes: patch.prepTimeMinutes,
 				cookTimeMinutes: patch.cookTimeMinutes,
 				yield: patch.yield,
-				ingredients,
-				instructions,
-				instructionEvents: recipe.instructionEvents.filter(({ recipeInstructionId }) =>
-					retainedInstructionIds.has(recipeInstructionId)
-				),
+				...reconcileRecipeLines(recipe, patch, occurredAt),
 				searchTokens: []
 			} satisfies RecipeAggregate;
 			return {
