@@ -155,6 +155,20 @@ try {
 		(await postWebhook(pastDueEvent)).result === 'duplicate',
 		'Duplicate event was processed twice.'
 	);
+	const projectedCapability = async () =>
+		(
+			await slotJson(
+				slotId,
+				session,
+				`billing/status?householdId=${encodeURIComponent(created.householdId)}`
+			)
+		).capability;
+	const afterForged = await projectedCapability();
+	assert(
+		afterForged?.state === 'enabled' && afterForged.stripeStatus === subscription.status,
+		'A forged event body changed the projected plan.'
+	);
+	checks.forgedEventBodyIgnored = true;
 	const staleActiveEvent = stripeEvent(
 		'customer.subscription.updated',
 		subscription,
@@ -166,18 +180,11 @@ try {
 		(await postWebhook(staleActiveEvent)).result === 'processed',
 		'Stale event was not acknowledged.'
 	);
-	const projection = await slotJson(
-		slotId,
-		session,
-		`billing/status?householdId=${encodeURIComponent(created.householdId)}`
-	);
 	assert(
-		projection.capability?.state === 'enabled' &&
-			projection.capability?.stripeStatus === subscription.status,
-		'A forged or stale event body changed the projected plan.'
+		JSON.stringify(await projectedCapability()) === JSON.stringify(afterForged),
+		'A stale event changed the projected plan.'
 	);
 	checks.webhookDisorderAndIdempotency = true;
-	checks.forgedEventBodyIgnored = true;
 
 	stage = 'paid subscription activation';
 	// `pm_card_visa` is a test token: attaching it creates a new method, referenced by its own ID.
