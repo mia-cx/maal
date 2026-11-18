@@ -262,6 +262,7 @@ async function deleteAndVerifyOrganization(organizationId) {
 			if (error instanceof NotFoundException) return;
 			throw error;
 		}
+		if (attempt === ORGANIZATION_DELETION_CHECKS - 1) break;
 		await new Promise((resolvePromise) => setTimeout(resolvePromise, 500 * 2 ** attempt));
 	}
 	throw new Error('Disposable WorkOS organization remains');
