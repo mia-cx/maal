@@ -199,11 +199,17 @@ async function addProfile(
 	const passwordInput = page.getByLabel(/password/i).first();
 	await expect(passwordInput).toBeVisible();
 	await passwordInput.fill(password);
+	// Listen before clicking and match at commit: the app strips the callback marker with
+	// replaceState before `load` fires, and a fast callback can land before the click resolves.
+	const authenticated = page.waitForURL(
+		(url) => url.searchParams.get('authStatus') === 'authenticated',
+		{ waitUntil: 'commit' }
+	);
 	await page
 		.getByRole('button', { name: /continue|sign in|log in/i })
 		.first()
 		.click();
-	await page.waitForURL((url) => url.searchParams.get('authStatus') === 'authenticated');
+	await authenticated;
 	return (await callbackResponse).headersArray();
 }
 
