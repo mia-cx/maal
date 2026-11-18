@@ -112,6 +112,7 @@ const seedProductDatabase = async ({
 		weekStartsOn: 1,
 		defaultPlannedYield: 4,
 		preferredDinnerTime: '18:30',
+		stalenessThresholdMinutes: 180,
 		createdByUserId: 'user_alice',
 		deletionState: 'active',
 		localOnly: false
@@ -335,7 +336,7 @@ export const seedProduct = async (
 				return candidate?.version ?? 0;
 			}, databaseName)
 		)
-		.toBe(50);
+		.toBe(60);
 	await page.goto('/manifest.webmanifest');
 	await page.evaluate(seedProductDatabase, {
 		name: databaseName,

@@ -68,6 +68,7 @@ const seedSettings = async (paid: boolean) => {
 		weekStartsOn: 1,
 		defaultPlannedYield: 4,
 		preferredDinnerTime: '18:30',
+		stalenessThresholdMinutes: 180,
 		createdByUserId: 'user_alice',
 		deletionState: 'active',
 		localOnly: false
@@ -123,7 +124,7 @@ const seed = async (page: Page, paid = false) => {
 		.poll(() =>
 			page.evaluate(async () =>
 				(await indexedDB.databases()).some(
-					(candidate) => candidate.name === 'maal-v1:production' && candidate.version === 50
+					(candidate) => candidate.name === 'maal-v1:production' && candidate.version === 60
 				)
 			)
 		)
