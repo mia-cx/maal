@@ -184,6 +184,14 @@ try {
 		JSON.stringify(await projectedCapability()) === JSON.stringify(afterForged),
 		'A stale event changed the projected plan.'
 	);
+	// Both events resolve to the same live status, so check the recency watermark directly.
+	const watermark = await d1Execute(
+		`SELECT last_stripe_event_id AS eventId FROM billing_subscriptions WHERE household_id = ${sql(created.householdId)}`
+	);
+	assert(
+		watermark?.[0]?.results?.[0]?.eventId === pastDueEvent.id,
+		'A stale event moved the projection watermark back.'
+	);
 	checks.webhookDisorderAndIdempotency = true;
 
 	stage = 'paid subscription activation';
