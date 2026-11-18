@@ -131,6 +131,13 @@ profile. A forgotten PIN requires online WorkOS reauthentication. Session expiry
 
 ### 4.2 WorkOS authority and cached permissions
 
+Maal has its own WorkOS project, with its own staging and production environments. It stays out of the shared
+mia.cx directory that Vesta and other mia.cx products sign in through
+([vesta ADR 0001](https://github.com/vesta-cx/vesta/blob/main/docs/adr/0001-shared-mia-cx-identity.md)).
+Maal's organizations are households with family roles, so its users, organizations, roles, and unprefixed
+permission strings never mix with a workspace product's tenants. Every Maal Worker uses keys from Maal's
+project only, and staging uses Maal's staging environment.
+
 WorkOS is authoritative for users, organizations, memberships, roles, and permissions. D1 and Dexie contain
 verified projections. Offline commands enforce the last verified projection. If a profile was removed while
 offline, the next remote denial stops sync, quarantines its outbox for that household, and detaches the local
