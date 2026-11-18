@@ -44,6 +44,14 @@ _Avoid_: Archived recipe, permanently deleted recipe
 A recipe whose content the owner erased. A minimal deletion marker may remain temporarily to prevent another device from restoring stale content.
 _Avoid_: Deleted recipe
 
+**Staleness threshold**:
+How long an edit may wait on a device and still count as current. A household sets its own; personal records use 3 hours. An edit younger than the threshold brings back a record someone deleted.
+_Avoid_: Grace period, late-upload window
+
+**Reinstated record**:
+A deleted recipe or meal that a recent edit brought back. It returns like a record another member just created, with a Reinstated badge until opened.
+_Avoid_: Restored record (that is a recipe brought back from the bin)
+
 **Portable archive**:
 A file through which a person can export and later restore their locally available Maal data without remote synchronization.
 _Avoid_: Cloud backup, database dump
