@@ -112,7 +112,7 @@ pnpm exec wrangler d1 execute maal-staging --remote --config wrangler.jsonc --en
 ```
 
 `application_objects` must equal `0`. A missing table, stale `d1_migrations` row, or any other nonzero result
-blocks the launch. Apply the two-file fresh chain only to that verified empty database:
+blocks the launch. Apply the fresh migration chain only to that verified empty database:
 
 ```sh
 pnpm exec wrangler d1 migrations apply maal-staging --remote --config wrangler.jsonc --env staging
@@ -120,8 +120,8 @@ pnpm exec wrangler d1 migrations list maal-staging --remote --config wrangler.js
 pnpm exec wrangler d1 execute maal-staging --remote --config wrangler.jsonc --env staging --command "SELECT name FROM d1_migrations ORDER BY id; SELECT (SELECT COUNT(*) FROM units) AS units, (SELECT COUNT(*) FROM unit_aliases) AS unit_aliases, (SELECT COUNT(*) FROM foods) AS foods, (SELECT COUNT(*) FROM food_aliases) AS food_aliases" --json
 ```
 
-The migration list must be empty afterward. `d1_migrations` must contain only
-`0000_rewrite_baseline.sql` and `0001_global_taxonomy_seed.sql`. The seed counts must be `40` units, `184`
+The migration list must be empty afterward. `d1_migrations` must list exactly the `.sql` files in `drizzle/`,
+in order, starting with `0000_rewrite_baseline.sql`. The seed counts must be `40` units, `184`
 unit aliases, and the intentionally empty current global food sets at `0` and `0`. Do not attach raw D1 output
 to a public issue because it can contain infrastructure metadata. D1 records applied files in
 `d1_migrations`. See [D1 migrations](https://developers.cloudflare.com/d1/reference/migrations/),
