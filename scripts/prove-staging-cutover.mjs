@@ -121,10 +121,10 @@ switch (command) {
 			}
 		});
 		const authApi = summarizeAuthEvidence(
-			await runJson('pnpm', ['test:proof:auth-slots:api'], providerEnvironment)
+			await runJson('test:proof:auth-slots:api', providerEnvironment)
 		);
 		const authHosted = summarizeAuthEvidence(
-			await runJson('pnpm', ['test:proof:auth-slots:hosted'], providerEnvironment)
+			await runJson('test:proof:auth-slots:hosted', providerEnvironment)
 		);
 		await run(
 			'pnpm',
@@ -135,14 +135,14 @@ switch (command) {
 			{ env: providerEnvironment }
 		);
 		const billing = summarizeBillingEvidence(
-			await runJson('pnpm', ['test:proof:billing'], providerEnvironment)
+			await runJson('test:proof:billing', providerEnvironment)
 		);
 		const runtime = summarizeBooleanProof(
-			await runJson('pnpm', ['test:proof:staging:runtime'], providerEnvironment)
+			await runJson('test:proof:staging:runtime', providerEnvironment)
 		);
 		const freeUseStartedAt = new Date().toISOString();
 		const freeUse = summarizeBooleanProof(
-			await runJson('pnpm', ['test:proof:staging:free-use'], {
+			await runJson('test:proof:staging:free-use', {
 				...providerEnvironment,
 				MAAL_STAGING_PROOF_RUN: freeUseRun.proofRun
 			})
@@ -234,9 +234,11 @@ function run(executable, args, options = {}) {
 	});
 }
 
-function runJson(executable, args, environment) {
+/** Runs a package script whose stdout is one proof JSON document and parses it. */
+function runJson(script, environment) {
 	return new Promise((resolvePromise, rejectPromise) => {
-		const child = spawn(executable, args, {
+		// --silent keeps pnpm's "> maal@… script" banner out of stdout, which must be pure JSON.
+		const child = spawn('pnpm', ['--silent', script], {
 			cwd: root,
 			stdio: ['ignore', 'pipe', 'ignore'],
 			env: environment
@@ -249,13 +251,13 @@ function runJson(executable, args, environment) {
 		child.once('error', rejectPromise);
 		child.once('exit', (code) => {
 			if (code !== 0) {
-				rejectPromise(new Error(`${args[0]} failed without publishing provider output.`));
+				rejectPromise(new Error(`${script} failed without publishing provider output.`));
 				return;
 			}
 			try {
 				resolvePromise(JSON.parse(stdout));
 			} catch {
-				rejectPromise(new Error(`${args[0]} returned invalid proof JSON.`));
+				rejectPromise(new Error(`${script} returned invalid proof JSON.`));
 			}
 		});
 	});
