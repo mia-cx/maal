@@ -1,5 +1,12 @@
 # Maal Greenfield Local-First Rewrite
 
+<a href="https://0rwx.com">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://0rwx.com/static/AI-W-dark.svg">
+    <img alt="AI:W" src="https://0rwx.com/static/AI-W-light.svg" height="48">
+  </picture>
+</a>
+
 > The implementation-driving architecture and schema are now in
 > [`docs/architecture/local-first-rewrite-spec.md`](docs/architecture/local-first-rewrite-spec.md). This older
 > scaffold plan is retained for provenance; the canonical specification wins wherever they differ.
