@@ -224,9 +224,23 @@ const readStore = (page: Page, store: string) =>
 		return rows;
 	}, store);
 
+/** A locator's box once it stops moving, so a drag never starts mid-transition or mid-scroll. */
+const settledBox = async (locator: Locator) => {
+	let previous = await locator.boundingBox();
+	await expect
+		.poll(async () => {
+			const current = await locator.boundingBox();
+			const settled = current !== null && JSON.stringify(current) === JSON.stringify(previous);
+			previous = current;
+			return settled;
+		})
+		.toBe(true);
+	return previous!;
+};
+
 const dragTo = async (page: Page, source: Locator, target: Locator, targetY?: number) => {
-	const [sourceBox, targetBox] = await Promise.all([source.boundingBox(), target.boundingBox()]);
-	if (!sourceBox || !targetBox) throw new Error('The dragged card and its target must be visible.');
+	const sourceBox = await settledBox(source);
+	const targetBox = await settledBox(target);
 	await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
 	await page.mouse.down();
 	await page.mouse.move(
