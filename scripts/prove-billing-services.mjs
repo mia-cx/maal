@@ -246,18 +246,26 @@ async function deleteAndVerifyCustomer(customerId) {
 	);
 }
 
+/** WorkOS reads can still return an organization for a few seconds after its deletion succeeds. */
 async function deleteAndVerifyOrganization(organizationId) {
+	// Declared here, not at module scope: cleanup runs before evaluation reaches later declarations.
+	const ORGANIZATION_DELETION_CHECKS = 8;
 	try {
 		await workos.organizations.deleteOrganization(organizationId);
 	} catch (error) {
 		if (!(error instanceof NotFoundException)) throw error;
 	}
-	try {
-		await workos.organizations.getOrganization(organizationId);
-		throw new Error('Disposable WorkOS organization remains');
-	} catch (error) {
-		if (!(error instanceof NotFoundException)) throw error;
+	for (let attempt = 0; attempt < ORGANIZATION_DELETION_CHECKS; attempt += 1) {
+		try {
+			await workos.organizations.getOrganization(organizationId);
+		} catch (error) {
+			if (error instanceof NotFoundException) return;
+			throw error;
+		}
+		if (attempt === ORGANIZATION_DELETION_CHECKS - 1) break;
+		await new Promise((resolvePromise) => setTimeout(resolvePromise, 500 * 2 ** attempt));
 	}
+	throw new Error('Disposable WorkOS organization remains');
 }
 
 async function verifyConfiguredMaalCatalog() {
