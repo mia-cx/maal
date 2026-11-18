@@ -98,7 +98,7 @@ export const SyncChangeSchema = Schema.Struct({
 	receivedAt: UtcInstantSchema,
 	aggregate: Schema.Unknown,
 	tombstoneExpiresAt: Schema.NullOr(UtcInstantSchema),
-	/** Present when this upsert brought back a tombstoned entity (spec §8.4). */
+	/** Present when this upsert brought back a tombstoned entity (spec §8.5). */
 	reinstated: Schema.optional(Schema.Literal(true))
 });
 export type SyncChange = typeof SyncChangeSchema.Type;

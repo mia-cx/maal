@@ -2,7 +2,7 @@ import Dexie from 'dexie';
 
 import type { MaalDatabase } from '$lib/client/local/database.js';
 
-/** The pulled-change fields that say whether the server brought an entity back (spec §8.4). */
+/** The pulled-change fields that say whether the server brought an entity back (spec §8.5). */
 interface ReinstatingChange {
 	readonly entityKind: string;
 	readonly entityId: string;

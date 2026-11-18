@@ -4,7 +4,7 @@ import type { MaalDatabase } from '$lib/client/local/database.js';
 import type { OutboxRecord } from '$lib/client/local/records.js';
 import { readActiveProfile } from '$lib/client/local/profiles.js';
 
-/** One rejected write the person has not dismissed yet (spec §8.5). */
+/** One rejected write the person has not dismissed yet (spec §8.6). */
 export interface RejectionNotice {
 	readonly mutationId: string;
 	readonly message: string;

@@ -1,7 +1,7 @@
 import { Schema } from 'effect';
 
 /**
- * How long an edit may wait on a device and still count as current (spec §8.4). Within it, an edit
+ * How long an edit may wait on a device and still count as current (spec §8.5). Within it, an edit
  * brings a deleted entity back and backfill contenders resolve by D1 commit order. Households set
  * their own; user audiences always use the default.
  */
