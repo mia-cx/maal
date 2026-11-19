@@ -344,8 +344,11 @@ export class HouseholdAdministrationRepository {
 		try {
 			await this.database
 				.prepare(
+					// updated_at marks when the member left: shared-recipe visibility is cut off there, so a
+					// repeated revocation must not move it later.
 					`UPDATE household_memberships
-					 SET status = 'revoked', last_verified_at = ?, updated_at = ?
+					 SET status = 'revoked', last_verified_at = ?,
+					  updated_at = CASE WHEN status = 'active' THEN ? ELSE updated_at END
 					 WHERE membership_id = ?`
 				)
 				.bind(now, now, membershipId)
