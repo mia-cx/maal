@@ -273,9 +273,17 @@ describe('recipe aggregate contract', () => {
 			media: updated.media,
 			nutritionFacts: updated.nutritionFacts
 		}).toEqual(hiddenBefore);
-		expect(await database.outbox.count()).toBe(2);
+		// The import and the save each change what a meal shows, so each adds a version.
+		expect(await outboxKinds(database)).toEqual({ recipe: 2, recipeVersion: 2 });
 	});
 });
+
+const outboxKinds = async (database: MaalDatabase): Promise<Record<string, number>> =>
+	Object.fromEntries(
+		[...Map.groupBy(await database.outbox.toArray(), ({ entityKind }) => entityKind)].map(
+			([kind, rows]) => [kind, rows.length]
+		)
+	);
 
 describe('offline recipe commands and queries', () => {
 	test('creates and searches a manual recipe through the normal command path', async () => {
@@ -301,7 +309,7 @@ describe('offline recipe commands and queries', () => {
 		expect((await searchRecipes(database, 'user_alice', 'creme')).map(({ id }) => id)).toEqual([
 			recipe.id
 		]);
-		expect(await database.outbox.count()).toBe(1);
+		expect(await outboxKinds(database)).toEqual({ recipe: 1, recipeVersion: 1 });
 	});
 
 	test('soft-deletes and restores within the recovery window as new mutations', async () => {
@@ -316,7 +324,8 @@ describe('offline recipe commands and queries', () => {
 
 		const restored = await restoreRecipe(database, context(at(23)), recipe.id);
 		expect(restored.deletedAt).toBeNull();
-		expect(await database.outbox.count()).toBe(3);
+		// The deletion adds a marker; the restore adds nothing (spec §5.2).
+		expect(await outboxKinds(database)).toEqual({ recipe: 3, recipeVersion: 2 });
 	});
 
 	test('purges only recipe content, retains a one-year marker, and never removes copied meals', async () => {

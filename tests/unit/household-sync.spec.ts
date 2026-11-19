@@ -541,7 +541,7 @@ describe('foreground household coordinator', () => {
 		expect(await database.meals.bulkGet([firstId, secondId])).toEqual([first, second]);
 	});
 
-	test('a bootstrap page that starts with a shared recipe still badges the meal it reinstates', async () => {
+	test('a bootstrap page that starts with a shared recipe version still badges the meal it reinstates', async () => {
 		const database = await openDatabase('bootstrap-shared-recipe-reinstated');
 		const deviceId = String((await database.meta.get('deviceId'))!.value);
 		const recipe = await commitImportedRecipeCandidate(
@@ -549,6 +549,7 @@ describe('foreground household coordinator', () => {
 			{ authSlotId: 'slot_bob', ownerUserId: 'user_bob', originDeviceId: deviceId },
 			candidateFromToolRecipe({ title: 'Bob’s stew', ingredients: [], instructions: [] })
 		);
+		const version = (await database.recipeVersions.where('recipeId').equals(recipe.id).first())!;
 		// This device synced the household before, so it saw the meal's deletion.
 		await database.syncScopes.put({
 			scopeKind: 'household',
@@ -564,7 +565,7 @@ describe('foreground household coordinator', () => {
 		});
 		const mealId = uuidv7();
 		const change = (
-			entityKind: 'recipe' | 'meal',
+			entityKind: 'recipeVersion' | 'meal',
 			entityId: string,
 			aggregate: unknown
 		): HouseholdSyncChange => ({
@@ -586,7 +587,7 @@ describe('foreground household coordinator', () => {
 		await applyHouseholdBootstrap(database, householdScope, {
 			protocolVersion: 1,
 			aggregates: [
-				change('recipe', recipe.id, recipe),
+				change('recipeVersion', String(version.id), version),
 				{ ...change('meal', mealId, meal(mealId, uuidv7(), deviceId)), reinstated: true }
 			],
 			instructions: [],

@@ -1782,8 +1782,9 @@ describe('device backfill budget', () => {
 		};
 		const unplanned = await createRecipeFromEditor(database, context, patch);
 		const planned = await createRecipeFromEditor(database, context, { ...patch, title: 'Stew' });
-		// Recipes from before the outbox existed: present locally with no sync history.
+		// Recipes from before the outbox and versions existed: present locally with no sync history.
 		await database.outbox.clear();
+		await database.recipeVersions.clear();
 		await database.meals.put({
 			id: uuidv7(),
 			householdId: 'household_paid',

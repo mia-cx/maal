@@ -322,7 +322,12 @@ describe('portable replacements', () => {
 			capabilityResolver: async () => ({ enabled: true, stale: false, householdId })
 		});
 		await expect(coordinator.syncNow()).resolves.toBe('complete');
-		expect(pushed.map(({ entityId }) => entityId).toSorted()).toEqual(
+		expect(
+			pushed
+				.filter(({ entityKind }) => entityKind === 'recipe')
+				.map(({ entityId }) => entityId)
+				.toSorted()
+		).toEqual(
 			[recipe.id, unrelated.id].toSorted()
 		);
 		expect(pushed.find(({ entityId }) => entityId === recipe.id)).toMatchObject({
@@ -331,7 +336,8 @@ describe('portable replacements', () => {
 			conflictGroups: [...RECIPE_CONFLICT_GROUPS],
 			aggregate: { deletedAt: archived.deletedAt, title: 'Soup' }
 		});
-		expect(repository.commit).toHaveBeenCalledTimes(2);
+		// The two recipe changes, and the version the unrelated recipe's creation added.
+		expect(repository.commit).toHaveBeenCalledTimes(3);
 		await expect(database.outbox.get(replacement.mutationId)).resolves.toMatchObject({
 			status: 'acknowledged'
 		});
