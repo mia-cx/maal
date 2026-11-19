@@ -413,7 +413,7 @@ Database name: `maal-v1:<environment>`. This replaces the stale per-user-databas
 | `householdInvites`     | Safe remote summary only; raw code exists only at creation/share time. Index `householdId,expiresAt,revokedAt`.                                                               |
 | `householdAppliances`  | `&id`; unique `[householdId+appliance]`.                                                                                                                                      |
 | `recipes`              | Complete recipe aggregate; indexes `ownerUserId,deletedAt,updatedAt,*searchTokens`.                                                                                           |
-| `recipeVersions`       | `&id`; index `recipeId`. Immutable versions of local profiles' recipes and versions shared with a household (§5.2, §8.7).                                                    |
+| `recipeVersions`       | `&id`; index `recipeId`. Immutable versions of local profiles' recipes and versions shared with a household (§5.2, §8.7).                                                     |
 | `meals`                | Recipe-following meal or meal copy; indexes `householdId,[householdId+date],[householdId+status],[householdId+date+sortOrder],deletedAt,sourceRecipeId`.                      |
 | `mealCheckIns`         | Complete check-in; unique `[mealId+reporterUserId]`; indexes `mealId,reporterUserId,deletedAt`.                                                                               |
 | taxonomy stores        | One store for each table family in §5.5, preserving exact editable rows and ownership/scope indexes.                                                                          |
