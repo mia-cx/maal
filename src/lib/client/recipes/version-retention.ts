@@ -32,6 +32,7 @@ export const runRecipeVersionRetention = async (
 			database.meals,
 			database.mealCheckIns,
 			database.households,
+			database.memberships,
 			database.profiles,
 			database.syncScopes,
 			database.outbox

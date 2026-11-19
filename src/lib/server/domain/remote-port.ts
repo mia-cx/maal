@@ -6,7 +6,7 @@ import {
 	copyRecipeIntoMeal,
 	planRecipeFollowingMeal,
 	resolveMealVersion,
-	versionChange
+	sameRecipeContent
 } from '$lib/domain/meals/recipe-following.js';
 import {
 	MEAL_CONFLICT_GROUPS,
@@ -25,11 +25,15 @@ import {
 	RECIPE_CONFLICT_GROUPS,
 	RecipeAggregateSchema,
 	RecipeImportedCandidateSchema,
-	StoredRecipeSchema,
 	type RecipeAggregate,
 	type RecipeImportedCandidate
 } from '$lib/domain/recipes/schema.js';
-import { recipeVersion, type RecipeVersion } from '$lib/domain/recipes/versions.js';
+import {
+	byEffect,
+	newestContentVersion,
+	recipeVersion,
+	type RecipeVersion
+} from '$lib/domain/recipes/versions.js';
 import {
 	FoodUserAliasSchema,
 	FoodUserEntrySchema,
@@ -216,9 +220,6 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		operation: 'upsert' | 'delete';
 	}): Promise<RecipeAggregate> {
 		const now = new Date().toISOString() as `${string}Z`;
-		const [before] = await this.users.readEntities(input.actorUserId, [
-			{ entityKind: 'recipe', entityId: input.aggregate.id }
-		]);
 		const { receipt, aggregate } = await this.users.commitWithResult({
 			actorUserId: input.actorUserId,
 			deviceId: this.deviceId,
@@ -239,14 +240,18 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		if (receipt.status === 'rejected') {
 			throw new RemoteDomainError('write_rejected', 'The recipe command was rejected.');
 		}
-		// A tool's recipe change adds its version on the Worker, as a device adds its own (§5.2).
-		const change = versionChange(
-			before === undefined
-				? undefined
-				: (fromSnapshot(StoredRecipeSchema, before.aggregate) ?? undefined),
-			fromSnapshot(StoredRecipeSchema, aggregate) ?? undefined
+		// A tool's recipe change adds its version on the Worker, as a device adds its own (§5.2):
+		// content the newest version lacks, or a deletion after a live version.
+		const committed = recipeFromSnapshot(aggregate);
+		const versions = (await readRecipeVersions(this.database, [input.aggregate.id])).toSorted(
+			byEffect
 		);
-		if (change !== null) {
+		const newest = newestContentVersion(versions);
+		const live = committed !== null && committed.deletedAt === null;
+		const adds = live
+			? newest === undefined || !sameRecipeContent(newest.recipe, committed)
+			: versions.at(-1)?.recipe != null;
+		if (adds) {
 			await this.commitVersion(
 				input.actorUserId,
 				recipeVersion({
@@ -254,7 +259,7 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 					recipeId: input.aggregate.id,
 					ownerUserId: input.actorUserId,
 					effectiveAt: now,
-					recipe: change === 'content' ? recipeFromSnapshot(aggregate) : null
+					recipe: live ? committed : null
 				}),
 				now
 			);

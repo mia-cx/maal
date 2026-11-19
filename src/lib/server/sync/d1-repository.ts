@@ -953,6 +953,7 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			input.mutation.aggregate
 		);
 		const isVersion = input.mutation.entityKind === 'recipeVersion';
+		const isRecipeCommit = input.mutation.entityKind === 'recipe';
 		if (isVersion) {
 			const refusal = await this.refuseVersion(input, decodedIncoming.aggregate as RecipeVersion);
 			if (refusal !== null) return rejected(refusal);
@@ -965,15 +966,23 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			input.mutation.entityKind,
 			input.mutation.entityId
 		);
-		const activeTombstone = await this.database
-			.prepare(
-				`SELECT c.payload FROM sync_tombstones t
+		// A version is insert-only and never deleted by a device, so it has no tombstone to consult.
+		const activeTombstone = isVersion
+			? null
+			: await this.database
+					.prepare(
+						`SELECT c.payload FROM sync_tombstones t
 				 JOIN sync_changes c ON c.seq = t.deletion_sequence
 				 WHERE t.audience_kind = 'user' AND t.audience_id = ? AND t.entity_kind = ?
 				  AND t.entity_id = ? AND t.expires_at > ?`
-			)
-			.bind(input.actorUserId, input.mutation.entityKind, input.mutation.entityId, input.receivedAt)
-			.first<ActiveTombstoneRow>();
+					)
+					.bind(
+						input.actorUserId,
+						input.mutation.entityKind,
+						input.mutation.entityId,
+						input.receivedAt
+					)
+					.first<ActiveTombstoneRow>();
 		let reinstated = false;
 		if (activeTombstone && input.mutation.operation === 'upsert') {
 			const deletedAggregate = decodeStoredPayload(activeTombstone.payload).payload.aggregate;
@@ -1029,27 +1038,29 @@ export class D1UserSyncRepository implements UserSyncRepository {
 		if (acceptedGroups.length === 0) return rejected('historical_loser');
 
 		const head = Math.max(0, ...versions.map(({ last_sequence }) => last_sequence));
-		const current =
-			(await readLatestChangedAggregate(
-				this.database,
-				input.actorUserId,
-				input.mutation.entityKind,
-				input.mutation.entityId
-			)) ??
-			(
-				await readSnapshotChanges(this.database, input.actorUserId, [
-					{ entityKind: input.mutation.entityKind, entityId: input.mutation.entityId }
-				])
-			)[0]?.aggregate ??
-			null;
+		// Only a recipe merges into what D1 holds; every other kind takes the incoming aggregate.
+		const current = !isRecipeCommit
+			? null
+			: ((await readLatestChangedAggregate(
+					this.database,
+					input.actorUserId,
+					input.mutation.entityKind,
+					input.mutation.entityId
+				)) ??
+				(
+					await readSnapshotChanges(this.database, input.actorUserId, [
+						{ entityKind: input.mutation.entityKind, entityId: input.mutation.entityId }
+					])
+				)[0]?.aggregate ??
+				null);
 		const revision = Math.max(0, ...versions.map(({ revision }) => revision)) + 1;
 		const clock = {
 			occurredAt: input.mutation.occurredAt,
 			originDeviceId: input.mutation.originDeviceId,
 			mutationId: input.mutation.mutationId
 		};
-		const isRecipe = input.mutation.entityKind === 'recipe';
-		const result = isRecipe
+
+		const result = isRecipeCommit
 			? mergeRecipe(current, decodedIncoming.aggregate, acceptedGroups, revision, clock)
 			: {
 					...decodedIncoming.aggregate,
@@ -1256,7 +1267,7 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			.bind(input.mutation.mutationId)
 			.first<ReceiptRow>();
 		if (!receipt) throw new TypeError('The committed mutation has no receipt.');
-		if (isRecipe) {
+		if (isRecipeCommit) {
 			await this.matchNewestVersion(
 				input,
 				decodedResult.aggregate as StoredRecipe,
