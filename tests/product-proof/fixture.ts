@@ -329,11 +329,21 @@ export const seedProduct = async (
 	await page.goto('/');
 	await page.evaluate(resetDatabase, databaseName);
 	await page.goto('/plan');
+	// The listed version appears while the app's upgrade is still creating stores, so wait for the
+	// stores too: leaving the page mid-upgrade would abort it and leave an empty database.
 	await expect
 		.poll(() =>
 			page.evaluate(async (name) => {
 				const candidate = (await indexedDB.databases()).find((entry) => entry.name === name);
-				return candidate?.version ?? 0;
+				if (candidate?.version !== 70) return candidate?.version ?? 0;
+				const database = await new Promise<IDBDatabase>((resolve, reject) => {
+					const request = indexedDB.open(name);
+					request.onerror = () => reject(request.error);
+					request.onsuccess = () => resolve(request.result);
+				});
+				const ready = database.objectStoreNames.contains('recipes');
+				database.close();
+				return ready ? 70 : 0;
 			}, databaseName)
 		)
 		.toBe(70);
