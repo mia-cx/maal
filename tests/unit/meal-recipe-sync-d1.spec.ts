@@ -6,6 +6,7 @@ import { uuidv7 } from 'uuidv7';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.js';
+import { detachHouseholdSnapshot } from '$lib/client/local/households.js';
 import { removeProfileFromDevice } from '$lib/client/local/profiles.js';
 import {
 	listHouseholdMeals,
@@ -24,6 +25,7 @@ import {
 	commitImportedRecipeCandidate,
 	updateRecipeFromEditor
 } from '$lib/client/recipes/index.js';
+import { runRecipeVersionRetention } from '$lib/client/recipes/version-retention.js';
 import {
 	createHouseholdSyncCoordinator,
 	createUserSyncCoordinator,
@@ -34,7 +36,8 @@ import { readUnseenRejections } from '$lib/client/sync/rejections.js';
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
 import { planRecipeFollowingMeal } from '$lib/domain/meals/recipe-following.js';
 import { MEAL_CONFLICT_GROUPS } from '$lib/domain/meals/schema.js';
-import { recipeVersion } from '$lib/domain/recipes/versions.js';
+import { newestContentVersion, recipeVersion } from '$lib/domain/recipes/versions.js';
+import { D1RemoteDomainPort } from '$lib/server/domain/remote-port.js';
 import { collectRecipeVersions } from '$lib/server/maintenance/recipe-versions.js';
 import { candidateFromToolRecipe } from '$lib/server/mcp/builders.js';
 import {
@@ -49,8 +52,9 @@ import {
 	pushHouseholdSync,
 	pushUserSync
 } from '$lib/server/sync/index.js';
+import { readRecipeVersions } from '$lib/server/sync/recipe-versions.js';
 
-import { createMcpTestDatabase } from './mcp-test-helpers.js';
+import { MCP_TEST_DEVICE, createMcpTestDatabase } from './mcp-test-helpers.js';
 
 const householdId = 'org_family';
 const alice = { userId: 'user_alice', profileId: 'profile_alice', slot: 'slot_alice' };
@@ -221,6 +225,9 @@ const openDevice = async (
 			originDeviceId,
 			...(occurredAt ? { occurredAt } : {})
 		}),
+		syncUser: async () => {
+			expect(await userSync.syncNow()).toBe('complete');
+		},
 		/** User sync first, as the app does, so a meal's recipe versions reach D1 before the meal. */
 		sync: async () => {
 			expect(await userSync.syncNow()).toBe('complete');
@@ -288,16 +295,24 @@ const pushMeal = async (
 		})
 	).receipts[0]!;
 
-/** D1 that runs `write` just before its next batch commits, as when another request lands then. */
-const beforeNextBatch = (write: () => Promise<unknown>): D1Database => {
+/**
+ * D1 that runs `write` just before its next batch commits once `ready` holds, as when another request
+ * lands then.
+ */
+const beforeNextBatch = (
+	write: () => Promise<unknown>,
+	ready: () => Promise<boolean> = async () => true
+): D1Database => {
 	let pending: (() => Promise<unknown>) | undefined = write;
 	return new Proxy(d1, {
 		get(target, key) {
 			if (key === 'batch') {
 				return async (statements: D1PreparedStatement[]) => {
-					const run = pending;
-					pending = undefined;
-					await run?.();
+					if (pending !== undefined && (await ready())) {
+						const run = pending;
+						pending = undefined;
+						await run();
+					}
 					return target.batch(statements);
 				};
 			}
@@ -456,6 +471,44 @@ describe('recipe versions across devices', () => {
 		expect(await titles(phone.database)).toEqual(new Map([[meal.id, 'Phone soup']]));
 		expect(await titles(laptop.database)).toEqual(new Map([[meal.id, 'Phone soup']]));
 	});
+
+	test('an edit that lands while the Worker matches an older winning edit stays the newest version', async () => {
+		const tablet = await openDevice(alice);
+		const laptop = await openDevice(alice);
+		const recipe = await saveRecipe(tablet, '2026-01-01T10:00:00.000Z');
+		await tablet.sync();
+		await laptop.sync();
+		await editRecipe(laptop, recipe.id, 'Laptop soup', '2026-01-03T10:00:00.000Z');
+		await laptop.sync();
+		await tablet.sync();
+		await editRecipe(tablet, recipe.id, 'Newer concurrent edit', '2026-01-04T10:00:00.000Z');
+		const storedTitle = async () =>
+			(
+				await d1
+					.prepare('SELECT title FROM recipes WHERE id = ?')
+					.bind(recipe.id)
+					.first<{ title: string }>()
+			)?.title;
+
+		// The phone's older edit wins by commit order, so the Worker adds a version matching it. The
+		// tablet's newer edit commits just before that version would.
+		const phone = await openDevice(
+			alice,
+			undefined,
+			beforeNextBatch(
+				() => tablet.sync(),
+				async () => (await storedTitle()) === 'Older winning edit'
+			)
+		);
+		await phone.sync();
+		await editRecipe(phone, recipe.id, 'Older winning edit', '2026-01-02T10:00:00.000Z');
+		await phone.sync();
+
+		await expect(storedTitle()).resolves.toBe('Newer concurrent edit');
+		expect(newestContentVersion(await readRecipeVersions(d1, [recipe.id]))?.recipe.title).toBe(
+			'Newer concurrent edit'
+		);
+	});
 });
 
 describe('who can follow and version a recipe', () => {
@@ -509,6 +562,41 @@ describe('who can follow and version a recipe', () => {
 			occurredAt: new Date().toISOString()
 		});
 		await expect(pushMeal(bob.userId, bobsMeal)).resolves.toMatchObject({ status: 'accepted' });
+	});
+
+	test('edits the owner makes after leaving stay private in every household read', async () => {
+		const on = (date: string) => `${date}T10:00:00.000Z` as `${string}Z`;
+		const aliceDevice = await openDevice(alice);
+		const bobDevice = await openDevice(bob);
+		const recipe = await saveRecipe(aliceDevice, on('2026-08-21'));
+		const meal = await planRecipeAsMeal(
+			aliceDevice.database,
+			{ ...aliceDevice.context, occurredAt: on('2026-08-22') },
+			recipe.id,
+			{ date: '2099-01-01' }
+		);
+		await aliceDevice.sync();
+		await bobDevice.sync();
+
+		await d1
+			.prepare(
+				`UPDATE household_memberships SET status = 'revoked', updated_at = ?
+				 WHERE workos_user_id = ?`
+			)
+			.bind(on('2026-08-23'), alice.userId)
+			.run();
+		await editRecipe(aliceDevice, recipe.id, 'Private after leaving', on('2026-08-24'));
+		await aliceDevice.syncUser();
+		await bobDevice.sync();
+
+		const port = new D1RemoteDomainPort(d1, MCP_TEST_DEVICE);
+		expect(await titles(bobDevice.database)).toEqual(new Map([[meal.id, 'Sunday soup']]));
+		await expect(port.getHouseholdMeal(householdId, meal.id)).resolves.toMatchObject({
+			title: 'Sunday soup'
+		});
+		expect((await port.listHouseholdMeals(householdId)).map(({ title }) => title)).toEqual([
+			'Sunday soup'
+		]);
 	});
 });
 
@@ -617,6 +705,32 @@ describe('version collection', () => {
 		await bobDevice.sync();
 		expect((await titles(bobDevice.database)).get(bobsMeal.id)).toBe('April soup');
 	});
+
+	test('a device keeps the version a detached household’s meal shows', async () => {
+		// Free use: Alice's user scope never syncs, so this device collects her versions itself.
+		const device = await openDevice(alice);
+		const on = (date: string) => `${date}T10:00:00.000Z` as `${string}Z`;
+		const recipe = await saveRecipe(device, on('2026-08-21'));
+		const meal = await planRecipeAsMeal(
+			device.database,
+			{ ...device.context, occurredAt: on('2026-08-22') },
+			recipe.id,
+			{ date: '2099-01-01' }
+		);
+		await detachHouseholdSnapshot(device.database, {
+			profileId: alice.profileId,
+			householdId,
+			denialCode: 'membership_revoked',
+			detachedAt: on('2026-08-23')
+		});
+		await editRecipe(device, recipe.id, 'August soup', on('2026-08-24'));
+		await editRecipe(device, recipe.id, 'September soup', on('2026-09-01'));
+
+		await runRecipeVersionRetention(device.database, new Date('2027-03-01T00:00:00.000Z'));
+
+		expect(await titles(device.database)).toEqual(new Map([[meal.id, 'Sunday soup']]));
+		expect(await versionTitles(device.database)).toEqual(['September soup', 'Sunday soup']);
+	});
 });
 
 describe('archives and shared devices', () => {
@@ -668,6 +782,63 @@ describe('archives and shared devices', () => {
 		await expect(restored.database.recipeVersions.count()).resolves.toBe(2);
 		await expect(restored.database.meals.get(meal.id)).resolves.toMatchObject({
 			followsRecipe: true
+		});
+	});
+
+	test('a checked-in meal of another member’s recipe, copied by an edit, exports without its pin', async () => {
+		const aliceDevice = await openDevice(alice);
+		const bobDevice = await openDevice(bob);
+		const recipe = await saveRecipe(bobDevice);
+		const meal = await planRecipeAsMeal(bobDevice.database, bobDevice.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		await bobDevice.sync();
+		await aliceDevice.sync();
+		const { checkIn } = await saveMealCheckIn(aliceDevice.database, aliceDevice.context, meal.id, {
+			status: 'cooked',
+			verdict: 'repeat'
+		});
+		await updateMealHeader(aliceDevice.database, aliceDevice.context, meal.id, {
+			title: 'Alice’s soup',
+			description: null,
+			cookTimeMinutes: null
+		});
+		await aliceDevice.database.households.put({
+			householdId,
+			name: 'Family kitchen',
+			locale: 'en-US',
+			timezone: null,
+			weekStartsOn: 1,
+			defaultPlannedYield: 4,
+			preferredDinnerTime: '18:00',
+			stalenessThresholdMinutes: 180,
+			createdByUserId: alice.userId,
+			deletionState: 'active',
+			localOnly: false,
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: joinedAt,
+			updatedAt: joinedAt,
+			deletedAt: null,
+			conflictClocks: {}
+		});
+		const archive = await decodePortableArchive(
+			await exportPortableArchive(aliceDevice.database, alice.profileId)
+		);
+
+		const restored = await openDevice(alice);
+		await restored.database.households.put(
+			(await aliceDevice.database.households.get(householdId))!
+		);
+		await commitPortableImport(
+			restored.database,
+			await planPortableImport(restored.database, archive, alice.profileId)
+		);
+
+		expect(await titles(restored.database)).toEqual(new Map([[meal.id, 'Alice’s soup']]));
+		await expect(restored.database.mealCheckIns.get(checkIn.id)).resolves.toMatchObject({
+			verdict: 'repeat',
+			recipeVersionId: null
 		});
 	});
 

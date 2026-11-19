@@ -77,14 +77,10 @@ const collectRecipe = async (
 		followingMealsOf(database, recipeId),
 		database.prepare('SELECT 1 AS present FROM recipes WHERE id = ?').bind(recipeId).first()
 	]);
-	const contextOf = await loadMealResolution(database, meals);
-	const checkIns = meals.flatMap((meal) => contextOf(meal).checkIns);
-	const timeZones = new Map(meals.map((meal) => [meal.householdId, contextOf(meal).timeZone]));
 	const garbage = collectableVersions({
 		versions,
 		meals,
-		checkIns,
-		timeZones,
+		contextOf: await loadMealResolution(database, meals),
 		recipeExists: recipe !== null,
 		now: new Date(now)
 	});

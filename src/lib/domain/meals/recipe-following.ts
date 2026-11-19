@@ -240,34 +240,31 @@ export const resolveMeal = (
 export const VERSION_RETENTION_MS = 90 * 86_400_000;
 
 /**
- * The versions of one recipe that collection removes (spec §5.2). `meals` are the live
- * recipe-following meals of the recipe, and `checkIns` the live check-ins on live meals. A version
- * stays while it is the newest content version of a recipe that exists, while a meal resolves to it
- * or a check-in pins it, while it caps a meal's candidates, or until it and the version after it
- * took effect more than {@link VERSION_RETENTION_MS} before `now`.
+ * The versions of one recipe that collection removes (spec §5.2). `versions` are all of the recipe's
+ * versions, `meals` its live recipe-following meals, and `contextOf` what each meal resolves against,
+ * as readers load it, so a meal keeps the version it shows even when its household sees only some of
+ * the versions. A version stays while it is the newest content version of a recipe that exists, while
+ * a meal resolves to it or a check-in pins it, while it caps a meal's candidates, or until it and the
+ * version after it took effect more than {@link VERSION_RETENTION_MS} before `now`.
  */
 export const collectableVersions = (input: {
 	readonly versions: readonly RecipeVersion[];
 	readonly meals: readonly RecipeFollowingMeal[];
-	readonly checkIns: readonly MealCheckIn[];
-	readonly timeZones: ReadonlyMap<string, string | null>;
+	readonly contextOf: (meal: RecipeFollowingMeal) => MealResolutionContext;
 	readonly recipeExists: boolean;
 	readonly now: Date;
 }): RecipeVersion[] => {
 	const sorted = input.versions.toSorted(byEffect);
 	const needed = new Set<string>();
 	for (const meal of input.meals) {
-		const resolved = resolveMealVersion(meal, {
-			versions: sorted,
-			checkIns: input.checkIns,
-			timeZone: input.timeZones.get(meal.householdId) ?? null
-		});
+		const context = input.contextOf(meal);
+		const resolved = resolveMealVersion(meal, context);
 		if (resolved !== null) needed.add(resolved.id);
-		const cap = deletionCap(meal, sorted);
+		const cap = deletionCap(meal, context.versions.toSorted(byEffect));
 		if (cap !== undefined) needed.add(cap.id);
-	}
-	for (const { recipeVersionId } of input.checkIns) {
-		if (recipeVersionId !== null) needed.add(recipeVersionId);
+		for (const { recipeVersionId } of context.checkIns) {
+			if (recipeVersionId !== null) needed.add(recipeVersionId);
+		}
 	}
 	const newest = newestContentVersion(sorted);
 	if (input.recipeExists && newest !== undefined) needed.add(newest.id);

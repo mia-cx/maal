@@ -254,13 +254,16 @@ insert-only in its owner's user audience, so versions never conflict.
   conflict group (§8.2), so the merged recipe can differ from every version a device wrote. After each
   recipe commit, the Worker compares the recipe's content with its newest content version. When they
   differ, it adds a version of the recipe, effective at the later of its commit time and one millisecond
-  after that newest version.
+  after that newest version. That version commits only while the recipe is still the one it matches and
+  no version of the recipe was written since the comparison. When another recipe commit lands first, it
+  adds nothing, since that commit matches its own recipe.
 
 **Version collection.** A version is collected when all of these hold:
 
 1. It is not the newest content version of a recipe that still exists.
 2. No live recipe-following meal resolves to it (§5.3), no live check-in on a live meal pins it (§5.4), and
-   no live recipe-following meal's candidates stop at it, for a deletion marker.
+   no live recipe-following meal's candidates stop at it, for a deletion marker. Each meal resolves among
+   the versions its household sees (§8.7), exactly as readers resolve it.
 3. It, and the version after it if there is one, took effect more than 90 days ago, the window of ordinary
    change retention (§8.3). Moving a meal into an older window is rare, so this keeps most versions a
    reschedule could reach.
@@ -661,6 +664,12 @@ Following keeps that view current, and only for recipes a member chose to plan t
 receiving new versions once no recipe-following meal there follows the recipe, or once the recipe's owner
 leaves it; its meals keep resolving among the versions it received.
 
+- **What a household sees.** A household sees a recipe's versions only while the recipe's owner belongs
+  to it: every version while the owner is a member, and after the owner leaves only those that took effect
+  before they left. Its meals resolve among those versions alone, wherever they are read: on a device, in a
+  Worker read such as an MCP tool, and in version collection. Edits the owner makes after leaving stay
+  private. A device that detaches a household snapshot applies the same cutoff at its detachment time.
+
 - **Who may follow.** A meal may start following a recipe only when the writer owns it or the household
   already receives it, because a live recipe-following meal there follows it. Anyone else can see the
   recipe only through a meal copy they write themselves, so following it would share what they never saw.
@@ -705,7 +714,9 @@ The active user may export everything they can see, including complete accessibl
 recoverable deleted recipes. `meals.json` holds both meal kinds as stored. A recipe-following meal of the
 exporter's own recipe stays a reference, because its recipe and versions are in the archive; one that
 follows another member's recipe is exported as a meal copy of the version it resolves to, because the
-archive holds only the exporter's recipes, and the pins of its check-ins are cleared. Import requires each
+archive holds only the exporter's recipes. Only a check-in on a meal exported as recipe-following keeps
+its pin, which names a version in the archive; every other check-in's pin is cleared, because its meal
+holds its own content. Import requires each
 recipe-following meal's recipe and each pinned version to resolve among the imported or local records.
 Versions import insert-only: a version already on the device stays as it is. Credentials, PIN verifiers,
 billing capability, sync clocks/cursors/outbox, leases, and MCP secrets are excluded. URL media/provenance is included; third-party bytes are not fetched.

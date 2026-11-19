@@ -89,13 +89,11 @@ const collectLocal = async (
 	meals: readonly RecipeFollowingMeal[],
 	now: Date
 ): Promise<RecipeVersion[]> => {
-	const contextOf = await loadMealResolution(database, meals);
 	const stored = await database.recipes.get(recipeId);
 	return collectableVersions({
 		versions,
 		meals,
-		checkIns: meals.flatMap((meal) => contextOf(meal).checkIns),
-		timeZones: new Map(meals.map((meal) => [meal.householdId, contextOf(meal).timeZone])),
+		contextOf: await loadMealResolution(database, meals),
 		recipeExists:
 			stored !== undefined &&
 			isRecipeAggregate(Schema.decodeUnknownSync(StoredRecipeSchema)(stored)),

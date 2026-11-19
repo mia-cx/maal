@@ -218,7 +218,6 @@ export const buildPortableArchive = (
 	// A meal following one of the exported recipes stays a reference, since the recipe and its
 	// versions are in the archive; one following another member's recipe goes out as a copy of the
 	// version it resolves to (spec §9).
-	const copiedMealIds = new Set<string>();
 	const meals = source.meals
 		.map((record) => decode(StoredMealSchema, record, 'decode meal for export'))
 		.filter(isLiveMeal)
@@ -232,12 +231,12 @@ export const buildPortableArchive = (
 				checkIns: allCheckIns,
 				timeZone: timeZones.get(meal.householdId) ?? null
 			});
-			if (copy === null) return [];
-			copiedMealIds.add(meal.id);
-			return [copy];
+			return copy === null ? [] : [copy];
 		});
 	const mealIds = new Set(meals.map(({ id }) => id));
-	// A meal exported as a copy holds its content, so its check-ins pin nothing.
+	// Only a meal exported as recipe-following resolves through a pin, and its versions are in the
+	// archive. Every other meal holds its content, so its check-ins pin nothing.
+	const followingMealIds = new Set(meals.filter(isRecipeFollowingMeal).map(({ id }) => id));
 	const checkIns = allCheckIns
 		.filter(
 			(row) =>
@@ -245,7 +244,9 @@ export const buildPortableArchive = (
 				(row.mealId === null && row.reporterUserId === exporterId)
 		)
 		.map((row) =>
-			row.mealId !== null && copiedMealIds.has(row.mealId) ? { ...row, recipeVersionId: null } : row
+			row.mealId !== null && followingMealIds.has(row.mealId)
+				? row
+				: { ...row, recipeVersionId: null }
 		);
 	const portableVersions = versions
 		.filter(({ recipeId }) => exportedRecipeIds.has(recipeId))

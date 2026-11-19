@@ -121,8 +121,9 @@ export const followingMealsOf = async (
 	);
 
 /**
- * Reads what these meals resolve against in D1: their recipes' versions, the live check-ins on them,
- * and their households' timezones (spec §5.3). The same rule as on a device, from the same data.
+ * Reads what these meals resolve against in D1: the versions of their recipes that each meal's
+ * household receives (spec §8.7), the live check-ins on them, and their households' timezones
+ * (spec §5.3). The same rule as on a device, from the same data.
  */
 export const loadMealResolution = async (
 	database: D1Database,
@@ -130,11 +131,19 @@ export const loadMealResolution = async (
 ): Promise<(meal: RecipeFollowingMeal) => MealResolutionContext> => {
 	const following = meals.filter(isRecipeFollowingMeal);
 	if (following.length === 0) return () => ({ versions: [], checkIns: [], timeZone: null });
-	const [versions, checkInRows, timeZoneRows] = await Promise.all([
-		readRecipeVersions(
-			database,
-			following.map(({ sourceRecipeId }) => sourceRecipeId)
-		),
+	const [versionsByHousehold, checkInRows, timeZoneRows] = await Promise.all([
+		Promise.all(
+			[...Map.groupBy(following, ({ householdId }) => householdId)].map(
+				async ([householdId, householdMeals]) => {
+					const versions = await readHouseholdVersions(
+						database,
+						householdId,
+						householdMeals.map(({ sourceRecipeId }) => sourceRecipeId)
+					);
+					return [householdId, Map.groupBy(versions, ({ recipeId }) => recipeId)] as const;
+				}
+			)
+		).then((entries) => new Map(entries)),
 		queryAll(
 			database,
 			`SELECT * FROM meal_check_ins WHERE deleted_at IS NULL AND meal_id IN (${JSON_IDS})`,
@@ -158,11 +167,10 @@ export const loadMealResolution = async (
 			return [];
 		}
 	});
-	const versionsByRecipe = Map.groupBy(versions, ({ recipeId }) => recipeId);
 	const checkInsByMeal = Map.groupBy(checkIns, ({ mealId }) => mealId);
 	const timeZones = new Map(timeZoneRows.map((row) => [row.household_id, row.timezone]));
 	return (meal) => ({
-		versions: versionsByRecipe.get(meal.sourceRecipeId) ?? [],
+		versions: versionsByHousehold.get(meal.householdId)?.get(meal.sourceRecipeId) ?? [],
 		checkIns: checkInsByMeal.get(meal.id) ?? [],
 		timeZone: timeZones.get(meal.householdId) ?? null
 	});

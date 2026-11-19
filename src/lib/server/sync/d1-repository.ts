@@ -56,6 +56,7 @@ import { ServerSyncUnavailable } from './errors.js';
 import {
 	FOLLOWING_MEAL_WRITTEN_SINCE_SQL,
 	LATEST_SEQUENCE_SQL,
+	VERSION_HEAD_SQL,
 	householdsReceivingRecipe,
 	readRecipeVersions,
 	recipeVersionFromRow,
@@ -873,8 +874,13 @@ export class D1UserSyncRepository implements UserSyncRepository {
 	 * commit makes it retry against the new head instead of overwriting the other edit.
 	 */
 	async commitWithResult(input: UserCommitInput): Promise<CommitResult> {
-		for (let attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt += 1) {
-			const result = await this.attemptCommit(input);
+		return this.retryRaced(() => this.attemptCommit(input));
+	}
+
+	/** Runs `attempt` until it does not race, up to {@link MAX_COMMIT_ATTEMPTS} times. */
+	private async retryRaced<A>(attempt: () => Promise<A | typeof COMMIT_RACED>): Promise<A> {
+		for (let count = 1; count <= MAX_COMMIT_ATTEMPTS; count += 1) {
+			const result = await attempt();
 			if (result !== COMMIT_RACED) return result;
 		}
 		throw new ServerSyncUnavailable({
@@ -907,7 +913,11 @@ export class D1UserSyncRepository implements UserSyncRepository {
 		return row !== null && (row.head !== head || row.stored === 1 || row.guarded === 0);
 	}
 
-	private async attemptCommit(input: UserCommitInput): Promise<CommitResult | typeof COMMIT_RACED> {
+	/** One commit of `input`; the batch also holds only while every guard in `held` does. */
+	private async attemptCommit(
+		input: UserCommitInput,
+		held: readonly CommitGuard[] = []
+	): Promise<CommitResult | typeof COMMIT_RACED> {
 		const existingReceipt = await this.database
 			.prepare('SELECT * FROM sync_mutation_receipts WHERE mutation_id = ?')
 			.bind(input.mutation.mutationId)
@@ -1081,8 +1091,9 @@ export class D1UserSyncRepository implements UserSyncRepository {
 		const receivingHouseholds = isVersion
 			? await householdsReceivingRecipe(this.database, version.recipeId, input.actorUserId)
 			: [];
-		const guards: CommitGuard[] =
-			since === null
+		const guards: CommitGuard[] = [
+			...held,
+			...(since === null
 				? []
 				: [
 						{
@@ -1090,7 +1101,8 @@ export class D1UserSyncRepository implements UserSyncRepository {
 							binds: [version.recipeId, since.value],
 							value: 0
 						}
-					];
+					])
+		];
 		const guardSql = commitGuardSql(guards);
 		const tombstoneExpiresAt =
 			input.mutation.operation === 'delete'
@@ -1267,11 +1279,12 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			.bind(input.mutation.mutationId)
 			.first<ReceiptRow>();
 		if (!receipt) throw new TypeError('The committed mutation has no receipt.');
-		if (isRecipeCommit) {
-			await this.matchNewestVersion(
-				input,
-				decodedResult.aggregate as StoredRecipe,
-				decodedIncoming.aggregate
+		const committedSequence = receipt.sequence;
+		if (isRecipeCommit && committedSequence !== null) {
+			const recipe = decodedResult.aggregate as StoredRecipe;
+			const incoming = decodedIncoming.aggregate;
+			await this.retryRaced(() =>
+				this.matchNewestVersion(input, recipe, incoming, committedSequence)
 			);
 		}
 		return { receipt: receiptFromRow(receipt), aggregate: decodedResult.aggregate };
@@ -1307,27 +1320,46 @@ export class D1UserSyncRepository implements UserSyncRepository {
 	 * version of the recipe, effective at the later of the commit time and one millisecond after the
 	 * newest version. Otherwise the content is a device's own edit whose version is still on its way,
 	 * since a device sends its versions ahead of the recipe change, so nothing is added.
+	 *
+	 * The version commits only while the recipe head is still `committedSequence` and no version of
+	 * the recipe was written since the read; it races otherwise and decides again. Once another
+	 * recipe commit wins, this adds nothing: that commit matches its own recipe.
 	 */
 	private async matchNewestVersion(
 		input: UserCommitInput,
 		recipe: StoredRecipe,
-		incoming: unknown
-	): Promise<void> {
+		incoming: unknown,
+		committedSequence: number
+	): Promise<void | typeof COMMIT_RACED> {
 		if (!isRecipeAggregate(recipe)) return;
-		const versions = await readRecipeVersions(this.database, [recipe.id]);
-		const newest = newestContentVersion(versions);
-		if (newest === undefined || sameRecipeContent(newest.recipe, recipe)) return;
-		const mergedByGroup =
-			!isRecipeAggregate(incoming as StoredRecipe) ||
-			!sameRecipeContent(incoming as RecipeAggregate, recipe);
-		const olderWon = versions.some(
-			(version) => version.recipe !== null && sameRecipeContent(version.recipe, recipe)
-		);
-		if (!mergedByGroup && !olderWon) return;
-		const effectiveAt =
-			justAfter(newest.effectiveAt) > input.receivedAt
+		const matchingEffectiveAt = async () => {
+			const versions = await readRecipeVersions(this.database, [recipe.id]);
+			const newest = newestContentVersion(versions);
+			if (newest === undefined || sameRecipeContent(newest.recipe, recipe)) return null;
+			const mergedByGroup =
+				!isRecipeAggregate(incoming as StoredRecipe) ||
+				!sameRecipeContent(incoming as RecipeAggregate, recipe);
+			const olderWon = versions.some(
+				(version) => version.recipe !== null && sameRecipeContent(version.recipe, recipe)
+			);
+			if (!mergedByGroup && !olderWon) return null;
+			return justAfter(newest.effectiveAt) > input.receivedAt
 				? justAfter(newest.effectiveAt)
 				: (input.receivedAt as `${string}Z`);
+		};
+		// Most commits leave the newest version matching. The rest read the heads, then decide again.
+		if ((await matchingEffectiveAt()) === null) return;
+		const recipeHead = await readCommitGuard(
+			this.database,
+			ENTITY_HEAD_SQL,
+			input.actorUserId,
+			'recipe',
+			recipe.id
+		);
+		if (recipeHead.value !== committedSequence) return;
+		const versionHead = await readCommitGuard(this.database, VERSION_HEAD_SQL, recipe.id);
+		const effectiveAt = await matchingEffectiveAt();
+		if (effectiveAt === null) return;
 		const matching = recipeVersion({
 			id: uuidv7(),
 			recipeId: recipe.id,
@@ -1335,21 +1367,25 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			effectiveAt,
 			recipe
 		});
-		await this.commitWithResult({
-			...input,
-			mode: 'live',
-			mutation: {
-				schemaVersion: CURRENT_SCHEMA_VERSION,
-				mutationId: uuidv7(),
-				originDeviceId: input.mutation.originDeviceId,
-				entityKind: 'recipeVersion',
-				entityId: matching.id,
-				conflictGroups: ['row'],
-				operation: 'upsert',
-				occurredAt: effectiveAt,
-				aggregate: matching
-			}
-		});
+		const result = await this.attemptCommit(
+			{
+				...input,
+				mode: 'live',
+				mutation: {
+					schemaVersion: CURRENT_SCHEMA_VERSION,
+					mutationId: uuidv7(),
+					originDeviceId: input.mutation.originDeviceId,
+					entityKind: 'recipeVersion',
+					entityId: matching.id,
+					conflictGroups: ['row'],
+					operation: 'upsert',
+					occurredAt: effectiveAt,
+					aggregate: matching
+				}
+			},
+			[recipeHead, versionHead]
+		);
+		if (result === COMMIT_RACED) return COMMIT_RACED;
 	}
 
 	async prune(input: { now: string; changeCutoff: string }): Promise<void> {
