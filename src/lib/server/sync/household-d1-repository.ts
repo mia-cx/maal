@@ -28,6 +28,7 @@ import {
 import type { MutationReceipt } from '$lib/sync/contracts.js';
 import {
 	MEAL_ALREADY_COPIED,
+	RECIPE_NOT_SHARED,
 	type HouseholdSyncChange,
 	type HouseholdSyncEntityKind,
 	type HouseholdSyncMutation
@@ -42,6 +43,7 @@ import {
 	MAX_COMMIT_ATTEMPTS,
 	assertIdentifier,
 	camelize,
+	commitGuardSql,
 	entityHeadSql,
 	groupBy,
 	heldManifestKeys,
@@ -50,7 +52,9 @@ import {
 	listHeldIdentities,
 	markReinstated,
 	queryAll,
+	readCommitGuard,
 	readSidecars,
+	type CommitGuard,
 	type CommitResult,
 	type EntityIdentity,
 	type SqlValue
@@ -425,6 +429,24 @@ const receiptFromRow = (row: ReceiptRow, duplicate = false): MutationReceipt => 
 
 const isContentGroup = (group: string): boolean =>
 	(MEAL_CONTENT_GROUPS as readonly string[]).includes(group);
+
+/**
+ * True for a copy mutation, which writes `source` and content groups only (spec §5.3). A mutation
+ * that also writes the meal's own groups, such as an archive's Replace, is a full replacement.
+ */
+const isCopyOnly = (groups: readonly string[]): boolean =>
+	groups.includes('source') &&
+	groups.every((group) => (MEAL_COPY_GROUPS as readonly string[]).includes(group));
+
+/** The newest sequence among the live recipe-following meals of the recipe bound to `?`. */
+export const FOLLOWING_MEALS_HEAD_SQL = `(SELECT COALESCE(MAX(v.last_sequence), 0) FROM meals m
+	JOIN sync_entity_versions v ON v.audience_kind = 'household' AND v.audience_id = m.household_id
+	 AND v.entity_kind = 'meal' AND v.entity_id = m.id
+	WHERE m.source_recipe_id = ? AND m.follows_recipe = 1 AND m.deleted_at IS NULL)`;
+
+/** The newest sequence of the recipe bound to `?` in its owner's user audience. */
+const RECIPE_HEAD_SQL = `(SELECT COALESCE(MAX(last_sequence), 0) FROM sync_entity_versions
+	WHERE audience_kind = 'user' AND entity_kind = 'recipe' AND entity_id = ?)`;
 
 /**
  * True when this upsert turns a recipe-following meal into a meal copy: it carries the `source`
@@ -1287,7 +1309,7 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 		if (
 			isMeal &&
 			input.mode === 'live' &&
-			winningGroups.includes('source') &&
+			isCopyOnly(winningGroups) &&
 			current !== null &&
 			isLiveMeal(current as StoredMeal) &&
 			!isRecipeFollowingMeal(current as StoredMeal) &&
@@ -1340,16 +1362,20 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 		// Purging a source recipe nulls meal provenance (§5.3). An offline or revived aggregate written
 		// after that still names the recipe, so it gets the same null instead of failing the foreign key.
 		const sourceRecipeId = (result as { sourceRecipeId?: unknown }).sourceRecipeId;
-		const sourceRecipePurged =
-			typeof sourceRecipeId === 'string' &&
-			(await this.database
-				.prepare('SELECT 1 AS present FROM recipes WHERE id = ?')
-				.bind(sourceRecipeId)
-				.first()) === null;
+		const sourceRecipe =
+			typeof sourceRecipeId === 'string'
+				? await this.database
+						.prepare('SELECT owner_user_id FROM recipes WHERE id = ?')
+						.bind(sourceRecipeId)
+						.first<{ owner_user_id: string }>()
+				: null;
+		const sourceRecipePurged = typeof sourceRecipeId === 'string' && sourceRecipe === null;
+		const follows =
+			isMeal && isLiveMeal(result as StoredMeal) && isRecipeFollowingMeal(result as StoredMeal);
 		// A recipe-following meal has nothing to show without its recipe, so its provenance cannot
 		// simply be dropped (§8.7). A purged recipe ends the meal; one not uploaded yet makes the
 		// device retry after its recipe sync.
-		if (sourceRecipePurged && isRecipeFollowingMeal(result as StoredMeal)) {
+		if (sourceRecipePurged && follows) {
 			const purged = await this.database
 				.prepare(
 					`SELECT 1 AS present FROM sync_tombstones
@@ -1363,6 +1389,28 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 				message: 'The recipe this meal follows has not been uploaded yet.'
 			});
 		}
+		// Following shares the recipe, so only its owner may start it, or a member of a household
+		// that already receives the recipe (§8.7). Knowing a recipe's ID reveals none of its content.
+		if (
+			follows &&
+			sourceRecipe !== null &&
+			sourceRecipe.owner_user_id !== input.actorUserId &&
+			!(await this.householdFollows(input.householdId, sourceRecipeId as string))
+		) {
+			return rejected(RECIPE_NOT_SHARED);
+		}
+		// Planning a recipe-following meal shares its recipe with the household (spec §8.7). The
+		// batch commits only while the recipe is unchanged, so the household never keeps an old one.
+		const sharesRecipe = follows && acceptedGroups.includes('source');
+		const guards = sharesRecipe
+			? [await readCommitGuard(this.database, RECIPE_HEAD_SQL, sourceRecipeId as string)]
+			: [];
+		const sharedRecipe = sharesRecipe
+			? (await readCurrentRecipes(this.database, [sourceRecipeId as string])).get(
+					sourceRecipeId as string
+				)
+			: undefined;
+		const guardSql = commitGuardSql(guards);
 		const decodedResult = decodeHouseholdSyncAggregate(
 			input.mutation.entityKind,
 			input.mutation.entityId,
@@ -1400,7 +1448,7 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 					  entity_id, conflict_group, operation, resulting_revision, occurred_at, received_at,
 					  payload, tombstone_expires_at)
 					 VALUES (?, ?, ?, 'household', ?, ?, ?, ?, ?, ?, ?, ?,
-					  CASE WHEN ${ENTITY_HEAD_SQL} = ? THEN ? END, ?)`
+					  CASE WHEN ${ENTITY_HEAD_SQL} = ?${guardSql.sql} THEN ? END, ?)`
 				)
 				.bind(
 					input.mutation.mutationId,
@@ -1419,6 +1467,7 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 					input.mutation.entityKind,
 					input.mutation.entityId,
 					head,
+					...guardSql.binds,
 					payload,
 					tombstoneExpiresAt
 				)
@@ -1527,34 +1576,22 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 					.bind(input.householdId, input.mutation.entityKind, input.mutation.entityId)
 			);
 		}
-		// Planning a recipe-following meal shares its recipe with the household (spec §8.7).
-		const stored = decodedResult.aggregate as StoredMeal;
-		if (
-			isMeal &&
-			acceptedGroups.includes('source') &&
-			isLiveMeal(stored) &&
-			isRecipeFollowingMeal(stored)
-		) {
-			const recipe = (await readCurrentRecipes(this.database, [stored.sourceRecipeId])).get(
-				stored.sourceRecipeId
+		if (sharedRecipe) {
+			statements.push(
+				...sharedRecipeStatements(this.database, {
+					recipe: sharedRecipe,
+					householdIds: [input.householdId],
+					actorUserId: input.actorUserId,
+					deviceId: input.deviceId,
+					occurredAt: input.mutation.occurredAt,
+					receivedAt: input.receivedAt
+				})
 			);
-			if (recipe) {
-				statements.push(
-					...sharedRecipeStatements(this.database, {
-						recipe,
-						householdIds: [input.householdId],
-						actorUserId: input.actorUserId,
-						deviceId: input.deviceId,
-						occurredAt: input.mutation.occurredAt,
-						receivedAt: input.receivedAt
-					})
-				);
-			}
 		}
 		try {
 			await this.database.batch(statements);
 		} catch (error) {
-			if (await this.raced(input, head)) return COMMIT_RACED;
+			if (await this.raced(input, head, guards)) return COMMIT_RACED;
 			throw error;
 		}
 		const receipt = await this.database
@@ -1565,21 +1602,40 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 		return { receipt: receiptFromRow(receipt), aggregate: decodedResult.aggregate };
 	}
 
-	/** True when another commit moved the entity head or stored this mutation first. */
-	private async raced(input: HouseholdCommitInput, head: number): Promise<boolean> {
+	/** True when another commit moved the entity head or a guard, or stored this mutation first. */
+	private async raced(
+		input: HouseholdCommitInput,
+		head: number,
+		guards: readonly CommitGuard[]
+	): Promise<boolean> {
+		const guardSql = commitGuardSql(guards);
 		const row = await this.database
 			.prepare(
 				`SELECT ${ENTITY_HEAD_SQL} AS head,
-				 EXISTS (SELECT 1 FROM sync_mutation_receipts WHERE mutation_id = ?) AS stored`
+				 EXISTS (SELECT 1 FROM sync_mutation_receipts WHERE mutation_id = ?) AS stored,
+				 (1${guardSql.sql}) AS guarded`
 			)
 			.bind(
 				input.householdId,
 				input.mutation.entityKind,
 				input.mutation.entityId,
-				input.mutation.mutationId
+				input.mutation.mutationId,
+				...guardSql.binds
 			)
-			.first<{ head: number; stored: number }>();
-		return row !== null && (row.head !== head || row.stored === 1);
+			.first<{ head: number; stored: number; guarded: number }>();
+		return row !== null && (row.head !== head || row.stored === 1 || row.guarded === 0);
+	}
+
+	/** True when a live recipe-following meal in the household follows the recipe. */
+	private async householdFollows(householdId: string, recipeId: string): Promise<boolean> {
+		const row = await this.database
+			.prepare(
+				`SELECT 1 AS present FROM meals WHERE household_id = ? AND source_recipe_id = ?
+				 AND follows_recipe = 1 AND deleted_at IS NULL LIMIT 1`
+			)
+			.bind(householdId, recipeId)
+			.first();
+		return row !== null;
 	}
 
 	/**

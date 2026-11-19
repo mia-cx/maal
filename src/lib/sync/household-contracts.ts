@@ -35,6 +35,12 @@ export const HOUSEHOLD_SHARED_RECIPE_KIND = 'recipe' as const;
  * without a notice, since nothing the person did was lost (spec §8.6).
  */
 export const MEAL_ALREADY_COPIED = 'meal_already_copied' as const;
+
+/**
+ * Rejects a recipe-following meal of a recipe the writer does not own and the household does not
+ * already receive, since following would share it (spec §8.7).
+ */
+export const RECIPE_NOT_SHARED = 'recipe_not_shared' as const;
 const HouseholdSyncChangeEntityKindSchema = Schema.Literal(
 	...HOUSEHOLD_SYNC_ENTITY_KINDS,
 	HOUSEHOLD_SHARED_RECIPE_KIND

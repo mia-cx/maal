@@ -6,12 +6,20 @@ import { uuidv7 } from 'uuidv7';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.js';
+import { finalizeProfileSignOut, removeProfileFromDevice } from '$lib/client/local/profiles.js';
 import {
 	listHouseholdMeals,
 	planRecipeAsMeal,
 	saveMealCheckIn,
+	updateMealHeader,
 	type MealCommandContext
 } from '$lib/client/meals/index.js';
+import {
+	commitPortableImport,
+	decodePortableArchive,
+	exportPortableArchive,
+	planPortableImport
+} from '$lib/client/portability/index.js';
 import { commitImportedRecipeCandidate } from '$lib/client/recipes/index.js';
 import {
 	createHouseholdSyncCoordinator,
@@ -19,6 +27,7 @@ import {
 } from '$lib/client/sync/index.js';
 import { readUnseenRejections } from '$lib/client/sync/rejections.js';
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
+import { planRecipeFollowingMeal } from '$lib/domain/meals/recipe-following.js';
 import {
 	MEAL_CONFLICT_GROUPS,
 	isRecipeFollowingMeal,
@@ -85,10 +94,13 @@ afterEach(async () => {
 	await miniflare.dispose();
 });
 
-/** One member's device, signed in and paid, with a coordinator talking to the real D1 services. */
-const openDevice = async (member: typeof alice) => {
-	const database = await openMaalDatabase(`meal-recipe-sync-${crypto.randomUUID()}`);
-	devices.push(database);
+/**
+ * One member's device, signed in and paid, with a coordinator talking to the real D1 services.
+ * Pass another member's `database` to sign this member in on the same device.
+ */
+const openDevice = async (member: typeof alice, shared?: MaalDatabase) => {
+	const database = shared ?? (await openMaalDatabase(`meal-recipe-sync-${crypto.randomUUID()}`));
+	if (!shared) devices.push(database);
 	await database.profiles.put({
 		profileId: member.profileId,
 		workosUserId: member.userId,
@@ -175,8 +187,12 @@ const openDevice = async (member: typeof alice) => {
 };
 
 /** Commits a recipe to D1 the way its owner's user sync would. */
-const commitRecipe = async (recipe: RecipeAggregate, groups: readonly string[]) => {
-	const receipt = await new D1UserSyncRepository(d1).commit({
+const commitRecipe = async (
+	recipe: RecipeAggregate,
+	groups: readonly string[],
+	database: D1Database = d1
+) => {
+	const receipt = await new D1UserSyncRepository(database).commit({
 		actorUserId: recipe.ownerUserId,
 		deviceId: uuidv7(),
 		mutation: {
@@ -212,7 +228,60 @@ const aliceSavesRecipe = async (device: Awaited<ReturnType<typeof openDevice>>) 
 		})
 	);
 	await commitRecipe(recipe, ['header', 'ingredients', 'instructions']);
+	// Her user sync acknowledged the upload, so no unsent edit holds the recipe back.
+	await device.database.outbox.where('aggregateId').equals(recipe.id).delete();
 	return recipe;
+};
+
+/** Pushes one meal mutation straight to the household sync service. */
+const pushMeal = async (
+	actorUserId: string,
+	meal: unknown,
+	groups: readonly string[] = MEAL_CONFLICT_GROUPS,
+	database: D1Database = d1
+) =>
+	(
+		await pushHouseholdSync(new D1HouseholdSyncRepository(database), householdId, actorUserId, {
+			protocolVersion: 1,
+			deviceId: uuidv7(),
+			audience: { kind: 'household', id: householdId },
+			baseCursor: null,
+			mutations: [
+				{
+					schemaVersion: CURRENT_SCHEMA_VERSION,
+					mutationId: uuidv7(),
+					originDeviceId: uuidv7(),
+					entityKind: 'meal',
+					entityId: (meal as { id: string }).id,
+					conflictGroups: [...groups] as [string, ...string[]],
+					operation: 'upsert',
+					occurredAt: new Date().toISOString() as `${string}Z`,
+					aggregate: meal
+				}
+			]
+		})
+	).receipts[0]!;
+
+/**
+ * D1 that runs `write` just before its next batch commits, as when another request lands between
+ * a commit's reads and its write.
+ */
+const beforeNextBatch = (write: () => Promise<unknown>): D1Database => {
+	let pending: (() => Promise<unknown>) | undefined = write;
+	return new Proxy(d1, {
+		get(target, key) {
+			if (key === 'batch') {
+				return async (statements: D1PreparedStatement[]) => {
+					const run = pending;
+					pending = undefined;
+					await run?.();
+					return target.batch(statements);
+				};
+			}
+			const value = Reflect.get(target, key);
+			return typeof value === 'function' ? value.bind(target) : value;
+		}
+	});
 };
 
 const titles = async (database: MaalDatabase) =>
@@ -353,5 +422,217 @@ describe('recipe-following meals across devices', () => {
 		const { receipts } = await push();
 		expect(receipts[0]).toMatchObject({ status: 'accepted' });
 		expect(await d1FollowsRecipe(meal.id)).toBe(1);
+	});
+});
+
+describe('who can follow a recipe', () => {
+	test('a member cannot pull another member’s private recipe into the household by its ID', async () => {
+		const aliceDevice = await openDevice(alice);
+		const bobDevice = await openDevice(bob);
+		const recipe = await aliceSavesRecipe(aliceDevice);
+		await commitRecipe({ ...recipe, title: 'Secret soup' }, ['header']);
+		// Bob kept an old copy from a household they no longer share, and plans it here.
+		await bobDevice.database.table('recipes').put(recipe);
+		const meal = await planRecipeAsMeal(bobDevice.database, bobDevice.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		await bobDevice.sync();
+
+		await expect(readUnseenRejections(bobDevice.database)).resolves.toEqual([
+			expect.objectContaining({
+				message:
+					'Your change to “Sunday soup” wasn’t saved because its recipe belongs to someone else.'
+			})
+		]);
+		// A schedule-only write cannot slip the reference in either.
+		await expect(
+			pushMeal(bob.userId, await bobDevice.database.meals.get(meal.id), ['schedule'])
+		).resolves.toMatchObject({
+			status: 'rejected',
+			errorCode: 'recipe_not_shared'
+		});
+		expect(await d1FollowsRecipe(meal.id)).toBeUndefined();
+		const household = await d1
+			.prepare(`SELECT payload FROM sync_changes WHERE audience_kind = 'household'`)
+			.all<{ payload: string }>();
+		expect(JSON.stringify(household.results)).not.toContain('Secret soup');
+		await bobDevice.sync();
+		await expect(bobDevice.database.recipes.get(recipe.id)).resolves.toMatchObject({
+			title: 'Sunday soup'
+		});
+	});
+
+	test('a member may plan a recipe the household already receives', async () => {
+		const aliceDevice = await openDevice(alice);
+		const recipe = await aliceSavesRecipe(aliceDevice);
+		await planRecipeAsMeal(aliceDevice.database, aliceDevice.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		await aliceDevice.sync();
+
+		const bobsMeal = planRecipeFollowingMeal({
+			recipe,
+			householdId,
+			mealId: uuidv7(),
+			occurredAt: new Date().toISOString()
+		});
+		await expect(pushMeal(bob.userId, bobsMeal)).resolves.toMatchObject({ status: 'accepted' });
+	});
+});
+
+describe('recipe changes racing meal writes', () => {
+	test('a past meal written while a recipe edit commits still keeps the old recipe', async () => {
+		const aliceDevice = await openDevice(alice);
+		const recipe = await aliceSavesRecipe(aliceDevice);
+		const past = await planRecipeAsMeal(aliceDevice.database, aliceDevice.context, recipe.id, {
+			date: '2020-01-01'
+		});
+
+		await commitRecipe(
+			{ ...recipe, title: 'Changed soup' },
+			['header'],
+			// The meal lands after the edit chose which meals to copy, before the edit commits.
+			beforeNextBatch(async () =>
+				expect(
+					await pushMeal(alice.userId, await aliceDevice.database.meals.get(past.id))
+				).toMatchObject({ status: 'accepted' })
+			)
+		);
+
+		expect(await d1FollowsRecipe(past.id)).toBe(0);
+		const bobDevice = await openDevice(bob);
+		await bobDevice.sync();
+		expect(await titles(bobDevice.database)).toEqual(new Map([[past.id, 'Sunday soup']]));
+	});
+
+	test('a meal planned while its recipe changes shares the changed recipe', async () => {
+		const aliceDevice = await openDevice(alice);
+		const bobDevice = await openDevice(bob);
+		await bobDevice.sync();
+		const recipe = await aliceSavesRecipe(aliceDevice);
+		const meal = await planRecipeAsMeal(aliceDevice.database, aliceDevice.context, recipe.id, {
+			date: '2099-01-01'
+		});
+
+		await expect(
+			pushMeal(
+				alice.userId,
+				await aliceDevice.database.meals.get(meal.id),
+				MEAL_CONFLICT_GROUPS,
+				// The edit lands after the meal read the recipe, before the meal commits.
+				beforeNextBatch(() => commitRecipe({ ...recipe, title: 'Changed soup' }, ['header']))
+			)
+		).resolves.toMatchObject({ status: 'accepted' });
+
+		await bobDevice.sync();
+		expect(await titles(bobDevice.database)).toEqual(new Map([[meal.id, 'Changed soup']]));
+	});
+});
+
+describe('archives and shared devices', () => {
+	test('replacing a meal copy from an archive updates it for the household', async () => {
+		const aliceDevice = await openDevice(alice);
+		const recipe = await aliceSavesRecipe(aliceDevice);
+		const meal = await planRecipeAsMeal(aliceDevice.database, aliceDevice.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		await updateMealHeader(aliceDevice.database, aliceDevice.context, meal.id, {
+			title: 'Leftover soup',
+			description: null,
+			cookTimeMinutes: null
+		});
+		await aliceDevice.sync();
+		await aliceDevice.database.households.put({
+			householdId,
+			name: 'Family kitchen',
+			locale: 'en-US',
+			timezone: null,
+			weekStartsOn: 1,
+			defaultPlannedYield: 4,
+			preferredDinnerTime: '18:00',
+			stalenessThresholdMinutes: 180,
+			createdByUserId: alice.userId,
+			deletionState: 'active',
+			localOnly: false,
+			schemaVersion: 1,
+			revision: 1,
+			createdAt: joinedAt,
+			updatedAt: joinedAt,
+			deletedAt: null,
+			conflictClocks: {}
+		});
+		const archive = await decodePortableArchive(
+			await exportPortableArchive(aliceDevice.database, alice.profileId)
+		);
+		await updateMealHeader(aliceDevice.database, aliceDevice.context, meal.id, {
+			title: 'Renamed soup',
+			description: null,
+			cookTimeMinutes: null
+		});
+		await aliceDevice.sync();
+
+		const preview = await planPortableImport(aliceDevice.database, archive, alice.profileId);
+		const replaceMeal = Object.fromEntries(
+			preview.collisions.map(({ collisionId, store }) => [
+				collisionId,
+				store === 'meals' ? ('replace' as const) : ('keep-local' as const)
+			])
+		);
+		await commitPortableImport(
+			aliceDevice.database,
+			await planPortableImport(aliceDevice.database, archive, alice.profileId, replaceMeal)
+		);
+		await aliceDevice.sync();
+
+		const bobDevice = await openDevice(bob);
+		await bobDevice.sync();
+		expect(await titles(bobDevice.database)).toEqual(new Map([[meal.id, 'Leftover soup']]));
+	});
+
+	test('a recipe edit reaches the household view after its owner signs out of a shared device', async () => {
+		const device = await openDevice(alice);
+		const bobOnDevice = await openDevice(bob, device.database);
+		const recipe = await aliceSavesRecipe(device);
+		const meal = await planRecipeAsMeal(device.database, device.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		await device.sync();
+		await finalizeProfileSignOut(device.database, alice.profileId);
+
+		// Alice edits the recipe on her phone.
+		await commitRecipe({ ...recipe, title: 'Changed soup' }, ['header']);
+		await bobOnDevice.sync();
+
+		expect(await titles(device.database)).toEqual(new Map([[meal.id, 'Changed soup']]));
+	});
+
+	test('removing a profile keeps the recipes that the remaining household’s meals follow', async () => {
+		const device = await openDevice(alice);
+		await openDevice(bob, device.database);
+		const context = {
+			authSlotId: alice.slot,
+			ownerUserId: alice.userId,
+			originDeviceId: device.context.originDeviceId
+		};
+		// Free use: nothing reaches D1, so this device holds the only copy.
+		const followed = await commitImportedRecipeCandidate(
+			device.database,
+			context,
+			candidateFromToolRecipe({ title: 'Sunday soup' })
+		);
+		const unplanned = await commitImportedRecipeCandidate(
+			device.database,
+			context,
+			candidateFromToolRecipe({ title: 'Private soup' })
+		);
+		const meal = await planRecipeAsMeal(device.database, device.context, followed.id, {
+			date: '2099-01-01'
+		});
+
+		const removed = await removeProfileFromDevice(device.database, alice.profileId);
+
+		expect(removed.retainedHouseholdIds).toEqual([householdId]);
+		expect(await titles(device.database)).toEqual(new Map([[meal.id, 'Sunday soup']]));
+		await expect(device.database.recipes.get(unplanned.id)).resolves.toBeUndefined();
 	});
 });

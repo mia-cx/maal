@@ -25,6 +25,7 @@ import {
 	MAX_COMMIT_ATTEMPTS,
 	assertIdentifier,
 	camelize,
+	commitGuardSql,
 	entityHeadSql,
 	groupBy,
 	heldManifestKeys,
@@ -33,7 +34,9 @@ import {
 	listHeldIdentities,
 	markReinstated,
 	queryAll,
+	readCommitGuard,
 	readSidecars,
+	type CommitGuard,
 	type CommitResult,
 	type EntityIdentity,
 	type SqlValue
@@ -41,6 +44,7 @@ import {
 import { ServerSyncUnavailable } from './errors.js';
 import {
 	D1HouseholdSyncRepository,
+	FOLLOWING_MEALS_HEAD_SQL,
 	householdsFollowingRecipe,
 	sharedRecipeStatements
 } from './household-d1-repository.js';
@@ -856,21 +860,28 @@ export class D1UserSyncRepository implements UserSyncRepository {
 		});
 	}
 
-	/** True when another commit moved the entity head or stored this mutation first. */
-	private async raced(input: UserCommitInput, head: number): Promise<boolean> {
+	/** True when another commit moved the entity head or a guard, or stored this mutation first. */
+	private async raced(
+		input: UserCommitInput,
+		head: number,
+		guards: readonly CommitGuard[]
+	): Promise<boolean> {
+		const guardSql = commitGuardSql(guards);
 		const row = await this.database
 			.prepare(
 				`SELECT ${ENTITY_HEAD_SQL} AS head,
-				 EXISTS (SELECT 1 FROM sync_mutation_receipts WHERE mutation_id = ?) AS stored`
+				 EXISTS (SELECT 1 FROM sync_mutation_receipts WHERE mutation_id = ?) AS stored,
+				 (1${guardSql.sql}) AS guarded`
 			)
 			.bind(
 				input.actorUserId,
 				input.mutation.entityKind,
 				input.mutation.entityId,
-				input.mutation.mutationId
+				input.mutation.mutationId,
+				...guardSql.binds
 			)
-			.first<{ head: number; stored: number }>();
-		return row !== null && (row.head !== head || row.stored === 1);
+			.first<{ head: number; stored: number; guarded: number }>();
+		return row !== null && (row.head !== head || row.stored === 1 || row.guarded === 0);
 	}
 
 	private async attemptCommit(input: UserCommitInput): Promise<CommitResult | typeof COMMIT_RACED> {
@@ -1011,6 +1022,7 @@ export class D1UserSyncRepository implements UserSyncRepository {
 		};
 		const isRecipe = input.mutation.entityKind === 'recipe';
 		const incomingRecipe = decodedIncoming.aggregate as StoredRecipe;
+		const guards: CommitGuard[] = [];
 		if (isRecipe && current !== null && isRecipeAggregate(current as StoredRecipe)) {
 			const deletes = !isRecipeAggregate(incomingRecipe) || incomingRecipe.deletedAt !== null;
 			const edits = acceptedGroups.some((group) => group !== 'deletion');
@@ -1025,6 +1037,14 @@ export class D1UserSyncRepository implements UserSyncRepository {
 				});
 			}
 		}
+		// The change commits only while the recipe's following meals are as the copies left them, so
+		// a meal written in between makes it retry and copy again (spec §8.7).
+		if (isRecipe) {
+			guards.push(
+				await readCommitGuard(this.database, FOLLOWING_MEALS_HEAD_SQL, input.mutation.entityId)
+			);
+		}
+		const guardSql = commitGuardSql(guards);
 		const result =
 			input.mutation.entityKind === 'recipe'
 				? mergeRecipe(current, decodedIncoming.aggregate, acceptedGroups, revision, clock)
@@ -1067,7 +1087,7 @@ export class D1UserSyncRepository implements UserSyncRepository {
 				  entity_id, conflict_group, operation, resulting_revision, occurred_at, received_at,
 				  payload, tombstone_expires_at)
 				 VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?,
-				  CASE WHEN ${ENTITY_HEAD_SQL} = ? THEN ? END, ?)`
+				  CASE WHEN ${ENTITY_HEAD_SQL} = ?${guardSql.sql} THEN ? END, ?)`
 				)
 				.bind(
 					input.mutation.mutationId,
@@ -1086,6 +1106,7 @@ export class D1UserSyncRepository implements UserSyncRepository {
 					input.mutation.entityKind,
 					input.mutation.entityId,
 					head,
+					...guardSql.binds,
 					payload,
 					tombstoneExpiresAt
 				)
@@ -1213,7 +1234,7 @@ export class D1UserSyncRepository implements UserSyncRepository {
 		try {
 			await this.database.batch(statements);
 		} catch (error) {
-			if (await this.raced(input, head)) return COMMIT_RACED;
+			if (await this.raced(input, head, guards)) return COMMIT_RACED;
 			throw error;
 		}
 		const receipt = await this.database

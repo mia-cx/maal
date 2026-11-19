@@ -3,6 +3,7 @@ import Dexie from 'dexie';
 import type { MaalDatabase } from '$lib/client/local/database.js';
 import type { OutboxRecord } from '$lib/client/local/records.js';
 import { readActiveProfile } from '$lib/client/local/profiles.js';
+import { RECIPE_NOT_SHARED } from '$lib/sync/household-contracts.js';
 
 /** One rejected write the person has not dismissed yet (spec §8.6). */
 export interface RejectionNotice {
@@ -34,10 +35,25 @@ const titleOf = (value: unknown): string | null =>
 		? value.title
 		: null;
 
+/** A recipe-following meal has no title of its own; it shows its recipe's. */
+const followedRecipeOf = async (database: MaalDatabase, local: unknown): Promise<unknown> =>
+	typeof local === 'object' &&
+	local !== null &&
+	'followsRecipe' in local &&
+	local.followsRecipe === true &&
+	'sourceRecipeId' in local &&
+	typeof local.sourceRecipeId === 'string'
+		? database.recipes.get(local.sourceRecipeId)
+		: undefined;
+
 const describeEntity = async (database: MaalDatabase, row: OutboxRecord): Promise<string> => {
 	const store = ENTITY_STORES[row.entityKind];
 	const local = store ? await database.table(store).get(row.aggregateId) : undefined;
-	const title = titleOf(local) ?? titleOf(row.payload) ?? titleOf(row.snapshot);
+	const title =
+		titleOf(local) ??
+		titleOf(await followedRecipeOf(database, local)) ??
+		titleOf(row.payload) ??
+		titleOf(row.snapshot);
 	return title ? `“${title}”` : (ENTITY_NOUNS[row.entityKind] ?? 'a preference');
 };
 
@@ -47,6 +63,8 @@ const messageFor = (code: string | undefined, name: string): string => {
 			return `Your change to ${name} wasn’t saved because it was deleted.`;
 		case 'historical_loser':
 			return `A newer change to ${name} replaced yours.`;
+		case RECIPE_NOT_SHARED:
+			return `Your change to ${name} wasn’t saved because its recipe belongs to someone else.`;
 		case 'planned_cook_not_member':
 			return `Your change to ${name} wasn’t saved because the cook you chose left the household.`;
 		case 'backfill_payload_too_large':

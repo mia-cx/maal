@@ -138,9 +138,10 @@ const decodeSharedRecipe = (change: HouseholdSyncChange): StoredRecipe => {
 const UNSENT_STATUSES = new Set(['pending', 'sending', 'quarantined']);
 
 /**
- * Stores the recipes shared with the household (spec §8.7). A recipe that a signed-in profile on
- * this device owns is skipped, because that profile's own recipe sync is authoritative; so is one
- * whose local copy is newer or has unsent edits. Needs `recipes`, `authSlots`, and `outbox` in the
+ * Stores the recipes shared with the household (spec §8.7). A recipe whose owner is signed in on
+ * this device is skipped, because the owner's own recipe sync is authoritative; so is one whose
+ * local copy is newer or has unsent edits. An owner who signed out or must reauthenticate syncs
+ * nothing, so the household's copy applies. Needs `recipes`, `authSlots`, and `outbox` in the
  * surrounding transaction.
  */
 const applySharedRecipes = async (
@@ -148,9 +149,12 @@ const applySharedRecipes = async (
 	recipes: readonly StoredRecipe[]
 ): Promise<void> => {
 	for (const recipe of recipes) {
-		if ((await database.authSlots.where('workosUserId').equals(recipe.ownerUserId).count()) > 0) {
-			continue;
-		}
+		const ownerSyncs = await database.authSlots
+			.where('workosUserId')
+			.equals(recipe.ownerUserId)
+			.filter(({ sessionState }) => sessionState === 'authenticated')
+			.count();
+		if (ownerSyncs > 0) continue;
 		const local = (await database.recipes.get(recipe.id)) as { revision?: number } | undefined;
 		if (local !== undefined && (local.revision ?? 0) > recipe.revision) continue;
 		const unsent = await database.outbox
