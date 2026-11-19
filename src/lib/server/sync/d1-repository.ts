@@ -1,15 +1,21 @@
+import { uuidv7 } from 'uuidv7';
+
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
-import { recipeChangeKind } from '$lib/domain/meals/recipe-following.js';
+import { sameRecipeContent } from '$lib/domain/meals/recipe-following.js';
 import {
 	DEFAULT_STALENESS_THRESHOLD_MINUTES,
 	isRecentEdit
 } from '$lib/domain/household/staleness.js';
+import { isRecipeAggregate, type StoredRecipe } from '$lib/domain/recipes/schema.js';
 import {
-	isRecipeAggregate,
-	type RecipeAggregate,
-	type StoredRecipe
-} from '$lib/domain/recipes/schema.js';
+	justAfter,
+	newestContentVersion,
+	recipeVersion,
+	type RecipeVersion
+} from '$lib/domain/recipes/versions.js';
 import {
+	RECIPE_NOT_OWNED,
+	RECIPE_VERSION_IMMUTABLE,
 	USER_SYNC_ENTITY_KINDS,
 	type MutationReceipt,
 	type SyncChange,
@@ -35,6 +41,7 @@ import {
 	listHeldIdentities,
 	markReinstated,
 	queryAll,
+	readCommitGuard,
 	readSidecars,
 	type CommitGuard,
 	type CommitResult,
@@ -43,10 +50,14 @@ import {
 } from './d1-snapshot.js';
 import { ServerSyncUnavailable } from './errors.js';
 import {
-	D1HouseholdSyncRepository,
-	householdsFollowingRecipe,
-	sharedRecipeStatements
-} from './household-d1-repository.js';
+	FOLLOWING_MEAL_WRITTEN_SINCE_SQL,
+	LATEST_SEQUENCE_SQL,
+	householdsReceivingRecipe,
+	readRecipeVersions,
+	recipeVersionFromRow,
+	recipeVersionRow,
+	sharedVersionStatements
+} from './recipe-versions.js';
 import { incomingWinsHistoricalConflict, type WinningClock } from './reconciliation.js';
 import {
 	syncEntityKey,
@@ -478,6 +489,9 @@ const normalizedStatements = (
 	entityKind: UserSyncEntityKind,
 	aggregate: Record<string, unknown>
 ): D1PreparedStatement[] => {
+	if (entityKind === 'recipeVersion') {
+		return [upsert(database, 'recipe_versions', recipeVersionRow(aggregate))];
+	}
 	if (entityKind !== 'recipe') {
 		const table = USER_TABLES[entityKind];
 		const columns = USER_TABLE_COLUMNS[entityKind];
@@ -587,7 +601,11 @@ const conflictClocks = (versions: readonly VersionRow[]) =>
 
 /** The normalized table and owner column that hold a user entity kind's current row. */
 const entityTable = (kind: UserSyncEntityKind): readonly [table: string, owner: string] =>
-	kind === 'recipe' ? ['recipes', 'owner_user_id'] : [USER_TABLES[kind], 'workos_user_id'];
+	kind === 'recipe'
+		? ['recipes', 'owner_user_id']
+		: kind === 'recipeVersion'
+			? ['recipe_versions', 'owner_user_id']
+			: [USER_TABLES[kind], 'workos_user_id'];
 
 export type UserEntityIdentity = EntityIdentity<UserSyncEntityKind>;
 
@@ -717,7 +735,9 @@ const readSnapshotChanges = async (
 								searchTokens: [],
 								...sidecars.get(entityId)
 							}
-						: { ...camelize(row), conflictClocks: clocks },
+						: entityKind === 'recipeVersion'
+							? { ...recipeVersionFromRow(row), conflictClocks: clocks }
+							: { ...camelize(row), conflictClocks: clocks },
 					versions
 				)
 			);
@@ -928,6 +948,11 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			input.actorUserId,
 			input.mutation.aggregate
 		);
+		const isVersion = input.mutation.entityKind === 'recipeVersion';
+		if (isVersion) {
+			const refusal = await this.refuseVersion(input, decodedIncoming.aggregate as RecipeVersion);
+			if (refusal !== null) return rejected(refusal);
+		}
 		// Read the head before the tombstone: a deletion committing in between moves the head, so the
 		// guarded batch retries and the revival decision sees it.
 		const versions = await readVersions(
@@ -1034,28 +1059,22 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			input.actorUserId,
 			result
 		);
-		const before =
-			isRecipe && current !== null
-				? (decodeUserSyncAggregate('recipe', input.mutation.entityId, input.actorUserId, current)
-						.aggregate as StoredRecipe)
-				: null;
-		const change =
-			before !== null && isRecipeAggregate(before)
-				? recipeChangeKind(before, decodedResult.aggregate as StoredRecipe)
-				: null;
-		// Meals that must keep this version take their copies before it changes, and the change
-		// commits only while no following meal was written since (spec §8.7).
+		// A version reaches every household whose recipe-following meals follow its recipe, and
+		// commits only while no such meal was written since the households were listed (spec §8.7).
+		const since = isVersion ? await readCommitGuard(this.database, LATEST_SEQUENCE_SQL) : null;
+		const version = decodedResult.aggregate as RecipeVersion;
+		const receivingHouseholds = isVersion
+			? await householdsReceivingRecipe(this.database, version.recipeId, input.actorUserId)
+			: [];
 		const guards: CommitGuard[] =
-			change === null
+			since === null
 				? []
 				: [
-						await new D1HouseholdSyncRepository(this.database).freezeFollowingMeals({
-							recipe: before as RecipeAggregate,
-							change,
-							deviceId: input.deviceId,
-							occurredAt: input.mutation.occurredAt,
-							receivedAt: input.receivedAt
-						})
+						{
+							sql: FOLLOWING_MEAL_WRITTEN_SINCE_SQL,
+							binds: [version.recipeId, since.value],
+							value: 0
+						}
 					];
 		const guardSql = commitGuardSql(guards);
 		const tombstoneExpiresAt =
@@ -1212,23 +1231,16 @@ export class D1UserSyncRepository implements UserSyncRepository {
 					.bind(input.actorUserId, input.mutation.entityKind, input.mutation.entityId)
 			);
 		}
-		// Households whose recipe-following meals show this recipe receive the change (spec §8.7).
-		if (isRecipe) {
-			statements.push(
-				...sharedRecipeStatements(this.database, {
-					recipe: decodedResult.aggregate as StoredRecipe,
-					householdIds: await householdsFollowingRecipe(
-						this.database,
-						input.mutation.entityId,
-						input.actorUserId
-					),
-					actorUserId: input.actorUserId,
-					deviceId: input.deviceId,
-					occurredAt: input.mutation.occurredAt,
-					receivedAt: input.receivedAt
-				})
-			);
-		}
+		statements.push(
+			...sharedVersionStatements(this.database, {
+				versions: isVersion ? [version] : [],
+				householdIds: receivingHouseholds,
+				actorUserId: input.actorUserId,
+				deviceId: input.deviceId,
+				occurredAt: input.mutation.occurredAt,
+				receivedAt: input.receivedAt
+			})
+		);
 		try {
 			await this.database.batch(statements);
 		} catch (error) {
@@ -1240,7 +1252,68 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			.bind(input.mutation.mutationId)
 			.first<ReceiptRow>();
 		if (!receipt) throw new TypeError('The committed mutation has no receipt.');
+		if (isRecipe) await this.matchNewestVersion(input, decodedResult.aggregate as StoredRecipe);
 		return { receipt: receiptFromRow(receipt), aggregate: decodedResult.aggregate };
+	}
+
+	/**
+	 * Why a version push is refused, or null (spec §8.7): a version is never rewritten, and only the
+	 * owner of its recipe can version it.
+	 */
+	private async refuseVersion(
+		input: UserCommitInput,
+		version: RecipeVersion
+	): Promise<string | null> {
+		if (input.mutation.operation === 'delete') return RECIPE_VERSION_IMMUTABLE;
+		const row = await this.database
+			.prepare(
+				`SELECT EXISTS (SELECT 1 FROM recipe_versions WHERE id = ?) AS stored,
+				 EXISTS (SELECT 1 FROM recipes WHERE id = ?1 AND owner_user_id <> ?3)
+				  OR EXISTS (SELECT 1 FROM recipe_versions WHERE recipe_id = ?1 AND owner_user_id <> ?3)
+				  AS foreign_recipe`
+			)
+			.bind(version.id, version.recipeId, input.actorUserId)
+			.first<{ stored: number; foreign_recipe: number }>();
+		if (row?.stored === 1) return RECIPE_VERSION_IMMUTABLE;
+		if (row?.foreign_recipe === 1) return RECIPE_NOT_OWNED;
+		return null;
+	}
+
+	/**
+	 * Keeps the recipe's newest content version equal to the recipe (spec §5.2). Concurrent edits from
+	 * two devices merge by conflict group into content no device versioned; this adds that version,
+	 * effective at the later of the commit time and one millisecond after the newest version.
+	 */
+	private async matchNewestVersion(input: UserCommitInput, recipe: StoredRecipe): Promise<void> {
+		if (!isRecipeAggregate(recipe)) return;
+		const newest = newestContentVersion(await readRecipeVersions(this.database, [recipe.id]));
+		if (newest === undefined || sameRecipeContent(newest.recipe, recipe)) return;
+		const effectiveAt =
+			justAfter(newest.effectiveAt) > input.receivedAt
+				? justAfter(newest.effectiveAt)
+				: (input.receivedAt as `${string}Z`);
+		const merged = recipeVersion({
+			id: uuidv7(),
+			recipeId: recipe.id,
+			ownerUserId: recipe.ownerUserId,
+			effectiveAt,
+			recipe
+		});
+		await this.commitWithResult({
+			...input,
+			mode: 'live',
+			mutation: {
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				mutationId: uuidv7(),
+				originDeviceId: input.mutation.originDeviceId,
+				entityKind: 'recipeVersion',
+				entityId: merged.id,
+				conflictGroups: ['row'],
+				operation: 'upsert',
+				occurredAt: effectiveAt,
+				aggregate: merged
+			}
+		});
 	}
 
 	async prune(input: { now: string; changeCutoff: string }): Promise<void> {

@@ -3,6 +3,9 @@ import Dexie from 'dexie';
 import type { MaalDatabase } from '$lib/client/local/database.js';
 import type { OutboxRecord } from '$lib/client/local/records.js';
 import { readActiveProfile } from '$lib/client/local/profiles.js';
+import { readRecipeVersions } from '$lib/client/recipes/versions.js';
+import { newestContentVersion } from '$lib/domain/recipes/versions.js';
+import { RECIPE_NOT_OWNED } from '$lib/sync/contracts.js';
 import { RECIPE_NOT_SHARED } from '$lib/sync/household-contracts.js';
 
 /** One rejected write the person has not dismissed yet (spec §8.6). */
@@ -13,6 +16,7 @@ export interface RejectionNotice {
 
 const ENTITY_STORES: Readonly<Record<string, string>> = {
 	recipe: 'recipes',
+	recipeVersion: 'recipeVersions',
 	meal: 'meals',
 	meal_check_in: 'mealCheckIns',
 	household: 'households'
@@ -20,6 +24,7 @@ const ENTITY_STORES: Readonly<Record<string, string>> = {
 
 const ENTITY_NOUNS: Readonly<Record<string, string>> = {
 	recipe: 'a recipe',
+	recipeVersion: 'a recipe',
 	meal: 'a meal',
 	meal_check_in: 'a check-in',
 	household: 'household settings',
@@ -35,23 +40,24 @@ const titleOf = (value: unknown): string | null =>
 		? value.title
 		: null;
 
-/** A recipe-following meal has no title of its own; it shows its recipe's. */
-const followedRecipeOf = async (database: MaalDatabase, local: unknown): Promise<unknown> =>
-	typeof local === 'object' &&
-	local !== null &&
-	'followsRecipe' in local &&
-	local.followsRecipe === true &&
-	'sourceRecipeId' in local &&
-	typeof local.sourceRecipeId === 'string'
-		? database.recipes.get(local.sourceRecipeId)
-		: undefined;
+/**
+ * The recipe a version holds, or the newest version's recipe for a recipe-following meal, which has
+ * no title of its own.
+ */
+const recipeOf = async (database: MaalDatabase, local: unknown): Promise<unknown> => {
+	const record = local as
+		{ recipe?: unknown; followsRecipe?: unknown; sourceRecipeId?: unknown } | undefined;
+	if (record?.recipe !== undefined) return record.recipe;
+	if (record?.followsRecipe !== true || typeof record.sourceRecipeId !== 'string') return undefined;
+	return newestContentVersion(await readRecipeVersions(database, [record.sourceRecipeId]))?.recipe;
+};
 
 const describeEntity = async (database: MaalDatabase, row: OutboxRecord): Promise<string> => {
 	const store = ENTITY_STORES[row.entityKind];
 	const local = store ? await database.table(store).get(row.aggregateId) : undefined;
 	const title =
 		titleOf(local) ??
-		titleOf(await followedRecipeOf(database, local)) ??
+		titleOf(await recipeOf(database, local)) ??
 		titleOf(row.payload) ??
 		titleOf(row.snapshot);
 	return title ? `“${title}”` : (ENTITY_NOUNS[row.entityKind] ?? 'a preference');
@@ -64,6 +70,7 @@ const messageFor = (code: string | undefined, name: string): string => {
 		case 'historical_loser':
 			return `A newer change to ${name} replaced yours.`;
 		case RECIPE_NOT_SHARED:
+		case RECIPE_NOT_OWNED:
 			return `Your change to ${name} wasn’t saved because its recipe belongs to someone else.`;
 		case 'planned_cook_not_member':
 			return `Your change to ${name} wasn’t saved because the cook you chose left the household.`;

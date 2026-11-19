@@ -172,6 +172,7 @@ const createMeal = async (
 		} else {
 			recipe = await requireRecipe(context.domain, context.principal.ownerUserId, userRecipeId!);
 		}
+		await context.domain.ensureRecipeVersion(context.principal.ownerUserId, recipe);
 		meal = followRecipeAsMeal({
 			recipe,
 			householdId,
@@ -289,7 +290,7 @@ export const tools: readonly ToolDefinition[] = [
 	{
 		name: 'update_user_recipe',
 		description:
-			'Patch a saved recipe by recipeId. Omitted fields stay unchanged. Planned meals that still follow the recipe show the change; edited, cooked, skipped, and past meals keep the version they had.',
+			'Patch a saved recipe by recipeId. Omitted fields stay unchanged. Each change adds a recipe version: future meals that still follow the recipe show it, while past meals, checked-in meals, and edited meals keep the version they had.',
 		inputSchema: Schema.Struct({
 			...optionalHouseholdInput,
 			recipeId: Schema.String,
@@ -304,7 +305,6 @@ export const tools: readonly ToolDefinition[] = [
 				context.principal.ownerUserId,
 				requiredText(args.recipeId, 'recipeId')
 			);
-			// The Worker copies the meals that must keep the old version before it commits (spec §8.7).
 			const recipe = await context.domain.writeUserRecipe({
 				actorUserId: context.principal.ownerUserId,
 				aggregate: patchRecipe(current, args.patch),
@@ -440,7 +440,7 @@ export const tools: readonly ToolDefinition[] = [
 	{
 		name: 'get_household_meal',
 		description:
-			'Fetch one planned or floating meal by mealId, including its recipe details, schedule fields, and followsRecipe: true while it still shows its recipe as the recipe is now. Use before editing when you need the current meal-specific state.',
+			'Fetch one planned or floating meal by mealId, including its recipe details, schedule fields, and followsRecipe: true with recipeVersionId while it still shows a version of its recipe. Use before editing when you need the current meal-specific state.',
 		inputSchema: Schema.Struct({ ...optionalHouseholdInput, mealId: Schema.String }),
 		annotations: { readOnlyHint: true },
 		handler: async (context, args) => {
@@ -562,22 +562,16 @@ export const tools: readonly ToolDefinition[] = [
 					reporterUserId: context.principal.ownerUserId,
 					verdict: args.verdict === 'repeat' || args.verdict === 'avoid' ? args.verdict : 'neutral',
 					cookTimeMinutes: cookTime === null ? null : Math.max(1, Math.round(cookTime)),
-					reason: text(args.reason)
+					reason: text(args.reason),
+					recipeVersionId: meal.recipeVersionId
 				})
 			});
 			const status = cooked ? 'cooked' : 'skipped';
-			// A check-in copies a recipe-following meal, so history shows what was cooked.
-			const copied = await copyMealBeforeEdit({
-				domain: context.domain,
-				actorUserId: context.principal.ownerUserId,
-				householdId: household.householdId,
-				meal
-			});
 			const updatedMeal = written(
 				await context.domain.writeHouseholdMeal({
 					actorUserId: context.principal.ownerUserId,
 					householdId: household.householdId,
-					aggregate: { ...copied, status },
+					aggregate: { ...meal, status },
 					conflictGroups: ['status'],
 					operation: 'upsert'
 				})

@@ -10,8 +10,7 @@ import type {
 	UserSyncEntityKind
 } from '$lib/sync/contracts.js';
 
-import { recipeChangeTables, storeRecipe } from '$lib/client/recipes/commands.js';
-
+import { storeSyncedAggregate } from './versions.js';
 import { pruneAcknowledgedOutbox, recordServerChanges, scopeOutbox } from './outbox.js';
 import { noteReinstatement } from './reinstatements.js';
 
@@ -23,20 +22,7 @@ export interface UserApplyScope {
 
 const keyFor = (entityKind: string, entityId: string): string => `${entityKind}\u0000${entityId}`;
 
-/**
- * Stores an aggregate, or removes it when `aggregate` is undefined. A recipe goes through
- * `storeRecipe`, so the meals that must keep its old version freeze first (spec §5.3).
- */
-const storeAggregate = async (
-	database: MaalDatabase,
-	store: string,
-	entityId: string,
-	aggregate: unknown
-): Promise<void> => {
-	if (store === 'recipes') await storeRecipe(database, entityId, aggregate);
-	else if (aggregate === undefined) await database.table(store).delete(entityId);
-	else await database.table(store).put(aggregate);
-};
+const storeAggregate = storeSyncedAggregate;
 
 const pendingUserOutbox = (database: MaalDatabase, workosUserId: string): Promise<OutboxRecord[]> =>
 	scopeOutbox(database, 'user', workosUserId);
@@ -75,11 +61,7 @@ export const applyUserPullPage = async (
 	const tables = decoded.map(({ store }) => database.table(store));
 	await database.transaction(
 		'rw',
-		[
-			...new Set([...tables, ...recipeChangeTables(database)]),
-			database.syncScopes,
-			database.reinstatements
-		],
+		[...new Set(tables), database.outbox, database.syncScopes, database.reinstatements],
 		async () => {
 			const pending = await pendingUserOutbox(database, workosUserId);
 			const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));
@@ -164,7 +146,7 @@ export const applyUserMutationReceipts = async (
 		...resolved.flatMap(({ authoritative }) =>
 			authoritative ? [database.table(authoritative.store)] : []
 		),
-		...recipeChangeTables(database)
+		database.outbox
 	]);
 	await database.transaction('rw', [...tables], async () => {
 		const restorations = new Map<string, NonNullable<(typeof resolved)[number]['authoritative']>>();
@@ -216,11 +198,7 @@ export const applyUserBootstrap = async (
 	}
 	await database.transaction(
 		'rw',
-		[
-			...new Set([...tables, ...recipeChangeTables(database)]),
-			database.syncScopes,
-			database.reinstatements
-		],
+		[...new Set(tables), database.outbox, database.syncScopes, database.reinstatements],
 		async () => {
 			const pending = await pendingUserOutbox(database, workosUserId);
 			const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));

@@ -668,8 +668,8 @@ leaves it; its meals keep resolving among the versions it received.
   rejection carries no recipe content, and the device shows the §8.6 notice.
 - **Who may version.** The Worker rejects a version of a recipe that D1 holds, or holds versions of, under
   another owner, with `recipe_not_owned`. Otherwise a member could version another member's followed
-  recipe and change what the household's meals show. A version is never rewritten: a push of an existing
-  version ID is rejected as `recipe_version_exists`.
+  recipe and change what the household's meals show. A device never rewrites or deletes a version: a
+  push of an existing version ID, or a deletion of one, is rejected as `recipe_version_immutable`.
 - **Wire.** Household pulls and bootstrap pages carry `recipeVersion` changes with the complete version,
   and its deletion when the Worker collects it (§5.2). They are pull-only: a household push of a
   `recipeVersion` is malformed.

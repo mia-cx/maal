@@ -13,7 +13,7 @@ const expectedMigrations = [
 	'0001_global_taxonomy_seed.sql',
 	'0002_dry_bug.sql',
 	'0003_household_staleness_threshold.sql',
-	'0004_recipe_following_meals.sql'
+	'0004_recipe_versions.sql'
 ];
 
 const run = (persistenceDirectory, args, expectedSuccess = true) => {
@@ -136,8 +136,8 @@ try {
 		"INSERT INTO meals (id, household_id, title) VALUES ('meal_copy', 'org_1', 'Soup');"
 	);
 	assert.deepEqual(
-		query(emptyPersistenceDirectory, "SELECT follows_recipe FROM meals WHERE id = 'meal_copy'"),
-		[{ follows_recipe: 0 }]
+		query(emptyPersistenceDirectory, "SELECT followed_recipe_id FROM meals WHERE id = 'meal_copy'"),
+		[{ followed_recipe_id: null }]
 	);
 	execute(
 		emptyPersistenceDirectory,

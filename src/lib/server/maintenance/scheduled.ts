@@ -10,6 +10,7 @@ import {
 	reconcileStaleTrialClaims
 } from '$lib/server/billing/index.js';
 
+import { collectRecipeVersions } from './recipe-versions.js';
 import { runScheduledSyncRetention } from './sync-retention.js';
 
 type MaintenanceEnvironment = Env & {
@@ -22,6 +23,7 @@ export interface ScheduledMaintenanceResult {
 	readonly syncReceiptsDeleted: number;
 	readonly syncTombstonesDeleted: number;
 	readonly syncScopesAdvanced: number;
+	readonly recipeVersionsCollected: number;
 	readonly householdsPurged: number;
 	readonly householdsPending: number;
 	readonly householdRowsDeleted: number;
@@ -56,6 +58,7 @@ export const runScheduledMaintenance = async (
 	);
 	const serverNow = retention[0]?.serverNow;
 	if (!serverNow) throw new TypeError('Scheduled retention did not return D1 server time.');
+	const recipeVersionsCollected = await collectRecipeVersions(database, serverNow);
 	const householdResult = await purgeExpiredHouseholds({
 		repository: new BillingRepository(database),
 		stripe,
@@ -79,6 +82,7 @@ export const runScheduledMaintenance = async (
 	});
 	return {
 		...syncResult,
+		recipeVersionsCollected,
 		householdsPurged: householdResult.purged.length,
 		householdsPending: householdResult.pending.length,
 		householdRowsDeleted: householdResult.rowsDeleted,

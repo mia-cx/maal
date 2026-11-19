@@ -8,6 +8,7 @@ import {
 import { MealCheckInSchema, StoredMealSchema, isLiveMeal } from '$lib/domain/meals/schema.js';
 import { PortableUserAttributionSchema } from '$lib/domain/portability/schema.js';
 import { StoredRecipeSchema, isRecipeAggregate } from '$lib/domain/recipes/schema.js';
+import { RecipeVersionSchema } from '$lib/domain/recipes/versions.js';
 import {
 	GLOBAL_FOOD_ALIAS_SEED,
 	GLOBAL_FOOD_SEED,
@@ -59,6 +60,7 @@ const recoveryDecoders = {
 	householdAppliances: HouseholdApplianceSchema,
 	userAttributions: PortableUserAttributionSchema,
 	recipes: StoredRecipeSchema,
+	recipeVersions: RecipeVersionSchema,
 	meals: StoredMealSchema,
 	mealCheckIns: MealCheckInSchema,
 	foods: FoodSchema,

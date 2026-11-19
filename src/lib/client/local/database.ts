@@ -114,10 +114,14 @@ export const DATABASE_V6_STORES = {
 	reinstatements: '&[entityKind+entityId]'
 } as const;
 
-/** v7 indexes meals by their recipe, for the copies a recipe change or deletion makes (spec §5.3). */
+/**
+ * v7 adds immutable recipe versions, which recipe-following meals resolve to, and indexes meals by
+ * their recipe for version collection (spec §5.2, §5.3).
+ */
 export const DATABASE_STORES = {
 	...DATABASE_V6_STORES,
-	meals: `${DATABASE_V1_STORES.meals},sourceRecipeId`
+	meals: `${DATABASE_V1_STORES.meals},sourceRecipeId`,
+	recipeVersions: '&id,recipeId'
 } as const;
 
 export type LocalStoreName = keyof typeof DATABASE_STORES;
@@ -141,6 +145,7 @@ export class MaalDatabase extends Dexie {
 	householdInvites!: Table<HouseholdInviteRecord, string>;
 	householdAppliances!: Table<HouseholdApplianceRecord, string>;
 	recipes!: Table<LocalAggregateRecord, string>;
+	recipeVersions!: Table<LocalAggregateRecord, string>;
 	meals!: Table<LocalAggregateRecord, string>;
 	mealCheckIns!: Table<LocalAggregateRecord, string>;
 	foods!: Table<Food, string>;
@@ -257,7 +262,8 @@ export class MaalDatabase extends Dexie {
 					{ key: 'databaseVersion', value: 6, updatedAt: timestamp }
 				]);
 			});
-		// Existing meals are meal copies, so v7 only adds the index; no record changes.
+		// Existing meals are meal copies and existing recipes get their first version when planned,
+		// so v7 adds stores and an index without changing a record.
 		this.version(CURRENT_DATABASE_VERSION)
 			.stores(DATABASE_STORES)
 			.upgrade(async (transaction) => {

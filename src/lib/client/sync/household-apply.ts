@@ -2,14 +2,11 @@ import { Schema } from 'effect';
 
 import type { MaalDatabase } from '$lib/client/local/database.js';
 import type { OutboxRecord, SyncScopeRecord } from '$lib/client/local/records.js';
-import { recipeChangeTables, storeRecipe } from '$lib/client/recipes/commands.js';
 import { LocalDecodeError } from '$lib/domain/contracts/errors.js';
-import type { UtcInstant } from '$lib/domain/contracts/primitives.js';
-import { StoredRecipeSchema, type StoredRecipe } from '$lib/domain/recipes/schema.js';
+import { RecipeVersionSchema, type RecipeVersion } from '$lib/domain/recipes/versions.js';
 import type { MutationReceipt } from '$lib/sync/contracts.js';
 import {
-	HOUSEHOLD_SHARED_RECIPE_KIND,
-	MEAL_ALREADY_COPIED,
+	HOUSEHOLD_SHARED_VERSION_KIND,
 	type HouseholdBootstrapResponse,
 	type HouseholdPullResponse,
 	type HouseholdSnapshotManifestEntry,
@@ -24,6 +21,7 @@ import {
 
 import { pruneAcknowledgedOutbox, recordServerChanges, scopeOutbox } from './outbox.js';
 import { noteReinstatement } from './reinstatements.js';
+import { storeSyncedAggregate } from './versions.js';
 
 /** The auth slot and household a coordinator applies server changes for. */
 export interface HouseholdApplyScope {
@@ -86,13 +84,13 @@ const pendingHouseholdOutbox = async (
 
 type HouseholdEntityChange = HouseholdSyncChange & { readonly entityKind: HouseholdSyncEntityKind };
 
-const isSharedRecipeChange = (change: HouseholdSyncChange): boolean =>
-	change.entityKind === HOUSEHOLD_SHARED_RECIPE_KIND;
+const isSharedVersionChange = (change: HouseholdSyncChange): boolean =>
+	change.entityKind === HOUSEHOLD_SHARED_VERSION_KIND;
 
 /**
  * Splits a page into the household's own changes, each decoded alongside the change it came from,
- * and the recipes shared with it. Shared recipes are decoded too, so a malformed one fails the page
- * like any other change.
+ * and the recipe versions shared with it. Shared versions are decoded too, so a malformed one fails
+ * the page like any other change.
  */
 const decodeChanges = (
 	householdId: string,
@@ -101,13 +99,13 @@ const decodeChanges = (
 ) => {
 	let prior = -1;
 	const own: HouseholdEntityChange[] = [];
-	const sharedRecipes: StoredRecipe[] = [];
+	const sharedVersions: RecipeVersion[] = [];
 	for (const change of changes) {
 		if (requireSequenceOrder && change.sequence <= prior) {
 			throw new TypeError('Sync changes must be strictly ordered.');
 		}
 		prior = change.sequence;
-		if (isSharedRecipeChange(change)) sharedRecipes.push(decodeSharedRecipe(change));
+		if (isSharedVersionChange(change)) sharedVersions.push(decodeSharedVersion(change));
 		else own.push(change as HouseholdEntityChange);
 	}
 	return {
@@ -121,52 +119,33 @@ const decodeChanges = (
 			),
 			change
 		})),
-		sharedRecipes
+		sharedVersions
 	};
 };
 
-const decodeSharedRecipe = (change: HouseholdSyncChange): StoredRecipe => {
+const decodeSharedVersion = (change: HouseholdSyncChange): RecipeVersion => {
 	try {
-		const recipe = Schema.decodeUnknownSync(StoredRecipeSchema)(change.aggregate);
-		if (recipe.id !== change.entityId) throw new Error('entity mismatch');
-		return recipe;
+		const version = Schema.decodeUnknownSync(RecipeVersionSchema)(change.aggregate);
+		if (version.id !== change.entityId) throw new Error('entity mismatch');
+		return version;
 	} catch {
 		throw new LocalDecodeError({
-			operation: 'decode shared recipe',
-			message: 'A recipe shared with the household did not match its contract.'
+			operation: 'decode shared recipe version',
+			message: 'A recipe version shared with the household did not match its contract.'
 		});
 	}
 };
 
-const UNSENT_STATUSES = new Set(['pending', 'sending', 'quarantined']);
-
 /**
- * Stores the recipes shared with the household (spec §8.7). A recipe whose owner is signed in on
- * this device is skipped, because the owner's own recipe sync is authoritative; so is one whose
- * local copy is newer or has unsent edits. An owner who signed out or must reauthenticate syncs
- * nothing, so the household's copy applies. Needs `authSlots` and `recipeChangeTables` in the
- * surrounding transaction.
+ * Stores the recipe versions shared with the household, or removes the ones the Worker collected
+ * (spec §8.7). A version is immutable, so storing one already here changes nothing.
  */
-const applySharedRecipes = async (
+const applySharedVersions = async (
 	database: MaalDatabase,
-	recipes: readonly StoredRecipe[]
+	versions: readonly RecipeVersion[]
 ): Promise<void> => {
-	for (const recipe of recipes) {
-		const ownerSyncs = await database.authSlots
-			.where('workosUserId')
-			.equals(recipe.ownerUserId)
-			.filter(({ sessionState }) => sessionState === 'authenticated')
-			.count();
-		if (ownerSyncs > 0) continue;
-		const local = (await database.recipes.get(recipe.id)) as { revision?: number } | undefined;
-		if (local !== undefined && (local.revision ?? 0) > recipe.revision) continue;
-		const unsent = await database.outbox
-			.where('aggregateId')
-			.equals(recipe.id)
-			.filter((row) => row.scopeKind === 'user' && UNSENT_STATUSES.has(row.status))
-			.count();
-		if (unsent > 0) continue;
-		await storeRecipe(database, recipe.id, recipe);
+	for (const version of versions) {
+		await storeSyncedAggregate(database, 'recipeVersions', version.id, version);
 	}
 };
 
@@ -182,7 +161,7 @@ export const applyHouseholdPullPage = async (
 	now = new Date()
 ): Promise<void> => {
 	const { householdId } = scope;
-	const { own, decoded, sharedRecipes } = decodeChanges(householdId, response.changes, true);
+	const { own, decoded, sharedVersions } = decodeChanges(householdId, response.changes, true);
 	if (response.changes.some(({ sequence }) => sequence > response.throughSequence)) {
 		throw new TypeError('A sync page cannot advance behind one of its changes.');
 	}
@@ -190,14 +169,16 @@ export const applyHouseholdPullPage = async (
 	await database.transaction(
 		'rw',
 		[
-			...new Set([...tables, ...recipeChangeTables(database)]),
+			...new Set(tables),
+			database.outbox,
+			database.recipeVersions,
 			database.mealCheckIns,
 			database.authSlots,
 			database.syncScopes,
 			database.reinstatements
 		],
 		async () => {
-			await applySharedRecipes(database, sharedRecipes);
+			await applySharedVersions(database, sharedVersions);
 			const pending = await pendingHouseholdOutbox(database, householdId, decoded);
 			const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));
 			const pendingByKey = Map.groupBy(pending, (row) => keyFor(row.entityKind, row.aggregateId));
@@ -314,11 +295,7 @@ export const applyHouseholdMutationReceipts = async (
 				await database.outbox.update(receipt.mutationId, {
 					status: 'rejected',
 					rejectionCode: receipt.errorCode,
-					acknowledgedAt: now.toISOString(),
-					// Another device copied the meal first; nothing the person did was lost (spec §8.6).
-					...(receipt.errorCode === MEAL_ALREADY_COPIED
-						? { rejectionSeenAt: now.toISOString() as UtcInstant }
-						: {})
+					acknowledgedAt: now.toISOString()
 				});
 				if (authoritative)
 					restorations.set(keyFor(authoritative.entityKind, authoritative.entityId), authoritative);
@@ -348,7 +325,7 @@ export const applyHouseholdBootstrap = async (
 ): Promise<void> => {
 	const { householdId } = scope;
 	// Bootstrap pages are sorted by stable entity key for pagination, not by commit sequence.
-	const { own, decoded, sharedRecipes } = decodeChanges(householdId, response.aggregates, false);
+	const { own, decoded, sharedVersions } = decodeChanges(householdId, response.aggregates, false);
 	const tables = decoded.map(({ store }) => database.table(store));
 	for (const instruction of response.instructions) {
 		tables.push(database.table(HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS[instruction.entityKind].store));
@@ -356,14 +333,16 @@ export const applyHouseholdBootstrap = async (
 	await database.transaction(
 		'rw',
 		[
-			...new Set([...tables, ...recipeChangeTables(database)]),
+			...new Set(tables),
+			database.outbox,
+			database.recipeVersions,
 			database.mealCheckIns,
 			database.authSlots,
 			database.syncScopes,
 			database.reinstatements
 		],
 		async () => {
-			await applySharedRecipes(database, sharedRecipes);
+			await applySharedVersions(database, sharedVersions);
 			const pending = await pendingHouseholdOutbox(database, householdId, [
 				...decoded,
 				...response.instructions

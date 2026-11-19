@@ -43,7 +43,7 @@ describe('rewrite D1 migration baseline', () => {
 			'0001_global_taxonomy_seed.sql',
 			'0002_dry_bug.sql',
 			'0003_household_staleness_threshold.sql',
-			'0004_recipe_following_meals.sql'
+			'0004_recipe_versions.sql'
 		]);
 
 		const database = await createDatabase();

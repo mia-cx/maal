@@ -4,17 +4,16 @@ import { Schema } from 'effect';
 import type { MaalDatabase } from '$lib/client/local/database.js';
 import { LocalDecodeError } from '$lib/domain/contracts/errors.js';
 import { LocalDateSchema } from '$lib/domain/contracts/primitives.js';
-import { resolveMeal } from '$lib/domain/meals/recipe-following.js';
 import {
 	MealCheckInSchema,
 	StoredMealSchema,
 	isLiveMeal,
-	isRecipeFollowingMeal,
 	type LiveMeal,
 	type MealAggregate,
 	type MealCheckIn
 } from '$lib/domain/meals/schema.js';
-import { StoredRecipeSchema, type StoredRecipe } from '$lib/domain/recipes/schema.js';
+
+import { resolveLocalMeals } from './resolution.js';
 
 export type MealCalendarRange = Readonly<{ start: string; end: string }>;
 
@@ -67,47 +66,21 @@ const queryHouseholdMealRangeRows = async (
 		.between([householdId, range.start], [householdId, range.end], true, true)
 		.toArray();
 
-const decodeRecipe = (value: unknown): StoredRecipe => {
-	try {
-		return Schema.decodeUnknownSync(StoredRecipeSchema)(value);
-	} catch {
-		throw new LocalDecodeError({
-			operation: 'decode followed recipe',
-			message: 'A local recipe did not match its contract.'
-		});
-	}
-};
-
 /**
- * Decodes live, undeleted meals as readers show them: a recipe-following meal as its recipe is now.
- * Reading `recipes` inside a live query makes the query re-run when a followed recipe changes. A
- * meal whose recipe is not on this device yet is left out until it arrives (spec §5.3).
+ * Decodes live, undeleted meals as readers show them: a recipe-following meal as the version it
+ * resolves to. The reads inside a live query make it re-run when a version, pin, or timezone changes.
+ * A meal whose version is not on this device yet is left out until it arrives (spec §5.3).
  */
 export const resolveMealRows = async (
 	database: MaalDatabase,
 	rows: readonly unknown[]
-): Promise<MealAggregate[]> => {
-	const live = rows
-		.map(decodeMeal)
-		.filter((meal): meal is LiveMeal => isLiveMeal(meal) && meal.deletedAt === null);
-	const recipeIds = [
-		...new Set(live.filter(isRecipeFollowingMeal).map(({ sourceRecipeId }) => sourceRecipeId))
-	];
-	const recipes = recipeIds.length === 0 ? [] : await database.recipes.bulkGet(recipeIds);
-	const recipeById = new Map(
-		recipeIds.map((id, index) => {
-			const row = recipes[index];
-			return [id, row === undefined ? undefined : decodeRecipe(row)] as const;
-		})
+): Promise<MealAggregate[]> =>
+	resolveLocalMeals(
+		database,
+		rows
+			.map(decodeMeal)
+			.filter((meal): meal is LiveMeal => isLiveMeal(meal) && meal.deletedAt === null)
 	);
-	return live.flatMap((meal) => {
-		const resolved = resolveMeal(
-			meal,
-			isRecipeFollowingMeal(meal) ? recipeById.get(meal.sourceRecipeId) : undefined
-		);
-		return resolved === null ? [] : [resolved];
-	});
-};
 
 const queryMealCheckInRows = async (
 	database: MaalDatabase,

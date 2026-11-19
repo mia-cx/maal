@@ -2,7 +2,11 @@ import { Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
 
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
-import { planRecipeFollowingMeal, resolveMeal } from '$lib/domain/meals/recipe-following.js';
+import {
+	copyRecipeIntoMeal,
+	planRecipeFollowingMeal,
+	resolveMealVersion
+} from '$lib/domain/meals/recipe-following.js';
 import {
 	MEAL_CONFLICT_GROUPS,
 	MEAL_COPY_GROUPS,
@@ -23,6 +27,7 @@ import {
 	type RecipeAggregate,
 	type RecipeImportedCandidate
 } from '$lib/domain/recipes/schema.js';
+import { recipeVersion } from '$lib/domain/recipes/versions.js';
 import {
 	FoodUserAliasSchema,
 	FoodUserEntrySchema,
@@ -39,11 +44,9 @@ import {
 	type UserFoodPreference,
 	type UserUnitDisplayPreference
 } from '$lib/domain/taxonomy/schema.js';
-import {
-	D1HouseholdSyncRepository,
-	readCurrentRecipes
-} from '$lib/server/sync/household-d1-repository.js';
+import { D1HouseholdSyncRepository } from '$lib/server/sync/household-d1-repository.js';
 import { D1UserSyncRepository } from '$lib/server/sync/d1-repository.js';
+import { loadMealResolution, readRecipeVersions } from '$lib/server/sync/recipe-versions.js';
 
 export interface RemoteHouseholdSummary {
 	readonly id: string;
@@ -63,10 +66,14 @@ export interface RemoteFoodProfile {
 }
 
 /**
- * A meal as tools show it: a recipe-following meal with its recipe's current content and
- * `followsRecipe: true`, or a meal copy with `followsRecipe: false` (spec §7.4).
+ * A meal as tools show it: a recipe-following meal with the content of the version it resolves to,
+ * that version's ID, and `followsRecipe: true`; or a meal copy with `followsRecipe: false` and no
+ * version (spec §7.4).
  */
-export type RemoteMeal = MealAggregate & { readonly followsRecipe: boolean };
+export type RemoteMeal = MealAggregate & {
+	readonly followsRecipe: boolean;
+	readonly recipeVersionId: string | null;
+};
 
 export interface RemoteDomainPort {
 	listHouseholds(householdIds: readonly string[]): Promise<readonly RemoteHouseholdSummary[]>;
@@ -78,6 +85,8 @@ export interface RemoteDomainPort {
 		conflictGroups: readonly string[];
 		operation: 'upsert' | 'delete';
 	}): Promise<RecipeAggregate>;
+	/** Gives a recipe stored before versions existed its first version, as planning does (§5.2). */
+	ensureRecipeVersion(actorUserId: string, recipe: RecipeAggregate): Promise<void>;
 	listHouseholdMeals(householdId: string): Promise<readonly RemoteMeal[]>;
 	getHouseholdMeal(householdId: string, mealId: string): Promise<RemoteMeal | null>;
 	/** Commits one meal mutation and returns the meal as tools show it, or null once deleted. */
@@ -232,8 +241,44 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 	}
 
 	/**
-	 * Resolves stored meals the way tools show them: a recipe-following meal with its recipe as it is
-	 * now. Deleted, purged, and unresolvable meals are left out.
+	 * The first version of a recipe stored before versions existed, which planning adds (spec §5.2).
+	 * Nothing happens when D1 holds a version of it.
+	 */
+	async ensureRecipeVersion(actorUserId: string, recipe: RecipeAggregate): Promise<void> {
+		if ((await readRecipeVersions(this.database, [recipe.id])).length > 0) return;
+		const now = new Date().toISOString() as `${string}Z`;
+		const version = recipeVersion({
+			id: uuidv7(),
+			recipeId: recipe.id,
+			ownerUserId: recipe.ownerUserId,
+			effectiveAt: recipe.updatedAt,
+			recipe
+		});
+		const { receipt } = await this.users.commitWithResult({
+			actorUserId,
+			deviceId: this.deviceId,
+			mutation: {
+				schemaVersion: CURRENT_SCHEMA_VERSION,
+				mutationId: uuidv7(),
+				originDeviceId: this.deviceId,
+				entityKind: 'recipeVersion',
+				entityId: version.id,
+				conflictGroups: ['row'],
+				operation: 'upsert',
+				occurredAt: version.effectiveAt,
+				aggregate: version
+			},
+			mode: 'live',
+			receivedAt: now
+		});
+		if (receipt.status === 'rejected') {
+			throw new RemoteDomainError('write_rejected', 'The recipe version was rejected.');
+		}
+	}
+
+	/**
+	 * Resolves stored meals the way tools show them: a recipe-following meal with the version it
+	 * resolves to (spec §5.3). Deleted, purged, and unresolvable meals are left out.
 	 */
 	private async resolveMeals(values: readonly unknown[]): Promise<RemoteMeal[]> {
 		const meals = values
@@ -241,17 +286,20 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 			.filter(
 				(meal): meal is LiveMeal => meal !== null && isLiveMeal(meal) && meal.deletedAt === null
 			);
-		const recipes = await readCurrentRecipes(
-			this.database,
-			meals.filter(isRecipeFollowingMeal).map(({ sourceRecipeId }) => sourceRecipeId)
-		);
-		return meals.flatMap((meal) => {
-			const followsRecipe = isRecipeFollowingMeal(meal);
-			const resolved = resolveMeal(
-				meal,
-				followsRecipe ? recipes.get(meal.sourceRecipeId) : undefined
-			);
-			return resolved === null ? [] : [{ ...resolved, followsRecipe }];
+		const contextOf = await loadMealResolution(this.database, meals);
+		return meals.flatMap((meal): RemoteMeal[] => {
+			if (!isRecipeFollowingMeal(meal)) {
+				return [{ ...meal, followsRecipe: false, recipeVersionId: null }];
+			}
+			const version = resolveMealVersion(meal, contextOf(meal));
+			if (version === null) return [];
+			return [
+				{
+					...copyRecipeIntoMeal(meal, version.recipe),
+					followsRecipe: true,
+					recipeVersionId: version.id
+				}
+			];
 		});
 	}
 

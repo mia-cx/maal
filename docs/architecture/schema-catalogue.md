@@ -51,18 +51,22 @@ confidence fields, notes, revision, timestamps, and tombstone. Its normalized si
 Every recipe sidecar references exactly one recipe. Sidecar collections are replaced atomically; they are not
 independently synchronized aggregates.
 
+`recipe_versions` holds immutable recipe versions: owner, `recipe_id` without a foreign key, `effective_at`,
+and the complete recipe as JSON, or null for a deletion marker (spec §5.2). Versions sync insert-only, and
+scheduled maintenance collects the ones no meal or check-in needs.
+
 ## D1 meal aggregate and check-ins
 
-`meals` is household-owned and carries a nullable `source_recipe_id`, `follows_recipe`, copied recipe/source
-fields, date, time, sort order, planned cook, yield, status, notes, revision, timestamps, and tombstone. A
-recipe-following meal (`follows_recipe = 1`) keeps only the meal's own fields, an empty `title`, and no
-sidecar rows. A meal copy holds its operational fields in `meal_ingredients`, `meal_instructions`,
+`meals` is household-owned and carries a nullable `source_recipe_id`, `followed_recipe_id`, copied
+recipe/source fields, date, time, sort order, planned cook, yield, status, notes, revision, timestamps, and
+tombstone. A recipe-following meal names its recipe in `followed_recipe_id`, which has no foreign key so it
+survives a purge, and keeps only the meal's own fields, an empty `title`, and no sidecar rows. A meal copy holds its operational fields in `meal_ingredients`, `meal_instructions`,
 `meal_instruction_events`, `meal_appliance_requirements`, `meal_classifications`, `meal_media`, and
 `meal_nutrition_facts` (spec §5.3).
 
 `meal_check_ins` is keyed by UUIDv7 and contains meal ID, reporting user ID, cooked flag, actual cook time,
-verdict, reason/notes, revision, timestamps, and tombstone. A meal/user pair is unique. Recipe deletion nulls
-meal provenance but never deletes a meal or check-in.
+verdict, reason/notes, the pinned `recipe_version_id`, revision, timestamps, and tombstone. A meal/user pair
+is unique. Recipe deletion never deletes a meal or check-in.
 
 ## D1 taxonomy and preferences
 

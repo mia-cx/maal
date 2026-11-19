@@ -301,15 +301,16 @@ export const removeProfileFromDevice = async (
 			}
 		}
 
-		// Recipes that retained meals still follow stay as shared recipes, so those meals keep
+		// The versions of removed recipes that retained meals follow stay, so those meals keep
 		// showing on this device, even offline or without sync (spec §4.3).
 		const removedHouseholds = new Set(removedHouseholdIds);
 		const ownRecipes = database.recipes.where('ownerUserId').equals(profile.workosUserId);
+		const ownRecipeIds = await ownRecipes.primaryKeys();
 		const followedRecipeIds = new Set(
 			(
 				await database.meals
 					.where('sourceRecipeId')
-					.anyOf(await ownRecipes.primaryKeys())
+					.anyOf(ownRecipeIds)
 					.filter(
 						(meal) =>
 							meal.followsRecipe === true &&
@@ -319,7 +320,12 @@ export const removeProfileFromDevice = async (
 					.toArray()
 			).map(({ sourceRecipeId }) => sourceRecipeId)
 		);
-		await ownRecipes.filter(({ id }) => !followedRecipeIds.has(id)).delete();
+		await ownRecipes.delete();
+		await database.recipeVersions
+			.where('recipeId')
+			.anyOf(ownRecipeIds)
+			.filter(({ recipeId }) => !followedRecipeIds.has(recipeId))
+			.delete();
 		await database.mealCheckIns
 			.filter(
 				(checkIn) =>

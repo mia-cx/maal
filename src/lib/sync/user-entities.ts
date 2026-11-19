@@ -4,6 +4,7 @@ import type { AggregateStoreName } from '$lib/client/local/commands.js';
 import { LocalDecodeError } from '$lib/domain/contracts/errors.js';
 import { StoredRecipeSchema } from '$lib/domain/recipes/schema.js';
 import { RECIPE_CONFLICT_GROUPS } from '$lib/domain/recipes/schema.js';
+import { RecipeVersionSchema } from '$lib/domain/recipes/versions.js';
 import {
 	FoodUserAliasSchema,
 	FoodUserEntrySchema,
@@ -24,6 +25,8 @@ export interface UserSyncEntityDescriptor {
 
 export const USER_SYNC_ENTITY_DESCRIPTORS = {
 	recipe: { store: 'recipes', schema: StoredRecipeSchema, conflictGroups: RECIPE_CONFLICT_GROUPS },
+	/** Immutable and insert-only (spec §5.2): its one group is written once. */
+	recipeVersion: { store: 'recipeVersions', schema: RecipeVersionSchema, conflictGroups: ['row'] },
 	foodUserAlias: { store: 'foodUserAliases', schema: FoodUserAliasSchema, conflictGroups: ['row'] },
 	foodUserEntry: { store: 'foodUserEntries', schema: FoodUserEntrySchema, conflictGroups: ['row'] },
 	unitUserAlias: { store: 'unitUserAliases', schema: UnitUserAliasSchema, conflictGroups: ['row'] },

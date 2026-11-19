@@ -319,6 +319,8 @@ export const makeCheckIn = (input: {
 	verdict: MealVerdict;
 	cookTimeMinutes: number | null;
 	reason: string | null;
+	/** The version a recipe-following meal shows, which the check-in pins (spec §5.4). */
+	recipeVersionId: string | null;
 	now?: `${string}Z`;
 }): MealCheckIn => {
 	const now = input.now ?? (new Date().toISOString() as `${string}Z`);
@@ -334,6 +336,7 @@ export const makeCheckIn = (input: {
 		mealId: input.mealId,
 		cookTimeMinutes: input.cookTimeMinutes,
 		verdict: input.verdict,
-		reason: input.reason
+		reason: input.reason,
+		recipeVersionId: input.recipeVersionId
 	});
 };

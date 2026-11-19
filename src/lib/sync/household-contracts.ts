@@ -25,25 +25,19 @@ export const HouseholdSyncEntityKindSchema = Schema.Literal(...HOUSEHOLD_SYNC_EN
 export type HouseholdSyncEntityKind = typeof HouseholdSyncEntityKindSchema.Type;
 
 /**
- * A recipe shared with the household because a recipe-following meal references it. Households
- * only receive it: pushes never carry it (spec §8.7).
+ * A recipe version shared with the household because one of its recipe-following meals follows the
+ * recipe. Households only receive it: pushes never carry it (spec §8.7).
  */
-export const HOUSEHOLD_SHARED_RECIPE_KIND = 'recipe' as const;
+export const HOUSEHOLD_SHARED_VERSION_KIND = 'recipeVersion' as const;
 
 /**
- * Rejects a copy of a meal another device already copied. The device takes the authoritative meal
- * without a notice, since nothing the person did was lost (spec §8.6).
- */
-export const MEAL_ALREADY_COPIED = 'meal_already_copied' as const;
-
-/**
- * Rejects a recipe-following meal of a recipe the writer does not own and the household does not
+ * Rejects a meal that starts following a recipe the writer does not own and the household does not
  * already receive, since following would share it (spec §8.7).
  */
 export const RECIPE_NOT_SHARED = 'recipe_not_shared' as const;
 const HouseholdSyncChangeEntityKindSchema = Schema.Literal(
 	...HOUSEHOLD_SYNC_ENTITY_KINDS,
-	HOUSEHOLD_SHARED_RECIPE_KIND
+	HOUSEHOLD_SHARED_VERSION_KIND
 );
 
 export const HouseholdSyncAudienceSchema = Schema.Struct({

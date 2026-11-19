@@ -160,8 +160,8 @@ export const MealAggregateSchema = Schema.Struct({
 export type MealAggregate = typeof MealAggregateSchema.Type;
 
 /**
- * A recipe-following meal: it stores no recipe content and shows its recipe as the recipe is now,
- * until a write copies the recipe into it (spec §5.3).
+ * A recipe-following meal: it stores no recipe content and shows the version of its recipe it
+ * resolves to, until its first content edit copies that version into it (spec §5.3).
  */
 export const RecipeFollowingMealSchema = Schema.Struct({
 	...MealOwnFields,
@@ -205,7 +205,12 @@ export const MealCheckInSchema = Schema.Struct({
 	mealId: Schema.NullOr(DomainIdSchema),
 	cookTimeMinutes: Schema.NullOr(Schema.Int.pipe(Schema.greaterThan(0))),
 	verdict: MealVerdictSchema,
-	reason: NullableStringSchema
+	reason: NullableStringSchema,
+	/**
+	 * The recipe version a recipe-following meal was cooked with, which the meal shows from then on;
+	 * null on a meal copy (spec §5.4). A record without the field decodes to null.
+	 */
+	recipeVersionId: Schema.optionalWith(Schema.NullOr(DomainIdSchema), { default: () => null })
 });
 export type MealCheckIn = typeof MealCheckInSchema.Type;
 

@@ -7,6 +7,13 @@ import {
 	type RecipeAggregate,
 	type StoredRecipe
 } from '$lib/domain/recipes/schema.js';
+import {
+	byEffect,
+	isContentVersion,
+	newestContentVersion,
+	type ContentVersion,
+	type RecipeVersion
+} from '$lib/domain/recipes/versions.js';
 
 import {
 	MealAggregateSchema,
@@ -14,6 +21,7 @@ import {
 	isRecipeFollowingMeal,
 	type LiveMeal,
 	type MealAggregate,
+	type MealCheckIn,
 	type RecipeFollowingMeal
 } from './schema.js';
 
@@ -123,34 +131,152 @@ export const copyRecipeIntoMeal = (meal: LiveMeal, recipe: RecipeAggregate): Mea
 		...recipeContent(recipe, (recipeRowId) => derivedMealRowId(meal.id, recipeRowId))
 	});
 
+/** True when two recipes give a meal the same content. Both must be decoded, so fields compare in order. */
+export const sameRecipeContent = (left: RecipeAggregate, right: RecipeAggregate): boolean =>
+	JSON.stringify(recipeContent(left, String)) === JSON.stringify(recipeContent(right, String));
+
 /**
- * What a recipe write does to the meals that follow the recipe (spec §5.3): `purge` when the
- * recipe's content goes away, `delete` when it moves to the bin, `edit` when anything a meal copy
- * holds changes, and null when the meals would show the same recipe. `before` and `after` must be
- * decoded, so their fields compare in schema order.
+ * The version a recipe write adds (spec §5.2): `content` when it creates the recipe or changes what a
+ * meal shows, `deletion` when it takes a live recipe to the bin or purges it, and null otherwise,
+ * such as a restore or a purge from the bin. Both sides must be decoded.
  */
-export const recipeChangeKind = (
-	before: RecipeAggregate,
+export const versionChange = (
+	before: StoredRecipe | undefined,
 	after: StoredRecipe | undefined
-): 'edit' | 'delete' | 'purge' | null => {
-	if (after === undefined || !isRecipeAggregate(after)) return 'purge';
-	if (before.deletedAt === null && after.deletedAt !== null) return 'delete';
-	const content = (recipe: RecipeAggregate) => JSON.stringify(recipeContent(recipe, String));
-	return content(before) === content(after) ? null : 'edit';
+): 'content' | 'deletion' | null => {
+	const wasLive = before !== undefined && isRecipeAggregate(before) && before.deletedAt === null;
+	if (after === undefined || !isRecipeAggregate(after) || after.deletedAt !== null) {
+		return wasLive ? 'deletion' : null;
+	}
+	if (before === undefined || !isRecipeAggregate(before)) return 'content';
+	return sameRecipeContent(before, after) ? null : 'content';
+};
+
+const dateFormatters = new Map<string, Intl.DateTimeFormat>();
+
+/** The calendar date of `instant` in `timeZone`, or in UTC when it is null. */
+export const localDateOf = (instant: string, timeZone: string | null): LocalDate => {
+	const zone = timeZone ?? 'UTC';
+	let formatter = dateFormatters.get(zone);
+	if (formatter === undefined) {
+		formatter = new Intl.DateTimeFormat('en-CA', {
+			timeZone: zone,
+			year: 'numeric',
+			month: '2-digit',
+			day: '2-digit'
+		});
+		dateFormatters.set(zone, formatter);
+	}
+	return formatter.format(new Date(instant)) as LocalDate;
+};
+
+/** What a recipe-following meal resolves against: its recipe's versions and its check-ins. */
+export interface MealResolutionContext {
+	readonly versions: readonly RecipeVersion[];
+	readonly checkIns: readonly MealCheckIn[];
+	/** The household's timezone; null resolves dates in UTC. */
+	readonly timeZone: string | null;
+}
+
+const byCreation = (left: MealCheckIn, right: MealCheckIn): number =>
+	left.createdAt === right.createdAt
+		? left.id.localeCompare(right.id)
+		: left.createdAt.localeCompare(right.createdAt);
+
+/** The first deletion marker that took effect after the meal was planned, if any. */
+const deletionCap = (meal: RecipeFollowingMeal, sorted: readonly RecipeVersion[]) =>
+	sorted.find((version) => !isContentVersion(version) && version.effectiveAt > meal.createdAt);
+
+/**
+ * The version a recipe-following meal shows (spec §5.3), or null while it is not on this device.
+ * The earliest live check-in pin decides; otherwise the newest content version in effect when the
+ * meal's date ends, among those before the first deletion after the meal was planned, falling back
+ * to the earliest of them. The result depends on synced data only, never on a device clock.
+ */
+export const resolveMealVersion = (
+	meal: RecipeFollowingMeal,
+	context: MealResolutionContext
+): ContentVersion | null => {
+	const sorted = context.versions
+		.filter(({ recipeId }) => recipeId === meal.sourceRecipeId)
+		.toSorted(byEffect);
+	const pin = context.checkIns
+		.filter(
+			({ mealId, deletedAt, recipeVersionId }) =>
+				mealId === meal.id && deletedAt === null && recipeVersionId !== null
+		)
+		.toSorted(byCreation)[0];
+	if (pin !== undefined) {
+		const pinned = sorted.find(({ id }) => id === pin.recipeVersionId);
+		return pinned !== undefined && isContentVersion(pinned) ? pinned : null;
+	}
+	const cap = deletionCap(meal, sorted);
+	const candidates = sorted
+		.filter(isContentVersion)
+		.filter((version) => cap === undefined || byEffect(version, cap) < 0);
+	const date = meal.date;
+	const inEffect =
+		date === null
+			? candidates
+			: candidates.filter(({ effectiveAt }) => localDateOf(effectiveAt, context.timeZone) <= date);
+	return inEffect.at(-1) ?? candidates[0] ?? null;
 };
 
 /**
- * What a reader shows for a live meal: a meal copy as stored, and a recipe-following meal as its
- * recipe is now. A deleted recipe still has its content. Returns null while the recipe is missing or
- * purged on this device, so the meal stays out of views until the recipe or the meal's copy arrives.
+ * What a reader shows for a live meal: a meal copy as stored, and a recipe-following meal as the
+ * version it resolves to. Null while that version is not on this device, so the meal stays out of
+ * views until it arrives.
  */
 export const resolveMeal = (
 	meal: LiveMeal,
-	recipe: StoredRecipe | undefined
+	context: MealResolutionContext
 ): MealAggregate | null => {
 	if (!isRecipeFollowingMeal(meal)) return meal;
-	if (recipe === undefined || !isRecipeAggregate(recipe)) return null;
-	return copyRecipeIntoMeal(meal, recipe);
+	const version = resolveMealVersion(meal, context);
+	return version === null ? null : copyRecipeIntoMeal(meal, version.recipe);
+};
+
+/** How long a superseded version stays at least, the window of ordinary change retention (§8.3). */
+export const VERSION_RETENTION_MS = 90 * 86_400_000;
+
+/**
+ * The versions of one recipe that collection removes (spec §5.2). `meals` are the live
+ * recipe-following meals of the recipe, and `checkIns` the live check-ins on live meals. A version
+ * stays while it is the newest content version of a recipe that exists, while a meal resolves to it
+ * or a check-in pins it, while it caps a meal's candidates, or until it and the version after it
+ * took effect more than {@link VERSION_RETENTION_MS} before `now`.
+ */
+export const collectableVersions = (input: {
+	readonly versions: readonly RecipeVersion[];
+	readonly meals: readonly RecipeFollowingMeal[];
+	readonly checkIns: readonly MealCheckIn[];
+	readonly timeZones: ReadonlyMap<string, string | null>;
+	readonly recipeExists: boolean;
+	readonly now: Date;
+}): RecipeVersion[] => {
+	const sorted = input.versions.toSorted(byEffect);
+	const needed = new Set<string>();
+	for (const meal of input.meals) {
+		const resolved = resolveMealVersion(meal, {
+			versions: sorted,
+			checkIns: input.checkIns,
+			timeZone: input.timeZones.get(meal.householdId) ?? null
+		});
+		if (resolved !== null) needed.add(resolved.id);
+		const cap = deletionCap(meal, sorted);
+		if (cap !== undefined) needed.add(cap.id);
+	}
+	for (const { recipeVersionId } of input.checkIns) {
+		if (recipeVersionId !== null) needed.add(recipeVersionId);
+	}
+	const newest = newestContentVersion(sorted);
+	if (input.recipeExists && newest !== undefined) needed.add(newest.id);
+	const horizon = input.now.getTime() - VERSION_RETENTION_MS;
+	const settled = (version: RecipeVersion | undefined) =>
+		version === undefined || Date.parse(version.effectiveAt) < horizon;
+	return sorted.filter(
+		(version, index) => !needed.has(version.id) && settled(version) && settled(sorted[index + 1])
+	);
 };
 
 /** Where and for how many a recipe is planned. Omitted fields are null; servings follow the recipe. */
@@ -192,19 +318,3 @@ export const planRecipeFollowingMeal = (input: {
 		status: 'planned'
 	});
 };
-
-/** Today's date in a household's timezone, or in UTC when the household has none. */
-export const householdToday = (now: Date, timeZone: string | null): LocalDate =>
-	new Intl.DateTimeFormat('en-CA', {
-		timeZone: timeZone ?? 'UTC',
-		year: 'numeric',
-		month: '2-digit',
-		day: '2-digit'
-	}).format(now) as LocalDate;
-
-/**
- * True when a recipe-following meal must take a copy before its recipe changes: it was cooked or
- * skipped, or its date has passed, so it must keep the version it was cooked with (spec §5.3 rule 4).
- */
-export const freezesBeforeRecipeChange = (meal: RecipeFollowingMeal, today: LocalDate): boolean =>
-	meal.status !== 'planned' || (meal.date !== null && meal.date < today);
