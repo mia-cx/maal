@@ -451,7 +451,7 @@ export const forkDetachedHouseholdSnapshot = async (
 		.filter(isRecipeFollowingMeal);
 	const contextOf = await loadMealResolution(database, following);
 	const copies = new Map(following.map((meal) => [meal.id, resolveMeal(meal, contextOf(meal))]));
-	const meals = rows.flatMap((row) => {
+	const meals = rows.flatMap((row): (typeof rows)[number][] => {
 		if (!copies.has(row.id)) return [row];
 		const copy = copies.get(row.id);
 		return copy ? [copy] : [];
