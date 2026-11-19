@@ -324,6 +324,26 @@ const beforeNextBatch = (
 	});
 };
 
+/** D1 that runs `after` once its next batch commits, as when its response is lost or another request lands then. */
+const afterNextBatch = (after: () => Promise<unknown>): D1Database => {
+	let pending: (() => Promise<unknown>) | undefined = after;
+	return new Proxy(d1, {
+		get(target, key) {
+			if (key === 'batch') {
+				return async (statements: D1PreparedStatement[]) => {
+					const result = await target.batch(statements);
+					const run = pending;
+					pending = undefined;
+					await run?.();
+					return result;
+				};
+			}
+			const value = Reflect.get(target, key);
+			return typeof value === 'function' ? value.bind(target) : value;
+		}
+	});
+};
+
 const titles = async (database: MaalDatabase) =>
 	new Map((await listHouseholdMeals(database, householdId)).map(({ id, title }) => [id, title]));
 
@@ -542,6 +562,59 @@ describe('recipe writes from MCP tools', () => {
 		expect(newestContentVersion(await readRecipeVersions(d1, [recipe.id]))?.recipe.title).toBe(
 			'Last committed request'
 		);
+	});
+
+	test('an edit whose batch response is lost still commits its version', async () => {
+		const aliceDevice = await openDevice(alice);
+		const recipe = await saveRecipe(aliceDevice);
+		await aliceDevice.sync();
+		const lostResponse = afterNextBatch(async () => {
+			throw new Error('batch committed, then the response was lost');
+		});
+
+		await expect(
+			new D1RemoteDomainPort(lostResponse, MCP_TEST_DEVICE).writeUserRecipe({
+				actorUserId: alice.userId,
+				aggregate: { ...recipe, title: 'Acknowledged edit' },
+				conflictGroups: ['header'],
+				operation: 'upsert'
+			})
+		).resolves.toMatchObject({ title: 'Acknowledged edit' });
+		expect(newestContentVersion(await readRecipeVersions(d1, [recipe.id]))?.recipe.title).toBe(
+			'Acknowledged edit'
+		);
+	});
+
+	test('a meal planned before a deletion keeps its content when an edit revives the recipe at once', async () => {
+		const aliceDevice = await openDevice(alice);
+		const recipe = await saveRecipe(aliceDevice, '2026-01-01T10:00:00.000Z');
+		const meal = await planRecipeAsMeal(aliceDevice.database, aliceDevice.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		await aliceDevice.sync();
+		const deletedAt = new Date().toISOString() as `${string}Z`;
+		// A recent edit from another request revives the recipe as soon as the deletion commits.
+		const revive = () =>
+			new D1RemoteDomainPort(d1, MCP_TEST_DEVICE).writeUserRecipe({
+				actorUserId: alice.userId,
+				aggregate: { ...recipe, title: 'Restored edit' },
+				conflictGroups: ['header'],
+				operation: 'upsert'
+			});
+
+		await new D1RemoteDomainPort(afterNextBatch(revive), MCP_TEST_DEVICE).writeUserRecipe({
+			actorUserId: alice.userId,
+			aggregate: { ...recipe, deletedAt, updatedAt: deletedAt },
+			conflictGroups: ['deletion'],
+			operation: 'delete'
+		});
+
+		await expect(
+			d1.prepare('SELECT title, deleted_at FROM recipes WHERE id = ?').bind(recipe.id).first()
+		).resolves.toEqual({ title: 'Restored edit', deleted_at: null });
+		await expect(
+			new D1RemoteDomainPort(d1, MCP_TEST_DEVICE).getHouseholdMeal(householdId, meal.id)
+		).resolves.toMatchObject({ title: 'Sunday soup' });
 	});
 });
 

@@ -47,7 +47,6 @@ import {
 	markReinstated,
 	queryAll,
 	readCommitGuard,
-	readCommitGuards,
 	readSidecars,
 	type CommitGuard,
 	type CommitResult,
@@ -807,10 +806,133 @@ const syntheticChange = (
 
 const ENTITY_HEAD_SQL = entityHeadSql('user');
 
+/**
+ * The statements that record one accepted user mutation: its change, its group versions, the
+ * scope's latest sequence, and its receipt. The change holds its payload only while the entity
+ * head is still `head` and every guard holds; otherwise the NULL payload fails NOT NULL and rolls
+ * the whole batch back.
+ */
+const acceptedChangeStatements = (
+	database: D1Database,
+	change: {
+		readonly actorUserId: string;
+		readonly receivedAt: string;
+		readonly mutation: SyncMutation;
+		readonly groups: readonly string[];
+		readonly revision: number;
+		readonly payload: string;
+		readonly head: number;
+		readonly guards: readonly CommitGuard[];
+		readonly tombstoneExpiresAt: string | null;
+	}
+): D1PreparedStatement[] => {
+	const { actorUserId, receivedAt, mutation, revision } = change;
+	const guardSql = commitGuardSql(change.guards);
+	const retainUntil = new Date(Date.parse(receivedAt) + 365 * 86_400_000).toISOString();
+	return [
+		database
+			.prepare(
+				`INSERT INTO sync_changes
+				 (mutation_id, actor_user_id, origin_device_id, audience_kind, audience_id, entity_kind,
+				  entity_id, conflict_group, operation, resulting_revision, occurred_at, received_at,
+				  payload, tombstone_expires_at)
+				 VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?,
+				  CASE WHEN ${ENTITY_HEAD_SQL} = ?${guardSql.sql} THEN ? END, ?)`
+			)
+			.bind(
+				mutation.mutationId,
+				actorUserId,
+				mutation.originDeviceId,
+				actorUserId,
+				mutation.entityKind,
+				mutation.entityId,
+				change.groups.join(','),
+				mutation.operation,
+				revision,
+				mutation.occurredAt,
+				receivedAt,
+				actorUserId,
+				mutation.entityKind,
+				mutation.entityId,
+				change.head,
+				...guardSql.binds,
+				change.payload,
+				change.tombstoneExpiresAt
+			),
+		...change.groups.map((group) =>
+			database
+				.prepare(
+					`INSERT INTO sync_entity_versions
+					 (audience_kind, audience_id, entity_kind, entity_id, conflict_group, revision,
+					  last_sequence, winning_occurred_at, winning_origin_device_id, winning_mutation_id,
+					  winning_actor_user_id, winning_received_at)
+					 VALUES ('user', ?, ?, ?, ?, ?,
+					  (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?, ?, ?, ?, ?)
+					 ON CONFLICT(audience_kind, audience_id, entity_kind, entity_id, conflict_group)
+					 DO UPDATE SET revision = excluded.revision, last_sequence = excluded.last_sequence,
+					  winning_occurred_at = excluded.winning_occurred_at,
+					  winning_origin_device_id = excluded.winning_origin_device_id,
+					  winning_mutation_id = excluded.winning_mutation_id,
+					  winning_actor_user_id = excluded.winning_actor_user_id,
+					  winning_received_at = excluded.winning_received_at`
+				)
+				.bind(
+					actorUserId,
+					mutation.entityKind,
+					mutation.entityId,
+					group,
+					revision,
+					mutation.mutationId,
+					mutation.occurredAt,
+					mutation.originDeviceId,
+					mutation.mutationId,
+					actorUserId,
+					receivedAt
+				)
+		),
+		database
+			.prepare(
+				`INSERT INTO sync_scope_state
+				 (audience_kind, audience_id, bootstrap_generation, earliest_retained_sequence,
+				  latest_sequence, updated_at)
+				 VALUES ('user', ?, 1, 0, (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?)
+				 ON CONFLICT(audience_kind, audience_id) DO UPDATE SET
+				  latest_sequence = excluded.latest_sequence, updated_at = excluded.updated_at`
+			)
+			.bind(actorUserId, mutation.mutationId, receivedAt),
+		database
+			.prepare(
+				`INSERT INTO sync_mutation_receipts
+				 (mutation_id, audience_kind, audience_id, entity_kind, entity_id, status, sequence,
+				  resulting_revision, error_code, created_at, retain_until)
+				 VALUES (?, 'user', ?, ?, ?, 'accepted',
+				  (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?, NULL, ?, ?)`
+			)
+			.bind(
+				mutation.mutationId,
+				actorUserId,
+				mutation.entityKind,
+				mutation.entityId,
+				mutation.mutationId,
+				revision,
+				receivedAt,
+				retainUntil
+			)
+	];
+};
+
+/** The version a recipe commit adds in its own batch, and what that batch must hold for it. */
+interface CommittedVersion {
+	/** The version to write, or null when the newest version already matches the recipe. */
+	readonly version: { readonly mutation: SyncMutation; readonly aggregate: RecipeVersion } | null;
+	readonly householdIds: readonly string[];
+	readonly guards: readonly CommitGuard[];
+}
+
 type UserCommitInput = Parameters<UserSyncRepository['commit']>[0] & {
 	/**
 	 * Set by a writer that sends no version of its own, such as an MCP tool: a recipe commit then
-	 * versions the recipe it leaves (spec §5.2).
+	 * writes the version of the recipe it leaves in the same batch (spec §5.2).
 	 */
 	readonly versionsRecipe?: boolean;
 };
@@ -1074,9 +1196,6 @@ export class D1UserSyncRepository implements UserSyncRepository {
 							DEFAULT_STALENESS_THRESHOLD_MINUTES
 						);
 					});
-		const receiptRetainUntil = new Date(
-			Date.parse(input.receivedAt) + 365 * 86_400_000
-		).toISOString();
 		if (acceptedGroups.length === 0) return rejected('historical_loser');
 
 		const head = Math.max(0, ...versions.map(({ last_sequence }) => last_sequence));
@@ -1116,38 +1235,22 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			input.actorUserId,
 			result
 		);
-		// A version reaches every household whose recipe-following meals follow its recipe, and
-		// commits only while no such meal was written since the households were listed (spec §8.7).
-		const since = isVersion ? await readCommitGuard(this.database, LATEST_SEQUENCE_SQL) : null;
-		const version = decodedResult.aggregate as RecipeVersion;
-		const receivingHouseholds = isVersion
-			? await householdsReceivingRecipe(this.database, version.recipeId, input.actorUserId)
-			: [];
-		const guards: CommitGuard[] = [
-			...held,
-			...(since === null
-				? []
-				: [
-						{
-							sql: FOLLOWING_MEAL_WRITTEN_SINCE_SQL,
-							binds: [version.recipeId, since.value],
-							value: 0
-						}
-					])
-		];
-		const guardSql = commitGuardSql(guards);
+		// A version reaches every household whose recipe-following meals follow its recipe (spec §8.7).
+		// A recipe commit from a writer that sends no version adds its own version in this batch, so
+		// the recipe never commits without it (spec §5.2).
+		const pushedVersion = isVersion ? (decodedResult.aggregate as RecipeVersion) : null;
+		const committed =
+			pushedVersion !== null
+				? await this.shareVersion(input.actorUserId, pushedVersion.recipeId)
+				: isRecipeCommit && input.versionsRecipe
+					? await this.versionOfCommit(input, decodedResult.aggregate as StoredRecipe)
+					: null;
+		const added = committed?.version ?? null;
+		const guards: CommitGuard[] = [...held, ...(committed?.guards ?? [])];
 		const tombstoneExpiresAt =
 			input.mutation.operation === 'delete'
 				? new Date(Date.parse(input.receivedAt) + 365 * 86_400_000).toISOString()
 				: null;
-		const payload = JSON.stringify({
-			schemaVersion: CURRENT_SCHEMA_VERSION,
-			payload: {
-				conflictGroups: acceptedGroups,
-				aggregate: decodedResult.aggregate,
-				...(reinstated ? { reinstated: true } : {})
-			}
-		});
 		const statements = [
 			this.database
 				.prepare(
@@ -1156,81 +1259,24 @@ export class D1UserSyncRepository implements UserSyncRepository {
 				)
 				.bind(input.actorUserId, input.receivedAt, input.receivedAt),
 			...normalizedStatements(this.database, input.mutation.entityKind, decodedResult.aggregate),
-			this.database
-				.prepare(
-					`INSERT INTO sync_changes
-				 (mutation_id, actor_user_id, origin_device_id, audience_kind, audience_id, entity_kind,
-				  entity_id, conflict_group, operation, resulting_revision, occurred_at, received_at,
-				  payload, tombstone_expires_at)
-				 VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?,
-				  CASE WHEN ${ENTITY_HEAD_SQL} = ?${guardSql.sql} THEN ? END, ?)`
-				)
-				.bind(
-					input.mutation.mutationId,
-					input.actorUserId,
-					input.mutation.originDeviceId,
-					input.actorUserId,
-					input.mutation.entityKind,
-					input.mutation.entityId,
-					acceptedGroups.join(','),
-					input.mutation.operation,
-					revision,
-					input.mutation.occurredAt,
-					input.receivedAt,
-					// A moved head leaves the payload NULL, which fails NOT NULL and rolls the batch back.
-					input.actorUserId,
-					input.mutation.entityKind,
-					input.mutation.entityId,
-					head,
-					...guardSql.binds,
-					payload,
-					tombstoneExpiresAt
-				)
-		];
-		for (const group of acceptedGroups) {
-			statements.push(
-				this.database
-					.prepare(
-						`INSERT INTO sync_entity_versions
-					 (audience_kind, audience_id, entity_kind, entity_id, conflict_group, revision,
-				  last_sequence, winning_occurred_at, winning_origin_device_id, winning_mutation_id,
-				  winning_actor_user_id, winning_received_at)
-					 VALUES ('user', ?, ?, ?, ?, ?,
-				  (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?, ?, ?, ?, ?)
-					 ON CONFLICT(audience_kind, audience_id, entity_kind, entity_id, conflict_group)
-					 DO UPDATE SET revision = excluded.revision, last_sequence = excluded.last_sequence,
-					  winning_occurred_at = excluded.winning_occurred_at,
-					  winning_origin_device_id = excluded.winning_origin_device_id,
-					  winning_mutation_id = excluded.winning_mutation_id,
-					  winning_actor_user_id = excluded.winning_actor_user_id,
-					  winning_received_at = excluded.winning_received_at`
-					)
-					.bind(
-						input.actorUserId,
-						input.mutation.entityKind,
-						input.mutation.entityId,
-						group,
-						revision,
-						input.mutation.mutationId,
-						input.mutation.occurredAt,
-						input.mutation.originDeviceId,
-						input.mutation.mutationId,
-						input.actorUserId,
-						input.receivedAt
-					)
-			);
-		}
-		statements.push(
-			this.database
-				.prepare(
-					`INSERT INTO sync_scope_state
-				 (audience_kind, audience_id, bootstrap_generation, earliest_retained_sequence,
-				  latest_sequence, updated_at)
-				 VALUES ('user', ?, 1, 0, (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?)
-				 ON CONFLICT(audience_kind, audience_id) DO UPDATE SET
-				  latest_sequence = excluded.latest_sequence, updated_at = excluded.updated_at`
-				)
-				.bind(input.actorUserId, input.mutation.mutationId, input.receivedAt),
+			...acceptedChangeStatements(this.database, {
+				actorUserId: input.actorUserId,
+				receivedAt: input.receivedAt,
+				mutation: input.mutation,
+				groups: acceptedGroups,
+				revision,
+				payload: JSON.stringify({
+					schemaVersion: CURRENT_SCHEMA_VERSION,
+					payload: {
+						conflictGroups: acceptedGroups,
+						aggregate: decodedResult.aggregate,
+						...(reinstated ? { reinstated: true } : {})
+					}
+				}),
+				head,
+				guards,
+				tombstoneExpiresAt
+			}),
 			this.database
 				.prepare(
 					`INSERT INTO sync_devices
@@ -1239,26 +1285,8 @@ export class D1UserSyncRepository implements UserSyncRepository {
 				 ON CONFLICT(device_id, workos_user_id) DO UPDATE SET last_seen_at = excluded.last_seen_at,
 				  last_app_version = excluded.last_app_version, last_protocol_version = excluded.last_protocol_version`
 				)
-				.bind(input.deviceId, input.actorUserId, input.receivedAt, input.receivedAt),
-			this.database
-				.prepare(
-					`INSERT INTO sync_mutation_receipts
-				 (mutation_id, audience_kind, audience_id, entity_kind, entity_id, status, sequence,
-				  resulting_revision, error_code, created_at, retain_until)
-				 VALUES (?, 'user', ?, ?, ?, 'accepted',
-				  (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?, NULL, ?, ?)`
-				)
-				.bind(
-					input.mutation.mutationId,
-					input.actorUserId,
-					input.mutation.entityKind,
-					input.mutation.entityId,
-					input.mutation.mutationId,
-					revision,
-					input.receivedAt,
-					receiptRetainUntil
-				)
-		);
+				.bind(input.deviceId, input.actorUserId, input.receivedAt, input.receivedAt)
+		];
 		if (tombstoneExpiresAt) {
 			statements.push(
 				this.database
@@ -1290,13 +1318,34 @@ export class D1UserSyncRepository implements UserSyncRepository {
 					.bind(input.actorUserId, input.mutation.entityKind, input.mutation.entityId)
 			);
 		}
+		if (added !== null) {
+			// The version is a new entity, so its head is 0; the recipe's change guards the batch.
+			statements.push(
+				...normalizedStatements(this.database, 'recipeVersion', added.aggregate),
+				...acceptedChangeStatements(this.database, {
+					actorUserId: input.actorUserId,
+					receivedAt: input.receivedAt,
+					mutation: added.mutation,
+					groups: added.mutation.conflictGroups,
+					revision: added.aggregate.revision,
+					payload: JSON.stringify({
+						schemaVersion: CURRENT_SCHEMA_VERSION,
+						payload: { conflictGroups: added.mutation.conflictGroups, aggregate: added.aggregate }
+					}),
+					head: 0,
+					guards: [],
+					tombstoneExpiresAt: null
+				})
+			);
+		}
+		const shared = pushedVersion ?? added?.aggregate;
 		statements.push(
 			...sharedVersionStatements(this.database, {
-				versions: isVersion ? [version] : [],
-				householdIds: receivingHouseholds,
+				versions: shared === undefined ? [] : [shared],
+				householdIds: committed?.householdIds ?? [],
 				actorUserId: input.actorUserId,
 				deviceId: input.deviceId,
-				occurredAt: input.mutation.occurredAt,
+				occurredAt: (added?.mutation ?? input.mutation).occurredAt,
 				receivedAt: input.receivedAt
 			})
 		);
@@ -1312,16 +1361,88 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			.first<ReceiptRow>();
 		if (!receipt) throw new TypeError('The committed mutation has no receipt.');
 		const committedSequence = receipt.sequence;
-		if (isRecipeCommit && committedSequence !== null) {
+		if (isRecipeCommit && !input.versionsRecipe && committedSequence !== null) {
 			const recipe = decodedResult.aggregate as StoredRecipe;
 			const incoming = decodedIncoming.aggregate;
 			await this.retryRaced(() =>
-				input.versionsRecipe
-					? this.versionCommittedRecipe(input, recipe, committedSequence)
-					: this.matchNewestVersion(input, recipe, incoming, committedSequence)
+				this.matchNewestVersion(input, recipe, incoming, committedSequence)
 			);
 		}
 		return { receipt: receiptFromRow(receipt), aggregate: decodedResult.aggregate };
+	}
+
+	/**
+	 * The households a new version of `recipeId` reaches, and the guard that holds its batch while
+	 * no recipe-following meal of the recipe was written since they were listed (spec §8.7).
+	 */
+	private async shareVersion(actorUserId: string, recipeId: string): Promise<CommittedVersion> {
+		const since = await readCommitGuard(this.database, LATEST_SEQUENCE_SQL);
+		return {
+			version: null,
+			householdIds: await householdsReceivingRecipe(this.database, recipeId, actorUserId),
+			guards: [{ sql: FOLLOWING_MEAL_WRITTEN_SINCE_SQL, binds: [recipeId, since.value], value: 0 }]
+		};
+	}
+
+	/**
+	 * The version a recipe commit from a writer that sends none, such as an MCP tool, writes in its
+	 * own batch (spec §5.2): the committed recipe when its content differs from the newest content
+	 * version, or a deletion marker when it deletes a recipe whose newest version is content. Once
+	 * the deletion commits, so has its marker, whatever revives the recipe later. The batch holds
+	 * only while no version of the recipe was written since this read.
+	 */
+	private async versionOfCommit(
+		input: UserCommitInput,
+		recipe: StoredRecipe
+	): Promise<CommittedVersion> {
+		const recipeId = input.mutation.entityId;
+		const versionHead = await readCommitGuard(this.database, VERSION_HEAD_SQL, recipeId);
+		const versions = (await readRecipeVersions(this.database, [recipeId])).toSorted(byEffect);
+		const live = isRecipeAggregate(recipe) && recipe.deletedAt === null ? recipe : null;
+		const newest = newestContentVersion(versions);
+		const last = versions.at(-1);
+		const needed =
+			live === null
+				? last !== undefined && last.recipe !== null
+				: newest === undefined || !sameRecipeContent(newest.recipe, live);
+		if (!needed) return { version: null, householdIds: [], guards: [versionHead] };
+		const effectiveAt =
+			last !== undefined && justAfter(last.effectiveAt) > input.receivedAt
+				? justAfter(last.effectiveAt)
+				: (input.receivedAt as `${string}Z`);
+		const mutationId = uuidv7();
+		const aggregate: RecipeVersion = {
+			...recipeVersion({
+				id: uuidv7(),
+				recipeId,
+				ownerUserId: input.actorUserId,
+				effectiveAt,
+				recipe: live
+			}),
+			revision: 1,
+			conflictClocks: {
+				row: { occurredAt: effectiveAt, originDeviceId: input.mutation.originDeviceId, mutationId }
+			}
+		};
+		const sharing = await this.shareVersion(input.actorUserId, recipeId);
+		return {
+			...sharing,
+			version: {
+				aggregate,
+				mutation: {
+					schemaVersion: CURRENT_SCHEMA_VERSION,
+					mutationId,
+					originDeviceId: input.mutation.originDeviceId,
+					entityKind: 'recipeVersion',
+					entityId: aggregate.id,
+					conflictGroups: ['row'],
+					operation: 'upsert',
+					occurredAt: effectiveAt,
+					aggregate
+				}
+			},
+			guards: [versionHead, ...sharing.guards]
+		};
 	}
 
 	/**
@@ -1420,98 +1541,6 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			[recipeHead, versionHead]
 		);
 		if (result === COMMIT_RACED) return COMMIT_RACED;
-	}
-
-	/**
-	 * Versions a recipe commit whose writer sends no version, such as an MCP tool's (spec §5.2): the
-	 * recipe as D1 holds it, or a deletion marker once it is deleted. The version commits only while
-	 * the recipe head and the recipe's versions are what this read, so it always matches the
-	 * committed recipe; after a race it reads again. Once a later commit changed the content, that
-	 * commit versions its own, and this adds nothing.
-	 */
-	private async versionCommittedRecipe(
-		input: UserCommitInput,
-		committed: StoredRecipe,
-		committedSequence: number
-	): Promise<void | typeof COMMIT_RACED> {
-		const recipeId = input.mutation.entityId;
-		const [[recipeHead, versionHead], versions] = await Promise.all([
-			readCommitGuards(this.database, [
-				{ sql: ENTITY_HEAD_SQL, binds: [input.actorUserId, 'recipe', recipeId] },
-				{ sql: VERSION_HEAD_SQL, binds: [recipeId] }
-			]),
-			readRecipeVersions(this.database, [recipeId])
-		]);
-		// While the head is this commit's, D1 holds the committed recipe; otherwise read what won.
-		const stored =
-			recipeHead.value === committedSequence
-				? committed
-				: await this.readStoredRecipe(input.actorUserId, recipeId);
-		const live = (recipe: StoredRecipe | undefined) =>
-			recipe !== undefined && isRecipeAggregate(recipe) && recipe.deletedAt === null
-				? recipe
-				: null;
-		const mine = live(committed);
-		const current = live(stored);
-		if (mine === null ? current !== null : current === null || !sameRecipeContent(mine, current)) {
-			return;
-		}
-		const sorted = versions.toSorted(byEffect);
-		const newest = newestContentVersion(sorted);
-		const last = sorted.at(-1);
-		const needed =
-			current === null
-				? last !== undefined && last.recipe !== null
-				: newest === undefined || !sameRecipeContent(newest.recipe, current);
-		if (!needed) return;
-		const effectiveAt =
-			last !== undefined && justAfter(last.effectiveAt) > input.receivedAt
-				? justAfter(last.effectiveAt)
-				: (input.receivedAt as `${string}Z`);
-		const version = recipeVersion({
-			id: uuidv7(),
-			recipeId,
-			ownerUserId: input.actorUserId,
-			effectiveAt,
-			recipe: current
-		});
-		const result = await this.attemptCommit(
-			{
-				...input,
-				mode: 'live',
-				mutation: {
-					schemaVersion: CURRENT_SCHEMA_VERSION,
-					mutationId: uuidv7(),
-					originDeviceId: input.mutation.originDeviceId,
-					entityKind: 'recipeVersion',
-					entityId: version.id,
-					conflictGroups: ['row'],
-					operation: 'upsert',
-					occurredAt: effectiveAt,
-					aggregate: version
-				}
-			},
-			[recipeHead, versionHead]
-		);
-		if (result === COMMIT_RACED) return COMMIT_RACED;
-	}
-
-	/** The recipe as D1 holds it now, decoded, or undefined when D1 has none. */
-	private async readStoredRecipe(
-		actorUserId: string,
-		recipeId: string
-	): Promise<StoredRecipe | undefined> {
-		const stored =
-			(await readLatestChangedAggregate(this.database, actorUserId, 'recipe', recipeId)) ??
-			(
-				await readSnapshotChanges(this.database, actorUserId, [
-					{ entityKind: 'recipe', entityId: recipeId }
-				])
-			)[0]?.aggregate;
-		return stored == null
-			? undefined
-			: (decodeUserSyncAggregate('recipe', recipeId, actorUserId, stored)
-					.aggregate as StoredRecipe);
 	}
 
 	async prune(input: { now: string; changeCutoff: string }): Promise<void> {
