@@ -272,8 +272,17 @@ A recipe-following meal becomes a meal copy, once and for good, when:
    The copy holds the recipe as it was before the change, which is the version that was cooked.
 
 Rule 4 is how a passing date freezes a meal. Nothing is written when the date passes: until its recipe
-changes, a past recipe-following meal already shows the version it was cooked with. Only the recipe
-owner's devices and the Worker apply rules 3 and 4, and only to the meals of the recipe being changed.
+changes, a past recipe-following meal already shows the version it was cooked with.
+
+Rules 3 and 4 apply wherever a recipe's stored content changes, through one recipe-change path: the
+Worker's recipe commit (§8.7), and on a device every write of a recipe, whether the person's own edit,
+a pulled or bootstrapped recipe, a shared recipe, a restored rejected write, or an archive import. That
+path first copies the version it is about to replace into the meals the rules select, then stores the
+new version, in one transaction. Only the device that makes the change uploads its copies, and only to
+households where its profile is an active member. Every other device writes the same deterministic
+copies locally, so no reader shows a past meal with the new content while household sync catches up.
+A detached household snapshot (§4.3) never changes with its recipe: on a device, any change to the
+recipe copies all of its recipe-following meals, without upload.
 
 Schedule, servings, cook, and status changes are meal fields. They never copy.
 
@@ -627,9 +636,10 @@ A household whose recipe owner has left gets copies at the owner's next recipe c
 - **Worker copies.** Before it commits a recipe change that edits content or deletes the recipe, the Worker
   copies the current D1 recipe into the recipe-following meals that rules 3 and 4 select, as household meal
   changes. The copies land ahead of the recipe change, so no member sees an old meal take the new content.
-  The recipe change then commits only while the recipe's recipe-following meals are as the copies left them;
-  a meal written in between makes the change retry and select its copies again. Recipe changes through MCP
-  take the same path. The owner's devices make the same copies locally; the Worker's or the device's copy
+  The Worker notes the latest change sequence before it selects any meal, and the recipe change commits
+  only while no recipe-following meal of the recipe was written after it. A meal written while the Worker
+  selects, copies, or commits makes the change retry and select its copies again. Recipe changes through
+  MCP take the same path. The owner's devices make the same copies locally; the Worker's or the device's copy
   wins, and the other is a quiet `meal_already_copied` rejection (§8.6).
 - **Device apply.** A device stores a shared recipe in `recipes` unless its owner is signed in on the device,
   where the owner's user sync is authoritative, or the local copy is newer or has unsent edits. An owner who
