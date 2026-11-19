@@ -49,7 +49,6 @@ export type PortableImportStore = Exclude<
 	| 'outbox'
 	| 'syncScopes'
 	| 'backfillCheckpoints'
-	| 'householdVersions'
 	| 'uiState'
 	| 'reinstatements'
 >;
@@ -676,11 +675,13 @@ const validatePlannedReferences = async (
 };
 
 /**
- * Plans the archive's recipe versions and returns their IDs on this device (spec §9). Versions are
- * insert-only: one already here stays as it is. A recipe imported as a copy brings copies of its
- * versions. A written recipe whose newest version does not hold its content, such as a replaced
- * one or one from an archive without versions, gets a version: effective now when it has one,
- * else at the recipe's `updatedAt`.
+ * Plans the archive's recipe versions (spec §9) and returns their IDs on this device, and the
+ * archived versions withheld from it. Versions are insert-only: one already here stays as it is. A
+ * recipe imported as a copy brings copies of its versions. A recipe kept local brings none, so its
+ * meals keep showing the local recipe; a version of it that is not here is withheld. A written
+ * recipe whose newest version does not hold its content, such as a replaced one or one from an
+ * archive without versions, gets a version: effective now when it has one, else at the recipe's
+ * `updatedAt`.
  */
 const planRecipeVersions = async (
 	database: MaalDatabase,
@@ -695,16 +696,28 @@ const planRecipeVersions = async (
 			copied: boolean
 		) => Record<string, unknown>;
 	}
-): Promise<Map<string, string>> => {
+): Promise<{ versionIds: Map<string, string>; withheld: Set<string> }> => {
 	const versionIds = new Map<string, string>();
+	const withheld = new Set<string>();
 	const planned: Record<string, unknown>[] = [];
+	const written = new Set((state.writes.get('recipes') ?? []).map(({ id }) => String(id)));
+	const kept = new Set(
+		state.collisions
+			.filter(({ store, localId }) => store === 'recipes' && !written.has(localId))
+			.map(({ localId }) => localId)
+	);
 	for (const archived of archive.recipeVersions?.versions ?? []) {
 		const recipeId = input.recipeIds.get(archived.recipeId);
 		if (recipeId === undefined) continue;
 		const copied = recipeId !== archived.recipeId;
 		const id = copied ? uuidv7() : archived.id;
+		const here = !copied && (await database.recipeVersions.get(id)) !== undefined;
+		if (kept.has(recipeId) && !here) {
+			withheld.add(archived.id);
+			continue;
+		}
 		versionIds.set(archived.id, id);
-		if (!copied && (await database.recipeVersions.get(id)) !== undefined) continue;
+		if (here) continue;
 		const row = {
 			...copyRecord(archived),
 			id,
@@ -741,7 +754,7 @@ const planRecipeVersions = async (
 			})
 		});
 	}
-	return versionIds;
+	return { versionIds, withheld };
 };
 
 export const planPortableImport = async (
@@ -883,7 +896,7 @@ export const planPortableImport = async (
 		}
 	}
 
-	const versionIds = await planRecipeVersions(database, state, archive, {
+	const { versionIds, withheld } = await planRecipeVersions(database, state, archive, {
 		recipeIds,
 		ownerUserId: profile.workosUserId,
 		remapContent: (recipe, recipeId, copied) =>
@@ -943,7 +956,11 @@ export const planPortableImport = async (
 			...copyRecord(archived),
 			id: mealChanged ? uuidv7() : archived.id,
 			mealId: mappedMealId,
-			recipeVersionId: mapId(versionIds, archived.recipeVersionId)
+			// A pin on a withheld version would show content the person kept out, so it pins nothing.
+			recipeVersionId:
+				archived.recipeVersionId !== null && withheld.has(archived.recipeVersionId)
+					? null
+					: mapId(versionIds, archived.recipeVersionId)
 		};
 		const decision = await resolveCandidate(database, state, 'mealCheckIns', candidate, true);
 		candidate.id = decision.id;

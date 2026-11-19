@@ -20,6 +20,7 @@ import {
 } from '$lib/client/meals/index.js';
 import { exportRecoveryArchives } from '$lib/client/local/recovery-export.js';
 import {
+	bulkResolutions,
 	commitPortableImport,
 	decodePortableArchive,
 	exportPortableArchive,
@@ -952,6 +953,42 @@ describe('archives and shared devices', () => {
 		);
 
 		expect(await titles(restored.database)).toEqual(new Map([[meal.id, 'Sunday soup']]));
+	});
+
+	test('importing with Keep local leaves a kept recipe’s meals on the local content', async () => {
+		const device = await openDevice(alice);
+		await device.database.households.put(familyKitchen);
+		const recipe = await saveRecipe(device);
+		const meal = await planRecipeAsMeal(device.database, device.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		const exportArchive = async () =>
+			decodePortableArchive(await exportPortableArchive(device.database, alice.profileId));
+		const before = await exportArchive();
+		await editRecipe(device, recipe.id, 'Archived replacement');
+		const after = await exportArchive();
+		const local = await openDevice(alice);
+		await local.database.households.put(familyKitchen);
+		await commitPortableImport(
+			local.database,
+			await planPortableImport(local.database, before, alice.profileId)
+		);
+
+		const draft = await planPortableImport(local.database, after, alice.profileId);
+		await commitPortableImport(
+			local.database,
+			await planPortableImport(
+				local.database,
+				after,
+				alice.profileId,
+				bulkResolutions(draft.collisions, 'keep-local')
+			)
+		);
+
+		await expect(local.database.recipes.get(recipe.id)).resolves.toMatchObject({
+			title: 'Sunday soup'
+		});
+		expect(await titles(local.database)).toEqual(new Map([[meal.id, 'Sunday soup']]));
 	});
 
 	test('on a shared device, a departed owner’s later edits stay out of the household', async () => {
