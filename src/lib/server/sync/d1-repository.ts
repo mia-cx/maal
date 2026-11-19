@@ -922,6 +922,56 @@ const acceptedChangeStatements = (
 	];
 };
 
+/**
+ * A version a recipe commit still lacks: `recipe` is its content, or null for a deletion marker,
+ * and it takes effect after `after`.
+ */
+interface UnversionedChange {
+	readonly recipe: RecipeAggregate | null;
+	readonly after: RecipeVersion | undefined;
+}
+
+/**
+ * What a recipe commit from a writer that sends no version, such as an MCP tool, must version
+ * (spec §5.2): the recipe when its content differs from the newest content version, or a deletion
+ * marker when it deletes a recipe whose newest version is content. `versions` are in effect order.
+ */
+const unversionedToolChange = (
+	recipe: RecipeAggregate,
+	versions: readonly RecipeVersion[]
+): UnversionedChange | null => {
+	const live = recipe.deletedAt === null ? recipe : null;
+	const newest = newestContentVersion(versions);
+	const last = versions.at(-1);
+	const needed =
+		live === null
+			? last !== undefined && last.recipe !== null
+			: newest === undefined || !sameRecipeContent(newest.recipe, live);
+	return needed ? { recipe: live, after: last } : null;
+};
+
+/**
+ * What a device's recipe commit must version (spec §5.2). A device sends its versions ahead of
+ * its recipe change, so its own edit is already versioned. Edits from two of the owner's devices
+ * can still leave the recipe with content its newest version lacks: a merge by conflict group made
+ * content no device versioned, or an older edit won by commit order.
+ */
+const unversionedDeviceChange = (
+	recipe: RecipeAggregate,
+	incoming: unknown,
+	versions: readonly RecipeVersion[]
+): UnversionedChange | null => {
+	const newest = newestContentVersion(versions);
+	if (newest === undefined || sameRecipeContent(newest.recipe, recipe)) return null;
+	const mergedByGroup =
+		!isRecipeAggregate(incoming as StoredRecipe) ||
+		!sameRecipeContent(incoming as RecipeAggregate, recipe);
+	const olderWon = versions.some(
+		(version) => version.recipe !== null && sameRecipeContent(version.recipe, recipe)
+	);
+	return mergedByGroup || olderWon ? { recipe, after: newest } : null;
+};
+
 /** The version a recipe commit adds in its own batch, and what that batch must hold for it. */
 interface CommittedVersion {
 	/** The version to write, or null when the newest version already matches the recipe. */
@@ -1237,14 +1287,18 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			result
 		);
 		// A version reaches every household whose recipe-following meals follow its recipe (spec §8.7).
-		// A recipe commit from a writer that sends no version adds its own version in this batch, so
-		// the recipe never commits without it (spec §5.2).
+		// A recipe commit adds the version its recipe still lacks in this batch, so the recipe never
+		// commits without it (spec §5.2). A purge adds none: its batch deletes versions instead.
 		const pushedVersion = isVersion ? (decodedResult.aggregate as RecipeVersion) : null;
 		const committed =
 			pushedVersion !== null
 				? await this.shareVersion(input.actorUserId, pushedVersion.recipeId)
-				: isRecipeCommit && input.versionsRecipe
-					? await this.versionOfCommit(input, decodedResult.aggregate as StoredRecipe)
+				: isRecipeCommit && isRecipeAggregate(decodedResult.aggregate as StoredRecipe)
+					? await this.versionOfCommit(
+							input,
+							decodedResult.aggregate as RecipeAggregate,
+							decodedIncoming.aggregate
+						)
 					: null;
 		const added = committed?.version ?? null;
 		const guards: CommitGuard[] = [...held, ...(committed?.guards ?? [])];
@@ -1361,14 +1415,6 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			.bind(input.mutation.mutationId)
 			.first<ReceiptRow>();
 		if (!receipt) throw new TypeError('The committed mutation has no receipt.');
-		const committedSequence = receipt.sequence;
-		if (isRecipeCommit && !input.versionsRecipe && committedSequence !== null) {
-			const recipe = decodedResult.aggregate as StoredRecipe;
-			const incoming = decodedIncoming.aggregate;
-			await this.retryRaced(() =>
-				this.matchNewestVersion(input, recipe, incoming, committedSequence)
-			);
-		}
 		return { receipt: receiptFromRow(receipt), aggregate: decodedResult.aggregate };
 	}
 
@@ -1396,30 +1442,25 @@ export class D1UserSyncRepository implements UserSyncRepository {
 	}
 
 	/**
-	 * The version a recipe commit from a writer that sends none, such as an MCP tool, writes in its
-	 * own batch (spec §5.2): the committed recipe when its content differs from the newest content
-	 * version, or a deletion marker when it deletes a recipe whose newest version is content. Once
-	 * the deletion commits, so has its marker, whatever revives the recipe later. The batch holds
-	 * only while no version of the recipe was written since this read.
+	 * The version a recipe commit writes in its own batch, so a lost response or a retry never
+	 * leaves the recipe committed without it (spec §5.2). The batch holds only while no version of
+	 * the recipe was written since this read; it races otherwise and decides again.
 	 */
 	private async versionOfCommit(
 		input: UserCommitInput,
-		recipe: StoredRecipe
+		recipe: RecipeAggregate,
+		incoming: unknown
 	): Promise<CommittedVersion> {
 		const recipeId = input.mutation.entityId;
 		const versionHead = await readCommitGuard(this.database, VERSION_HEAD_SQL, recipeId);
 		const versions = (await readRecipeVersions(this.database, [recipeId])).toSorted(byEffect);
-		const live = isRecipeAggregate(recipe) && recipe.deletedAt === null ? recipe : null;
-		const newest = newestContentVersion(versions);
-		const last = versions.at(-1);
-		const needed =
-			live === null
-				? last !== undefined && last.recipe !== null
-				: newest === undefined || !sameRecipeContent(newest.recipe, live);
-		if (!needed) return { version: null, householdIds: [], guards: [versionHead] };
+		const missing = input.versionsRecipe
+			? unversionedToolChange(recipe, versions)
+			: unversionedDeviceChange(recipe, incoming, versions);
+		if (missing === null) return { version: null, householdIds: [], guards: [versionHead] };
 		const effectiveAt =
-			last !== undefined && justAfter(last.effectiveAt) > input.receivedAt
-				? justAfter(last.effectiveAt)
+			missing.after !== undefined && justAfter(missing.after.effectiveAt) > input.receivedAt
+				? justAfter(missing.after.effectiveAt)
 				: (input.receivedAt as `${string}Z`);
 		const mutationId = uuidv7();
 		const aggregate: RecipeVersion = {
@@ -1428,7 +1469,7 @@ export class D1UserSyncRepository implements UserSyncRepository {
 				recipeId,
 				ownerUserId: input.actorUserId,
 				effectiveAt,
-				recipe: live
+				recipe: missing.recipe
 			}),
 			revision: 1,
 			conflictClocks: {
@@ -1477,81 +1518,6 @@ export class D1UserSyncRepository implements UserSyncRepository {
 		if (row?.stored === 1) return RECIPE_VERSION_IMMUTABLE;
 		if (row?.foreign_recipe === 1) return RECIPE_NOT_OWNED;
 		return null;
-	}
-
-	/**
-	 * Keeps the recipe's newest content version equal to the recipe (spec §5.2). Edits from two of the
-	 * owner's devices can leave the recipe with content its newest version lacks: a merge by conflict
-	 * group made content no device versioned, or an older edit won by commit order. This adds a
-	 * version of the recipe, effective at the later of the commit time and one millisecond after the
-	 * newest version. Otherwise the content is a device's own edit whose version is still on its way,
-	 * since a device sends its versions ahead of the recipe change, so nothing is added.
-	 *
-	 * The version commits only while the recipe head is still `committedSequence` and no version of
-	 * the recipe was written since the read; it races otherwise and decides again. Once another
-	 * recipe commit wins, this adds nothing: that commit matches its own recipe.
-	 */
-	private async matchNewestVersion(
-		input: UserCommitInput,
-		recipe: StoredRecipe,
-		incoming: unknown,
-		committedSequence: number
-	): Promise<void | typeof COMMIT_RACED> {
-		if (!isRecipeAggregate(recipe)) return;
-		const matchingEffectiveAt = async () => {
-			const versions = await readRecipeVersions(this.database, [recipe.id]);
-			const newest = newestContentVersion(versions);
-			if (newest === undefined || sameRecipeContent(newest.recipe, recipe)) return null;
-			const mergedByGroup =
-				!isRecipeAggregate(incoming as StoredRecipe) ||
-				!sameRecipeContent(incoming as RecipeAggregate, recipe);
-			const olderWon = versions.some(
-				(version) => version.recipe !== null && sameRecipeContent(version.recipe, recipe)
-			);
-			if (!mergedByGroup && !olderWon) return null;
-			return justAfter(newest.effectiveAt) > input.receivedAt
-				? justAfter(newest.effectiveAt)
-				: (input.receivedAt as `${string}Z`);
-		};
-		// Most commits leave the newest version matching. The rest read the heads, then decide again.
-		if ((await matchingEffectiveAt()) === null) return;
-		const recipeHead = await readCommitGuard(
-			this.database,
-			ENTITY_HEAD_SQL,
-			input.actorUserId,
-			'recipe',
-			recipe.id
-		);
-		if (recipeHead.value !== committedSequence) return;
-		const versionHead = await readCommitGuard(this.database, VERSION_HEAD_SQL, recipe.id);
-		const effectiveAt = await matchingEffectiveAt();
-		if (effectiveAt === null) return;
-		const matching = recipeVersion({
-			id: uuidv7(),
-			recipeId: recipe.id,
-			ownerUserId: recipe.ownerUserId,
-			effectiveAt,
-			recipe
-		});
-		const result = await this.attemptCommit(
-			{
-				...input,
-				mode: 'live',
-				mutation: {
-					schemaVersion: CURRENT_SCHEMA_VERSION,
-					mutationId: uuidv7(),
-					originDeviceId: input.mutation.originDeviceId,
-					entityKind: 'recipeVersion',
-					entityId: matching.id,
-					conflictGroups: ['row'],
-					operation: 'upsert',
-					occurredAt: effectiveAt,
-					aggregate: matching
-				}
-			},
-			[recipeHead, versionHead]
-		);
-		if (result === COMMIT_RACED) return COMMIT_RACED;
 	}
 
 	async prune(input: { now: string; changeCutoff: string }): Promise<void> {

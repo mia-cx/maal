@@ -327,17 +327,24 @@ const beforeNextBatch = (
 	});
 };
 
-/** D1 that runs `after` once its next batch commits, as when its response is lost or another request lands then. */
-const afterNextBatch = (after: () => Promise<unknown>): D1Database => {
+/**
+ * D1 that runs `after` once its next batch commits and `ready` holds, as when its response is lost
+ * or another request lands then.
+ */
+const afterNextBatch = (
+	after: () => Promise<unknown>,
+	ready: () => Promise<boolean> = async () => true
+): D1Database => {
 	let pending: (() => Promise<unknown>) | undefined = after;
 	return new Proxy(d1, {
 		get(target, key) {
 			if (key === 'batch') {
 				return async (statements: D1PreparedStatement[]) => {
 					const result = await target.batch(statements);
+					if (pending === undefined || !(await ready())) return result;
 					const run = pending;
 					pending = undefined;
-					await run?.();
+					await run();
 					return result;
 				};
 			}
@@ -497,7 +504,7 @@ describe('recipe versions across devices', () => {
 		expect(await titles(laptop.database)).toEqual(new Map([[meal.id, 'Phone soup']]));
 	});
 
-	test('an edit that lands while the Worker matches an older winning edit stays the newest version', async () => {
+	test('an edit that lands while the Worker matches an older winning edit leaves the newest version matching', async () => {
 		const tablet = await openDevice(alice);
 		const laptop = await openDevice(alice);
 		const recipe = await saveRecipe(tablet, '2026-01-01T10:00:00.000Z');
@@ -515,24 +522,62 @@ describe('recipe versions across devices', () => {
 					.first<{ title: string }>()
 			)?.title;
 
-		// The phone's older edit wins by commit order, so the Worker adds a version matching it. The
-		// tablet's newer edit commits just before that version would.
+		// The phone's older edit wins by commit order, so the Worker adds a version matching it in the
+		// recipe's batch. The tablet's newer edit commits just before that batch, after the phone's
+		// version reached D1.
 		const phone = await openDevice(
 			alice,
 			undefined,
 			beforeNextBatch(
 				() => tablet.sync(),
-				async () => (await storedTitle()) === 'Older winning edit'
+				async () =>
+					(await readRecipeVersions(d1, [recipe.id])).some(
+						(version) => version.recipe?.title === 'Older winning edit'
+					)
 			)
 		);
 		await phone.sync();
 		await editRecipe(phone, recipe.id, 'Older winning edit', '2026-01-02T10:00:00.000Z');
 		await phone.sync();
 
-		await expect(storedTitle()).resolves.toBe('Newer concurrent edit');
-		expect(newestContentVersion(await readRecipeVersions(d1, [recipe.id]))?.recipe.title).toBe(
-			'Newer concurrent edit'
+		const versions = await readRecipeVersions(d1, [recipe.id]);
+		expect(versions.map((version) => version.recipe?.title)).toContain('Newer concurrent edit');
+		expect(newestContentVersion(versions)?.recipe.title).toBe(await storedTitle());
+	});
+
+	test('an older edit that wins by commit order is versioned even when its batch response is lost', async () => {
+		const phone = await openDevice(alice);
+		const laptop = await openDevice(alice);
+		const recipe = await saveRecipe(phone, '2026-01-01T10:00:00.000Z');
+		const meal = await planRecipeAsMeal(phone.database, phone.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		await phone.sync();
+		await laptop.sync();
+		await editRecipe(phone, recipe.id, 'Phone soup', '2026-01-02T10:00:00.000Z');
+		await editRecipe(laptop, recipe.id, 'Laptop soup', '2026-01-02T11:00:00.000Z');
+		await laptop.sync();
+
+		// The phone's recipe batch commits, then its response is lost, so the push replays the receipt.
+		const lostResponse = afterNextBatch(
+			async () => {
+				throw new Error('batch committed, then the response was lost');
+			},
+			async () =>
+				(
+					await d1
+						.prepare('SELECT title FROM recipes WHERE id = ?')
+						.bind(recipe.id)
+						.first<{ title: string }>()
+				)?.title === 'Phone soup'
 		);
+		await (await openDevice(alice, phone.database, lostResponse)).syncUser();
+
+		expect(newestContentVersion(await readRecipeVersions(d1, [recipe.id]))?.recipe.title).toBe(
+			'Phone soup'
+		);
+		await laptop.sync();
+		expect(await titles(laptop.database)).toEqual(new Map([[meal.id, 'Phone soup']]));
 	});
 });
 

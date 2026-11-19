@@ -259,13 +259,13 @@ insert-only in its owner's user audience, so versions never conflict.
   would date that edit a day late, and would change when the version synced. A device with a wrong clock
   misdates only its own versions, as it already misdates its conflict clocks.
 - **The newest version matches the recipe.** Concurrent edits from two of the owner's devices merge by
-  conflict group (§8.2), so the merged recipe can differ from every version a device wrote. After each
+  conflict group (§8.2), so the merged recipe can differ from every version a device wrote. With each
   recipe commit, the Worker compares the recipe's content with its newest content version. When they
   differ, it adds a version of the recipe, effective at the later of its commit time and one millisecond
-  after that newest version. That version commits only while the recipe is still the one it matches and
-  no version of the recipe was written since the comparison. When another recipe commit lands first, it
-  adds nothing, since that commit matches its own recipe. A recipe change from an MCP tool, which sends no
-  version, is versioned by the Worker instead (§7.4).
+  after that newest version, in the same D1 batch as the recipe. The batch commits only while no version
+  of the recipe was written since the comparison, so a lost response or a retry never leaves the recipe
+  without its version. A recipe change from an MCP tool, which sends no version, is versioned by the
+  Worker the same way (§7.4).
 
 **Versions are kept.** V1 never collects versions. The one deletion is a purge's: the transaction that purges
 a recipe also deletes its versions, but only while no meal and no check-in references the recipe: no meal
