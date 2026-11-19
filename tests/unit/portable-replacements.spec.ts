@@ -327,9 +327,7 @@ describe('portable replacements', () => {
 				.filter(({ entityKind }) => entityKind === 'recipe')
 				.map(({ entityId }) => entityId)
 				.toSorted()
-		).toEqual(
-			[recipe.id, unrelated.id].toSorted()
-		);
+		).toEqual([recipe.id, unrelated.id].toSorted());
 		expect(pushed.find(({ entityId }) => entityId === recipe.id)).toMatchObject({
 			mutationId: replacement.mutationId,
 			operation: 'delete',
