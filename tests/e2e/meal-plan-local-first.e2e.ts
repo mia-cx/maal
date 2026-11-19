@@ -605,6 +605,8 @@ test.describe('meal sheet', () => {
 	test('saves a custom meal’s name from the sheet', async ({ page }) => {
 		await seed(page);
 		const { targetDay } = await planRecipeOn(page, '2026-08-23');
+		// The card moves before the schedule write commits, so wait for the stored date.
+		await expect.poll(async () => (await readStore(page, 'meals'))[0]?.date).toBe('2026-08-23');
 		const [meal] = await readStore(page, 'meals');
 		const [recipe] = await readStore(page, 'recipes');
 		// A custom meal is a meal copy with no source recipe; the planned meal only follows one.
