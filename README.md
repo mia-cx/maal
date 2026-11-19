@@ -1,11 +1,15 @@
 # Maal Greenfield Local-First Rewrite
 
+> The implementation-driving architecture and schema are now in
+> [`docs/architecture/local-first-rewrite-spec.md`](docs/architecture/local-first-rewrite-spec.md). This older
+> scaffold plan is retained for provenance; the canonical specification wins wherever they differ.
+
 ## Summary
 
 Rebuild Maal on an empty orphan branch as a client-side, offline-first SvelteKit PWA:
 
 - Dexie is the only data source observed by the UI.
-- Each previously authenticated WorkOS user gets an isolated local database.
+- One shared device database supports several previously authenticated WorkOS users with logical ownership.
 - The app continues working offline indefinitely.
 - D1 provides optional paid backup, multi-device sync, household collaboration, and MCP.
 - D1 remains normalized through Drizzle; Dexie stores complete domain aggregates.
@@ -20,8 +24,7 @@ Rebuild Maal on an empty orphan branch as a client-side, offline-first SvelteKit
 - A user must authenticate with WorkOS once to create a local profile.
 - WorkOS user IDs and organization IDs remain application primary keys.
 - Domain records, devices, and mutations use client-generated UUIDv7 IDs.
-- A small device-level profile registry lists previously authenticated profiles.
-- Every profile opens a separate Dexie database named by deployment and WorkOS user ID.
+- The shared Dexie database contains safe profile and auth-slot projections beside logically scoped data.
 - Multiple profiles may coexist on one browser, Netflix-style.
 - An optional per-profile PIN prevents casual access or editing.
 - The PIN is only an application gate; IndexedDB is not encrypted.
@@ -61,10 +64,11 @@ When a subscription ends:
 
 - Recipes are user-owned templates.
 - A household’s menu is derived from recipes owned by its current members.
-- Adding a recipe to the plan creates a household-owned meal and copies the recipe fields and sidecars.
-- Planned meals do not change when their source recipe is edited.
-- A meal retains an optional source recipe reference for provenance.
-- Deleting a recipe sets that provenance reference to `null` but preserves meal history.
+- Every recipe change adds an immutable recipe version.
+- Adding a recipe to the plan creates a household-owned meal that follows the recipe: it stores only a reference and shows one version, the latest for a future meal and the one in effect on its date for a past one. A check-in pins the version it was cooked with.
+- The meal's first edit copies its version into the meal, which is independent from then on.
+- Deleting or purging a recipe changes no meal: its versions stay while a meal needs them.
+- A meal copy retains an optional source recipe reference for provenance; purging the recipe sets it to `null`.
 - Ingredient and instruction overrides modify only the household meal copy.
 
 ### Technical authority
@@ -90,14 +94,17 @@ Create the rewrite without disturbing the prototype:
 7. Copy no existing route, store, or data-access implementation.
 8. Port the scroll/snap SDK only after extracting its framework-neutral behavior and adding characterization tests.
 
-The new deployment uses distinct resources:
+The deployment keeps the long-lived environment resources:
 
-- New staging and production D1 databases
+- Local Worker/D1: `maal-local` / `maal-local`
+- Staging Worker/D1: `maal-staging` / `maal-staging`
+- Production Worker/D1: `maal` / `maal-prod`
 - New cache names and service-worker version namespace
-- `maal-v1-profiles` for the profile registry
-- `maal-v1:<environment>:<workosUserId>` for user databases
+- `maal-v1:<environment>` for the shared device database
 
-No current D1 migration or prototype IndexedDB migration is provided.
+Application releases evolve each existing D1 database through the committed migration chain. They do not
+create release-named replacement databases. The browser Dexie and service-worker namespaces remain versioned
+because they are local storage/cache formats, not Cloudflare resource identities.
 
 ## Shared domain contracts
 
@@ -878,11 +885,11 @@ Initial defaults:
 
 ## Rollout and observability
 
-- Deploy to a new staging hostname and D1 database.
+- Deploy to the existing `maal-staging` Worker after inspecting and migrating `maal-staging` in place.
 - Emit structured sync metrics: push count, duplicate count, retry class, pull lag, reset count and batch size.
 - Never log recipe content, PINs, raw MCP keys, tokens, or mutation payloads.
 - Run a minimum one-week staging burn-in across offline, multiple tabs, multiple profiles and two-device sync.
-- Create fresh production D1/KV resources.
+- Inspect and migrate the existing `maal-prod` D1 database, then deploy the existing `maal` Worker.
 - Deploy the new service worker with distinct cache names.
 - Switch the production custom domain only after release-gate acceptance.
 - Keep the prototype branch and deployment recoverable during the initial production window.
@@ -891,7 +898,8 @@ Initial defaults:
 
 Not part of this rewrite release:
 
-- Migration of prototype D1 or IndexedDB data
+- One-off copying from an existing D1 database into a release-named replacement database
+- Migration of prototype IndexedDB data
 - Grocery generation or purchase-state implementation
 - Pantry inventory
 - CRDTs or per-field vector clocks

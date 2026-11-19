@@ -1,0 +1,32 @@
+{
+	"name": "Maal",
+	"short_name": "Maal",
+	"description": "Plan meals, manage recipes, and keep your household food workflow in sync.",
+	"start_url": "/plan",
+	"scope": "/",
+	"display": "standalone",
+	"background_color": "#fff7ed",
+	"theme_color": "#fe7156",
+	"orientation": "any",
+	"categories": ["food", "productivity", "lifestyle"],
+	"icons": [
+		{
+			"src": "/icon-192.png",
+			"sizes": "192x192",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "/icon-512.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "any"
+		},
+		{
+			"src": "/icon-maskable-512.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "maskable"
+		}
+	]
+}

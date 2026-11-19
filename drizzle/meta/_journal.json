@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1787404746634,
+      "tag": "0000_rewrite_baseline",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1787405111991,
+      "tag": "0001_global_taxonomy_seed",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791094726558,
+      "tag": "0002_dry_bug",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1795043795352,
+      "tag": "0003_household_staleness_threshold",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1795058300057,
+      "tag": "0004_recipe_versions",
+      "breakpoints": true
+    }
+  ]
+}
