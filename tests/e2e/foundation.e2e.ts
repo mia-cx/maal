@@ -58,6 +58,9 @@ test('serves localized landing pages and reciprocal search metadata without Java
 			'https://maal.is/'
 		);
 	}
+	await page.getByRole('link', { name: 'English' }).click();
+	await expect(page).toHaveURL(new URL('/', page.url()).href);
+	await expect(page.locator('html')).toHaveAttribute('lang', 'en');
 	await context.close();
 });
 
