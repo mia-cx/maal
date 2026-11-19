@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import type { Pathname } from '$app/types';
 	import { ArrowDown, ArrowRight, Bookmark, CalendarDays, Sparkles, WifiOff } from '@lucide/svelte';
 	import PublicHead from '$lib/components/public-head.svelte';
 	import * as m from '$lib/paraglide/messages';
@@ -129,7 +128,7 @@
 			{#each alternates as { locale: language, href } (language)}
 				{#if language !== 'x-default'}
 					<a
-						href={resolve(href as Pathname)}
+						href={resolve(href as '/')}
 						lang={language}
 						hreflang={language}
 						aria-current={language === locale ? 'page' : undefined}
