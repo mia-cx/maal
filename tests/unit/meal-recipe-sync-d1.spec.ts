@@ -683,10 +683,37 @@ describe('purging a recipe', () => {
 		await aliceDevice.sync();
 
 		await expect(storedVersionIds(unplanned.id)).resolves.toEqual([]);
+		// The device keeps only the deletion marker it uploaded; the recipe's content is gone.
 		await expect(
-			aliceDevice.database.recipeVersions.where('recipeId').equals(unplanned.id).count()
+			aliceDevice.database.recipeVersions
+				.where('recipeId')
+				.equals(unplanned.id)
+				.filter(({ recipe }) => recipe !== null)
+				.count()
 		).resolves.toBe(0);
 		await expect(storedVersionIds(planned.id)).resolves.not.toEqual([]);
+		const bobDevice = await openDevice(bob);
+		await bobDevice.sync();
+		expect(await titles(bobDevice.database)).toEqual(new Map([[meal.id, 'Sunday soup']]));
+	});
+
+	test('from a device without the meals, still uploads its deletion marker for the meals elsewhere', async () => {
+		const phone = await openDevice(alice);
+		const recipe = await saveRecipe(phone);
+		const meal = await planRecipeAsMeal(phone.database, phone.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		await phone.sync();
+		// The laptop syncs Alice's recipes but has not loaded the household's meals.
+		const laptop = await openDevice(alice);
+		await laptop.syncUser();
+		await permanentlyDeleteRecipe(laptop.database, laptop.recipeContext(), recipe.id);
+		await laptop.syncUser();
+
+		// A recent edit from the phone revives the recipe (spec §8.5).
+		await editRecipe(phone, recipe.id, 'Revived edit');
+		await phone.sync();
+
 		const bobDevice = await openDevice(bob);
 		await bobDevice.sync();
 		expect(await titles(bobDevice.database)).toEqual(new Map([[meal.id, 'Sunday soup']]));

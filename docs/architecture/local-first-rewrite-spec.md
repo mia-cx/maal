@@ -271,8 +271,9 @@ insert-only in its owner's user audience, so versions never conflict.
 a recipe also deletes its versions, but only while no meal and no check-in references the recipe: no meal
 follows it or names it as provenance, and no check-in pins one of its versions. In D1 that check runs inside
 the purge's own batch, so a meal or check-in that commits first keeps the versions. A device runs the same
-check in its purge transaction and drops the deleted versions' unsent pushes. Nothing syncs a version's
-deletion.
+check in its purge transaction over the versions it holds, but keeps a version that has not uploaded yet,
+such as the purge's own deletion marker, and uploads it: meals on other devices can keep the recipe's
+versions in D1, and only the Worker's purge decides which it deletes. Nothing syncs a version's deletion.
 
 ### 5.3 Meal
 

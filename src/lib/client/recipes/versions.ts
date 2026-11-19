@@ -120,8 +120,10 @@ export const executeRecipeCommands = (
 };
 
 /**
- * Removes a purged recipe's versions with their unsent outbox rows, unless a meal or check-in on this
- * device still references the recipe (spec §5.2). Run it in the purge's transaction.
+ * Removes a purged recipe's versions from this device, unless a meal or check-in here still
+ * references the recipe (spec §5.2). A version still waiting to upload, such as the purge's own
+ * deletion marker, stays and uploads: meals on other devices can keep the recipe's versions in D1,
+ * and only the Worker's purge decides which it deletes. Run it in the purge's transaction.
  */
 export const removePurgedRecipeVersions = async (
 	database: MaalDatabase,
@@ -137,12 +139,18 @@ export const removePurgedRecipeVersions = async (
 			.filter((row) => ids.has(String((row as { recipeVersionId?: unknown }).recipeVersionId)))
 			.count()) > 0;
 	if (referenced) return;
-	await database.recipeVersions.bulkDelete([...ids]);
-	await database.outbox
-		.where('aggregateId')
-		.anyOf([...ids])
-		.filter(({ entityKind, status }) => entityKind === 'recipeVersion' && status !== 'acknowledged')
-		.delete();
+	const unsent = new Set(
+		(
+			await database.outbox
+				.where('aggregateId')
+				.anyOf([...ids])
+				.filter(
+					({ entityKind, status }) => entityKind === 'recipeVersion' && status !== 'acknowledged'
+				)
+				.toArray()
+		).map(({ aggregateId }) => String(aggregateId))
+	);
+	await database.recipeVersions.bulkDelete([...ids].filter((id) => !unsent.has(id)));
 };
 
 /** Every stored version of these recipes, decoded. */
