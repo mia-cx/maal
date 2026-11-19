@@ -19,7 +19,11 @@ import {
 } from '$lib/client/sync/index.js';
 import { readUnseenRejections } from '$lib/client/sync/rejections.js';
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
-import { isRecipeFollowingMeal, type StoredMeal } from '$lib/domain/meals/schema.js';
+import {
+	MEAL_CONFLICT_GROUPS,
+	isRecipeFollowingMeal,
+	type StoredMeal
+} from '$lib/domain/meals/schema.js';
 import type { RecipeAggregate } from '$lib/domain/recipes/schema.js';
 import { candidateFromToolRecipe } from '$lib/server/mcp/builders.js';
 import {
@@ -305,5 +309,49 @@ describe('recipe-following meals across devices', () => {
 		await expect(
 			bobDevice.database.mealCheckIns.where('mealId').equals(meal.id).count()
 		).resolves.toBe(2);
+	});
+
+	test('a meal that reaches D1 before its recipe is retried, not stored without it', async () => {
+		const aliceDevice = await openDevice(alice);
+		const recipe = await commitImportedRecipeCandidate(
+			aliceDevice.database,
+			{
+				authSlotId: alice.slot,
+				ownerUserId: alice.userId,
+				originDeviceId: aliceDevice.context.originDeviceId
+			},
+			candidateFromToolRecipe({ title: 'Sunday soup' })
+		);
+		const meal = await planRecipeAsMeal(aliceDevice.database, aliceDevice.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		const push = async () =>
+			pushHouseholdSync(new D1HouseholdSyncRepository(d1), householdId, alice.userId, {
+				protocolVersion: 1,
+				deviceId: aliceDevice.context.originDeviceId,
+				audience: { kind: 'household', id: householdId },
+				baseCursor: null,
+				mutations: [
+					{
+						schemaVersion: CURRENT_SCHEMA_VERSION,
+						mutationId: uuidv7(),
+						originDeviceId: aliceDevice.context.originDeviceId,
+						entityKind: 'meal',
+						entityId: meal.id,
+						conflictGroups: [...MEAL_CONFLICT_GROUPS],
+						operation: 'upsert',
+						occurredAt: new Date().toISOString() as `${string}Z`,
+						aggregate: await aliceDevice.database.meals.get(meal.id)
+					}
+				]
+			});
+
+		await expect(push()).rejects.toMatchObject({ code: 'source_recipe_pending' });
+		expect(await d1FollowsRecipe(meal.id)).toBeUndefined();
+
+		await commitRecipe(recipe, ['header', 'ingredients', 'instructions']);
+		const { receipts } = await push();
+		expect(receipts[0]).toMatchObject({ status: 'accepted' });
+		expect(await d1FollowsRecipe(meal.id)).toBe(1);
 	});
 });

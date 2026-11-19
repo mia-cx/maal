@@ -1346,6 +1346,23 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 				.prepare('SELECT 1 AS present FROM recipes WHERE id = ?')
 				.bind(sourceRecipeId)
 				.first()) === null;
+		// A recipe-following meal has nothing to show without its recipe, so its provenance cannot
+		// simply be dropped (§8.7). A purged recipe ends the meal; one not uploaded yet makes the
+		// device retry after its recipe sync.
+		if (sourceRecipePurged && isRecipeFollowingMeal(result as StoredMeal)) {
+			const purged = await this.database
+				.prepare(
+					`SELECT 1 AS present FROM sync_tombstones
+					 WHERE audience_kind = 'user' AND entity_kind = 'recipe' AND entity_id = ?`
+				)
+				.bind(sourceRecipeId)
+				.first();
+			if (purged) return rejected('tombstoned_entity');
+			throw new ServerSyncUnavailable({
+				code: 'source_recipe_pending',
+				message: 'The recipe this meal follows has not been uploaded yet.'
+			});
+		}
 		const decodedResult = decodeHouseholdSyncAggregate(
 			input.mutation.entityKind,
 			input.mutation.entityId,

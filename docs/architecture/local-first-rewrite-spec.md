@@ -605,6 +605,10 @@ A household whose recipe owner has left gets copies at the owner's next recipe c
 
 - **Wire.** Household pulls and bootstrap pages carry `recipe` changes with the complete recipe aggregate.
   They are pull-only: a household push of a `recipe` is malformed.
+- **Order.** User and household scopes sync independently, so a recipe-following meal can reach D1 before
+  its recipe. The Worker then answers `source_recipe_pending`, a retryable unavailable error, and the device
+  retries after its recipe sync. A recipe-following meal whose recipe was purged is rejected as
+  `tombstoned_entity`.
 - **Fan-out.** The D1 transaction that commits a recipe change also appends one household `recipe` change for
   each household that holds a live recipe-following meal of it. Committing a recipe-following meal appends
   its recipe to that household when D1 holds the recipe. Each bootstrap page carries the recipe of every
