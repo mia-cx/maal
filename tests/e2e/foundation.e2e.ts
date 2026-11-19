@@ -2,9 +2,91 @@ import { expect, test } from '@playwright/test';
 
 test('enters the local-first meal plan through the shared shell', async ({ page }) => {
 	await page.goto('/');
+	await expect(page.getByRole('heading', { level: 1 })).toHaveText('Dinner plans that can change');
+	await expect(page.getByTestId('shared-app-shell')).toHaveCount(0);
+	await page.getByRole('link', { name: 'Pricing' }).click();
+	await expect(
+		page.getByRole('heading', { name: 'Free forever locally, pay for sync' })
+	).toBeInViewport();
+	await page.getByRole('main').getByRole('link', { name: 'Open the planner' }).click();
 
 	await expect(page).toHaveURL(/\/plan$/);
 	await expect(page).toHaveTitle('Meal plan · Maal');
 	await expect(page.getByTestId('shared-app-shell')).toHaveCount(1);
 	await expect(page.getByTestId('app-sidebar')).toHaveCount(1);
+});
+
+test('serves localized landing pages and reciprocal search metadata without JavaScript', async ({
+	browser
+}) => {
+	const context = await browser.newContext({ javaScriptEnabled: false });
+	const page = await context.newPage();
+	await page.goto('/');
+	await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+	await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://maal.is/');
+	await expect(page.locator('meta[property="og:image"]')).toHaveAttribute(
+		'content',
+		'https://maal.is/social.png'
+	);
+	await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute(
+		'content',
+		'summary_large_image'
+	);
+	const schema = JSON.parse(
+		(await page.locator('script[type="application/ld+json"]').textContent())!
+	);
+	expect(schema['@graph']).toEqual([
+		expect.objectContaining({ '@type': 'Organization' }),
+		expect.objectContaining({
+			'@type': 'SoftwareApplication',
+			offers: expect.objectContaining({ price: 0 })
+		})
+	]);
+	await expect(page.locator('link[rel="alternate"][hreflang]')).toHaveCount(11);
+	const dutchUrl = 'https://maal.is/nl/';
+	await expect(page.locator('link[hreflang="nl"]')).toHaveAttribute('href', dutchUrl);
+	await page.getByRole('link', { name: 'Nederlands' }).click();
+	await expect(page).toHaveURL(/\/nl\/$/);
+	await expect(page.locator('html')).toHaveAttribute('lang', 'nl');
+	await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+		'Avondeten plannen mag anders lopen'
+	);
+	await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', dutchUrl);
+	for (const language of ['en', 'x-default']) {
+		await expect(page.locator(`link[hreflang="${language}"]`)).toHaveAttribute(
+			'href',
+			'https://maal.is/'
+		);
+	}
+	await page.getByRole('link', { name: 'English' }).click();
+	await expect(page).toHaveURL(new URL('/', page.url()).href);
+	await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+	await context.close();
+});
+
+test('serves only localized public URLs in the sitemap and discourages preview indexing', async ({
+	request
+}) => {
+	const sitemap = await request.get('/sitemap.xml');
+	expect(sitemap.ok()).toBe(true);
+	expect(sitemap.headers()['content-type']).toContain('application/xml');
+	const xml = await sitemap.text();
+	expect(xml.match(/<loc>/g)).toHaveLength(10);
+	expect(xml).toContain('<loc>https://maal.is/nl/</loc>');
+	expect(xml).toContain('hreflang="x-default" href="https://maal.is/"');
+	expect(xml).not.toContain('/plan');
+	const robots = await request.get('/robots.txt');
+	expect(await robots.text()).toBe('User-agent: *\nDisallow: /\n');
+	expect(robots.headers()['x-robots-tag']).toBe('noindex');
+	expect((await request.get('/')).headers()['x-robots-tag']).toBe('noindex');
+	const plan = await request.get('/plan');
+	expect(await plan.text()).toContain('<meta name="robots" content="noindex"');
+	expect((await request.get('/social.png')).ok()).toBe(true);
+});
+
+test('keeps the old auth callback redirect from the homepage', async ({ request }) => {
+	const query = '?authSlot=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&authStatus=authenticated';
+	const response = await request.get(`/${query}`, { maxRedirects: 0 });
+	expect(response.status()).toBe(307);
+	expect(response.headers().location).toBe(`/plan${query}`);
 });

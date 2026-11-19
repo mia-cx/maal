@@ -1,7 +1,7 @@
 import { isRedirect } from '@sveltejs/kit';
 import { expect, it } from 'vitest';
 
-import { load } from '../../src/routes/+page.js';
+import { load } from '../../src/routes/(public)/+page.server.js';
 
 it('opens the meal plan with a sign-in callback marker still attached', () => {
 	let outcome: unknown;

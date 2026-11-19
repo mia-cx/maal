@@ -15,7 +15,8 @@ import { Locale } from '$lib/paraglide.svelte';
 
 export const init: ClientInit = async () => {
 	new Locale();
-	if (deLocalizeUrl(new URL(window.location.href)).pathname === '/recovery') return;
+	const pathname = deLocalizeUrl(new URL(window.location.href)).pathname;
+	if (pathname === '/' || pathname === '/recovery') return;
 	if (isBrowserRecoveryRequired()) {
 		window.location.replace(localizeHref('/recovery'));
 		return;
