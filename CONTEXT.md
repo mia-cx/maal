@@ -44,6 +44,18 @@ _Avoid_: Archived recipe, permanently deleted recipe
 A recipe whose content the owner erased. A minimal deletion marker may remain temporarily to prevent another device from restoring stale content.
 _Avoid_: Deleted recipe
 
+**Recipe-following meal**:
+A planned meal that stores no recipe content and shows its recipe as the recipe is now. It becomes a meal copy on its first edit, check-in, or recipe deletion, or when its recipe changes after the meal was cooked or its date passed.
+_Avoid_: Linked meal, live meal, reference meal
+
+**Meal copy**:
+A meal that holds its own copy of the recipe content and never changes with the recipe. Custom meals are meal copies from the start.
+_Avoid_: Snapshot, detached meal
+
+**Shared recipe**:
+Another member's recipe that a household receives read-only because one of its recipe-following meals references it.
+_Avoid_: Household recipe
+
 **Staleness threshold**:
 How long an edit may wait on a device and still count as current. A household sets its own; personal records use 3 hours. An edit younger than the threshold brings back a record someone deleted.
 _Avoid_: Grace period, late-upload window
