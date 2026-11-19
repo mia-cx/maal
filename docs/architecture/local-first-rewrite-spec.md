@@ -521,8 +521,9 @@ Sync is otherwise invisible, so every write that truly fails must say so. A reje
 receipt, an isolated request failure, or an oversized backfill record) restores the authoritative copy and
 stays in the outbox with its `rejectionCode`. While a row for the active auth slot has no
 `rejectionSeenAt`, the app shell shows a notice that names the affected record and why the change was not
-saved. Dismissing the notice sets `rejectionSeenAt` on those rows. The notice is a live query over Dexie, so
-it appears in every open tab and disappears from all of them together.
+saved. It shows the three oldest and counts the rest. Dismissing it sets `rejectionSeenAt` on the rows it
+showed, so the next ones take their place. The notice is a live query over Dexie, so it appears in every
+open tab and disappears from all of them together.
 
 ## 9. Import and export
 

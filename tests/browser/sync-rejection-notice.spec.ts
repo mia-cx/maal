@@ -18,11 +18,11 @@ afterEach(async () => {
 	databases.length = 0;
 });
 
-test('a rejected write stays on screen until the person dismisses it', async () => {
+/** Opens a database whose active profile has an auth slot, as the app shell sees it. */
+const openActiveProfile = async (): Promise<MaalDatabase> => {
 	const database = await openMaalDatabase(`sync-rejection-${crypto.randomUUID()}`);
 	databases.push(database);
 	const profileId = uuidv7();
-	const mealId = uuidv7();
 	await database.profiles.put({
 		profileId,
 		workosUserId: 'user_alice',
@@ -48,30 +48,58 @@ test('a rejected write stays on screen until the person dismisses it', async () 
 		retryCount: 0
 	});
 	await database.uiState.put({ key: 'activeProfileId', value: profileId });
-	await database.outbox.put({
+	return database;
+};
+
+/** Stores a meal edit the server rejected because the meal was deleted. */
+const rejectMealEdit = (database: MaalDatabase, title: string, occurredAt: `${string}Z`) =>
+	database.outbox.put({
 		mutationId: uuidv7(),
 		authSlotId: slotId,
 		scopeKind: 'household',
 		scopeId: 'org_family',
 		status: 'rejected',
-		occurredAt: timestamp,
-		aggregateId: mealId,
+		occurredAt,
+		aggregateId: uuidv7(),
 		entityKind: 'meal',
 		conflictGroup: 'schedule',
 		operation: 'upsert',
 		originDeviceId: uuidv7(),
-		payload: { title: 'Family soup' },
-		nextAttemptAt: timestamp,
+		payload: { title },
+		nextAttemptAt: occurredAt,
 		attempts: 0,
 		rejectionCode: 'tombstoned_entity'
 	});
 
+const deletedMessage = (title: string) =>
+	`Your change to “${title}” wasn’t saved because it was deleted.`;
+
+test('a rejected write stays on screen until the person dismisses it', async () => {
+	const database = await openActiveProfile();
+	await rejectMealEdit(database, 'Family soup', timestamp);
+
 	render(SyncRejectionNotice, { database });
 
 	await expect.element(page.getByText('Change not saved')).toBeVisible();
-	await expect
-		.element(page.getByText('Your change to “Family soup” wasn’t saved because it was deleted.'))
-		.toBeVisible();
+	await expect.element(page.getByText(deletedMessage('Family soup'))).toBeVisible();
 	await page.getByRole('button', { name: 'Dismiss' }).click();
 	await expect.element(page.getByText('Change not saved')).not.toBeInTheDocument();
+});
+
+test('dismissing shows the rejected writes that did not fit', async () => {
+	const database = await openActiveProfile();
+	const titles = ['Soup', 'Stew', 'Curry', 'Pasta'];
+	for (const [minute, title] of titles.entries()) {
+		await rejectMealEdit(database, title, `2026-08-21T12:0${minute}:00.000Z`);
+	}
+
+	render(SyncRejectionNotice, { database });
+
+	await expect.element(page.getByText('4 changes not saved')).toBeVisible();
+	await expect.element(page.getByText('1 more change wasn’t saved.')).toBeVisible();
+	await expect.element(page.getByText(deletedMessage('Pasta'))).not.toBeInTheDocument();
+	await page.getByRole('button', { name: 'Dismiss' }).click();
+	await expect.element(page.getByText('Change not saved')).toBeVisible();
+	await expect.element(page.getByText(deletedMessage('Pasta'))).toBeVisible();
+	await expect.element(page.getByText(deletedMessage('Soup'))).not.toBeInTheDocument();
 });

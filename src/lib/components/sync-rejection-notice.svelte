@@ -24,7 +24,8 @@
 		return () => subscription.unsubscribe();
 	});
 
-	const hiddenCount = $derived(Math.max(0, notices.length - visibleMessages));
+	const shown = $derived(notices.slice(0, visibleMessages));
+	const hiddenCount = $derived(notices.length - shown.length);
 </script>
 
 {#if notices.length > 0}
@@ -37,7 +38,7 @@
 			<p class="text-sm font-medium">
 				{notices.length === 1 ? 'Change not saved' : `${notices.length} changes not saved`}
 			</p>
-			{#each notices.slice(0, visibleMessages) as notice (notice.mutationId)}
+			{#each shown as notice (notice.mutationId)}
 				<p class="text-xs text-muted-foreground">{notice.message}</p>
 			{/each}
 			{#if hiddenCount > 0}
@@ -48,13 +49,14 @@
 				</p>
 			{/if}
 		</div>
+		<!-- Dismissing marks only the shown messages, so the hidden ones show next. -->
 		<Button
 			variant="outline"
 			size="sm"
 			onclick={() =>
 				void markRejectionsSeen(
 					database,
-					notices.map(({ mutationId }) => mutationId)
+					shown.map(({ mutationId }) => mutationId)
 				)}
 		>
 			Dismiss
