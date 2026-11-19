@@ -64,10 +64,10 @@ When a subscription ends:
 
 - Recipes are user-owned templates.
 - A household’s menu is derived from recipes owned by its current members.
-- Adding a recipe to the plan creates a household-owned meal and copies the recipe fields and sidecars.
-- Planned meals do not change when their source recipe is edited.
+- Adding a recipe to the plan creates a household-owned meal that follows the recipe: it stores only a reference and shows each later edit.
+- The meal's first edit, a check-in, or deleting the recipe copies the recipe into the meal, which is independent from then on. A recipe edit first copies meals that were cooked or whose date has passed.
 - A meal retains an optional source recipe reference for provenance.
-- Deleting a recipe sets that provenance reference to `null` but preserves meal history.
+- Purging a recipe sets that provenance reference to `null` but preserves meal history.
 - Ingredient and instruction overrides modify only the household meal copy.
 
 ### Technical authority

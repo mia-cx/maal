@@ -53,10 +53,12 @@ independently synchronized aggregates.
 
 ## D1 meal aggregate and check-ins
 
-`meals` is household-owned and carries a nullable `source_recipe_id`, copied recipe/source fields, date, time,
-sort order, planned cook, yield, status, notes, revision, timestamps, and tombstone. Planning copies all
-operational fields into `meal_ingredients`, `meal_instructions`, `meal_instruction_events`,
-`meal_appliance_requirements`, `meal_classifications`, `meal_media`, and `meal_nutrition_facts`.
+`meals` is household-owned and carries a nullable `source_recipe_id`, `follows_recipe`, copied recipe/source
+fields, date, time, sort order, planned cook, yield, status, notes, revision, timestamps, and tombstone. A
+recipe-following meal (`follows_recipe = 1`) keeps only the meal's own fields, an empty `title`, and no
+sidecar rows. A meal copy holds its operational fields in `meal_ingredients`, `meal_instructions`,
+`meal_instruction_events`, `meal_appliance_requirements`, `meal_classifications`, `meal_media`, and
+`meal_nutrition_facts` (spec §5.3).
 
 `meal_check_ins` is keyed by UUIDv7 and contains meal ID, reporting user ID, cooked flag, actual cook time,
 verdict, reason/notes, revision, timestamps, and tombstone. A meal/user pair is unique. Recipe deletion nulls
