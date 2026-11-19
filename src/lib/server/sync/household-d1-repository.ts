@@ -1055,11 +1055,20 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 								...Object.fromEntries(acceptedGroups.map((group) => [group, clock]))
 							}
 						};
+		// Purging a source recipe nulls meal provenance (§5.3). An offline or revived aggregate written
+		// after that still names the recipe, so it gets the same null instead of failing the foreign key.
+		const sourceRecipeId = (result as { sourceRecipeId?: unknown }).sourceRecipeId;
+		const sourceRecipePurged =
+			typeof sourceRecipeId === 'string' &&
+			(await this.database
+				.prepare('SELECT 1 AS present FROM recipes WHERE id = ?')
+				.bind(sourceRecipeId)
+				.first()) === null;
 		const decodedResult = decodeHouseholdSyncAggregate(
 			input.mutation.entityKind,
 			input.mutation.entityId,
 			input.householdId,
-			result
+			sourceRecipePurged ? { ...(result as object), sourceRecipeId: null } : result
 		);
 		const payload = JSON.stringify({
 			schemaVersion: CURRENT_SCHEMA_VERSION,

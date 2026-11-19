@@ -243,7 +243,8 @@ from another device also brings a deleted recipe back (§8.5).
 
 Postpone changes date/time and keeps status `planned`; it is not a fourth status. Planning copies all seven
 recipe sidecar families, including appliance requirements. Meal sidecars have the exact recipe-sidecar fields
-with meal ownership. Deleting the source recipe nulls provenance and never changes the copied meal.
+with meal ownership. Deleting the source recipe nulls provenance and never changes the copied meal. A meal
+write that still names a purged recipe, such as an offline edit or a revival (§8.5), stores null provenance.
 
 Meal conflict groups are `header`, `schedule`, `status`, the seven sidecar collections, and `deletion`. Meal
 deletion has no recovery UI: content is removed after local/remote acknowledgement and a one-year minimal

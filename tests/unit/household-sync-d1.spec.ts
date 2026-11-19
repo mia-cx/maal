@@ -745,6 +745,61 @@ describe('D1 household sync', () => {
 		).resolves.toBeNull();
 	});
 
+	test('a meal revived after its source recipe was purged comes back without provenance', async () => {
+		const repository = new D1HouseholdSyncRepository(database);
+		const recipeId = uuidv7();
+		await database
+			.prepare("INSERT INTO recipes (id, owner_user_id, title) VALUES (?, ?, 'Soup')")
+			.bind(recipeId, aliceId)
+			.run();
+		const mealId = uuidv7();
+		const plannedAt = '2026-08-22T12:00:00.000Z' as const;
+		await repository.commit({
+			householdId,
+			actorUserId: aliceId,
+			deviceId,
+			mutation: mealMutation(mealId, uuidv7(), plannedAt, { sourceRecipeId: recipeId }),
+			mode: 'live',
+			receivedAt: plannedAt
+		});
+		const deletedAt = '2026-08-22T12:10:00.000Z' as const;
+		await repository.commit({
+			householdId,
+			actorUserId: aliceId,
+			deviceId,
+			mutation: {
+				...mealMutation(mealId, uuidv7(), deletedAt, { sourceRecipeId: recipeId, deletedAt }),
+				operation: 'delete',
+				conflictGroups: ['deletion']
+			},
+			mode: 'live',
+			receivedAt: deletedAt
+		});
+		await database.prepare('DELETE FROM recipes WHERE id = ?').bind(recipeId).run();
+
+		// Bob rescheduled offline at 12:05, before the deletion, and still names the purged recipe.
+		await expect(
+			repository.commit({
+				householdId,
+				actorUserId: bobId,
+				deviceId,
+				mutation: mealMutation(mealId, uuidv7(), '2026-08-22T12:05:00.000Z', {
+					sourceRecipeId: recipeId,
+					time: '19:00'
+				}),
+				mode: 'live',
+				receivedAt: '2026-08-22T12:30:00.000Z'
+			})
+		).resolves.toMatchObject({ status: 'accepted' });
+		await expect(
+			database.prepare('SELECT source_recipe_id, time FROM meals WHERE id = ?').bind(mealId).first()
+		).resolves.toEqual({ source_recipe_id: null, time: '19:00' });
+		expect((await repository.pull(householdId, 0, 100)).changes.at(-1)).toMatchObject({
+			reinstated: true,
+			aggregate: expect.objectContaining({ sourceRecipeId: null })
+		});
+	});
+
 	test('requires bootstrap below the retained floor', async () => {
 		const repository = new D1HouseholdSyncRepository(database);
 		const mealId = uuidv7();
