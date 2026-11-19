@@ -52,8 +52,8 @@ Every recipe sidecar references exactly one recipe. Sidecar collections are repl
 independently synchronized aggregates.
 
 `recipe_versions` holds immutable recipe versions: owner, `recipe_id` without a foreign key, `effective_at`,
-and the complete recipe as JSON, or null for a deletion marker (spec §5.2). Versions sync insert-only, and
-scheduled maintenance collects the ones no meal or check-in needs.
+and the complete recipe as JSON, or null for a deletion marker (spec §5.2). Versions sync insert-only and
+are kept; only a recipe's purge deletes its versions, while no meal or check-in references the recipe.
 
 ## D1 meal aggregate and check-ins
 

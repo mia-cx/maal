@@ -114,15 +114,6 @@ export interface ReinstatementRecord {
 	reinstatedAt: UtcInstant;
 }
 
-/**
- * A recipe version a household's sync delivered (spec §8.7). The Worker shares only the versions the
- * household sees, so the household resolves a recipe owner it has no membership row for among these.
- */
-export interface HouseholdVersionRecord {
-	householdId: string;
-	versionId: string;
-}
-
 export type SyncScopeState = 'idle' | 'syncing' | 'blocked' | 'bootstrapRequired';
 
 export interface SyncScopeRecord {

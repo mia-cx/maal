@@ -532,7 +532,6 @@ describe('household administration Worker service', () => {
 		});
 	});
 
-	// updated_at is the cutoff for which of a departed owner's recipe versions the household sees.
 	test('a repeated revocation keeps the time the member left', async () => {
 		await bootstrapHousehold();
 		const bobMembership = (await repository.membership('org_family', bobId))!.membershipId;

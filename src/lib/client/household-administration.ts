@@ -23,7 +23,7 @@ import {
 import { requireCachedPermission } from '$lib/domain/household/permissions.js';
 import { refreshJoinedHouseholdBilling } from '$lib/client/billing.js';
 import type { MaalDatabase } from '$lib/client/local/database.js';
-import { detachHouseholdSnapshot } from '$lib/client/local/households.js';
+import { departureStores, detachHouseholdSnapshot } from '$lib/client/local/households.js';
 import { LocalProfileMissing, markProfileReauthRequired } from '$lib/client/local/profiles.js';
 
 const LegacyHouseholdMembershipResponseSchema = Schema.Struct({
@@ -153,16 +153,14 @@ const commitHouseholdProjection = async (
 	await database.transaction(
 		'rw',
 		[
-			database.households,
-			database.memberships,
 			database.householdInvites,
 			database.userAttributions,
 			database.remoteProjectionMeta,
 			database.uiState,
 			database.outbox,
-			database.profiles,
 			database.authSlots,
-			database.syncScopes
+			database.syncScopes,
+			...departureStores(database)
 		],
 		async () => {
 			const [existingHousehold, existingMemberships, existingInvites, pendingHouseholdMutation] =
@@ -389,12 +387,11 @@ export const refreshRemoteHousehold = async (
 			await database.transaction(
 				'rw',
 				[
-					database.profiles,
 					database.authSlots,
-					database.memberships,
 					database.householdInvites,
 					database.outbox,
-					database.syncScopes
+					database.syncScopes,
+					...departureStores(database)
 				],
 				async () => {
 					if (expectedState !== (await administrationState(database, householdId))) return;
@@ -505,13 +502,7 @@ export const removeHouseholdMember = async (
 	);
 	await database.transaction(
 		'rw',
-		[
-			database.memberships,
-			database.profiles,
-			database.authSlots,
-			database.outbox,
-			database.syncScopes
-		],
+		[database.authSlots, database.outbox, database.syncScopes, ...departureStores(database)],
 		async () => {
 			const removed = await database.memberships.get(membershipId);
 			const localProfile = removed

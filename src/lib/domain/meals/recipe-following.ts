@@ -169,38 +169,6 @@ export const localDateOf = (instant: string, timeZone: string | null): LocalDate
 	return formatter.format(new Date(instant)) as LocalDate;
 };
 
-/**
- * How a recipe's owner belongs to a household, as the household's view of the owner's versions
- * reads it: a member, or gone since `leftAt`.
- */
-export type OwnerStanding =
-	{ readonly active: true } | { readonly active: false; readonly leftAt: string };
-
-/**
- * The owner's standing from their membership rows in one household, each given as when it ended,
- * or null while it is active. Undefined when the owner never belonged. One active row makes the
- * owner a member; otherwise the latest end is when they left.
- */
-export const ownerStanding = (
-	membershipEnds: readonly (string | null)[]
-): OwnerStanding | undefined => {
-	if (membershipEnds.length === 0) return undefined;
-	if (membershipEnds.includes(null)) return { active: true };
-	const leftAt = (membershipEnds as readonly string[]).reduce((a, b) => (a > b ? a : b));
-	return { active: false, leftAt };
-};
-
-/**
- * Whether a household sees a version of its owner's recipe (spec §8.7): every version while the
- * owner is a member, only those that took effect before the owner left otherwise, and none when the
- * owner never belonged. Every reader applies this one rule: device resolution, Worker reads and
- * household sync, MCP tools, and export.
- */
-export const householdSeesVersion = (
-	version: RecipeVersion,
-	standing: OwnerStanding | undefined
-): boolean => standing !== undefined && (standing.active || version.effectiveAt < standing.leftAt);
-
 /** What a recipe-following meal resolves against: its recipe's versions and its check-ins. */
 export interface MealResolutionContext {
 	readonly versions: readonly RecipeVersion[];

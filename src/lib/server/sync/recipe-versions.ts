@@ -6,11 +6,7 @@ import { Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
 
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
-import {
-	householdSeesVersion,
-	ownerStanding,
-	type MealResolutionContext
-} from '$lib/domain/meals/recipe-following.js';
+import type { MealResolutionContext } from '$lib/domain/meals/recipe-following.js';
 import {
 	MealCheckInSchema,
 	isRecipeFollowingMeal,
@@ -61,47 +57,6 @@ export const readRecipeVersions = async (
 	);
 };
 
-/**
- * The versions of these recipes that a household sees (spec §8.7), by {@link householdSeesVersion}
- * over the owner's membership in the household, which is unique per household and user. A
- * membership that is not active ended at its `updated_at`.
- */
-export const readHouseholdVersions = async (
-	database: D1Database,
-	householdId: string,
-	recipeIds: readonly string[]
-): Promise<RecipeVersion[]> => {
-	const unique = [...new Set(recipeIds)];
-	if (unique.length === 0) return [];
-	const rows = await queryAll<
-		Record<string, unknown> & {
-			id: string;
-			owner_status: string | null;
-			owner_updated_at: string;
-		}
-	>(
-		database,
-		`SELECT v.*, hm.status AS owner_status, hm.updated_at AS owner_updated_at
-		 FROM recipe_versions v LEFT JOIN household_memberships hm
-		  ON hm.household_id = ? AND hm.workos_user_id = v.owner_user_id
-		 WHERE v.recipe_id IN (${JSON_IDS})`,
-		householdId,
-		JSON.stringify(unique)
-	);
-	const standings = new Map(
-		rows.map(({ id, owner_status, owner_updated_at }) => [
-			id,
-			ownerStanding(
-				owner_status === null ? [] : [owner_status === 'active' ? null : owner_updated_at]
-			)
-		])
-	);
-	// Decoding drops the joined membership columns.
-	return decodeVersionRows(rows).filter((version) =>
-		householdSeesVersion(version, standings.get(version.id))
-	);
-};
-
 const decodeVersionRows = (rows: readonly Record<string, unknown>[]): RecipeVersion[] =>
 	rows.flatMap((row) => {
 		try {
@@ -117,9 +72,10 @@ const decodeVersionRows = (rows: readonly Record<string, unknown>[]): RecipeVers
 	});
 
 /**
- * Reads what these meals resolve against in D1: the versions of their recipes that each meal's
- * household receives (spec §8.7), the live check-ins on them, and their households' timezones
- * (spec §5.3). The same rule as on a device, from the same data.
+ * Reads what these meals resolve against in D1: the versions of their recipes, the live check-ins
+ * on them, and their households' timezones (spec §5.3). A household follows only its current
+ * members' recipes and receives every version of them (spec §8.7), so this is the same rule as on
+ * a device, from the same data.
  */
 export const loadMealResolution = async (
 	database: D1Database,
@@ -127,19 +83,11 @@ export const loadMealResolution = async (
 ): Promise<(meal: RecipeFollowingMeal) => MealResolutionContext> => {
 	const following = meals.filter(isRecipeFollowingMeal);
 	if (following.length === 0) return () => ({ versions: [], checkIns: [], timeZone: null });
-	const [versionsByHousehold, checkInRows, timeZoneRows] = await Promise.all([
-		Promise.all(
-			[...Map.groupBy(following, ({ householdId }) => householdId)].map(
-				async ([householdId, householdMeals]) => {
-					const versions = await readHouseholdVersions(
-						database,
-						householdId,
-						householdMeals.map(({ sourceRecipeId }) => sourceRecipeId)
-					);
-					return [householdId, Map.groupBy(versions, ({ recipeId }) => recipeId)] as const;
-				}
-			)
-		).then((entries) => new Map(entries)),
+	const [versionsByRecipe, checkInRows, timeZoneRows] = await Promise.all([
+		readRecipeVersions(
+			database,
+			following.map(({ sourceRecipeId }) => sourceRecipeId)
+		).then((versions) => Map.groupBy(versions, ({ recipeId }) => recipeId)),
 		queryAll(
 			database,
 			`SELECT * FROM meal_check_ins WHERE deleted_at IS NULL AND meal_id IN (${JSON_IDS})`,
@@ -166,7 +114,7 @@ export const loadMealResolution = async (
 	const checkInsByMeal = Map.groupBy(checkIns, ({ mealId }) => mealId);
 	const timeZones = new Map(timeZoneRows.map((row) => [row.household_id, row.timezone]));
 	return (meal) => ({
-		versions: versionsByHousehold.get(meal.householdId)?.get(meal.sourceRecipeId) ?? [],
+		versions: versionsByRecipe.get(meal.sourceRecipeId) ?? [],
 		checkIns: checkInsByMeal.get(meal.id) ?? [],
 		timeZone: timeZones.get(meal.householdId) ?? null
 	});
@@ -188,6 +136,17 @@ export const FOLLOWING_MEAL_WRITTEN_SINCE_SQL = `(EXISTS (SELECT 1 FROM meals m
 export const VERSION_HEAD_SQL = `(SELECT COALESCE(MAX(v.last_sequence), 0) FROM sync_entity_versions v
 	JOIN recipe_versions r ON r.id = v.entity_id
 	WHERE v.audience_kind = 'user' AND v.entity_kind = 'recipeVersion' AND r.recipe_id = ?)`;
+
+/**
+ * 1 when the user bound to the first `?` is an active member of the household bound to the second,
+ * else 0. A household follows only its current members' recipes (spec §8.7).
+ */
+export const ACTIVE_MEMBER_SQL = `(EXISTS (SELECT 1 FROM household_memberships
+	WHERE workos_user_id = ? AND household_id = ? AND status = 'active'))`;
+
+/** How many households in the JSON list bound to the second `?` the first `?` is an active member of. */
+export const ACTIVE_MEMBERSHIPS_SQL = `(SELECT COUNT(*) FROM household_memberships
+	WHERE workos_user_id = ? AND status = 'active' AND household_id IN (${JSON_IDS}))`;
 
 /**
  * Households that hold a live recipe-following meal of `recipeId` and that its owner still belongs

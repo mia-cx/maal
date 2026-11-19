@@ -18,6 +18,7 @@ import {
 	updateMealHeader,
 	type MealCommandContext
 } from '$lib/client/meals/index.js';
+import { exportRecoveryArchives } from '$lib/client/local/recovery-export.js';
 import {
 	commitPortableImport,
 	decodePortableArchive,
@@ -41,6 +42,7 @@ import { planRecipeFollowingMeal } from '$lib/domain/meals/recipe-following.js';
 import { MEAL_CONFLICT_GROUPS } from '$lib/domain/meals/schema.js';
 import { newestContentVersion, recipeVersion } from '$lib/domain/recipes/versions.js';
 import { D1RemoteDomainPort } from '$lib/server/domain/remote-port.js';
+import { HouseholdAdministrationRepository } from '$lib/server/household-administration/repository.js';
 import { candidateFromToolRecipe } from '$lib/server/mcp/builders.js';
 import {
 	D1HouseholdSyncRepository,
@@ -718,40 +720,88 @@ describe('who can follow and version a recipe', () => {
 		});
 		await expect(pushMeal(bob.userId, bobsMeal)).resolves.toMatchObject({ status: 'accepted' });
 	});
+});
 
-	test('edits the owner makes after leaving stay private in every household read', async () => {
-		const on = (date: string) => `${date}T10:00:00.000Z` as `${string}Z`;
+describe('a member leaving the household', () => {
+	const revoke = (userId: string, database: D1Database = d1) =>
+		new HouseholdAdministrationRepository(database).markMembershipRevoked(
+			`membership_${userId}`,
+			new Date().toISOString()
+		);
+
+	const followers = async (recipeId: string) =>
+		(
+			await d1
+				.prepare('SELECT id FROM meals WHERE followed_recipe_id = ?')
+				.bind(recipeId)
+				.all<{ id: string }>()
+		).results.map(({ id }) => id);
+
+	test('copies the meals of their recipes as they showed, and their later edits stay private', async () => {
 		const aliceDevice = await openDevice(alice);
 		const bobDevice = await openDevice(bob);
-		const recipe = await saveRecipe(aliceDevice, on('2026-08-21'));
-		const meal = await planRecipeAsMeal(
-			aliceDevice.database,
-			{ ...aliceDevice.context, occurredAt: on('2026-08-22') },
-			recipe.id,
-			{ date: '2099-01-01' }
-		);
+		const recipe = await saveRecipe(aliceDevice);
+		const meal = await planRecipeAsMeal(aliceDevice.database, aliceDevice.context, recipe.id, {
+			date: '2099-01-01'
+		});
 		await aliceDevice.sync();
 		await bobDevice.sync();
 
-		await d1
-			.prepare(
-				`UPDATE household_memberships SET status = 'revoked', updated_at = ?
-				 WHERE workos_user_id = ?`
-			)
-			.bind(on('2026-08-23'), alice.userId)
-			.run();
-		await editRecipe(aliceDevice, recipe.id, 'Private after leaving', on('2026-08-24'));
+		await revoke(alice.userId);
+		await editRecipe(aliceDevice, recipe.id, 'Private after leaving');
 		await aliceDevice.syncUser();
 		await bobDevice.sync();
 
-		const port = new D1RemoteDomainPort(d1, MCP_TEST_DEVICE);
-		expect(await titles(bobDevice.database)).toEqual(new Map([[meal.id, 'Sunday soup']]));
-		await expect(port.getHouseholdMeal(householdId, meal.id)).resolves.toMatchObject({
-			title: 'Sunday soup'
+		await expect(followers(recipe.id)).resolves.toEqual([]);
+		await expect(bobDevice.database.meals.get(meal.id)).resolves.toMatchObject({
+			title: 'Sunday soup',
+			sourceRecipeId: recipe.id
 		});
-		expect((await port.listHouseholdMeals(householdId)).map(({ title }) => title)).toEqual([
-			'Sunday soup'
-		]);
+		expect(await titles(bobDevice.database)).toEqual(new Map([[meal.id, 'Sunday soup']]));
+		const port = new D1RemoteDomainPort(d1, MCP_TEST_DEVICE);
+		await expect(port.getHouseholdMeal(householdId, meal.id)).resolves.toMatchObject({
+			title: 'Sunday soup',
+			followsRecipe: false
+		});
+	});
+
+	test.each([
+		[
+			'a new meal of their recipe commits between the revocation’s reads and its write',
+			'meal-first'
+		],
+		['the revocation commits between a new meal’s reads and its write', 'revocation-first']
+	] as const)('converges when %s', async (_name, order) => {
+		const aliceDevice = await openDevice(alice);
+		const recipe = await saveRecipe(aliceDevice);
+		await planRecipeAsMeal(aliceDevice.database, aliceDevice.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		await aliceDevice.sync();
+		const late = planRecipeFollowingMeal({
+			recipe,
+			householdId,
+			mealId: uuidv7(),
+			occurredAt: new Date().toISOString()
+		});
+		const pushLate = (database?: D1Database) => pushMeal(alice.userId, late, undefined, database);
+
+		if (order === 'meal-first') {
+			await revoke(
+				alice.userId,
+				beforeNextBatch(() => pushLate())
+			);
+			await expect(
+				d1.prepare('SELECT title FROM meals WHERE id = ?').bind(late.id).first()
+			).resolves.toEqual({ title: 'Sunday soup' });
+		} else {
+			await expect(pushLate(beforeNextBatch(() => revoke(alice.userId)))).resolves.toMatchObject({
+				status: 'rejected',
+				errorCode: 'recipe_not_shared'
+			});
+		}
+
+		await expect(followers(recipe.id)).resolves.toEqual([]);
 	});
 });
 
@@ -783,6 +833,27 @@ describe('a recipe edit racing the first meal of it', () => {
 	});
 });
 
+/** The household row a device holds, which an export needs. */
+const familyKitchen = {
+	householdId,
+	name: 'Family kitchen',
+	locale: 'en-US',
+	timezone: null,
+	weekStartsOn: 1,
+	defaultPlannedYield: 4,
+	preferredDinnerTime: '18:00',
+	stalenessThresholdMinutes: 180,
+	createdByUserId: alice.userId,
+	deletionState: 'active',
+	localOnly: false,
+	schemaVersion: 1,
+	revision: 1,
+	createdAt: joinedAt,
+	updatedAt: joinedAt,
+	deletedAt: null,
+	conflictClocks: {}
+} as const;
+
 describe('archives and shared devices', () => {
 	test('export and import round-trip a following meal, its versions, and its pin', async () => {
 		const aliceDevice = await openDevice(alice);
@@ -795,25 +866,7 @@ describe('archives and shared devices', () => {
 			verdict: 'repeat'
 		});
 		await editRecipe(aliceDevice, recipe.id, 'Changed soup');
-		await aliceDevice.database.households.put({
-			householdId,
-			name: 'Family kitchen',
-			locale: 'en-US',
-			timezone: null,
-			weekStartsOn: 1,
-			defaultPlannedYield: 4,
-			preferredDinnerTime: '18:00',
-			stalenessThresholdMinutes: 180,
-			createdByUserId: alice.userId,
-			deletionState: 'active',
-			localOnly: false,
-			schemaVersion: 1,
-			revision: 1,
-			createdAt: joinedAt,
-			updatedAt: joinedAt,
-			deletedAt: null,
-			conflictClocks: {}
-		});
+		await aliceDevice.database.households.put(familyKitchen);
 		const archive = await decodePortableArchive(
 			await exportPortableArchive(aliceDevice.database, alice.profileId)
 		);
@@ -853,25 +906,7 @@ describe('archives and shared devices', () => {
 			description: null,
 			cookTimeMinutes: null
 		});
-		await aliceDevice.database.households.put({
-			householdId,
-			name: 'Family kitchen',
-			locale: 'en-US',
-			timezone: null,
-			weekStartsOn: 1,
-			defaultPlannedYield: 4,
-			preferredDinnerTime: '18:00',
-			stalenessThresholdMinutes: 180,
-			createdByUserId: alice.userId,
-			deletionState: 'active',
-			localOnly: false,
-			schemaVersion: 1,
-			revision: 1,
-			createdAt: joinedAt,
-			updatedAt: joinedAt,
-			deletedAt: null,
-			conflictClocks: {}
-		});
+		await aliceDevice.database.households.put(familyKitchen);
 		const archive = await decodePortableArchive(
 			await exportPortableArchive(aliceDevice.database, alice.profileId)
 		);
@@ -890,6 +925,33 @@ describe('archives and shared devices', () => {
 			verdict: 'repeat',
 			recipeVersionId: null
 		});
+	});
+
+	test('a recovery export keeps another member’s following meal as the copy it shows', async () => {
+		const aliceDevice = await openDevice(alice);
+		const bobDevice = await openDevice(bob);
+		const recipe = await saveRecipe(bobDevice);
+		const meal = await planRecipeAsMeal(bobDevice.database, bobDevice.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		await bobDevice.sync();
+		await aliceDevice.sync();
+		await aliceDevice.database.households.put(familyKitchen);
+
+		const recovery = await exportRecoveryArchives(aliceDevice.database);
+		const archive = await decodePortableArchive(
+			recovery.archives.find(({ workosUserId }) => workosUserId === alice.userId)!.blob
+		);
+		// Bob's recipe and versions stay out; the meal holds the content it showed.
+		expect(archive.recipeVersions).toBeUndefined();
+		const restored = await openDevice(alice);
+		await restored.database.households.put(familyKitchen);
+		await commitPortableImport(
+			restored.database,
+			await planPortableImport(restored.database, archive, alice.profileId)
+		);
+
+		expect(await titles(restored.database)).toEqual(new Map([[meal.id, 'Sunday soup']]));
 	});
 
 	test('on a shared device, a departed owner’s later edits stay out of the household', async () => {
@@ -916,41 +978,29 @@ describe('archives and shared devices', () => {
 		expect(await titles(device.database)).toEqual(new Map([[meal.id, 'Sunday soup']]));
 	});
 
-	test('forking or exporting a detached snapshot keeps the version its meals show', async () => {
+	test('a detached snapshot copies its meals on detach, and a fork or export keeps them', async () => {
 		const on = (date: string) => `${date}T10:00:00.000Z` as `${string}Z`;
 		const device = await openDevice(alice);
-		await device.database.households.put({
-			householdId,
-			name: 'Family kitchen',
-			locale: 'en-US',
-			timezone: null,
-			weekStartsOn: 1,
-			defaultPlannedYield: 4,
-			preferredDinnerTime: '18:00',
-			stalenessThresholdMinutes: 180,
-			createdByUserId: alice.userId,
-			deletionState: 'active',
-			localOnly: false,
-			schemaVersion: 1,
-			revision: 1,
-			createdAt: joinedAt,
-			updatedAt: joinedAt,
-			deletedAt: null,
-			conflictClocks: {}
-		});
+		await device.database.households.put(familyKitchen);
 		const recipe = await saveRecipe(device, on('2026-08-21'));
-		await planRecipeAsMeal(
+		const meal = await planRecipeAsMeal(
 			device.database,
 			{ ...device.context, occurredAt: on('2026-08-22') },
 			recipe.id,
 			{ date: '2099-01-01' }
 		);
+		const pending = await device.database.outbox.count();
 		await detachHouseholdSnapshot(device.database, {
 			profileId: alice.profileId,
 			householdId,
 			denialCode: 'membership_revoked',
 			detachedAt: on('2026-08-23')
 		});
+		// Copied locally only: a snapshot never uploads.
+		await expect(device.database.meals.get(meal.id)).resolves.toMatchObject({
+			title: 'Sunday soup'
+		});
+		await expect(device.database.outbox.count()).resolves.toBe(pending);
 		await editRecipe(device, recipe.id, 'Private after leaving', on('2026-08-24'));
 		const titlesIn = async (database: MaalDatabase, id: string) =>
 			(await listHouseholdMeals(database, id)).map(({ title }) => title);

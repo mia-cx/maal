@@ -9,9 +9,22 @@ import type { CreateRemoteHouseholdRequest } from '$lib/domain/household/adminis
 import { expandWorkOSPermissions } from '$lib/domain/household/permissions.js';
 import { BillingRepository } from '$lib/server/billing/repository.js';
 import { billingOwnerMayLeave } from '$lib/server/billing/transfer.js';
+import {
+	MAX_COMMIT_ATTEMPTS,
+	readCommitGuard,
+	type CommitGuard
+} from '$lib/server/sync/d1-snapshot.js';
+import { departureCopies } from '$lib/server/sync/household-d1-repository.js';
 
 import { HouseholdAdministrationError, asHouseholdAdministrationError } from './errors.js';
 import type { IdentityMembership } from './identity.js';
+
+/**
+ * The `revoked` status while `guard` still reads its value, bound after its own binds; NULL
+ * otherwise, which fails NOT NULL and rolls the revocation's batch back.
+ */
+const revokedWhile = (guard: CommitGuard): string =>
+	`CASE WHEN ${guard.sql} = ? THEN 'revoked' END`;
 
 interface HouseholdRow {
 	household_id: string;
@@ -311,20 +324,28 @@ export class HouseholdAdministrationRepository {
 		const ids = memberships.map(({ id }) => id);
 		const predicate =
 			ids.length === 0 ? '' : ` AND membership_id NOT IN (${ids.map(() => '?').join(', ')})`;
-		statements.push(
+		const members = new Set(memberships.map(({ workosUserId }) => workosUserId));
+		const leavers = (
+			await this.database
+				.prepare(
+					`SELECT workos_user_id FROM household_memberships
+					 WHERE household_id = ? AND status = 'active'`
+				)
+				.bind(householdId)
+				.all<{ workos_user_id: string }>()
+		).results
+			.map(({ workos_user_id }) => workos_user_id)
+			.filter((userId) => !members.has(userId));
+		await this.revokeCopyingMeals(householdId, leavers, now, (guard) => [
+			...statements,
 			this.database
 				.prepare(
 					`UPDATE household_memberships
-					 SET status = 'revoked', updated_at = ?
+					 SET status = ${revokedWhile(guard)}, updated_at = ?
 					 WHERE household_id = ? AND status = 'active'${predicate}`
 				)
-				.bind(now, householdId, ...ids)
-		);
-		try {
-			await this.database.batch(statements);
-		} catch (cause) {
-			throw asHouseholdAdministrationError(cause, 'projection_write_failed');
-		}
+				.bind(...guard.binds, guard.value, now, householdId, ...ids)
+		]);
 	}
 
 	async projectMembership(membership: IdentityMembership, now: string): Promise<void> {
@@ -341,21 +362,60 @@ export class HouseholdAdministrationRepository {
 	}
 
 	async markMembershipRevoked(membershipId: string, now: string): Promise<void> {
-		try {
-			await this.database
-				.prepare(
-					// updated_at marks when the member left: shared-recipe visibility is cut off there, so a
-					// repeated revocation must not move it later.
-					`UPDATE household_memberships
-					 SET status = 'revoked', last_verified_at = ?,
-					  updated_at = CASE WHEN status = 'active' THEN ? ELSE updated_at END
-					 WHERE membership_id = ?`
-				)
-				.bind(now, now, membershipId)
-				.run();
-		} catch (cause) {
-			throw asHouseholdAdministrationError(cause, 'projection_write_failed');
+		const membership = await this.database
+			.prepare(
+				'SELECT household_id, workos_user_id FROM household_memberships WHERE membership_id = ?'
+			)
+			.bind(membershipId)
+			.first<{ household_id: string; workos_user_id: string }>();
+		if (!membership) return;
+		await this.revokeCopyingMeals(
+			membership.household_id,
+			[membership.workos_user_id],
+			now,
+			(guard) => [
+				this.database
+					.prepare(
+						// updated_at is when the member left, so a repeated revocation keeps it.
+						`UPDATE household_memberships
+						 SET status = ${revokedWhile(guard)}, last_verified_at = ?,
+						  updated_at = CASE WHEN status = 'active' THEN ? ELSE updated_at END
+						 WHERE membership_id = ?`
+					)
+					.bind(...guard.binds, guard.value, now, now, membershipId)
+			]
+		);
+	}
+
+	/**
+	 * Ends the leavers' memberships with `revocation` and, in the same batch, turns the household's
+	 * meals that follow their recipes into meal copies (spec §4.3). The batch holds only while no
+	 * household write landed since those meals were read; otherwise it reads them again.
+	 */
+	private async revokeCopyingMeals(
+		householdId: string,
+		leaverUserIds: readonly string[],
+		now: string,
+		revocation: (guard: CommitGuard) => D1PreparedStatement[]
+	): Promise<void> {
+		for (let attempt = 1; attempt <= MAX_COMMIT_ATTEMPTS; attempt += 1) {
+			const copies = await departureCopies(this.database, {
+				householdId,
+				leaverUserIds,
+				receivedAt: now
+			});
+			try {
+				await this.database.batch([...revocation(copies.guard), ...copies.statements]);
+				return;
+			} catch (cause) {
+				const { guard } = copies;
+				const current = await readCommitGuard(this.database, guard.sql, ...guard.binds);
+				if (current.value === guard.value) {
+					throw asHouseholdAdministrationError(cause, 'projection_write_failed');
+				}
+			}
 		}
+		throw new HouseholdAdministrationError({ code: 'projection_write_failed' });
 	}
 
 	/** The billing owner who must transfer billing or schedule cancellation before leaving. */

@@ -61,7 +61,7 @@ A meal that holds its own copy of the recipe content and never changes with the 
 _Avoid_: Snapshot, detached meal
 
 **Shared recipe version**:
-A version of another member's recipe that a household receives read-only because one of its recipe-following meals follows that recipe.
+A version of another member's recipe that a household receives read-only because one of its recipe-following meals follows that recipe. A household follows only its current members' recipes: when a member leaves, its meals of their recipes become meal copies.
 _Avoid_: Household recipe, shared recipe
 
 **Staleness threshold**:

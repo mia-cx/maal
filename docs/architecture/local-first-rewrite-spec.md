@@ -148,11 +148,17 @@ mapping only during migration. Server authorization uses permissions, not a trus
   all pending mutations owned by that profile. Shared household aggregates remain if another local member can
   access them. The versions of a removed recipe that a remaining household's live recipe-following meal
   follows stay (§5.2), so the meal keeps showing them, offline and in free use too.
-- **Membership revoked:** retain a read-only detached snapshot. It can be exported or explicitly forked with
-  new IDs; it never uploads under the former household identity. Its recipe-following meals resolve only
-  among versions that took effect before it was detached, so it never changes with its recipes. A fork
-  turns each of them into a meal copy of the version it shows, and its check-ins pin nothing, because the
-  fork has no such boundary.
+- **Member leaves or is revoked:** the household's recipe-following meals of the leaver's recipes become
+  meal copies of the version each shows, so a household only ever follows its current members' recipes.
+  The Worker writes the copies in the same D1 batch that ends the membership, guarded so that a household
+  write committing in between makes it read again, and household sync sends them to the remaining
+  members. An edit the leaver made offline before leaving but uploaded after does not reach the copies.
+- **Membership revoked on this device:** retain a read-only detached snapshot. It can be exported or
+  explicitly forked with new IDs; it never uploads under the former household identity. When a local
+  profile's membership ends, the device copies that household's meals of the profile's recipes, locally
+  only. Once no local profile is an active member, the household is a detached snapshot and every one of
+  its recipe-following meals becomes a meal copy of the version it shows, so it never changes with its
+  recipes. A fork's check-ins on meal copies pin nothing.
 - **Delete household:** cancel and refund billing first, then enter 30-day recoverable deletion. Remote access
   stops immediately. Recovery does not recreate a subscription. Final purge removes household content and
   the WorkOS organization while retaining only required financial/idempotency audit identifiers.
@@ -654,29 +660,21 @@ member's recipe never appears in a member's menu.
 
 This shares nothing new. Planning already showed the household the full recipe, and a meal copy kept it.
 Following keeps that view current, and only for recipes a member chose to plan there. A household stops
-receiving new versions once no recipe-following meal there follows the recipe, or once the recipe's owner
-leaves it; its meals keep resolving among the versions it received.
+receiving new versions once no recipe-following meal there follows the recipe.
 
-- **What a household sees.** A household sees a recipe's versions only while the recipe's owner belongs
-  to it: every version while the owner is a member, and after the owner leaves only those that took effect
-  before they left. Its meals resolve among those versions alone, wherever they are read: on a device, in a
-  Worker read such as an MCP tool, and in an export. One shared function holds this rule, and each reader
-  supplies the owner's standing from its own data: the Worker from `household_memberships`, where a
-  membership that is not active ended at its `updated_at`; a device from its membership rows, where it
-  ended at `detachedAt`, or `updatedAt` without one. Edits the owner makes after leaving stay private.
-  A device holds versions from several sources: its profiles' own, and every household it syncs. It
-  therefore resolves an owner it has no membership row for among only the versions that household's sync
-  delivered (`householdVersions`), which the Worker filtered by the same rule. A household every profile
-  on the device left is a detached snapshot, whose view ends at its detachment as though every owner left
-  then. Removing a profile from a device records the versions each remaining household sees as delivered
-  to it, since the profile's membership rows go with it.
-
-- **Who may follow.** A meal may start following a recipe only when the writer owns it or the household
-  already receives it, because a live recipe-following meal there follows it. Anyone else can see the
-  recipe only through a meal copy they write themselves, so following it would share what they never saw.
-  The Worker checks every write that makes a meal follow a recipe it did not follow in D1, live or
-  backfill, before it stores or shares anything, and rejects the rest with `recipe_not_shared`. The
-  rejection carries no recipe content, and the device shows the §8.6 notice.
+- **Only current members' recipes.** A household follows only the recipes of its current members, so it
+  receives every version of each recipe it follows, and only current members' versions are shared. When
+  a member leaves, the household's meals of their recipes become meal copies (§4.3), and their later edits
+  stay private. Every reader therefore resolves a meal among all the versions of its recipe it holds: a
+  device, a Worker read such as an MCP tool, and an export.
+- **Who may follow.** A meal may start following a recipe only while the recipe's owner is an active
+  member of the household, and only when the writer owns the recipe or the household already receives it,
+  because a live recipe-following meal there follows it. Anyone else can see the recipe only through a
+  meal copy they write themselves, so following it would share what they never saw. The Worker checks
+  every write that makes a meal follow a recipe it did not follow in D1, live or backfill, before it
+  stores or shares anything, and rejects the rest with `recipe_not_shared`. The write commits only while
+  the owner is still a member, so it never lands after the departure that copied the household's meals.
+  The rejection carries no recipe content, and the device shows the §8.6 notice.
 - **Who may version.** The Worker rejects a version of a recipe that D1 holds, or holds versions of, under
   another owner, with `recipe_not_owned`. Otherwise a member could version another member's followed
   recipe and change what the household's meals show. A device never rewrites or deletes a version: a
@@ -690,13 +688,13 @@ leaves it; its meals keep resolving among the versions it received.
   after the recipe is deleted or purged.
 - **Fan-out.** The D1 transaction that commits a version also appends it to every household that holds a
   live recipe-following meal of its recipe and that its owner belongs to. It commits only while no
-  recipe-following meal of the recipe was written since it listed those households. A meal that starts
+  recipe-following meal of the recipe was written since it listed those households and the owner still
+  belongs to each of them. A meal that starts
   following a recipe its household did not follow yet appends every version of the recipe, and commits
   only while no version of the recipe was written since it read them. Each bootstrap page carries the
   versions of the recipes its recipe-following meals follow.
-- **Device apply.** A device stores shared versions in `recipeVersions` beside its own profiles' versions,
-  and records in `householdVersions` which household's sync delivered each. A version is immutable, so
-  storing one that is already there changes nothing.
+- **Device apply.** A device stores shared versions in `recipeVersions` beside its own profiles' versions.
+  A version is immutable, so storing one that is already there changes nothing.
 - **Free use.** Without sync, every profile on a device shares one Dexie database, so recipe-following
   meals resolve locally with no Worker or D1 request.
 
@@ -715,12 +713,13 @@ The active user may export everything they can see, including complete accessibl
 recoverable deleted recipes. `meals.json` holds both meal kinds. A recipe-following meal of the exporter's own
 recipe, in a household the exporter still belongs to, stays a reference, because its recipe and versions are
 in the archive. Every other recipe-following meal is exported as a meal copy of the version it resolves to on
-the exporting device: one of another member's recipe, because the archive holds only the exporter's recipes,
-and every one in a detached snapshot, because a restore has no detachment to cut its versions off at. Only a
-check-in on a meal exported as recipe-following keeps its pin, which names a version in the archive; every
-other check-in's pin is cleared, because its meal holds its own content. Import requires each recipe-following
-meal's recipe and each pinned version to resolve among the imported or local records. Versions import
-insert-only: a version already on the device stays as it is. Credentials, PIN verifiers, billing capability,
+the exporting device, because the archive holds only the exporter's recipes. A recovery archive resolves its
+meals the same way, before it leaves out other members' versions. Only a check-in on a meal exported as
+recipe-following keeps its pin, which names a version in the archive; every other check-in's pin is cleared,
+because its meal holds its own content. Import requires each recipe-following meal's recipe and each pinned
+version to resolve among the imported or local records. Versions import insert-only: a version already on the
+device stays as it is. A recipe kept local brings none of its archived versions, so its meals keep showing the
+local recipe, and a check-in pinned to one of those versions pins nothing. Credentials, PIN verifiers, billing capability,
 sync clocks/cursors/outbox, leases, and MCP secrets are excluded. URL media/provenance is included;
 third-party bytes are not fetched.
 

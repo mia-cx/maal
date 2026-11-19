@@ -55,6 +55,7 @@ import {
 } from './d1-snapshot.js';
 import { ServerSyncUnavailable } from './errors.js';
 import {
+	ACTIVE_MEMBERSHIPS_SQL,
 	FOLLOWING_MEAL_WRITTEN_SINCE_SQL,
 	LATEST_SEQUENCE_SQL,
 	VERSION_HEAD_SQL,
@@ -1372,15 +1373,25 @@ export class D1UserSyncRepository implements UserSyncRepository {
 	}
 
 	/**
-	 * The households a new version of `recipeId` reaches, and the guard that holds its batch while
-	 * no recipe-following meal of the recipe was written since they were listed (spec §8.7).
+	 * The households a new version of `recipeId` reaches, and the guards that hold its batch while
+	 * no recipe-following meal of the recipe was written since they were listed and the owner still
+	 * belongs to each of them (spec §8.7). A member's departure copies the household's meals in the
+	 * same batch that ends the membership, so a version listed for it before then never reaches it.
 	 */
 	private async shareVersion(actorUserId: string, recipeId: string): Promise<CommittedVersion> {
 		const since = await readCommitGuard(this.database, LATEST_SEQUENCE_SQL);
+		const householdIds = await householdsReceivingRecipe(this.database, recipeId, actorUserId);
 		return {
 			version: null,
-			householdIds: await householdsReceivingRecipe(this.database, recipeId, actorUserId),
-			guards: [{ sql: FOLLOWING_MEAL_WRITTEN_SINCE_SQL, binds: [recipeId, since.value], value: 0 }]
+			householdIds,
+			guards: [
+				{ sql: FOLLOWING_MEAL_WRITTEN_SINCE_SQL, binds: [recipeId, since.value], value: 0 },
+				{
+					sql: ACTIVE_MEMBERSHIPS_SQL,
+					binds: [actorUserId, JSON.stringify(householdIds)],
+					value: householdIds.length
+				}
+			]
 		};
 	}
 

@@ -12,7 +12,6 @@ import type { Table } from 'dexie';
 import { Schema } from 'effect';
 
 import type { LocalStoreName, MaalDatabase } from '$lib/client/local/database.js';
-import { deviceVersionVisibility } from '$lib/client/meals/resolution.js';
 import { PortableArchiveError } from '$lib/domain/contracts/errors.js';
 import { GLOBAL_TAXONOMY_SEED_VERSION } from '$lib/domain/taxonomy/global-seed.js';
 import {
@@ -143,7 +142,6 @@ export const PORTABLE_SOURCE_STORES = [
 	'householdAppliances',
 	'recipes',
 	'recipeVersions',
-	'householdVersions',
 	'meals',
 	'mealCheckIns',
 	'userAttributions',
@@ -168,16 +166,71 @@ export const PORTABLE_SOURCE_STORES = [
 
 type PortableSourceStore = (typeof PORTABLE_SOURCE_STORES)[number];
 type StoreRow<K extends PortableSourceStore> =
-	MaalDatabase[K] extends Table<infer Row, string>
-		? Row
-		: MaalDatabase[K] extends Table<infer Row, [string, string]>
-			? Row
-			: never;
+	MaalDatabase[K] extends Table<infer Row, string> ? Row : never;
 
 /** Every row of each source store, as the live database or a recovery read returns them. */
 export type PortableSource = { readonly [K in PortableSourceStore]: readonly StoreRow<K>[] };
 
 export type PortableUserAttribution = typeof PortableUserAttributionSchema.Type;
+
+/** The households whose content `exporterId` can export: those they did not lose for good. */
+const exporterMemberships = (source: Pick<PortableSource, 'memberships'>, exporterId: string) =>
+	source.memberships.filter(
+		({ workosUserId, status }) => workosUserId === exporterId && status !== 'revoked'
+	);
+
+/**
+ * The live meals `exporterId` can see in `source`, as an archive holds them (spec §9). A meal that
+ * follows one of the exporter's recipes in a household they still belong to stays a reference, since
+ * the recipe and its versions go in the archive. Every other recipe-following meal goes out as a copy
+ * of the version it shows here, because the archive holds only the exporter's recipes. A meal whose
+ * version is not on this device is left out, as every view leaves it out.
+ */
+export const exportedMeals = (source: PortableSource, exporterId: string): LiveMeal[] => {
+	const memberships = exporterMemberships(source, exporterId);
+	const householdIds = new Set(memberships.map(({ householdId }) => householdId));
+	const activeIn = new Set(
+		memberships.filter(({ status }) => status === 'active').map(({ householdId }) => householdId)
+	);
+	const exporterRecipeIds = new Set(
+		source.recipes
+			.filter(({ ownerUserId }) => ownerUserId === exporterId)
+			.map(({ id }) => String(id))
+	);
+	const versionsByRecipe = Map.groupBy(
+		source.recipeVersions.map((record) =>
+			decode(RecipeVersionSchema, record, 'decode recipe version for export')
+		),
+		({ recipeId }) => recipeId
+	);
+	const checkInsByMeal = Map.groupBy(
+		source.mealCheckIns.map((record) =>
+			decode(MealCheckInSchema, record, 'decode check-in for export')
+		),
+		({ mealId }) => mealId
+	);
+	const timeZones = new Map(
+		source.households.map(({ householdId, timezone }) => [householdId, timezone])
+	);
+	return source.meals
+		.map((record) => decode(StoredMealSchema, record, 'decode meal for export'))
+		.filter(isLiveMeal)
+		.filter(({ householdId, deletedAt }) => householdIds.has(householdId) && deletedAt === null)
+		.flatMap((meal): LiveMeal[] => {
+			if (
+				!isRecipeFollowingMeal(meal) ||
+				(exporterRecipeIds.has(meal.sourceRecipeId) && activeIn.has(meal.householdId))
+			) {
+				return [meal];
+			}
+			const copy = resolveMeal(meal, {
+				versions: versionsByRecipe.get(meal.sourceRecipeId) ?? [],
+				checkIns: checkInsByMeal.get(meal.id) ?? [],
+				timeZone: timeZones.get(meal.householdId) ?? null
+			});
+			return copy === null ? [] : [copy];
+		});
+};
 
 /**
  * Builds the archive of everything `exporter` can see in `source`. `localUsers` are this
@@ -190,9 +243,7 @@ export const buildPortableArchive = (
 	options: PortableExportOptions = {}
 ): PortableArchive => {
 	const exporterId = exporter.workosUserId;
-	const memberships = source.memberships.filter(
-		({ workosUserId, status }) => workosUserId === exporterId && status !== 'revoked'
-	);
+	const memberships = exporterMemberships(source, exporterId);
 	const householdIds = new Set(memberships.map(({ householdId }) => householdId));
 	const households = source.households
 		.filter(
@@ -218,39 +269,7 @@ export const buildPortableArchive = (
 	const allCheckIns = source.mealCheckIns.map((record) =>
 		decode(MealCheckInSchema, record, 'decode check-in for export')
 	);
-	const timeZones = new Map(
-		source.households.map(({ householdId, timezone }) => [householdId, timezone])
-	);
-	const sees = deviceVersionVisibility(source);
-	const versionsByRecipe = Map.groupBy(versions, ({ recipeId }) => recipeId);
-	const checkInsByMeal = Map.groupBy(allCheckIns, ({ mealId }) => mealId);
-	const exporterActiveIn = new Set(
-		memberships.filter(({ status }) => status === 'active').map(({ householdId }) => householdId)
-	);
-	// A meal following one of the exported recipes in a household the exporter still belongs to
-	// stays a reference, since the recipe and its versions are in the archive. Every other
-	// recipe-following meal, of another member's recipe or in a detached snapshot, goes out as a copy
-	// of the version it shows here, so a restore shows the same (spec §9).
-	const meals = source.meals
-		.map((record) => decode(StoredMealSchema, record, 'decode meal for export'))
-		.filter(isLiveMeal)
-		.filter(({ householdId, deletedAt }) => householdIds.has(householdId) && deletedAt === null)
-		.flatMap((meal): LiveMeal[] => {
-			if (
-				!isRecipeFollowingMeal(meal) ||
-				(exportedRecipeIds.has(meal.sourceRecipeId) && exporterActiveIn.has(meal.householdId))
-			) {
-				return [meal];
-			}
-			const copy = resolveMeal(meal, {
-				versions: (versionsByRecipe.get(meal.sourceRecipeId) ?? []).filter((version) =>
-					sees(meal.householdId, version)
-				),
-				checkIns: checkInsByMeal.get(meal.id) ?? [],
-				timeZone: timeZones.get(meal.householdId) ?? null
-			});
-			return copy === null ? [] : [copy];
-		});
+	const meals = exportedMeals(source, exporterId);
 	const mealIds = new Set(meals.map(({ id }) => id));
 	// Only a meal exported as recipe-following resolves through a pin, and its versions are in the
 	// archive. Every other meal holds its content, so its check-ins pin nothing.

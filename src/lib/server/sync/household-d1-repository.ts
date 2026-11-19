@@ -1,8 +1,11 @@
+import { uuidv7 } from 'uuidv7';
+
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
 import {
 	DEFAULT_STALENESS_THRESHOLD_MINUTES,
 	isRecentEdit
 } from '$lib/domain/household/staleness.js';
+import { resolveMeal } from '$lib/domain/meals/recipe-following.js';
 import {
 	MEAL_CONTENT_GROUPS,
 	MEAL_COPY_GROUPS,
@@ -47,8 +50,9 @@ import {
 } from './d1-snapshot.js';
 import { ServerSyncUnavailable } from './errors.js';
 import {
+	ACTIVE_MEMBER_SQL,
 	VERSION_HEAD_SQL,
-	readHouseholdVersions,
+	loadMealResolution,
 	readRecipeVersions,
 	sharedVersionSnapshot,
 	sharedVersionStatements
@@ -871,6 +875,199 @@ const syntheticChange = (
 
 const ENTITY_HEAD_SQL = entityHeadSql('household');
 
+/** The household's latest sequence bound to `?`; every household change moves it. */
+const HOUSEHOLD_HEAD_SQL = `(SELECT COALESCE(MAX(latest_sequence), 0) FROM sync_scope_state
+	WHERE audience_kind = 'household' AND audience_id = ?)`;
+
+/**
+ * The statements that record one household change: the change, its group versions, and the
+ * household's latest sequence. With a `condition`, the change holds its payload only while the
+ * condition is true; otherwise the NULL payload fails NOT NULL and rolls the whole batch back.
+ */
+const changeStatements = (
+	database: D1Database,
+	change: {
+		readonly householdId: string;
+		readonly entityKind: HouseholdSyncEntityKind;
+		readonly entityId: string;
+		readonly groups: readonly string[];
+		readonly operation: 'upsert' | 'delete';
+		readonly revision: number;
+		readonly actorUserId: string;
+		readonly clock: WinningClock;
+		readonly receivedAt: string;
+		readonly payload: string;
+		readonly tombstoneExpiresAt: string | null;
+		readonly condition?: { readonly sql: string; readonly binds: readonly SqlValue[] };
+	}
+): D1PreparedStatement[] => {
+	const { householdId, entityKind, entityId, clock } = change;
+	return [
+		database
+			.prepare(
+				`INSERT INTO sync_changes
+				 (mutation_id, actor_user_id, origin_device_id, audience_kind, audience_id, entity_kind,
+				  entity_id, conflict_group, operation, resulting_revision, occurred_at, received_at,
+				  payload, tombstone_expires_at)
+				 VALUES (?, ?, ?, 'household', ?, ?, ?, ?, ?, ?, ?, ?,
+				  ${change.condition ? `CASE WHEN ${change.condition.sql} THEN ? END` : '?'}, ?)`
+			)
+			.bind(
+				clock.mutationId,
+				change.actorUserId,
+				clock.originDeviceId,
+				householdId,
+				entityKind,
+				entityId,
+				change.groups.join(','),
+				change.operation,
+				change.revision,
+				clock.occurredAt,
+				change.receivedAt,
+				...(change.condition?.binds ?? []),
+				change.payload,
+				change.tombstoneExpiresAt
+			),
+		...change.groups.map((group) =>
+			database
+				.prepare(
+					`INSERT INTO sync_entity_versions
+					 (audience_kind, audience_id, entity_kind, entity_id, conflict_group, revision,
+					  last_sequence, winning_occurred_at, winning_origin_device_id, winning_mutation_id,
+					  winning_actor_user_id, winning_received_at)
+					 VALUES ('household', ?, ?, ?, ?, ?,
+					  (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?, ?, ?, ?, ?)
+					 ON CONFLICT(audience_kind, audience_id, entity_kind, entity_id, conflict_group)
+					 DO UPDATE SET revision = excluded.revision, last_sequence = excluded.last_sequence,
+					  winning_occurred_at = excluded.winning_occurred_at,
+					  winning_origin_device_id = excluded.winning_origin_device_id,
+					  winning_mutation_id = excluded.winning_mutation_id,
+					  winning_actor_user_id = excluded.winning_actor_user_id,
+					  winning_received_at = excluded.winning_received_at`
+				)
+				.bind(
+					householdId,
+					entityKind,
+					entityId,
+					group,
+					change.revision,
+					clock.mutationId,
+					clock.occurredAt,
+					clock.originDeviceId,
+					clock.mutationId,
+					change.actorUserId,
+					change.receivedAt
+				)
+		),
+		database
+			.prepare(
+				`INSERT INTO sync_scope_state
+				 (audience_kind, audience_id, bootstrap_generation, earliest_retained_sequence,
+				  latest_sequence, updated_at)
+				 VALUES ('household', ?, 1, 0, (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?)
+				 ON CONFLICT(audience_kind, audience_id) DO UPDATE SET
+				  latest_sequence = excluded.latest_sequence, updated_at = excluded.updated_at`
+			)
+			.bind(householdId, clock.mutationId, change.receivedAt)
+	];
+};
+
+/** What a revocation commits with when members leave a household (spec §4.3). */
+export interface DepartureCopies {
+	/** The statements that turn the leavers' followed meals into meal copies, as household changes. */
+	readonly statements: readonly D1PreparedStatement[];
+	/** The household's head when its meals were read. The revocation commits only while it holds. */
+	readonly guard: CommitGuard;
+}
+
+/**
+ * Turns the household's live recipe-following meals of the leavers' recipes into meal copies of
+ * the versions they show (spec §4.3), so the household follows only its current members' recipes.
+ * Each copy is a household change from the leaver, and reaches the remaining members through
+ * household sync. Everything is read at the household's head, which a meal, check-in, timezone, or
+ * shared-version write moves; the revocation commits these statements in its own batch, under the
+ * returned guard, and reads again when another household write lands first.
+ */
+export const departureCopies = async (
+	database: D1Database,
+	input: {
+		readonly householdId: string;
+		readonly leaverUserIds: readonly string[];
+		readonly receivedAt: string;
+	}
+): Promise<DepartureCopies> => {
+	const { householdId, receivedAt } = input;
+	const guard = await readCommitGuard(database, HOUSEHOLD_HEAD_SQL, householdId);
+	if (input.leaverUserIds.length === 0) return { statements: [], guard };
+	const followed = await queryAll<{ id: string; owner_user_id: string }>(
+		database,
+		`SELECT m.id, v.owner_user_id FROM meals m
+		 JOIN (SELECT DISTINCT recipe_id, owner_user_id FROM recipe_versions
+		  WHERE owner_user_id IN (${JSON_IDS})) v ON v.recipe_id = m.followed_recipe_id
+		 WHERE m.household_id = ? AND m.deleted_at IS NULL`,
+		JSON.stringify(input.leaverUserIds),
+		householdId
+	);
+	if (followed.length === 0) return { statements: [], guard };
+	const owners = new Map(followed.map(({ id, owner_user_id }) => [id, owner_user_id]));
+	const meals = (
+		await readSnapshotChanges(
+			database,
+			householdId,
+			followed.map(({ id }) => ({ entityKind: 'meal' as const, entityId: id }))
+		)
+	)
+		.map(({ aggregate }) => aggregate as StoredMeal)
+		.filter(isLiveMeal)
+		.filter(isRecipeFollowingMeal);
+	const [contextOf, liveRecipes] = await Promise.all([
+		loadMealResolution(database, meals),
+		queryAll<{ id: string }>(
+			database,
+			`SELECT id FROM recipes WHERE id IN (${JSON_IDS})`,
+			JSON.stringify([...new Set(meals.map(({ sourceRecipeId }) => sourceRecipeId))])
+		).then((rows) => new Set(rows.map(({ id }) => id)))
+	]);
+	const originDeviceId = uuidv7();
+	const statements = meals.flatMap((meal) => {
+		const copy = resolveMeal(meal, contextOf(meal));
+		// D1 holds a version of every recipe a meal follows (spec §8.7), so this is not reached.
+		if (copy === null) return [];
+		const clock = { occurredAt: receivedAt, originDeviceId, mutationId: uuidv7() };
+		const revision = meal.revision + 1;
+		const merged = mergeMeal(meal, copy, MEAL_COPY_GROUPS, revision, clock);
+		// A purged recipe leaves no row for the copy's provenance to name (spec §5.3).
+		const aggregate = decodeHouseholdSyncAggregate(
+			'meal',
+			meal.id,
+			householdId,
+			liveRecipes.has(meal.sourceRecipeId)
+				? merged
+				: { ...(merged as object), sourceRecipeId: null }
+		).aggregate;
+		return [
+			...normalizedStatements(database, householdId, 'meal', aggregate),
+			...changeStatements(database, {
+				householdId,
+				entityKind: 'meal',
+				entityId: meal.id,
+				groups: MEAL_COPY_GROUPS,
+				operation: 'upsert',
+				revision,
+				actorUserId: owners.get(meal.id)!,
+				clock,
+				receivedAt,
+				payload: JSON.stringify({
+					schemaVersion: CURRENT_SCHEMA_VERSION,
+					payload: { conflictGroups: MEAL_COPY_GROUPS, aggregate }
+				}),
+				tombstoneExpiresAt: null
+			})
+		];
+	});
+	return { statements, guard };
+};
+
 type HouseholdCommitInput = Parameters<HouseholdSyncRepository['commit']>[0];
 
 export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
@@ -952,9 +1149,9 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 				? [(aggregate as { sourceRecipeId: string }).sourceRecipeId]
 				: []
 		);
-		const sharedVersions = (
-			await readHouseholdVersions(this.database, householdId, followedRecipeIds)
-		).map((version) => sharedVersionSnapshot(version, state.latestSequence));
+		const sharedVersions = (await readRecipeVersions(this.database, followedRecipeIds)).map(
+			(version) => sharedVersionSnapshot(version, state.latestSequence)
+		);
 		return {
 			...state,
 			aggregates: [...sharedVersions, ...aggregates],
@@ -1240,81 +1437,32 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 				input.mutation.entityKind,
 				decodedResult.aggregate
 			),
-			this.database
-				.prepare(
-					`INSERT INTO sync_changes
-					 (mutation_id, actor_user_id, origin_device_id, audience_kind, audience_id, entity_kind,
-					  entity_id, conflict_group, operation, resulting_revision, occurred_at, received_at,
-					  payload, tombstone_expires_at)
-					 VALUES (?, ?, ?, 'household', ?, ?, ?, ?, ?, ?, ?, ?,
-					  CASE WHEN ${ENTITY_HEAD_SQL} = ?${guardSql.sql} THEN ? END, ?)`
-				)
-				.bind(
-					input.mutation.mutationId,
-					input.actorUserId,
-					input.mutation.originDeviceId,
-					input.householdId,
-					input.mutation.entityKind,
-					input.mutation.entityId,
-					acceptedGroups.join(','),
-					input.mutation.operation,
-					revision,
-					input.mutation.occurredAt,
-					input.receivedAt,
-					// A moved head leaves the payload NULL, which fails NOT NULL and rolls the batch back.
-					input.householdId,
-					input.mutation.entityKind,
-					input.mutation.entityId,
-					head,
-					...guardSql.binds,
-					payload,
-					tombstoneExpiresAt
-				)
-		];
-		for (const group of acceptedGroups) {
-			statements.push(
-				this.database
-					.prepare(
-						`INSERT INTO sync_entity_versions
-						 (audience_kind, audience_id, entity_kind, entity_id, conflict_group, revision,
-						  last_sequence, winning_occurred_at, winning_origin_device_id, winning_mutation_id,
-						  winning_actor_user_id, winning_received_at)
-						 VALUES ('household', ?, ?, ?, ?, ?,
-						  (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?, ?, ?, ?, ?)
-						 ON CONFLICT(audience_kind, audience_id, entity_kind, entity_id, conflict_group)
-						 DO UPDATE SET revision = excluded.revision, last_sequence = excluded.last_sequence,
-						  winning_occurred_at = excluded.winning_occurred_at,
-						  winning_origin_device_id = excluded.winning_origin_device_id,
-						  winning_mutation_id = excluded.winning_mutation_id,
-						  winning_actor_user_id = excluded.winning_actor_user_id,
-						  winning_received_at = excluded.winning_received_at`
-					)
-					.bind(
+			// A moved head leaves the payload NULL, which fails NOT NULL and rolls the batch back.
+			...changeStatements(this.database, {
+				householdId: input.householdId,
+				entityKind: input.mutation.entityKind,
+				entityId: input.mutation.entityId,
+				groups: acceptedGroups,
+				operation: input.mutation.operation,
+				revision,
+				actorUserId: input.actorUserId,
+				clock,
+				receivedAt: input.receivedAt,
+				payload,
+				tombstoneExpiresAt,
+				condition: {
+					sql: `${ENTITY_HEAD_SQL} = ?${guardSql.sql}`,
+					binds: [
 						input.householdId,
 						input.mutation.entityKind,
 						input.mutation.entityId,
-						group,
-						revision,
-						input.mutation.mutationId,
-						input.mutation.occurredAt,
-						input.mutation.originDeviceId,
-						input.mutation.mutationId,
-						input.actorUserId,
-						input.receivedAt
-					)
-			);
-		}
+						head,
+						...guardSql.binds
+					]
+				}
+			})
+		];
 		statements.push(
-			this.database
-				.prepare(
-					`INSERT INTO sync_scope_state
-					 (audience_kind, audience_id, bootstrap_generation, earliest_retained_sequence,
-					  latest_sequence, updated_at)
-					 VALUES ('household', ?, 1, 0, (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?)
-					 ON CONFLICT(audience_kind, audience_id) DO UPDATE SET
-					  latest_sequence = excluded.latest_sequence, updated_at = excluded.updated_at`
-				)
-				.bind(input.householdId, input.mutation.mutationId, input.receivedAt),
 			this.database
 				.prepare(
 					`INSERT INTO sync_devices
@@ -1439,10 +1587,12 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 
 	/**
 	 * Checks a meal that starts following `recipeId` in the household (spec §8.7) and returns the
-	 * versions to share with it. Only the recipe's owner may follow it first, which shares every
-	 * version under a guard that no version was written since they were read; anyone may follow a
-	 * recipe the household already receives. A purged recipe is refused, and one whose versions D1
-	 * does not hold yet makes the device retry. A refusal carries no recipe content.
+	 * versions to share with it. A household follows only its current members' recipes, so the
+	 * meal commits only while the recipe's owner is an active member. Only the owner may follow it
+	 * first, which shares every version under a guard that no version was written since they were
+	 * read; anyone may follow a recipe the household already receives. A purged recipe is refused,
+	 * and one whose versions D1 does not hold yet makes the device retry. A refusal carries no
+	 * recipe content.
 	 */
 	private async startFollowing(
 		input: HouseholdCommitInput,
@@ -1468,20 +1618,23 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 		]);
 		if (recipe === null && purged !== null) return { refusal: 'tombstoned_entity' };
 		const owner = recipe?.owner_user_id ?? versions[0]?.ownerUserId;
-		if (owner !== undefined && owner !== input.actorUserId) {
-			return (await this.householdFollows(input.householdId, recipeId))
-				? { versions: [], guards: [] }
-				: { refusal: RECIPE_NOT_SHARED };
-		}
-		if (versions.length === 0) {
+		if (owner === undefined || versions.length === 0) {
+			if (owner !== undefined && owner !== input.actorUserId) return { refusal: RECIPE_NOT_SHARED };
 			throw new ServerSyncUnavailable({
 				code: 'source_recipe_pending',
 				message: 'The recipe this meal follows has no version in D1 yet.'
 			});
 		}
-		return (await this.householdFollows(input.householdId, recipeId))
-			? { versions: [], guards: [] }
-			: { versions, guards: [guard] };
+		const member = await readCommitGuard(
+			this.database,
+			ACTIVE_MEMBER_SQL,
+			owner,
+			input.householdId
+		);
+		if (member.value === 0) return { refusal: RECIPE_NOT_SHARED };
+		const follows = await this.householdFollows(input.householdId, recipeId);
+		if (owner !== input.actorUserId && !follows) return { refusal: RECIPE_NOT_SHARED };
+		return follows ? { versions: [], guards: [member] } : { versions, guards: [guard, member] };
 	}
 
 	async prune(input: { now: string; changeCutoff: string }): Promise<void> {

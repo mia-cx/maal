@@ -1,8 +1,6 @@
 import { Data, Schema } from 'effect';
 
 import { createAuthSlotId, MAX_AUTHENTICATED_SLOTS } from '$lib/auth-slots/contracts.js';
-import { deviceVersionVisibility, readVersionVisibility } from '$lib/client/meals/resolution.js';
-import { readRecipeVersions } from '$lib/client/recipes/versions.js';
 import { DomainIdSchema, UtcInstantSchema } from '$lib/domain/contracts/primitives.js';
 import { ProfileSchema, type Profile } from '$lib/domain/household/contracts.js';
 import { StoredMealSchema, isRecipeFollowingMeal } from '$lib/domain/meals/schema.js';
@@ -321,22 +319,6 @@ export const removeProfileFromDevice = async (
 			.filter(({ deletedAt }) => deletedAt === null);
 		const followedRecipeIds = new Set(
 			retainedFollowing.map(({ sourceRecipeId }) => sourceRecipeId)
-		);
-		// The owner's membership rows go below, so each retained household keeps the versions it
-		// sees now as versions delivered to it (spec §8.7).
-		const sees = deviceVersionVisibility(
-			await readVersionVisibility(database, retainedHouseholdIds)
-		);
-		const versionsByRecipe = Map.groupBy(
-			await readRecipeVersions(database, followedRecipeIds),
-			({ recipeId }) => recipeId
-		);
-		await database.householdVersions.bulkPut(
-			retainedFollowing.flatMap(({ householdId, sourceRecipeId }) =>
-				(versionsByRecipe.get(sourceRecipeId) ?? [])
-					.filter((version) => sees(householdId, version))
-					.map(({ id }) => ({ householdId, versionId: id }))
-			)
 		);
 		await ownRecipes.delete();
 		await database.recipeVersions
