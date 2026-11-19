@@ -140,11 +140,11 @@ test('newer schema startup falls back to a safe recovery artifact', async ({ pag
 		databaseName,
 		safeRecipeId,
 		damagedRecipeId,
-		nativeVersion: 70
+		nativeVersion: 80
 	});
 	await page.goto('/plan');
 	expect(await page.evaluate(() => indexedDB.databases())).toEqual([
-		{ name: databaseName, version: 70 }
+		{ name: databaseName, version: 80 }
 	]);
 
 	await expectRecoveryShell(page);
@@ -152,7 +152,7 @@ test('newer schema startup falls back to a safe recovery artifact', async ({ pag
 	expect(contentRequests).toEqual([]);
 	await expect
 		.poll(() => page.evaluate(readRecoverySourceState, databaseName))
-		.toEqual({ count: 2, version: 70 });
+		.toEqual({ count: 2, version: 80 });
 
 	await page.goto('/plan');
 	await expect(page).toHaveURL(/\/recovery$/);

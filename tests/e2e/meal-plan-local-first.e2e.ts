@@ -606,7 +606,26 @@ test.describe('meal sheet', () => {
 		await seed(page);
 		const { targetDay } = await planRecipeOn(page, '2026-08-23');
 		const [meal] = await readStore(page, 'meals');
-		await putRow(page, 'meals', { ...meal, sourceRecipeId: null, cookTimeMinutes: null });
+		const [recipe] = await readStore(page, 'recipes');
+		// A custom meal is a meal copy with no source recipe; the planned meal only follows one.
+		const custom: Row = {
+			...recipe,
+			...meal,
+			notes: recipe!.userNotes,
+			instructionEvents: [],
+			sourceRecipeId: null,
+			cookTimeMinutes: null
+		};
+		for (const key of [
+			'followsRecipe',
+			'ownerUserId',
+			'savedFromHouseholdId',
+			'userNotes',
+			'searchTokens'
+		]) {
+			delete custom[key];
+		}
+		await putRow(page, 'meals', custom);
 		await page.reload();
 
 		await targetDay.getByRole('button', { name: 'Open Gingery chicken rice bowls' }).click();
