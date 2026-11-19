@@ -1,7 +1,7 @@
 import { alternatesFor } from '$lib/public-site';
 import type { RequestHandler } from './$types';
 
-const pageFiles = Object.keys(import.meta.glob('/src/routes/(public)/**/+page.svelte'));
+const pageFiles = Object.keys(import.meta.glob('/src/routes/[(]public[)]/**/+page.svelte'));
 const publicPaths = pageFiles.map((file) =>
 	file.slice('/src/routes/(public)'.length, -'+page.svelte'.length)
 );
