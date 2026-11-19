@@ -502,6 +502,9 @@ compares the edit's age with the audience's staleness threshold:
 - Restoring a recipe from the bin (a live upsert of only the `deletion` group with `deletedAt` null) is always
   accepted while its tombstone is active, whatever its age, and is not marked `reinstated`.
 
+The Worker reads the entity head before it looks for the tombstone, so a deletion that commits in between
+moves the head, fails the guarded write, and the retry decides against that deletion.
+
 The same threshold is the backfill skew window in §8.2, so one household setting decides when a change is
 too old to count as current.
 

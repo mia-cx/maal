@@ -25,6 +25,7 @@ import {
 } from '$lib/server/sync/index.js';
 import type { LiveWorkOSMembership } from '$lib/server/auth-slots/adapter.js';
 import { SyncTransportError, type SyncMutation } from '$lib/sync/contracts.js';
+import { commitBetweenReads } from './d1-interleave.js';
 import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js';
 
 const userId = 'user_alice';
@@ -450,50 +451,15 @@ describe('D1 user sync repository', () => {
 		// Resolve the scope-state read, then commit a new entity before the
 		// identity listing runs — the page must contain it (or the watermark
 		// must not cover it).
-		const intercepted: D1Database = new Proxy(database, {
-			get(target, property) {
-				if (property !== 'prepare') {
-					const value = Reflect.get(target, property);
-					return typeof value === 'function' ? value.bind(target) : value;
-				}
-				return (sql: string) => {
-					const statement = target.prepare(sql);
-					if (!sql.includes('FROM sync_scope_state')) return statement;
-					return new Proxy(statement, {
-						get(inner, innerProperty) {
-							if (innerProperty !== 'bind') {
-								const value = Reflect.get(inner, innerProperty);
-								return typeof value === 'function' ? value.bind(inner) : value;
-							}
-							return (...args: unknown[]) => {
-								const bound = (inner.bind as (...a: unknown[]) => D1PreparedStatement)(...args);
-								return new Proxy(bound, {
-									get(boundTarget, boundProperty) {
-										if (boundProperty !== 'first') {
-											const value = Reflect.get(boundTarget, boundProperty);
-											return typeof value === 'function' ? value.bind(boundTarget) : value;
-										}
-										return async () => {
-											const result = await bound.first();
-											if (!injected) {
-												injected = true;
-												await concurrent.commit({
-													actorUserId: userId,
-													deviceId,
-													mutation: mutation(entityId, uuidv7(), '2026-08-22T12:00:00.000Z', 3),
-													mode: 'live',
-													receivedAt: '2026-08-22T12:00:00.000Z'
-												});
-											}
-											return result;
-										};
-									}
-								});
-							};
-						}
-					});
-				};
-			}
+		const intercepted = commitBetweenReads(database, 'FROM sync_scope_state', async () => {
+			injected = true;
+			await concurrent.commit({
+				actorUserId: userId,
+				deviceId,
+				mutation: mutation(entityId, uuidv7(), '2026-08-22T12:00:00.000Z', 3),
+				mode: 'live',
+				receivedAt: '2026-08-22T12:00:00.000Z'
+			});
 		});
 		const repository = new D1UserSyncRepository(intercepted);
 		const snapshot = await repository.bootstrap(userId, FIRST_PAGE);
@@ -804,6 +770,100 @@ describe('D1 user sync repository', () => {
 			mutationId: editId,
 			reinstated: true,
 			conflictGroups: ['header', 'deletion']
+		});
+	});
+
+	test('a deletion committing while a recent edit is in flight still yields to the edit', async () => {
+		const repository = new D1UserSyncRepository(database);
+		const entityId = uuidv7();
+		const createId = uuidv7();
+		const original = recipeAggregate(entityId, createId);
+		await repository.commit({
+			actorUserId: userId,
+			deviceId,
+			mode: 'live',
+			receivedAt: timestamp,
+			mutation: {
+				schemaVersion: 1,
+				mutationId: createId,
+				originDeviceId: deviceId,
+				entityKind: 'recipe',
+				entityId,
+				conflictGroups: ['aggregate'],
+				operation: 'upsert',
+				occurredAt: timestamp,
+				aggregate: original
+			}
+		});
+		const deleteId = uuidv7();
+		const deletedAt = '2026-08-22T12:00:00.000Z' as const;
+		const deleteRecipe = () =>
+			repository.commit({
+				actorUserId: userId,
+				deviceId,
+				mode: 'live',
+				receivedAt: deletedAt,
+				mutation: {
+					schemaVersion: 1,
+					mutationId: deleteId,
+					originDeviceId: deviceId,
+					entityKind: 'recipe',
+					entityId,
+					conflictGroups: ['deletion'],
+					operation: 'delete',
+					occurredAt: deletedAt,
+					aggregate: {
+						...original,
+						updatedAt: deletedAt,
+						deletedAt,
+						conflictClocks: {
+							...original.conflictClocks,
+							deletion: { occurredAt: deletedAt, originDeviceId: deviceId, mutationId: deleteId }
+						}
+					}
+				}
+			});
+		const otherDevice = uuidv7();
+		const editId = uuidv7();
+		const editedAt = '2026-08-22T11:45:00.000Z' as const;
+		// The deletion lands after the edit found no tombstone, before it read the entity's versions.
+		const racing = new D1UserSyncRepository(
+			commitBetweenReads(database, 'FROM sync_tombstones', deleteRecipe)
+		);
+
+		await expect(
+			racing.commit({
+				actorUserId: userId,
+				deviceId: otherDevice,
+				mode: 'live',
+				receivedAt: '2026-08-22T12:00:01.000Z',
+				mutation: {
+					schemaVersion: 1,
+					mutationId: editId,
+					originDeviceId: otherDevice,
+					entityKind: 'recipe',
+					entityId,
+					conflictGroups: ['header'],
+					operation: 'upsert',
+					occurredAt: editedAt,
+					aggregate: {
+						...original,
+						title: 'Weeknight soup',
+						updatedAt: editedAt,
+						conflictClocks: {
+							...original.conflictClocks,
+							header: { occurredAt: editedAt, originDeviceId: otherDevice, mutationId: editId }
+						}
+					}
+				}
+			})
+		).resolves.toMatchObject({ status: 'accepted' });
+		await expect(
+			database.prepare('SELECT title, deleted_at FROM recipes WHERE id = ?').bind(entityId).first()
+		).resolves.toEqual({ title: 'Weeknight soup', deleted_at: null });
+		expect((await repository.pull(userId, 0, 100)).changes.at(-1)).toMatchObject({
+			mutationId: editId,
+			reinstated: true
 		});
 	});
 

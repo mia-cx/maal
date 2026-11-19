@@ -960,6 +960,14 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 				if (!currentMember) return rejected('planned_cook_not_member');
 			}
 		}
+		// Read the head before the tombstone: a deletion committing in between moves the head, so the
+		// guarded batch retries and the revival decision sees it.
+		const versions = await readVersions(
+			this.database,
+			input.householdId,
+			input.mutation.entityKind,
+			input.mutation.entityId
+		);
 		const activeTombstone = await this.database
 			.prepare(
 				`SELECT 1 AS present FROM sync_tombstones
@@ -984,12 +992,6 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 			return rejected('tombstoned_entity');
 		}
 
-		const versions = await readVersions(
-			this.database,
-			input.householdId,
-			input.mutation.entityKind,
-			input.mutation.entityId
-		);
 		const versionByGroup = new Map(versions.map((version) => [version.conflict_group, version]));
 		const acceptedGroups =
 			input.mode === 'live'

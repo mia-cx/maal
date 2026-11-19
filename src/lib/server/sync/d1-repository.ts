@@ -904,6 +904,14 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			input.actorUserId,
 			input.mutation.aggregate
 		);
+		// Read the head before the tombstone: a deletion committing in between moves the head, so the
+		// guarded batch retries and the revival decision sees it.
+		const versions = await readVersions(
+			this.database,
+			input.actorUserId,
+			input.mutation.entityKind,
+			input.mutation.entityId
+		);
 		const activeTombstone = await this.database
 			.prepare(
 				`SELECT c.payload FROM sync_tombstones t
@@ -944,12 +952,6 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			!input.mutation.conflictGroups.includes('deletion')
 				? [...input.mutation.conflictGroups, 'deletion']
 				: [...input.mutation.conflictGroups];
-		const versions = await readVersions(
-			this.database,
-			input.actorUserId,
-			input.mutation.entityKind,
-			input.mutation.entityId
-		);
 		const versionByGroup = new Map(versions.map((version) => [version.conflict_group, version]));
 		const acceptedGroups =
 			input.mode === 'live'

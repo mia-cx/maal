@@ -15,6 +15,7 @@ import {
 } from '$lib/server/sync/index.js';
 import type { LiveWorkOSMembership } from '$lib/server/auth-slots/adapter.js';
 import type { HouseholdSyncMutation } from '$lib/sync/household-contracts.js';
+import { commitBetweenReads } from './d1-interleave.js';
 import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js';
 
 const householdId = 'org_family';
@@ -698,6 +699,52 @@ describe('D1 household sync', () => {
 		).resolves.toEqual({ title: 'Bob’s soup' });
 	});
 
+	test('a deletion committing while a stale edit is in flight keeps the meal deleted', async () => {
+		const repository = new D1HouseholdSyncRepository(database);
+		const mealId = uuidv7();
+		await repository.commit({
+			householdId,
+			actorUserId: aliceId,
+			deviceId,
+			mutation: mealMutation(mealId, uuidv7(), timestamp),
+			mode: 'live',
+			receivedAt: timestamp
+		});
+		const deletedAt = '2026-08-22T12:00:00.000Z' as const;
+		const deleteMeal = () =>
+			repository.commit({
+				householdId,
+				actorUserId: aliceId,
+				deviceId,
+				mutation: {
+					...mealMutation(mealId, uuidv7(), deletedAt, { deletedAt }),
+					operation: 'delete',
+					conflictGroups: ['deletion']
+				},
+				mode: 'live',
+				receivedAt: deletedAt
+			});
+		// The deletion lands after the edit found no tombstone, before it read the meal's versions.
+		const racing = new D1HouseholdSyncRepository(
+			commitBetweenReads(database, 'FROM sync_tombstones', deleteMeal)
+		);
+
+		// Made a day before it reached D1: older than the 3-hour default threshold.
+		await expect(
+			racing.commit({
+				householdId,
+				actorUserId: bobId,
+				deviceId,
+				mutation: mealMutation(mealId, uuidv7(), timestamp, { title: 'Stale soup' }),
+				mode: 'live',
+				receivedAt: '2026-08-22T12:00:01.000Z'
+			})
+		).resolves.toMatchObject({ status: 'rejected', errorCode: 'tombstoned_entity' });
+		await expect(
+			database.prepare('SELECT 1 AS present FROM meals WHERE id = ?').bind(mealId).first()
+		).resolves.toBeNull();
+	});
+
 	test('requires bootstrap below the retained floor', async () => {
 		const repository = new D1HouseholdSyncRepository(database);
 		const mealId = uuidv7();
@@ -730,51 +777,16 @@ describe('D1 household sync', () => {
 		let injected = false;
 		// Resolve the scope-state read, then commit a new meal before the
 		// identity listing runs — the page must contain it.
-		const intercepted: D1Database = new Proxy(database, {
-			get(target, property) {
-				if (property !== 'prepare') {
-					const value = Reflect.get(target, property);
-					return typeof value === 'function' ? value.bind(target) : value;
-				}
-				return (sql: string) => {
-					const statement = target.prepare(sql);
-					if (!sql.includes('FROM sync_scope_state')) return statement;
-					return new Proxy(statement, {
-						get(inner, innerProperty) {
-							if (innerProperty !== 'bind') {
-								const value = Reflect.get(inner, innerProperty);
-								return typeof value === 'function' ? value.bind(inner) : value;
-							}
-							return (...args: unknown[]) => {
-								const bound = (inner.bind as (...a: unknown[]) => D1PreparedStatement)(...args);
-								return new Proxy(bound, {
-									get(boundTarget, boundProperty) {
-										if (boundProperty !== 'first') {
-											const value = Reflect.get(boundTarget, boundProperty);
-											return typeof value === 'function' ? value.bind(boundTarget) : value;
-										}
-										return async () => {
-											const result = await bound.first();
-											if (!injected) {
-												injected = true;
-												await concurrent.commit({
-													householdId,
-													actorUserId: aliceId,
-													deviceId,
-													mutation: mealMutation(mealId, uuidv7(), '2026-08-22T12:00:00.000Z'),
-													mode: 'live',
-													receivedAt: '2026-08-22T12:00:00.000Z'
-												});
-											}
-											return result;
-										};
-									}
-								});
-							};
-						}
-					});
-				};
-			}
+		const intercepted = commitBetweenReads(database, 'FROM sync_scope_state', async () => {
+			injected = true;
+			await concurrent.commit({
+				householdId,
+				actorUserId: aliceId,
+				deviceId,
+				mutation: mealMutation(mealId, uuidv7(), '2026-08-22T12:00:00.000Z'),
+				mode: 'live',
+				receivedAt: '2026-08-22T12:00:00.000Z'
+			});
 		});
 		const repository = new D1HouseholdSyncRepository(intercepted);
 		const snapshot = await repository.bootstrap(householdId, FIRST_PAGE);
