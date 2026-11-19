@@ -56,12 +56,12 @@ export class HouseholdAdministrationDecodeError extends Data.TaggedError(
 
 type Fetch = typeof globalThis.fetch;
 
-const requestJson = async <A>(
+const requestJson = async <A, I>(
 	fetcher: Fetch,
 	url: string,
 	operation: string,
 	init: RequestInit,
-	schema: Schema.Schema<A>,
+	schema: Schema.Schema<A, I>,
 	session: { database: MaalDatabase; authSlotId: string }
 ): Promise<A> => {
 	let response: Response;

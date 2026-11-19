@@ -30,6 +30,7 @@ export const households = sqliteTable(
 		weekStartsOn: integer('week_starts_on').notNull().default(1),
 		defaultPlannedYield: integer('default_planned_yield').notNull().default(1),
 		preferredDinnerTime: text('preferred_dinner_time'),
+		stalenessThresholdMinutes: integer('staleness_threshold_minutes').notNull().default(180),
 		createdByUserId: text('created_by_user_id').references(() => users.workosUserId, {
 			onDelete: 'set null'
 		}),

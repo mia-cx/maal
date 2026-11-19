@@ -33,6 +33,7 @@ import { MEAL_CONFLICT_GROUPS, MealCheckInSchema } from '$lib/domain/meals/schem
 import { RECIPE_CONFLICT_GROUPS } from '$lib/domain/recipes/schema.js';
 import { pushUserSync, type UserSyncRepository } from '$lib/server/sync/index.js';
 import { incomingWinsHistoricalConflict } from '$lib/server/sync/reconciliation.js';
+import { DEFAULT_STALENESS_THRESHOLD_MINUTES } from '$lib/domain/household/staleness.js';
 import type { SyncMutation } from '$lib/sync/contracts.js';
 import type { HouseholdSyncMutation } from '$lib/sync/household-contracts.js';
 import { HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS } from '$lib/sync/household-entities.js';
@@ -97,6 +98,7 @@ const openDatabase = async () => {
 		weekStartsOn: 1,
 		defaultPlannedYield: 2,
 		preferredDinnerTime: '18:00',
+		stalenessThresholdMinutes: 180,
 		createdByUserId: workosUserId,
 		deletionState: 'active',
 		localOnly: false,
@@ -462,7 +464,8 @@ describe('portable replacements', () => {
 		await database.outbox.clear();
 		await replace(database, archive);
 
-		const historical = { occurredAt: at(12), originDeviceId: uuidv7(), mutationId: uuidv7() };
+		// Over three hours after the archive's clocks, so only the fresh import clocks beat it.
+		const historical = { occurredAt: at(14), originDeviceId: uuidv7(), mutationId: uuidv7() };
 		const mutationIds: string[] = [];
 		for (const [store, original, groups, replacement] of [
 			['recipes', recipe, RECIPE_CONFLICT_GROUPS, true],
@@ -484,7 +487,9 @@ describe('portable replacements', () => {
 					occurredAt: replacement ? importedAt : original.updatedAt
 				}))
 			);
-			expect(incomingWinsHistoricalConflict(historical, clock)).toBe(replacement);
+			expect(
+				incomingWinsHistoricalConflict(historical, clock, DEFAULT_STALENESS_THRESHOLD_MINUTES)
+			).toBe(replacement);
 			const intents = await database.outbox.where('aggregateId').equals(original.id).toArray();
 			expect(intents).toEqual(
 				replacement

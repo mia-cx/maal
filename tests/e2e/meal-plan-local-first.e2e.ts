@@ -54,6 +54,7 @@ const seedPlan = async () => {
 		weekStartsOn: 0,
 		defaultPlannedYield: 4,
 		preferredDinnerTime: '18:30',
+		stalenessThresholdMinutes: 180,
 		createdByUserId: 'user_alice',
 		deletionState: 'active',
 		localOnly: false
@@ -180,7 +181,7 @@ const seed = async (page: Page) => {
 			page.evaluate(async () => {
 				const databases = await indexedDB.databases();
 				return databases.some(
-					({ name, version }) => name === 'maal-v1:production' && version === 50
+					({ name, version }) => name === 'maal-v1:production' && version === 60
 				);
 			})
 		)
@@ -278,7 +279,7 @@ test('renders the first-visit plan with an error when the saved schedule state c
 			page.evaluate(async () => {
 				const databases = await indexedDB.databases();
 				return databases.some(
-					({ name, version }) => name === 'maal-v1:production' && version === 50
+					({ name, version }) => name === 'maal-v1:production' && version === 60
 				);
 			})
 		)

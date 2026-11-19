@@ -15,6 +15,7 @@ import {
 } from '$lib/server/sync/index.js';
 import type { LiveWorkOSMembership } from '$lib/server/auth-slots/adapter.js';
 import type { HouseholdSyncMutation } from '$lib/sync/household-contracts.js';
+import { commitBetweenReads } from './d1-interleave.js';
 import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js';
 
 const householdId = 'org_family';
@@ -503,7 +504,7 @@ describe('D1 household sync', () => {
 		).resolves.toEqual({ id: checkInId });
 	});
 
-	test('is idempotent, rejects cross-profile check-ins, and keeps meal tombstones authoritative', async () => {
+	test('is idempotent, rejects cross-profile check-ins, and keeps meal tombstones authoritative over stale edits', async () => {
 		const repository = new D1HouseholdSyncRepository(database);
 		const mealId = uuidv7();
 		const mutationId = uuidv7();
@@ -571,11 +572,12 @@ describe('D1 household sync', () => {
 			mode: 'live',
 			receivedAt: '2026-08-22T12:00:01.000Z'
 		});
+		// Made a day before it reached D1: older than the 3-hour default threshold.
 		const resurrection = await repository.commit({
 			householdId,
 			actorUserId: bobId,
 			deviceId,
-			mutation: mealMutation(mealId, uuidv7(), '2026-08-23T12:00:00.000Z'),
+			mutation: mealMutation(mealId, uuidv7(), '2026-08-22T12:00:00.500Z'),
 			mode: 'live',
 			receivedAt: '2026-08-23T12:00:01.000Z'
 		});
@@ -586,6 +588,215 @@ describe('D1 household sync', () => {
 		).toMatchObject({
 			id: mealId,
 			purgedAt: '2026-08-22T12:00:01.000Z'
+		});
+	});
+
+	test("an edit younger than the household's synced threshold brings a deleted meal back", async () => {
+		const repository = new D1HouseholdSyncRepository(database);
+		const settingsMutationId = uuidv7();
+		await repository.commit({
+			householdId,
+			actorUserId: aliceId,
+			deviceId,
+			mutation: {
+				schemaVersion: 1,
+				mutationId: settingsMutationId,
+				originDeviceId: deviceId,
+				entityKind: 'household',
+				entityId: householdId,
+				conflictGroups: ['settings'],
+				operation: 'upsert',
+				occurredAt: timestamp,
+				aggregate: Schema.decodeUnknownSync(HouseholdSchema)({
+					schemaVersion: 1,
+					revision: 1,
+					createdAt: timestamp,
+					updatedAt: timestamp,
+					deletedAt: null,
+					conflictClocks: {
+						settings: {
+							occurredAt: timestamp,
+							originDeviceId: deviceId,
+							mutationId: settingsMutationId
+						}
+					},
+					householdId,
+					name: 'Family',
+					locale: 'en-NL',
+					timezone: 'Europe/Amsterdam',
+					weekStartsOn: 1,
+					defaultPlannedYield: 4,
+					preferredDinnerTime: null,
+					stalenessThresholdMinutes: 60,
+					createdByUserId: aliceId,
+					deletionState: 'active',
+					localOnly: false
+				})
+			},
+			mode: 'live',
+			receivedAt: timestamp
+		});
+		const mealId = uuidv7();
+		await repository.commit({
+			householdId,
+			actorUserId: aliceId,
+			deviceId,
+			mutation: mealMutation(mealId, uuidv7(), timestamp),
+			mode: 'live',
+			receivedAt: timestamp
+		});
+		await repository.commit({
+			householdId,
+			actorUserId: aliceId,
+			deviceId,
+			mutation: {
+				...mealMutation(mealId, uuidv7(), '2026-08-22T12:00:00.000Z', {
+					deletedAt: '2026-08-22T12:00:00.000Z'
+				}),
+				operation: 'delete',
+				conflictGroups: ['deletion']
+			},
+			mode: 'live',
+			receivedAt: '2026-08-22T12:00:00.000Z'
+		});
+
+		// Two hours old: inside the 3-hour default, outside this household's 1 hour.
+		const stale = await repository.commit({
+			householdId,
+			actorUserId: bobId,
+			deviceId,
+			mutation: mealMutation(mealId, uuidv7(), '2026-08-22T10:30:00.000Z', {
+				title: 'Stale soup'
+			}),
+			mode: 'live',
+			receivedAt: '2026-08-22T12:30:00.000Z'
+		});
+		expect(stale).toMatchObject({ status: 'rejected', errorCode: 'tombstoned_entity' });
+
+		const recent = await repository.commit({
+			householdId,
+			actorUserId: bobId,
+			deviceId,
+			mutation: mealMutation(mealId, uuidv7(), '2026-08-22T11:45:00.000Z', {
+				title: 'Bob’s soup'
+			}),
+			mode: 'live',
+			receivedAt: '2026-08-22T12:30:00.000Z'
+		});
+		expect(recent).toMatchObject({ status: 'accepted' });
+		const page = await repository.pull(householdId, 0, 100);
+		expect(page.changes.at(-1)).toMatchObject({
+			entityId: mealId,
+			operation: 'upsert',
+			reinstated: true,
+			aggregate: expect.objectContaining({ title: 'Bob’s soup', deletedAt: null })
+		});
+		await expect(
+			database
+				.prepare('SELECT title FROM meals WHERE id = ?')
+				.bind(mealId)
+				.first<{ title: string }>()
+		).resolves.toEqual({ title: 'Bob’s soup' });
+	});
+
+	test('a deletion committing while a stale edit is in flight keeps the meal deleted', async () => {
+		const repository = new D1HouseholdSyncRepository(database);
+		const mealId = uuidv7();
+		await repository.commit({
+			householdId,
+			actorUserId: aliceId,
+			deviceId,
+			mutation: mealMutation(mealId, uuidv7(), timestamp),
+			mode: 'live',
+			receivedAt: timestamp
+		});
+		const deletedAt = '2026-08-22T12:00:00.000Z' as const;
+		const deleteMeal = () =>
+			repository.commit({
+				householdId,
+				actorUserId: aliceId,
+				deviceId,
+				mutation: {
+					...mealMutation(mealId, uuidv7(), deletedAt, { deletedAt }),
+					operation: 'delete',
+					conflictGroups: ['deletion']
+				},
+				mode: 'live',
+				receivedAt: deletedAt
+			});
+		// The deletion lands after the edit found no tombstone, before it read the meal's versions.
+		const racing = new D1HouseholdSyncRepository(
+			commitBetweenReads(database, 'FROM sync_tombstones', deleteMeal)
+		);
+
+		// Made a day before it reached D1: older than the 3-hour default threshold.
+		await expect(
+			racing.commit({
+				householdId,
+				actorUserId: bobId,
+				deviceId,
+				mutation: mealMutation(mealId, uuidv7(), timestamp, { title: 'Stale soup' }),
+				mode: 'live',
+				receivedAt: '2026-08-22T12:00:01.000Z'
+			})
+		).resolves.toMatchObject({ status: 'rejected', errorCode: 'tombstoned_entity' });
+		await expect(
+			database.prepare('SELECT 1 AS present FROM meals WHERE id = ?').bind(mealId).first()
+		).resolves.toBeNull();
+	});
+
+	test('a meal revived after its source recipe was purged comes back without provenance', async () => {
+		const repository = new D1HouseholdSyncRepository(database);
+		const recipeId = uuidv7();
+		await database
+			.prepare("INSERT INTO recipes (id, owner_user_id, title) VALUES (?, ?, 'Soup')")
+			.bind(recipeId, aliceId)
+			.run();
+		const mealId = uuidv7();
+		const plannedAt = '2026-08-22T12:00:00.000Z' as const;
+		await repository.commit({
+			householdId,
+			actorUserId: aliceId,
+			deviceId,
+			mutation: mealMutation(mealId, uuidv7(), plannedAt, { sourceRecipeId: recipeId }),
+			mode: 'live',
+			receivedAt: plannedAt
+		});
+		const deletedAt = '2026-08-22T12:10:00.000Z' as const;
+		await repository.commit({
+			householdId,
+			actorUserId: aliceId,
+			deviceId,
+			mutation: {
+				...mealMutation(mealId, uuidv7(), deletedAt, { sourceRecipeId: recipeId, deletedAt }),
+				operation: 'delete',
+				conflictGroups: ['deletion']
+			},
+			mode: 'live',
+			receivedAt: deletedAt
+		});
+		await database.prepare('DELETE FROM recipes WHERE id = ?').bind(recipeId).run();
+
+		// Bob rescheduled offline at 12:05, before the deletion, and still names the purged recipe.
+		await expect(
+			repository.commit({
+				householdId,
+				actorUserId: bobId,
+				deviceId,
+				mutation: mealMutation(mealId, uuidv7(), '2026-08-22T12:05:00.000Z', {
+					sourceRecipeId: recipeId,
+					time: '19:00'
+				}),
+				mode: 'live',
+				receivedAt: '2026-08-22T12:30:00.000Z'
+			})
+		).resolves.toMatchObject({ status: 'accepted' });
+		await expect(
+			database.prepare('SELECT source_recipe_id, time FROM meals WHERE id = ?').bind(mealId).first()
+		).resolves.toEqual({ source_recipe_id: null, time: '19:00' });
+		expect((await repository.pull(householdId, 0, 100)).changes.at(-1)).toMatchObject({
+			reinstated: true,
+			aggregate: expect.objectContaining({ sourceRecipeId: null })
 		});
 	});
 
@@ -621,51 +832,16 @@ describe('D1 household sync', () => {
 		let injected = false;
 		// Resolve the scope-state read, then commit a new meal before the
 		// identity listing runs — the page must contain it.
-		const intercepted: D1Database = new Proxy(database, {
-			get(target, property) {
-				if (property !== 'prepare') {
-					const value = Reflect.get(target, property);
-					return typeof value === 'function' ? value.bind(target) : value;
-				}
-				return (sql: string) => {
-					const statement = target.prepare(sql);
-					if (!sql.includes('FROM sync_scope_state')) return statement;
-					return new Proxy(statement, {
-						get(inner, innerProperty) {
-							if (innerProperty !== 'bind') {
-								const value = Reflect.get(inner, innerProperty);
-								return typeof value === 'function' ? value.bind(inner) : value;
-							}
-							return (...args: unknown[]) => {
-								const bound = (inner.bind as (...a: unknown[]) => D1PreparedStatement)(...args);
-								return new Proxy(bound, {
-									get(boundTarget, boundProperty) {
-										if (boundProperty !== 'first') {
-											const value = Reflect.get(boundTarget, boundProperty);
-											return typeof value === 'function' ? value.bind(boundTarget) : value;
-										}
-										return async () => {
-											const result = await bound.first();
-											if (!injected) {
-												injected = true;
-												await concurrent.commit({
-													householdId,
-													actorUserId: aliceId,
-													deviceId,
-													mutation: mealMutation(mealId, uuidv7(), '2026-08-22T12:00:00.000Z'),
-													mode: 'live',
-													receivedAt: '2026-08-22T12:00:00.000Z'
-												});
-											}
-											return result;
-										};
-									}
-								});
-							};
-						}
-					});
-				};
-			}
+		const intercepted = commitBetweenReads(database, 'FROM sync_scope_state', async () => {
+			injected = true;
+			await concurrent.commit({
+				householdId,
+				actorUserId: aliceId,
+				deviceId,
+				mutation: mealMutation(mealId, uuidv7(), '2026-08-22T12:00:00.000Z'),
+				mode: 'live',
+				receivedAt: '2026-08-22T12:00:00.000Z'
+			});
 		});
 		const repository = new D1HouseholdSyncRepository(intercepted);
 		const snapshot = await repository.bootstrap(householdId, FIRST_PAGE);

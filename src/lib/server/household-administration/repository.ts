@@ -20,6 +20,7 @@ interface HouseholdRow {
 	week_starts_on: number;
 	default_planned_yield: number;
 	preferred_dinner_time: string | null;
+	staleness_threshold_minutes: number;
 	created_by_user_id: string | null;
 	schema_version: number;
 	revision: number;

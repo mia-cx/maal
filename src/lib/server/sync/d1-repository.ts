@@ -1,4 +1,8 @@
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
+import {
+	DEFAULT_STALENESS_THRESHOLD_MINUTES,
+	isRecentEdit
+} from '$lib/domain/household/staleness.js';
 import { isRecipeAggregate, type StoredRecipe } from '$lib/domain/recipes/schema.js';
 import {
 	USER_SYNC_ENTITY_KINDS,
@@ -23,6 +27,7 @@ import {
 	identitiesJson,
 	kindLiteral,
 	listHeldIdentities,
+	markReinstated,
 	queryAll,
 	readSidecars,
 	type CommitResult,
@@ -86,7 +91,7 @@ interface VersionRow {
 
 interface StoredChangePayload {
 	schemaVersion: 1;
-	payload: { conflictGroups: string[]; aggregate: unknown };
+	payload: { conflictGroups: string[]; aggregate: unknown; reinstated?: true };
 }
 
 const USER_TABLES = {
@@ -301,7 +306,11 @@ const decodeStoredPayload = (encoded: string): StoredChangePayload => {
 	const payload = (value as { payload?: unknown }).payload;
 	if (typeof payload !== 'object' || payload === null)
 		throw new TypeError('Malformed persisted sync payload.');
-	const candidate = payload as { conflictGroups?: unknown; aggregate?: unknown };
+	const candidate = payload as {
+		conflictGroups?: unknown;
+		aggregate?: unknown;
+		reinstated?: unknown;
+	};
 	if (
 		!Array.isArray(candidate.conflictGroups) ||
 		!candidate.conflictGroups.every((group) => typeof group === 'string')
@@ -310,7 +319,11 @@ const decodeStoredPayload = (encoded: string): StoredChangePayload => {
 	}
 	return {
 		schemaVersion: 1,
-		payload: { conflictGroups: candidate.conflictGroups, aggregate: candidate.aggregate }
+		payload: {
+			conflictGroups: candidate.conflictGroups,
+			aggregate: candidate.aggregate,
+			...(candidate.reinstated === true ? { reinstated: true as const } : {})
+		}
 	};
 };
 
@@ -328,7 +341,8 @@ const changeFromRow = (row: ChangeRow): SyncChange => {
 		occurredAt: row.occurred_at as `${string}Z`,
 		receivedAt: row.received_at as `${string}Z`,
 		aggregate: stored.payload.aggregate,
-		tombstoneExpiresAt: row.tombstone_expires_at as `${string}Z` | null
+		tombstoneExpiresAt: row.tombstone_expires_at as `${string}Z` | null,
+		...(stored.payload.reinstated ? { reinstated: true as const } : {})
 	};
 };
 
@@ -800,7 +814,11 @@ export class D1UserSyncRepository implements UserSyncRepository {
 		const last = selected.at(-1);
 		return {
 			...state,
-			aggregates: await readSnapshotChanges(this.database, workosUserId, selected),
+			aggregates: await markReinstated(
+				this.database,
+				audience(workosUserId),
+				await readSnapshotChanges(this.database, workosUserId, selected)
+			),
 			authoritativeIds,
 			nextEntityKey:
 				identities.length > page.limit && last
@@ -891,6 +909,14 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			input.actorUserId,
 			input.mutation.aggregate
 		);
+		// Read the head before the tombstone: a deletion committing in between moves the head, so the
+		// guarded batch retries and the revival decision sees it.
+		const versions = await readVersions(
+			this.database,
+			input.actorUserId,
+			input.mutation.entityKind,
+			input.mutation.entityId
+		);
 		const activeTombstone = await this.database
 			.prepare(
 				`SELECT c.payload FROM sync_tombstones t
@@ -900,6 +926,7 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			)
 			.bind(input.actorUserId, input.mutation.entityKind, input.mutation.entityId, input.receivedAt)
 			.first<ActiveTombstoneRow>();
+		let reinstated = false;
 		if (activeTombstone && input.mutation.operation === 'upsert') {
 			const deletedAggregate = decodeStoredPayload(activeTombstone.payload).payload.aggregate;
 			const intentionalSoftDeleteRestore =
@@ -910,19 +937,31 @@ export class D1UserSyncRepository implements UserSyncRepository {
 				isRecipeAggregate(deletedAggregate as StoredRecipe) &&
 				isRecipeAggregate(decodedIncoming.aggregate as StoredRecipe) &&
 				decodedIncoming.aggregate.deletedAt === null;
-			if (!intentionalSoftDeleteRestore) return rejected('tombstoned_entity');
+			if (!intentionalSoftDeleteRestore) {
+				// User audiences have no household setting, so they use the default threshold.
+				const recentEdit =
+					decodedIncoming.aggregate.deletedAt === null &&
+					isRecentEdit(
+						input.mutation.occurredAt,
+						input.receivedAt,
+						DEFAULT_STALENESS_THRESHOLD_MINUTES
+					);
+				if (!recentEdit) return rejected('tombstoned_entity');
+				reinstated = true;
+			}
 		}
-		const versions = await readVersions(
-			this.database,
-			input.actorUserId,
-			input.mutation.entityKind,
-			input.mutation.entityId
-		);
+		// A revived recipe takes the edit's deletion group too, so `deletedAt` clears.
+		const mutationGroups =
+			reinstated &&
+			input.mutation.entityKind === 'recipe' &&
+			!input.mutation.conflictGroups.includes('deletion')
+				? [...input.mutation.conflictGroups, 'deletion']
+				: [...input.mutation.conflictGroups];
 		const versionByGroup = new Map(versions.map((version) => [version.conflict_group, version]));
 		const acceptedGroups =
 			input.mode === 'live'
-				? [...input.mutation.conflictGroups]
-				: input.mutation.conflictGroups.filter((group) => {
+				? mutationGroups
+				: mutationGroups.filter((group) => {
 						const version = versionByGroup.get(group);
 						return incomingWinsHistoricalConflict(
 							version
@@ -932,7 +971,8 @@ export class D1UserSyncRepository implements UserSyncRepository {
 										mutationId: version.winning_mutation_id
 									}
 								: null,
-							input.mutation
+							input.mutation,
+							DEFAULT_STALENESS_THRESHOLD_MINUTES
 						);
 					});
 		const receiptRetainUntil = new Date(
@@ -981,7 +1021,11 @@ export class D1UserSyncRepository implements UserSyncRepository {
 				: null;
 		const payload = JSON.stringify({
 			schemaVersion: CURRENT_SCHEMA_VERSION,
-			payload: { conflictGroups: acceptedGroups, aggregate: decodedResult.aggregate }
+			payload: {
+				conflictGroups: acceptedGroups,
+				aggregate: decodedResult.aggregate,
+				...(reinstated ? { reinstated: true } : {})
+			}
 		});
 		const statements = [
 			this.database

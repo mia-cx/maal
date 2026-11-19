@@ -9,6 +9,11 @@ import {
 	UtcInstantSchema
 } from '$lib/domain/contracts/primitives.js';
 
+import {
+	DEFAULT_STALENESS_THRESHOLD_MINUTES,
+	StalenessThresholdMinutesSchema
+} from './staleness.js';
+
 export const householdRoleValues = ['admin', 'member', 'child'] as const;
 export const HouseholdRoleSchema = Schema.Literal(...householdRoleValues);
 export type HouseholdRole = typeof HouseholdRoleSchema.Type;
@@ -67,6 +72,9 @@ export const HouseholdSchema = Schema.Struct({
 	weekStartsOn: Schema.Literal(0, 1),
 	defaultPlannedYield: Schema.Number.pipe(Schema.int(), Schema.positive()),
 	preferredDinnerTime: Schema.NullOr(LocalTimeSchema),
+	stalenessThresholdMinutes: Schema.optionalWith(StalenessThresholdMinutesSchema, {
+		default: () => DEFAULT_STALENESS_THRESHOLD_MINUTES
+	}),
 	createdByUserId: Schema.NullOr(Schema.String),
 	deletionState: HouseholdDeletionStateSchema,
 	localOnly: Schema.Boolean
@@ -139,7 +147,8 @@ export const HouseholdSettingsPatchSchema = Schema.Struct({
 	timezone: Schema.optional(Schema.NullOr(TimeZoneSchema)),
 	weekStartsOn: Schema.optional(Schema.Literal(0, 1)),
 	defaultPlannedYield: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.between(1, 24))),
-	preferredDinnerTime: Schema.optional(Schema.NullOr(LocalTimeSchema))
+	preferredDinnerTime: Schema.optional(Schema.NullOr(LocalTimeSchema)),
+	stalenessThresholdMinutes: Schema.optional(StalenessThresholdMinutesSchema)
 });
 export type HouseholdSettingsPatch = typeof HouseholdSettingsPatchSchema.Type;
 

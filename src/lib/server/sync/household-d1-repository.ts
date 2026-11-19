@@ -1,4 +1,8 @@
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
+import {
+	DEFAULT_STALENESS_THRESHOLD_MINUTES,
+	isRecentEdit
+} from '$lib/domain/household/staleness.js';
 import { isMealAggregate, type MealAggregate } from '$lib/domain/meals/schema.js';
 import type { MutationReceipt } from '$lib/sync/contracts.js';
 import type {
@@ -22,6 +26,7 @@ import {
 	identitiesJson,
 	kindLiteral,
 	listHeldIdentities,
+	markReinstated,
 	queryAll,
 	readSidecars,
 	type CommitResult,
@@ -82,7 +87,7 @@ interface VersionRow {
 
 interface StoredChangePayload {
 	schemaVersion: 1;
-	payload: { conflictGroups: string[]; aggregate: unknown };
+	payload: { conflictGroups: string[]; aggregate: unknown; reinstated?: true };
 }
 
 const HOUSEHOLD_TABLES = {
@@ -105,6 +110,7 @@ const HOUSEHOLD_TABLE_COLUMNS = {
 		'weekStartsOn',
 		'defaultPlannedYield',
 		'preferredDinnerTime',
+		'stalenessThresholdMinutes',
 		'createdByUserId',
 		'schemaVersion',
 		'revision',
@@ -336,7 +342,11 @@ const decodeStoredPayload = (encoded: string): StoredChangePayload => {
 	if (typeof payload !== 'object' || payload === null) {
 		throw new TypeError('Malformed persisted sync payload.');
 	}
-	const candidate = payload as { conflictGroups?: unknown; aggregate?: unknown };
+	const candidate = payload as {
+		conflictGroups?: unknown;
+		aggregate?: unknown;
+		reinstated?: unknown;
+	};
 	if (
 		!Array.isArray(candidate.conflictGroups) ||
 		!candidate.conflictGroups.every((group) => typeof group === 'string')
@@ -345,7 +355,11 @@ const decodeStoredPayload = (encoded: string): StoredChangePayload => {
 	}
 	return {
 		schemaVersion: CURRENT_SCHEMA_VERSION,
-		payload: { conflictGroups: candidate.conflictGroups, aggregate: candidate.aggregate }
+		payload: {
+			conflictGroups: candidate.conflictGroups,
+			aggregate: candidate.aggregate,
+			...(candidate.reinstated === true ? { reinstated: true as const } : {})
+		}
 	};
 };
 
@@ -364,7 +378,8 @@ const changeFromRow = (row: ChangeRow): HouseholdSyncChange => {
 		occurredAt: row.occurred_at as `${string}Z`,
 		receivedAt: row.received_at as `${string}Z`,
 		aggregate: stored.payload.aggregate,
-		tombstoneExpiresAt: row.tombstone_expires_at as `${string}Z` | null
+		tombstoneExpiresAt: row.tombstone_expires_at as `${string}Z` | null,
+		...(stored.payload.reinstated ? { reinstated: true as const } : {})
 	};
 };
 
@@ -823,7 +838,11 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 		const last = selected.at(-1);
 		return {
 			...state,
-			aggregates: await readSnapshotChanges(this.database, householdId, selected),
+			aggregates: await markReinstated(
+				this.database,
+				audience(householdId),
+				await readSnapshotChanges(this.database, householdId, selected)
+			),
 			authoritativeIds,
 			nextEntityKey:
 				identities.length > page.limit && last
@@ -946,6 +965,14 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 				if (!currentMember) return rejected('planned_cook_not_member');
 			}
 		}
+		// Read the head before the tombstone: a deletion committing in between moves the head, so the
+		// guarded batch retries and the revival decision sees it.
+		const versions = await readVersions(
+			this.database,
+			input.householdId,
+			input.mutation.entityKind,
+			input.mutation.entityId
+		);
 		const activeTombstone = await this.database
 			.prepare(
 				`SELECT 1 AS present FROM sync_tombstones
@@ -954,16 +981,22 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 			)
 			.bind(input.householdId, input.mutation.entityKind, input.mutation.entityId, input.receivedAt)
 			.first<{ present: number }>();
-		if (activeTombstone && input.mutation.operation === 'upsert') {
+		const stalenessThresholdMinutes =
+			(
+				await this.database
+					.prepare('SELECT staleness_threshold_minutes FROM households WHERE household_id = ?')
+					.bind(input.householdId)
+					.first<{ staleness_threshold_minutes: number }>()
+			)?.staleness_threshold_minutes ?? DEFAULT_STALENESS_THRESHOLD_MINUTES;
+		const reinstated = activeTombstone !== null && input.mutation.operation === 'upsert';
+		if (
+			reinstated &&
+			(decodedIncoming.aggregate.deletedAt !== null ||
+				!isRecentEdit(input.mutation.occurredAt, input.receivedAt, stalenessThresholdMinutes))
+		) {
 			return rejected('tombstoned_entity');
 		}
 
-		const versions = await readVersions(
-			this.database,
-			input.householdId,
-			input.mutation.entityKind,
-			input.mutation.entityId
-		);
 		const versionByGroup = new Map(versions.map((version) => [version.conflict_group, version]));
 		const acceptedGroups =
 			input.mode === 'live'
@@ -978,7 +1011,8 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 										mutationId: version.winning_mutation_id
 									}
 								: null,
-							input.mutation
+							input.mutation,
+							stalenessThresholdMinutes
 						);
 					});
 		if (acceptedGroups.length === 0) {
@@ -1026,15 +1060,28 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 								...Object.fromEntries(acceptedGroups.map((group) => [group, clock]))
 							}
 						};
+		// Purging a source recipe nulls meal provenance (§5.3). An offline or revived aggregate written
+		// after that still names the recipe, so it gets the same null instead of failing the foreign key.
+		const sourceRecipeId = (result as { sourceRecipeId?: unknown }).sourceRecipeId;
+		const sourceRecipePurged =
+			typeof sourceRecipeId === 'string' &&
+			(await this.database
+				.prepare('SELECT 1 AS present FROM recipes WHERE id = ?')
+				.bind(sourceRecipeId)
+				.first()) === null;
 		const decodedResult = decodeHouseholdSyncAggregate(
 			input.mutation.entityKind,
 			input.mutation.entityId,
 			input.householdId,
-			result
+			sourceRecipePurged ? { ...(result as object), sourceRecipeId: null } : result
 		);
 		const payload = JSON.stringify({
 			schemaVersion: CURRENT_SCHEMA_VERSION,
-			payload: { conflictGroups: acceptedGroups, aggregate: decodedResult.aggregate }
+			payload: {
+				conflictGroups: acceptedGroups,
+				aggregate: decodedResult.aggregate,
+				...(reinstated ? { reinstated: true } : {})
+			}
 		});
 		const receiptRetainUntil = new Date(
 			Date.parse(input.receivedAt) + 365 * 86_400_000

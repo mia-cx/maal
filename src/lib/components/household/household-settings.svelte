@@ -34,6 +34,7 @@
 	} from '$lib/domain/household/contracts.js';
 	import { hasCachedPermission } from '$lib/domain/household/permissions.js';
 	import { inviteExpiryDays } from '$lib/domain/household/settings-parsing.js';
+	import { DEFAULT_STALENESS_THRESHOLD_MINUTES } from '$lib/domain/household/staleness.js';
 	import HouseholdTaxonomyPreferences from '$lib/components/household/household-taxonomy-preferences.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import BillingSettingsSection from '$lib/components/settings/billing-settings-section.svelte';
@@ -42,6 +43,21 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import * as Select from '$lib/components/ui/select/index.js';
 	import { cn } from '$lib/utils.js';
+
+	const minutesPerHour = 60;
+	const minutesPerDay = 24 * minutesPerHour;
+	const thresholdChoices = [60, 180, 360, 720, minutesPerDay, 7 * minutesPerDay] as const;
+	const thresholdLabel = (minutes: number): string => {
+		if (minutes % minutesPerDay === 0) {
+			const days = minutes / minutesPerDay;
+			return days === 7 ? '1 week' : days === 1 ? '1 day' : `${days} days`;
+		}
+		if (minutes % minutesPerHour === 0) {
+			const hours = minutes / minutesPerHour;
+			return hours === 1 ? '1 hour' : `${hours} hours`;
+		}
+		return minutes === 1 ? '1 minute' : `${minutes} minutes`;
+	};
 
 	type ApplianceView = {
 		id: string;
@@ -84,6 +100,7 @@
 	let weekStartsOn = $state<'0' | '1'>('1');
 	let defaultPlannedYield = $state('4');
 	let preferredDinnerTime = $state('');
+	let stalenessThresholdMinutes = $state(String(DEFAULT_STALENESS_THRESHOLD_MINUTES));
 	let message = $state('');
 	let pending = $state(false);
 	let inviteOpen = $state(false);
@@ -264,6 +281,7 @@
 				weekStartsOn = String(value.household.weekStartsOn) as '0' | '1';
 				defaultPlannedYield = String(value.household.defaultPlannedYield);
 				preferredDinnerTime = value.household.preferredDinnerTime ?? '';
+				stalenessThresholdMinutes = String(value.household.stalenessThresholdMinutes);
 			}
 		});
 		return () => subscription.unsubscribe();
@@ -283,7 +301,8 @@
 					timezone: timezone.trim() || null,
 					weekStartsOn: Number(weekStartsOn) as 0 | 1,
 					defaultPlannedYield: Number(defaultPlannedYield),
-					preferredDinnerTime: preferredDinnerTime || null
+					preferredDinnerTime: preferredDinnerTime || null,
+					stalenessThresholdMinutes: Number(stalenessThresholdMinutes)
 				}
 			});
 			message = 'Household settings saved.';
@@ -713,7 +732,7 @@
 						</Select.Root>
 					</label>
 				</div>
-				<div class="grid gap-3 md:grid-cols-2">
+				<div class="grid gap-3 md:grid-cols-3">
 					<label class="grid min-w-0 gap-1 text-xs font-medium"
 						>{m.household_default_yield()}<Input
 							type="number"
@@ -732,6 +751,19 @@
 							class="h-8"
 						/></label
 					>
+					<label class="grid min-w-0 gap-1 text-xs font-medium">
+						Restore deleted items edited within
+						<Select.Root type="single" bind:value={stalenessThresholdMinutes} disabled={readOnly}>
+							<Select.Trigger class="!h-8 w-full"
+								>{thresholdLabel(Number(stalenessThresholdMinutes))}</Select.Trigger
+							>
+							<Select.Content>
+								{#each thresholdChoices as minutes (minutes)}
+									<Select.Item value={String(minutes)}>{thresholdLabel(minutes)}</Select.Item>
+								{/each}
+							</Select.Content>
+						</Select.Root>
+					</label>
 				</div>
 				{#if canManage}<div>
 						<Button type="submit" disabled={pending}>{m.household_save_household()}</Button>

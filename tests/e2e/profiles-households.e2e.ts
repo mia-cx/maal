@@ -91,6 +91,7 @@ const seedCurrentDatabase = async () => {
 		weekStartsOn: 1,
 		defaultPlannedYield: 4,
 		preferredDinnerTime: '18:30',
+		stalenessThresholdMinutes: 180,
 		createdByUserId: 'user_alice',
 		deletionState: 'active',
 		localOnly: false
@@ -155,7 +156,7 @@ const seedProfilesAndHousehold = async (page: Page) => {
 					request.onsuccess = () => resolve(request.result);
 				});
 				const ready =
-					database.version === 50 &&
+					database.version === 60 &&
 					['profiles', 'authSlots', 'households', 'memberships', 'uiState'].every((store) =>
 						database.objectStoreNames.contains(store)
 					);

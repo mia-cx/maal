@@ -23,6 +23,7 @@ interface DiscoveryRow {
 	week_starts_on: 0 | 1;
 	default_planned_yield: number;
 	preferred_dinner_time: string | null;
+	staleness_threshold_minutes: number;
 	created_by_user_id: string | null;
 	schema_version: 1;
 	revision: number;
@@ -160,6 +161,7 @@ export const discoverActiveHouseholds = async (input: {
 				weekStartsOn: row.week_starts_on,
 				defaultPlannedYield: row.default_planned_yield,
 				preferredDinnerTime: row.preferred_dinner_time,
+				stalenessThresholdMinutes: row.staleness_threshold_minutes,
 				createdByUserId: row.created_by_user_id,
 				deletionState: localDeletionState(row.deletion_state),
 				localOnly: false,

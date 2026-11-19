@@ -11,6 +11,7 @@ import type {
 } from '$lib/sync/contracts.js';
 
 import { pruneAcknowledgedOutbox, recordServerChanges, scopeOutbox } from './outbox.js';
+import { noteReinstatement } from './reinstatements.js';
 
 /** The auth slot and user a coordinator applies server changes for. */
 export interface UserApplyScope {
@@ -55,62 +56,67 @@ export const applyUserPullPage = async (
 		throw new TypeError('A sync page cannot advance behind one of its changes.');
 	}
 	const tables = [...new Set(decoded.map(({ store }) => database.table(store)))];
-	await database.transaction('rw', [...tables, database.outbox, database.syncScopes], async () => {
-		const pending = await pendingUserOutbox(database, workosUserId);
-		const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));
-		const pendingByKey = Map.groupBy(pending, (row) => keyFor(row.entityKind, row.aggregateId));
-		const localIntent = new Map<string, unknown>();
-		for (const aggregate of decoded) {
-			const key = keyFor(aggregate.entityKind, aggregate.entityId);
-			if (pendingKeys.has(key)) {
-				if (!localIntent.has(key)) {
-					localIntent.set(key, await database.table(aggregate.store).get(aggregate.entityId));
+	await database.transaction(
+		'rw',
+		[...tables, database.outbox, database.syncScopes, database.reinstatements],
+		async () => {
+			const pending = await pendingUserOutbox(database, workosUserId);
+			const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));
+			const pendingByKey = Map.groupBy(pending, (row) => keyFor(row.entityKind, row.aggregateId));
+			const localIntent = new Map<string, unknown>();
+			for (const [index, aggregate] of decoded.entries()) {
+				await noteReinstatement(database, aggregate.store, response.changes[index]!, now);
+				const key = keyFor(aggregate.entityKind, aggregate.entityId);
+				if (pendingKeys.has(key)) {
+					if (!localIntent.has(key)) {
+						localIntent.set(key, await database.table(aggregate.store).get(aggregate.entityId));
+					}
+					for (const row of pendingByKey.get(key) ?? []) {
+						await database.outbox.update(row.mutationId, {
+							authoritativeSnapshot: aggregate.aggregate
+						});
+					}
 				}
-				for (const row of pendingByKey.get(key) ?? []) {
-					await database.outbox.update(row.mutationId, {
-						authoritativeSnapshot: aggregate.aggregate
-					});
-				}
+				await database.table(aggregate.store).put(aggregate.aggregate);
 			}
-			await database.table(aggregate.store).put(aggregate.aggregate);
+			// Pending intent wins until acknowledged, including a hard delete that left no record.
+			for (const aggregate of decoded) {
+				const key = keyFor(aggregate.entityKind, aggregate.entityId);
+				if (!localIntent.has(key)) continue;
+				const local = localIntent.get(key);
+				const table = database.table(aggregate.store);
+				if (local === undefined) await table.delete(aggregate.entityId);
+				else await table.put(local);
+			}
+			await recordServerChanges(
+				database,
+				{ authSlotId: scope.authSlotId, scopeKind: 'user', scopeId: workosUserId },
+				response.changes,
+				now
+			);
+			const current = await database.syncScopes.get(['user', workosUserId]);
+			if (
+				current?.cursor !== null &&
+				current?.cursor !== undefined &&
+				response.throughSequence < current.cursor
+			) {
+				throw new TypeError('A stale sync page cannot move the local cursor backwards.');
+			}
+			const next: SyncScopeRecord = {
+				scopeKind: 'user',
+				scopeId: workosUserId,
+				cursor: response.throughSequence,
+				bootstrapGeneration: response.bootstrapGeneration,
+				retainedFloor: response.retainedFloor,
+				state: 'syncing',
+				leaseOwner: current?.leaseOwner ?? null,
+				leaseExpiresAt: current?.leaseExpiresAt ?? null,
+				lastSuccessAt: now.toISOString() as `${string}Z`,
+				lastErrorCode: null
+			};
+			await database.syncScopes.put(next);
 		}
-		// Pending intent wins until acknowledged, including a hard delete that left no record.
-		for (const aggregate of decoded) {
-			const key = keyFor(aggregate.entityKind, aggregate.entityId);
-			if (!localIntent.has(key)) continue;
-			const local = localIntent.get(key);
-			const table = database.table(aggregate.store);
-			if (local === undefined) await table.delete(aggregate.entityId);
-			else await table.put(local);
-		}
-		await recordServerChanges(
-			database,
-			{ authSlotId: scope.authSlotId, scopeKind: 'user', scopeId: workosUserId },
-			response.changes,
-			now
-		);
-		const current = await database.syncScopes.get(['user', workosUserId]);
-		if (
-			current?.cursor !== null &&
-			current?.cursor !== undefined &&
-			response.throughSequence < current.cursor
-		) {
-			throw new TypeError('A stale sync page cannot move the local cursor backwards.');
-		}
-		const next: SyncScopeRecord = {
-			scopeKind: 'user',
-			scopeId: workosUserId,
-			cursor: response.throughSequence,
-			bootstrapGeneration: response.bootstrapGeneration,
-			retainedFloor: response.retainedFloor,
-			state: 'syncing',
-			leaseOwner: current?.leaseOwner ?? null,
-			leaseExpiresAt: current?.leaseExpiresAt ?? null,
-			lastSuccessAt: now.toISOString() as `${string}Z`,
-			lastErrorCode: null
-		};
-		await database.syncScopes.put(next);
-	});
+	);
 };
 
 export const applyUserMutationReceipts = async (
@@ -191,11 +197,16 @@ export const applyUserBootstrap = async (
 	}
 	await database.transaction(
 		'rw',
-		[...new Set(tables), database.outbox, database.syncScopes],
+		[...new Set(tables), database.outbox, database.syncScopes, database.reinstatements],
 		async () => {
 			const pending = await pendingUserOutbox(database, workosUserId);
 			const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));
-			for (const aggregate of decoded) {
+			const current = await database.syncScopes.get(['user', workosUserId]);
+			for (const [index, aggregate] of decoded.entries()) {
+				// A device that never synced this scope never saw the deletion, so it gets no badge.
+				if (current?.cursor != null) {
+					await noteReinstatement(database, aggregate.store, response.aggregates[index]!, now);
+				}
 				if (!pendingKeys.has(keyFor(aggregate.entityKind, aggregate.entityId))) {
 					await database.table(aggregate.store).put(aggregate.aggregate);
 				}
@@ -216,7 +227,6 @@ export const applyUserBootstrap = async (
 				response.aggregates,
 				now
 			);
-			const current = await database.syncScopes.get(['user', workosUserId]);
 			await database.syncScopes.put({
 				scopeKind: 'user',
 				scopeId: workosUserId,

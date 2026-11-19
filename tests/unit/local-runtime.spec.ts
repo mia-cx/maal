@@ -135,6 +135,7 @@ describe('shared device database', () => {
 				weekStartsOn: 1,
 				defaultPlannedYield: 4,
 				preferredDinnerTime: '18:00',
+				stalenessThresholdMinutes: 180,
 				createdByUserId: 'user_alice',
 				deletionState: 'active',
 				localOnly: false,
@@ -153,6 +154,7 @@ describe('shared device database', () => {
 				weekStartsOn: 1,
 				defaultPlannedYield: 2,
 				preferredDinnerTime: null,
+				stalenessThresholdMinutes: 180,
 				createdByUserId: 'user_bob',
 				deletionState: 'active',
 				localOnly: false,
@@ -196,7 +198,7 @@ describe('shared device database', () => {
 			title: 'Preserved recipe'
 		});
 		await expect(migrated.meta.get('migrationState')).resolves.toMatchObject({
-			value: { from: 4, to: CURRENT_DATABASE_VERSION, state: 'complete' }
+			value: { from: 5, to: CURRENT_DATABASE_VERSION, state: 'complete' }
 		});
 		await expect(migrated.meta.get('databaseVersion')).resolves.toMatchObject({
 			value: CURRENT_DATABASE_VERSION

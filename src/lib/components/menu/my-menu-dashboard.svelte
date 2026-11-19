@@ -23,12 +23,14 @@
 		ondelete,
 		onrestore,
 		onpermanentdelete,
+		onopen,
 		onimporturl = async () => {
 			throw new Error('URL import requires an active Maal plan.');
 		}
 	}: {
 		recipes?: RecipeMenuItem[];
 		archivedRecipes?: RecipeMenuItem[];
+		onopen?: (recipe: RecipeMenuItem) => void;
 		onsave?: (recipe: RecipeMenuItem) => void | Promise<void>;
 		ondelete?: (recipe: RecipeMenuItem) => void | Promise<void>;
 		onrestore?: (recipe: RecipeMenuItem) => void | Promise<void>;
@@ -150,6 +152,7 @@
 		draftRecipe = null;
 		selectedRecipeId = recipe.id;
 		sheetOpen = true;
+		onopen?.(recipe);
 	};
 
 	const archivedDate = (archivedAt?: string): string => archivedAt?.slice(0, 10) ?? '';

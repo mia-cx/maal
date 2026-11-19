@@ -3,6 +3,7 @@
 	import { CookIcon, PrepIcon } from '$lib/components/icons/solar-outline';
 	import * as Button from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card/index.js';
+	import ReinstatedBadge from '$lib/components/reinstated-badge.svelte';
 	import { cn } from '$lib/utils.js';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import { familiarityLabels } from './meal-labels';
@@ -425,6 +426,7 @@
 			>
 				<div class="flex min-w-0 items-baseline gap-2">
 					<p class="min-w-0 flex-1 truncate text-xs leading-tight font-medium">{meal.title}</p>
+					{#if meal.reinstated}<ReinstatedBadge class="-my-1 h-4 self-center" />{/if}
 					{#if displayedTime}
 						<time
 							class="hidden shrink-0 text-[0.6875rem] leading-tight text-muted-foreground tabular-nums @min-[12rem]:block"

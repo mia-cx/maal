@@ -165,7 +165,10 @@ case. Prototype fields are preserved unless this document explicitly changes the
 claims.
 
 `Household`: `householdId` (WorkOS organization ID), `locale`, nullable `timezone`, `weekStartsOn`,
-`defaultPlannedYield`, nullable `preferredDinnerTime`, nullable `createdByUserId`, `createdAt`, `updatedAt`.
+`defaultPlannedYield`, nullable `preferredDinnerTime`, `stalenessThresholdMinutes`, nullable `createdByUserId`,
+`createdAt`, `updatedAt`. `stalenessThresholdMinutes` is an integer from 1 to 10,080 and defaults to 180
+(3 hours); §8.5 defines what it governs. A household record or envelope without the field decodes to the
+default.
 
 `HouseholdAppliance`: `id`, `householdId`, `appliance`, `available`, nullable `notes`, `createdAt`, `updatedAt`.
 Appliance is one of `oven`, `stovetop`, `microwave`, `air_fryer`, `slow_cooker`, `rice_cooker`, `blender`,
@@ -223,7 +226,8 @@ within the recipe.
 `trans_fat`, `unsaturated_fat`, or `other`. `(recipeId, schemaOrgProperty)` is unique and units are paired.
 
 Deleted recipe content is recoverable for 30 days. Restore clears the tombstone through a new mutation.
-Permanent deletion or expiry purges content and retains a minimal sync tombstone for one year.
+Permanent deletion or expiry purges content and retains a minimal sync tombstone for one year. A recent edit
+from another device also brings a deleted recipe back (§8.5).
 
 ### 5.3 Meal
 
@@ -239,11 +243,12 @@ Permanent deletion or expiry purges content and retains a minimal sync tombstone
 
 Postpone changes date/time and keeps status `planned`; it is not a fourth status. Planning copies all seven
 recipe sidecar families, including appliance requirements. Meal sidecars have the exact recipe-sidecar fields
-with meal ownership. Deleting the source recipe nulls provenance and never changes the copied meal.
+with meal ownership. Deleting the source recipe nulls provenance and never changes the copied meal. A meal
+write that still names a purged recipe, such as an offline edit or a revival (§8.5), stores null provenance.
 
 Meal conflict groups are `header`, `schedule`, `status`, the seven sidecar collections, and `deletion`. Meal
 deletion has no recovery UI: content is removed after local/remote acknowledgement and a one-year minimal
-tombstone remains.
+tombstone remains. A recent edit from another device still brings the meal back (§8.5).
 
 ### 5.4 Focused check-in
 
@@ -292,26 +297,27 @@ preserves every source, alias, locale, adoption, pair, conversion, and preferenc
 
 Database name: `maal-v1:<environment>`. This replaces the stale per-user-database scaffold design.
 
-| Store                  | Primary fields and indexes                                                                                                                                                   |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `meta`                 | `&key`; schema/contract/app versions, installation `deviceId`, seed version, migration/recovery state.                                                                       |
-| `profiles`             | `&profileId`, unique `workosUserId`, display identity, locale/timezone, PIN salt/verifier, lock policy, `lastUsedAt`, auth state. Index `workosUserId,lastUsedAt,authState`. |
-| `authSlots`            | `&authSlotId`, unique `profileId`, `workosUserId`, `sessionState`, last refresh/verification and retry fields. No credentials.                                               |
-| `households`           | Complete household plus lifecycle projection. Index `createdByUserId,deletionState`.                                                                                         |
-| `memberships`          | `&membershipId`; compound unique `[householdId+workosUserId]`; indexes `[workosUserId+status]`, `[householdId+status]`.                                                      |
-| `householdInvites`     | Safe remote summary only; raw code exists only at creation/share time. Index `householdId,expiresAt,revokedAt`.                                                              |
-| `householdAppliances`  | `&id`; unique `[householdId+appliance]`.                                                                                                                                     |
-| `recipes`              | Complete recipe aggregate; indexes `ownerUserId,deletedAt,updatedAt,*searchTokens`.                                                                                          |
-| `meals`                | Complete meal aggregate; indexes `householdId,[householdId+date],[householdId+status],[householdId+date+sortOrder],deletedAt`.                                               |
-| `mealCheckIns`         | Complete check-in; unique `[mealId+reporterUserId]`; indexes `mealId,reporterUserId,deletedAt`.                                                                              |
-| taxonomy stores        | One store for each table family in §5.5, preserving exact editable rows and ownership/scope indexes.                                                                         |
-| `billingCapabilities`  | `&householdId`; status, grace/deadline, subscriber, price, period end, `validUntil`, source and stale state.                                                                 |
-| `mcpKeySummaries`      | `&id`; owner, label, preset, grant mode, scopes, selected household IDs, expiry/revocation/last-use. Never raw key/hash.                                                     |
-| `outbox`               | `&mutationId`; indexes `[authSlotId+status+occurredAt]`, `[scopeKind+scopeId+status]`, `aggregateId,nextAttemptAt`.                                                          |
-| `syncScopes`           | unique `[scopeKind+scopeId]`; cursor, bootstrap generation/floor, state, lease owner/expiry, last success/error.                                                             |
-| `backfillCheckpoints`  | unique `[scopeKind+scopeId+entityKind]`; priority boundary, last aggregate ID, counts, state.                                                                                |
-| `uiState`              | `&key`; active profile, active household per profile, routes, calendar view, scroll/drag/dialog state only.                                                                  |
-| `remoteProjectionMeta` | `&key`; last WorkOS/Stripe/settings refresh and decode version.                                                                                                              |
+| Store                  | Primary fields and indexes                                                                                                                                                    |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `meta`                 | `&key`; schema/contract/app versions, installation `deviceId`, seed version, migration/recovery state.                                                                        |
+| `profiles`             | `&profileId`, unique `workosUserId`, display identity, locale/timezone, PIN salt/verifier, lock policy, `lastUsedAt`, auth state. Index `workosUserId,lastUsedAt,authState`.  |
+| `authSlots`            | `&authSlotId`, unique `profileId`, `workosUserId`, `sessionState`, last refresh/verification and retry fields. No credentials.                                                |
+| `households`           | Complete household plus lifecycle projection. Index `createdByUserId,deletionState`.                                                                                          |
+| `memberships`          | `&membershipId`; compound unique `[householdId+workosUserId]`; indexes `[workosUserId+status]`, `[householdId+status]`.                                                       |
+| `householdInvites`     | Safe remote summary only; raw code exists only at creation/share time. Index `householdId,expiresAt,revokedAt`.                                                               |
+| `householdAppliances`  | `&id`; unique `[householdId+appliance]`.                                                                                                                                      |
+| `recipes`              | Complete recipe aggregate; indexes `ownerUserId,deletedAt,updatedAt,*searchTokens`.                                                                                           |
+| `meals`                | Complete meal aggregate; indexes `householdId,[householdId+date],[householdId+status],[householdId+date+sortOrder],deletedAt`.                                                |
+| `mealCheckIns`         | Complete check-in; unique `[mealId+reporterUserId]`; indexes `mealId,reporterUserId,deletedAt`.                                                                               |
+| taxonomy stores        | One store for each table family in §5.5, preserving exact editable rows and ownership/scope indexes.                                                                          |
+| `billingCapabilities`  | `&householdId`; status, grace/deadline, subscriber, price, period end, `validUntil`, source and stale state.                                                                  |
+| `mcpKeySummaries`      | `&id`; owner, label, preset, grant mode, scopes, selected household IDs, expiry/revocation/last-use. Never raw key/hash.                                                      |
+| `outbox`               | `&mutationId`; indexes `[authSlotId+status+occurredAt]`, `[scopeKind+scopeId+status]`, `aggregateId,nextAttemptAt`. Rejected rows keep `rejectionCode` and `rejectionSeenAt`. |
+| `reinstatements`       | `&[entityKind+entityId]`; `reinstatedAt`. A deleted record that a recent edit brought back, until this device opens it (§8.5).                                                |
+| `syncScopes`           | unique `[scopeKind+scopeId]`; cursor, bootstrap generation/floor, state, lease owner/expiry, last success/error.                                                              |
+| `backfillCheckpoints`  | unique `[scopeKind+scopeId+entityKind]`; priority boundary, last aggregate ID, counts, state.                                                                                 |
+| `uiState`              | `&key`; active profile, active household per profile, routes, calendar view, scroll/drag/dialog state only.                                                                   |
+| `remoteProjectionMeta` | `&key`; last WorkOS/Stripe/settings refresh and decode version.                                                                                                               |
 
 Every aggregate is a versioned Effect envelope. Conflict clocks live inside the aggregate record; child rows
 are arrays with stable IDs. Commands that affect a household record and user-owned recipe in one gesture use
@@ -391,7 +397,8 @@ or protocol session state. Tools call the same D1 domain commands as HTTP/sync a
 
 - `sync_changes`: autoincrement `seq` PK; unique `mutation_id`; `actor_user_id`, `origin_device_id`, audience
   kind/ID, entity kind/ID, conflict group, operation, resulting revision, original `occurred_at`, D1
-  `received_at`, Effect-versioned payload, nullable tombstone expiry.
+  `received_at`, Effect-versioned payload, nullable tombstone expiry. The payload marks an upsert that
+  brought back a tombstoned entity as `reinstated` (§8.5).
 - `sync_entity_versions`: PK `(audience_kind,audience_id,entity_kind,entity_id,conflict_group)`; revision,
   last sequence, winning occurred-at/device/mutation tuple.
 - `sync_devices`: PK `(device_id,workos_user_id)`; display name, created/last-seen times, last app/protocol version.
@@ -422,8 +429,9 @@ domain D1 tables, and rejects owner/audience mismatch. Mutation IDs make retries
 ### 8.2 Ordering and reconciliation
 
 - Routine live mutations resolve latest-wins by committed D1 sequence within their named conflict group.
-- Bootstrap/backfill compare the original UTC event `occurredAt`. If contenders differ by more than one hour,
-  later event time wins regardless of upload order. Within one hour, D1 commit order resolves possible skew.
+- Bootstrap/backfill compare the original UTC event `occurredAt`. If contenders differ by more than the
+  staleness threshold (§8.5), later event time wins regardless of upload order. Within the threshold, D1
+  commit order resolves possible skew.
 - Request arrival time is never substituted for original event time. Household timezones never order changes.
 - Server changes apply to Dexie in sequence in one transaction and advance the cursor only after decoding and
   committing all included records.
@@ -476,6 +484,47 @@ the only versions today.
   syncing, it either reloads or tells the user "Maal has to update to continue syncing to the cloud".
 - **Dexie.** Local schema changes follow the forward-only, non-destructive migration policy in §6 and §10.
 
+### 8.5 Recent edits beat deletions
+
+A recent edit beats a deletion. When an upsert reaches an entity with an active tombstone, the Worker
+compares the edit's age with the audience's staleness threshold:
+
+- **Edit age** is the D1 `received_at` of the upsert minus its `occurredAt`, floored at zero. `occurredAt` is
+  when the person made the edit, the same instant the conflict clock already records; `received_at` is the
+  Worker's clock, the only time a client cannot set. Their difference is how long the edit sat on a device
+  before it reached D1, which is exactly what makes an edit stale. Deletion time is not compared: an edit
+  made just before a concurrent deletion is still that person's current intent.
+- **Threshold** is the household's `stalenessThresholdMinutes` for household audiences. User audiences
+  (recipes, personal taxonomy and preferences) have no household and use the 180-minute default.
+- **Within the threshold** the edit wins and the entity comes back. The Worker commits the upsert, clears the
+  tombstone, and marks the change `reinstated`. A recipe's revival also takes the edit's `deletion` group, so
+  `deletedAt` is null again. A purged entity comes back with the edit's complete aggregate.
+- **Beyond the threshold** the deletion stands and the upsert is rejected with `tombstoned_entity`.
+- Restoring a recipe from the bin (a live upsert of only the `deletion` group with `deletedAt` null) is always
+  accepted while its tombstone is active, whatever its age, and is not marked `reinstated`.
+
+The Worker reads the entity head before it looks for the tombstone, so a deletion that commits in between
+moves the head, fails the guarded write, and the retry decides against that deletion.
+
+The same threshold is the backfill skew window in §8.2, so one household setting decides when a change is
+too old to count as current.
+
+A bootstrap page marks a live entity `reinstated` while a retained change revived it and no deletion
+followed. A device that applies a `reinstated` upsert while its own copy is absent or deleted records the
+entity in `reinstatements`, through a pull or through a bootstrap of a scope it synced before. The entity
+then appears exactly as if another member had just created it, plus a **Reinstated** badge on its recipe or
+meal card. Opening the recipe or meal on that device clears the badge.
+
+### 8.6 Rejected writes reach the person
+
+Sync is otherwise invisible, so every write that truly fails must say so. A rejected outbox row (a server
+receipt, an isolated request failure, or an oversized backfill record) restores the authoritative copy and
+stays in the outbox with its `rejectionCode`. While a row for the active auth slot has no
+`rejectionSeenAt`, the app shell shows a notice that names the affected record and why the change was not
+saved. It shows the three oldest and counts the rest. Dismissing it sets `rejectionSeenAt` on the rows it
+showed, so the next ones take their place. The notice is a live query over Dexie, so it appears in every
+open tab and disappears from all of them together.
+
 ## 9. Import and export
 
 V1 portable archives are unencrypted ZIP files with:
@@ -517,7 +566,8 @@ These are implementation proofs, not unresolved product decisions:
 2. Stripe test mode plus WorkOS staging: one Product/multiple Prices, weekly/monthly/yearly checkout, one trial
    per user and household, webhook disorder/idempotency, billing transfer, 30-day grace, immediate cancellation,
    real prorated cash-refund sequence, and deletion recovery.
-3. Sync model tests: live D1 ordering, one-hour backfill threshold, month-old stale upload, idempotent retries,
+3. Sync model tests: live D1 ordering, staleness-threshold backfill window, month-old stale upload, edit revival
+   within and rejection beyond the threshold, visible rejection feedback, idempotent retries,
    lapse/resubscription, expired cursor bootstrap, tombstone expiry, revoked membership, and two-profile device.
 4. Schema round trips: every prototype field and constraint, especially taxonomy aliases/conversions,
    instruction-event discriminants, confidence ranges, source fidelity, and import copy reference remapping.

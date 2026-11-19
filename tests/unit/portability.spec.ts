@@ -92,6 +92,7 @@ const seedIdentity = async (
 			weekStartsOn: 1,
 			defaultPlannedYield: 4,
 			preferredDinnerTime: '18:00',
+			stalenessThresholdMinutes: 180,
 			createdByUserId: workosUserId,
 			deletionState: 'active',
 			localOnly: false,

@@ -50,6 +50,7 @@ test('recipe counters follow local meal and check-in changes', async () => {
 		weekStartsOn: 1,
 		defaultPlannedYield: 2,
 		preferredDinnerTime: null,
+		stalenessThresholdMinutes: 180,
 		createdByUserId: 'user_alice',
 		deletionState: 'active',
 		localOnly: false,

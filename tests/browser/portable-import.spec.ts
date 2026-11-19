@@ -48,6 +48,7 @@ test('a chosen archive plans its collisions and replaces local records', async (
 		weekStartsOn: 1,
 		defaultPlannedYield: 2,
 		preferredDinnerTime: null,
+		stalenessThresholdMinutes: 180,
 		createdByUserId: 'user_alice',
 		deletionState: 'active',
 		localOnly: false,
