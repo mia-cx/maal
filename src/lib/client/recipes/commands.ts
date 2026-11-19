@@ -8,9 +8,8 @@ import {
 } from '$lib/client/local/commands.js';
 import type { MaalDatabase } from '$lib/client/local/database.js';
 import {
+	freezeMealsBeforeRecipeChange,
 	planMealCommand,
-	recipeChangeCopyCommands,
-	recipeProvenanceDetachCommands,
 	type MealCommandContext,
 	type PlanMealOptions
 } from '$lib/client/meals/commands.js';
@@ -21,7 +20,7 @@ import {
 	type UtcInstant
 } from '$lib/domain/contracts/primitives.js';
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
-import { copyRecipeIntoMeal } from '$lib/domain/meals/recipe-following.js';
+import { copyRecipeIntoMeal, recipeChangeKind } from '$lib/domain/meals/recipe-following.js';
 import { RecipeFollowingMealSchema, type MealAggregate } from '$lib/domain/meals/schema.js';
 import {
 	RECIPE_CONFLICT_GROUPS,
@@ -33,7 +32,8 @@ import {
 	type RecipeImportedCandidate,
 	type RecipeIngredient,
 	type RecipeInstruction,
-	type RecipePurgeTombstone
+	type RecipePurgeTombstone,
+	type StoredRecipe
 } from '$lib/domain/recipes/schema.js';
 import {
 	normalizeIngredientSource,
@@ -281,34 +281,77 @@ const recipeWriteCommand = (
 	]
 });
 
-const executeRecipeWrite = (
-	database: MaalDatabase,
-	...command: Parameters<typeof recipeWriteCommand>
-) => executeLocalCommand(database, recipeWriteCommand(...command));
+/** The tables a recipe change uses; a transaction that wraps one must hold them all. */
+export const recipeChangeTables = (database: MaalDatabase) => [
+	database.recipes,
+	database.meals,
+	database.memberships,
+	database.households,
+	database.outbox
+];
 
 /**
- * Commits a recipe edit or deletion together with the meal copies that must land first (spec §5.3):
- * every recipe-following meal on deletion, and cooked, skipped, or past ones on an edit. The copies
- * take the recipe as it is before this change. Returns the recipe write's result.
+ * The one path that changes a stored recipe on this device. In one transaction it reads the recipe,
+ * freezes the meals that the version `next` returns would change ({@link freezeMealsBeforeRecipeChange}),
+ * and then runs `write`, which stores that version. `next` returns undefined when `write` removes
+ * the recipe. Pass `uploader` when this device makes the change, so its copies upload with it;
+ * without one, as for a pull, every copy stays on this device.
  */
-const executeRecipeChange = async (
+export const executeRecipeChange = async <T>(
 	database: MaalDatabase,
-	change: 'edit' | 'delete',
-	...command: Parameters<typeof recipeWriteCommand>
+	recipeId: string,
+	next: (before: StoredRecipe | undefined) => unknown,
+	write: () => Promise<T>,
+	uploader?: Omit<MealCommandContext, 'householdId'>
+): Promise<T> =>
+	database.transaction('rw', recipeChangeTables(database), async () => {
+		const stored = await database.recipes.get(recipeId);
+		const before =
+			stored === undefined ? undefined : decode(StoredRecipeSchema, stored, 'read recipe');
+		if (before !== undefined && isRecipeAggregate(before)) {
+			const after = next(before);
+			const change = recipeChangeKind(
+				before,
+				after === undefined ? undefined : decode(StoredRecipeSchema, after, 'preview recipe')
+			);
+			if (change !== null) {
+				await freezeMealsBeforeRecipeChange(database, before, change, uploader);
+			}
+		}
+		return write();
+	});
+
+/** Commits one recipe write of this device through {@link executeRecipeChange}. */
+const executeRecipeCommand = (
+	database: MaalDatabase,
+	...args: Parameters<typeof recipeWriteCommand>
 ) => {
-	const [context, recipeId] = command;
-	const current = decode(StoredRecipeSchema, await database.recipes.get(recipeId), 'read recipe');
-	const copies = isRecipeAggregate(current)
-		? await recipeChangeCopyCommands(
-				database,
-				{ ...context, reporterUserId: context.ownerUserId },
-				current,
-				change
-			)
-		: [];
-	const results = await executeLocalCommands(database, [...copies, recipeWriteCommand(...command)]);
-	return results.at(-1)!;
+	const [context, recipeId, , , update] = args;
+	const command = recipeWriteCommand(...args);
+	return executeRecipeChange(
+		database,
+		recipeId,
+		update,
+		() => executeLocalCommand(database, command),
+		{ ...context, reporterUserId: context.ownerUserId }
+	);
 };
+
+/**
+ * Stores `recipe` as another source holds it, such as a pull or an archive, or removes the recipe
+ * when it is undefined. Call it inside a transaction that holds {@link recipeChangeTables}; meals
+ * freeze on this device only.
+ */
+export const storeRecipe = (database: MaalDatabase, recipeId: string, recipe: unknown) =>
+	executeRecipeChange(
+		database,
+		recipeId,
+		() => recipe,
+		async () => {
+			if (recipe === undefined) await database.recipes.delete(recipeId);
+			else await database.table('recipes').put(recipe);
+		}
+	);
 
 /** A freshly planned recipe-following meal, shown with the recipe it was planned from. */
 const plannedMeal = (aggregate: unknown, recipe: RecipeAggregate): MealAggregate =>
@@ -444,9 +487,8 @@ export const updateRecipeFromEditor = async (
 ): Promise<RecipeAggregate> => {
 	const occurredAt = commandTime(context);
 	const patch = decode(RecipeEditorPatchSchema, patchInput, 'decode recipe editor patch');
-	const result = await executeRecipeChange(
+	const result = await executeRecipeCommand(
 		database,
-		'edit',
 		{ ...context, occurredAt },
 		recipeId,
 		['header', 'ingredients', 'instructions'],
@@ -546,9 +588,8 @@ export const updateRecipeFromImportedCandidate = async (
 		'decode imported recipe candidate'
 	);
 	const conflictGroups = RECIPE_CONFLICT_GROUPS.filter((group) => group !== 'deletion');
-	const result = await executeRecipeChange(
+	const result = await executeRecipeCommand(
 		database,
-		'edit',
 		{ ...context, occurredAt: commandTime(context) },
 		recipeId,
 		conflictGroups,
@@ -601,9 +642,8 @@ export const deleteRecipe = async (
 	recipeId: string
 ): Promise<RecipeAggregate> => {
 	const deletedAt = commandTime(context);
-	const result = await executeRecipeChange(
+	const result = await executeRecipeCommand(
 		database,
-		'delete',
 		{ ...context, occurredAt: deletedAt },
 		recipeId,
 		['deletion'],
@@ -623,7 +663,7 @@ export const restoreRecipe = async (
 	recipeId: string
 ): Promise<RecipeAggregate> => {
 	const occurredAt = commandTime(context);
-	const result = await executeRecipeWrite(
+	const result = await executeRecipeCommand(
 		database,
 		{ ...context, occurredAt },
 		recipeId,
@@ -645,7 +685,10 @@ const purgeRecipe = async (
 ): Promise<RecipePurgeTombstone> => {
 	const purgedAt = commandTime(context);
 	const retainUntil = new Date(Date.parse(purgedAt) + 365 * 86_400_000).toISOString() as UtcInstant;
-	const purge = recipeWriteCommand(
+	// The recoverable delete keeps meal provenance so a restore brings the history back; only the
+	// purge severs it, together with the content, in the same transaction.
+	const result = await executeRecipeCommand(
+		database,
 		{ ...context, occurredAt: purgedAt },
 		recipeId,
 		['deletion'],
@@ -669,27 +712,9 @@ const purgeRecipe = async (
 		},
 		'delete'
 	);
-	// The recoverable delete keeps meal provenance so a restore brings the history back; only the
-	// purge severs it, together with the content, in the same transaction.
-	const recipe = requireOwnedRecipe(
-		await database.recipes.get(recipeId),
-		context.ownerUserId,
-		'read recipe to purge'
-	);
-	const detach = await recipeProvenanceDetachCommands(
-		database,
-		{
-			authSlotId: context.authSlotId,
-			reporterUserId: context.ownerUserId,
-			originDeviceId: context.originDeviceId,
-			occurredAt: purgedAt
-		},
-		recipe
-	);
-	const [result] = await executeLocalCommands(database, [purge, ...detach]);
 	return decode(
 		StoredRecipeSchema,
-		result!.aggregates[0],
+		result.aggregates[0],
 		'decode recipe tombstone'
 	) as RecipePurgeTombstone;
 };

@@ -21,6 +21,7 @@ import {
 	type RecipeEditorPatch
 } from '$lib/client/recipes/index.js';
 import { MaalDatabase, openMaalDatabase } from '$lib/client/local/database.js';
+import { copyRecipeIntoMeal, planRecipeFollowingMeal } from '$lib/domain/meals/recipe-following.js';
 import {
 	RecipeImportedCandidateSchema,
 	StoredRecipeSchema,
@@ -322,18 +323,17 @@ describe('offline recipe commands and queries', () => {
 		const database = await openDatabase();
 		const recipe = await commitImportedRecipeCandidate(database, context(), importedCandidate());
 		const copiedMealId = uuidv7();
-		await database.meals.put({
-			id: copiedMealId,
-			householdId: 'org_family',
-			sourceRecipeId: recipe.id,
-			title: recipe.title,
-			schemaVersion: 1,
-			revision: 1,
-			createdAt: at(21),
-			updatedAt: at(21),
-			deletedAt: null,
-			conflictClocks: {}
-		});
+		await database.meals.put(
+			copyRecipeIntoMeal(
+				planRecipeFollowingMeal({
+					recipe,
+					householdId: 'org_family',
+					mealId: copiedMealId,
+					occurredAt: at(21)
+				}),
+				recipe
+			)
+		);
 
 		const tombstone = await permanentlyDeleteRecipe(database, context(at(22)), recipe.id);
 		expect(tombstone).toMatchObject({

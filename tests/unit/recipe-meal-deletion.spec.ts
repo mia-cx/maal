@@ -22,9 +22,11 @@ import {
 	permanentlyDeleteRecipe,
 	restoreRecipe,
 	runRecipeRetention,
+	updateRecipeFromEditor,
 	type RecipeCommandContext,
 	type RecipeEditorPatch
 } from '$lib/client/recipes/index.js';
+import { detachHouseholdSnapshot } from '$lib/client/local/households.js';
 import { MealCheckInSchema, StoredMealSchema, isLiveMeal } from '$lib/domain/meals/schema.js';
 import { StoredRecipeSchema, isRecipeAggregate } from '$lib/domain/recipes/schema.js';
 
@@ -158,8 +160,8 @@ describe('recipe deletion and meal provenance', () => {
 				aggregateId
 			}))
 		).toEqual([
-			{ scopeKind: 'user', entityKind: 'recipe', aggregateId: recipe.id },
-			{ scopeKind: 'household', entityKind: 'meal', aggregateId: kept.id }
+			{ scopeKind: 'household', entityKind: 'meal', aggregateId: kept.id },
+			{ scopeKind: 'user', entityKind: 'recipe', aggregateId: recipe.id }
 		]);
 	});
 
@@ -197,33 +199,68 @@ describe('recipe deletion and meal provenance', () => {
 });
 
 describe('deletion boundaries', () => {
-	test('permanent delete leaves detached household snapshots untouched', async () => {
-		const database = await openDatabase();
-		const recipe = await createRecipeFromEditor(database, recipeContext(), patch('Soup'));
-		const snapshotMeal = await planRecipeAsMeal(
-			database,
-			{ ...mealContext(), householdId: 'org_former' },
-			recipe.id,
-			{ date: '2026-08-22' }
-		);
-		await database.memberships.put({
-			...(await database.memberships.get('membership_alice'))!,
-			membershipId: 'membership_former',
-			householdId: 'org_former',
-			status: 'detached',
-			detachedAt: at(21)
+	describe('a detached household snapshot keeps its meals as they were', () => {
+		// The snapshot never uploads, so no household change may be queued for it.
+		const householdOutbox = (database: MaalDatabase) =>
+			database.outbox.filter(({ scopeKind }) => scopeKind === 'household').count();
+		const planInFormerHousehold = async () => {
+			const database = await openDatabase();
+			await database.profiles.put({
+				profileId: 'profile_alice',
+				workosUserId: 'user_alice',
+				displayName: 'Alice',
+				email: null,
+				profilePictureUrl: null,
+				locale: 'en-US',
+				timezone: null,
+				pinSalt: null,
+				pinVerifier: null,
+				lockPolicy: 'none',
+				lastUsedAt: at(1),
+				authState: 'authenticated'
+			});
+			await database.memberships.put({
+				...(await database.memberships.get('membership_alice'))!,
+				membershipId: 'membership_former',
+				householdId: 'org_former'
+			});
+			const recipe = await createRecipeFromEditor(database, recipeContext(), patch('Soup'));
+			const meal = await planRecipeAsMeal(
+				database,
+				{ ...mealContext(), householdId: 'org_former' },
+				recipe.id,
+				{ date: '2099-01-01' }
+			);
+			await detachHouseholdSnapshot(database, {
+				profileId: 'profile_alice',
+				householdId: 'org_former',
+				denialCode: 'membership_required',
+				detachedAt: at(22)
+			});
+			const outboxBefore = await householdOutbox(database);
+			const formerMeals = async () =>
+				(await listHouseholdMeals(database, 'org_former')).map(({ id, title }) => ({ id, title }));
+			return { database, recipe, meal, outboxBefore, formerMeals };
+		};
+
+		test('when its recipe is edited', async () => {
+			const { database, recipe, meal, outboxBefore, formerMeals } = await planInFormerHousehold();
+
+			await updateRecipeFromEditor(database, recipeContext(at(24)), recipe.id, patch('Changed'));
+
+			expect(await formerMeals()).toEqual([{ id: meal.id, title: 'Soup' }]);
+			expect(await householdOutbox(database)).toBe(outboxBefore);
 		});
 
-		await permanentlyDeleteRecipe(database, recipeContext(at(24)), recipe.id);
+		test('when its recipe is permanently deleted', async () => {
+			const { database, recipe, meal, outboxBefore, formerMeals } = await planInFormerHousehold();
 
-		expect(await storedMeal(database, snapshotMeal.id)).toMatchObject({
-			sourceRecipeId: recipe.id
+			await permanentlyDeleteRecipe(database, recipeContext(at(24)), recipe.id);
+
+			expect(await formerMeals()).toEqual([{ id: meal.id, title: 'Soup' }]);
+			expect(await storedMeal(database, meal.id)).toMatchObject({ sourceRecipeId: null });
+			expect(await householdOutbox(database)).toBe(outboxBefore);
 		});
-		expect(
-			await database.outbox
-				.filter(({ scopeId, occurredAt }) => scopeId === 'org_former' && occurredAt === at(24))
-				.count()
-		).toBe(0);
 	});
 
 	test("deleting a meal queues an outbox row for the deleter's own check-in only", async () => {

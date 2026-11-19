@@ -2,6 +2,7 @@ import { Schema } from 'effect';
 
 import type { MaalDatabase } from '$lib/client/local/database.js';
 import type { OutboxRecord, SyncScopeRecord } from '$lib/client/local/records.js';
+import { recipeChangeTables, storeRecipe } from '$lib/client/recipes/commands.js';
 import { LocalDecodeError } from '$lib/domain/contracts/errors.js';
 import type { UtcInstant } from '$lib/domain/contracts/primitives.js';
 import { StoredRecipeSchema, type StoredRecipe } from '$lib/domain/recipes/schema.js';
@@ -89,8 +90,9 @@ const isSharedRecipeChange = (change: HouseholdSyncChange): boolean =>
 	change.entityKind === HOUSEHOLD_SHARED_RECIPE_KIND;
 
 /**
- * Splits a page into the household's own changes, decoded, and the recipes shared with it. Shared
- * recipes are decoded too, so a malformed one fails the page like any other change.
+ * Splits a page into the household's own changes, each decoded alongside the change it came from,
+ * and the recipes shared with it. Shared recipes are decoded too, so a malformed one fails the page
+ * like any other change.
  */
 const decodeChanges = (
 	householdId: string,
@@ -110,14 +112,15 @@ const decodeChanges = (
 	}
 	return {
 		own,
-		decoded: own.map((change) =>
-			decodeHouseholdSyncAggregate(
+		decoded: own.map((change) => ({
+			...decodeHouseholdSyncAggregate(
 				change.entityKind,
 				change.entityId,
 				householdId,
 				change.aggregate
-			)
-		),
+			),
+			change
+		})),
 		sharedRecipes
 	};
 };
@@ -141,7 +144,7 @@ const UNSENT_STATUSES = new Set(['pending', 'sending', 'quarantined']);
  * Stores the recipes shared with the household (spec §8.7). A recipe whose owner is signed in on
  * this device is skipped, because the owner's own recipe sync is authoritative; so is one whose
  * local copy is newer or has unsent edits. An owner who signed out or must reauthenticate syncs
- * nothing, so the household's copy applies. Needs `recipes`, `authSlots`, and `outbox` in the
+ * nothing, so the household's copy applies. Needs `authSlots` and `recipeChangeTables` in the
  * surrounding transaction.
  */
 const applySharedRecipes = async (
@@ -163,7 +166,7 @@ const applySharedRecipes = async (
 			.filter((row) => row.scopeKind === 'user' && UNSENT_STATUSES.has(row.status))
 			.count();
 		if (unsent > 0) continue;
-		await database.table('recipes').put(recipe);
+		await storeRecipe(database, recipe.id, recipe);
 	}
 };
 
@@ -183,14 +186,12 @@ export const applyHouseholdPullPage = async (
 	if (response.changes.some(({ sequence }) => sequence > response.throughSequence)) {
 		throw new TypeError('A sync page cannot advance behind one of its changes.');
 	}
-	const tables = [...new Set(decoded.map(({ store }) => database.table(store)))];
+	const tables = decoded.map(({ store }) => database.table(store));
 	await database.transaction(
 		'rw',
 		[
-			...tables,
-			database.recipes,
+			...new Set([...tables, ...recipeChangeTables(database)]),
 			database.mealCheckIns,
-			database.outbox,
 			database.authSlots,
 			database.syncScopes,
 			database.reinstatements
@@ -201,8 +202,8 @@ export const applyHouseholdPullPage = async (
 			const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));
 			const pendingByKey = Map.groupBy(pending, (row) => keyFor(row.entityKind, row.aggregateId));
 			const localIntent = new Map<string, unknown>();
-			for (const [index, aggregate] of decoded.entries()) {
-				await noteReinstatement(database, aggregate.store, own[index]!, now);
+			for (const aggregate of decoded) {
+				await noteReinstatement(database, aggregate.store, aggregate.change, now);
 				const key = keyFor(aggregate.entityKind, aggregate.entityId);
 				if (pendingKeys.has(key)) {
 					if (!localIntent.has(key)) {
@@ -348,17 +349,15 @@ export const applyHouseholdBootstrap = async (
 	const { householdId } = scope;
 	// Bootstrap pages are sorted by stable entity key for pagination, not by commit sequence.
 	const { own, decoded, sharedRecipes } = decodeChanges(householdId, response.aggregates, false);
-	const tables = [...new Set(decoded.map(({ store }) => database.table(store)))];
+	const tables = decoded.map(({ store }) => database.table(store));
 	for (const instruction of response.instructions) {
 		tables.push(database.table(HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS[instruction.entityKind].store));
 	}
 	await database.transaction(
 		'rw',
 		[
-			...new Set(tables),
-			database.recipes,
+			...new Set([...tables, ...recipeChangeTables(database)]),
 			database.mealCheckIns,
-			database.outbox,
 			database.authSlots,
 			database.syncScopes,
 			database.reinstatements
@@ -377,10 +376,10 @@ export const applyHouseholdBootstrap = async (
 			]);
 			const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));
 			const current = await database.syncScopes.get(['household', householdId]);
-			for (const [index, aggregate] of decoded.entries()) {
+			for (const aggregate of decoded) {
 				// A device that never synced this scope never saw the deletion, so it gets no badge.
 				if (current?.cursor != null) {
-					await noteReinstatement(database, aggregate.store, response.aggregates[index]!, now);
+					await noteReinstatement(database, aggregate.store, aggregate.change, now);
 				}
 				const key = keyFor(aggregate.entityKind, aggregate.entityId);
 				if (pendingKeys.has(key)) continue;

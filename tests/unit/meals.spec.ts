@@ -36,6 +36,8 @@ import {
 	updateRecipeFromEditor,
 	type RecipeCommandContext
 } from '$lib/client/recipes/index.js';
+import { applyUserPullPage } from '$lib/client/sync/apply.js';
+import { CURRENT_PROTOCOL_VERSION } from '$lib/domain/contracts/versions.js';
 import type { Membership } from '$lib/domain/household/contracts.js';
 import {
 	MealCheckInSchema,
@@ -360,6 +362,54 @@ describe('recipe-following meals', () => {
 		expect(await titleOf(database, past.id)).toBe('Sunday soup');
 		expect(isRecipeFollowingMeal(await storedMeal(database, upcoming.id))).toBe(true);
 		expect(await titleOf(database, upcoming.id)).toBe('Changed soup');
+	});
+
+	test('a recipe edit pulled from another device keeps the version a past meal was cooked with', async () => {
+		const database = await openDatabase();
+		await joinHousehold(database);
+		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
+		const past = await planRecipeAsMeal(database, mealContext(), recipe.id, { date: '2020-01-01' });
+		const upcoming = await planRecipeAsMeal(database, mealContext(), recipe.id, {
+			date: '2099-01-01'
+		});
+		// The upload was acknowledged, so the pull is not held back by unsent intent.
+		await database.outbox.where('aggregateId').equals(recipe.id).delete();
+		const householdOutbox = () =>
+			database.outbox.filter(({ scopeKind }) => scopeKind === 'household').count();
+		const queued = await householdOutbox();
+
+		await applyUserPullPage(
+			database,
+			{ authSlotId: 'slot-alice', workosUserId: 'user_alice' },
+			{
+				protocolVersion: CURRENT_PROTOCOL_VERSION,
+				changes: [
+					{
+						sequence: 1,
+						mutationId: uuidv7(),
+						originDeviceId: uuidv7(),
+						entityKind: 'recipe',
+						entityId: recipe.id,
+						conflictGroups: ['header'],
+						operation: 'upsert',
+						resultingRevision: recipe.revision + 1,
+						occurredAt: at(25),
+						receivedAt: at(25),
+						aggregate: { ...recipe, title: 'Changed soup', revision: recipe.revision + 1 },
+						tombstoneExpiresAt: null
+					}
+				],
+				throughSequence: 1,
+				retainedFloor: 0,
+				bootstrapGeneration: 1,
+				hasMore: false
+			}
+		);
+
+		expect(await titleOf(database, past.id)).toBe('Sunday soup');
+		expect(await titleOf(database, upcoming.id)).toBe('Changed soup');
+		// The Worker already copied the meal for the household; this device uploads nothing.
+		expect(await householdOutbox()).toBe(queued);
 	});
 
 	test('deleting a recipe copies its meals, and restoring it leaves those copies independent', async () => {

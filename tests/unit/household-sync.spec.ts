@@ -24,6 +24,9 @@ import {
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
 import { MealAggregateSchema, type MealAggregate } from '$lib/domain/meals/schema.js';
 import { deleteMeal, setMealStatus, updateMealSchedule } from '$lib/client/meals/commands.js';
+import { commitImportedRecipeCandidate } from '$lib/client/recipes/commands.js';
+import { readReinstatedIds } from '$lib/client/sync/reinstatements.js';
+import { candidateFromToolRecipe } from '$lib/server/mcp/builders.js';
 import { SyncPermissionDenied, SyncTransportError } from '$lib/sync/contracts.js';
 import type {
 	HouseholdBackfillRequest,
@@ -536,6 +539,65 @@ describe('foreground household coordinator', () => {
 		});
 
 		expect(await database.meals.bulkGet([firstId, secondId])).toEqual([first, second]);
+	});
+
+	test('a bootstrap page that starts with a shared recipe still badges the meal it reinstates', async () => {
+		const database = await openDatabase('bootstrap-shared-recipe-reinstated');
+		const deviceId = String((await database.meta.get('deviceId'))!.value);
+		const recipe = await commitImportedRecipeCandidate(
+			database,
+			{ authSlotId: 'slot_bob', ownerUserId: 'user_bob', originDeviceId: deviceId },
+			candidateFromToolRecipe({ title: 'Bob’s stew', ingredients: [], instructions: [] })
+		);
+		// This device synced the household before, so it saw the meal's deletion.
+		await database.syncScopes.put({
+			scopeKind: 'household',
+			scopeId: householdId,
+			cursor: 1,
+			bootstrapGeneration: 1,
+			retainedFloor: 0,
+			state: 'bootstrapRequired',
+			leaseOwner: null,
+			leaseExpiresAt: null,
+			lastSuccessAt: null,
+			lastErrorCode: null
+		});
+		const mealId = uuidv7();
+		const change = (
+			entityKind: 'recipe' | 'meal',
+			entityId: string,
+			aggregate: unknown
+		): HouseholdSyncChange => ({
+			sequence: 2,
+			mutationId: uuidv7(),
+			originDeviceId: deviceId,
+			actorUserId: 'user_bob',
+			entityKind,
+			entityId,
+			conflictGroups: ['header'],
+			operation: 'upsert',
+			resultingRevision: 2,
+			occurredAt: timestamp,
+			receivedAt: timestamp,
+			aggregate,
+			tombstoneExpiresAt: null
+		});
+
+		await applyHouseholdBootstrap(database, householdScope, {
+			protocolVersion: 1,
+			aggregates: [
+				change('recipe', recipe.id, recipe),
+				{ ...change('meal', mealId, meal(mealId, uuidv7(), deviceId)), reinstated: true }
+			],
+			instructions: [],
+			throughSequence: 2,
+			retainedFloor: 0,
+			bootstrapGeneration: 1,
+			hasMore: false,
+			nextEntityKey: null
+		});
+
+		expect(await readReinstatedIds(database, 'meal')).toEqual(new Set([mealId]));
 	});
 
 	test('makes zero content requests for an unpaid household', async () => {

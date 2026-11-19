@@ -3,6 +3,7 @@ import { uuidv7 } from 'uuidv7';
 import { runTrackedLocalCommit } from '$lib/client/local/commit-activity.js';
 import type { LocalStoreName, MaalDatabase } from '$lib/client/local/database.js';
 import { activeHouseholdKey } from '$lib/client/local/profiles.js';
+import { storeRecipe } from '$lib/client/recipes/commands.js';
 import { requestLocalSync, type SyncRequestedScope } from '$lib/client/sync/requests.js';
 import { PortableArchiveError } from '$lib/domain/contracts/errors.js';
 import type { PortableArchive } from '$lib/domain/portability/schema.js';
@@ -996,19 +997,25 @@ export const commitPortableImport = async (
 							(descriptor.entityKind !== 'meal_check_in' ||
 								row.reporterUserId === plan.importerWorkosUserId)
 					}));
-					await database
-						.table(store)
-						.bulkPut(
-							prepared.map(({ row, mutationId, replacement }) =>
-								importedAggregate(
-									descriptor,
-									row,
-									originDeviceId,
-									mutationId,
-									replacement ? importedAt : text(row.updatedAt)
-								)
-							)
-						);
+					const aggregates = prepared.map(({ row, mutationId, replacement }) =>
+						importedAggregate(
+							descriptor,
+							row,
+							originDeviceId,
+							mutationId,
+							replacement ? importedAt : text(row.updatedAt)
+						)
+					);
+					if (store === 'recipes') {
+						// A replaced recipe first freezes the meals that must keep its old version. Meals are
+						// written after recipes, so a meal the person chose to replace still takes the
+						// archive's version.
+						for (const aggregate of aggregates) {
+							await storeRecipe(database, rowId(store, aggregate), aggregate);
+						}
+					} else {
+						await database.table(store).bulkPut(aggregates);
+					}
 					for (const { row, mutationId, replacement } of prepared) {
 						const id = rowId(store, row);
 						const scopeId =
