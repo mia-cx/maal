@@ -32,6 +32,7 @@ class ProtocolDomain implements RemoteDomainPort {
 	async getUserRecipe(): Promise<RecipeAggregate | null> {
 		return null;
 	}
+	async ensureRecipeVersion(): Promise<void> {}
 	async writeUserRecipe(input: { aggregate: RecipeAggregate }): Promise<RecipeAggregate> {
 		return input.aggregate;
 	}
@@ -45,7 +46,7 @@ class ProtocolDomain implements RemoteDomainPort {
 		if (isRecipeFollowingMeal(input.aggregate)) {
 			throw new Error('The protocol tests plan custom meals only.');
 		}
-		const meal = { ...input.aggregate, followsRecipe: false };
+		const meal = { ...input.aggregate, followsRecipe: false, recipeVersionId: null };
 		this.meals.push(meal);
 		return meal;
 	}

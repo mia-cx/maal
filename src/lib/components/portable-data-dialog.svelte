@@ -48,6 +48,7 @@
 		memberships: 'Membership',
 		householdAppliances: 'Appliance',
 		recipes: 'Recipe',
+		recipeVersions: 'Recipe version',
 		meals: 'Meal',
 		mealCheckIns: 'Check-in',
 		userAttributions: 'Person',
