@@ -666,7 +666,9 @@ receiving new versions once no recipe-following meal there follows the recipe.
   receives every version of each recipe it follows, and only current members' versions are shared. When
   a member leaves, the household's meals of their recipes become meal copies (§4.3), and their later edits
   stay private. Every reader therefore resolves a meal among all the versions of its recipe it holds: a
-  device, a Worker read such as an MCP tool, and an export.
+  device, a Worker read such as an MCP tool, and an export. A Worker read takes the versions of a
+  recipe only while a live meal of the household follows it, checked in the statement that reads
+  them, so a departure between its meal read and its version read leaves the leaver's versions out.
 - **Who may follow.** A meal may start following a recipe only while the recipe's owner is an active
   member of the household, and only when the writer owns the recipe or the household already receives it,
   because a live recipe-following meal there follows it. Anyone else can see the recipe only through a
