@@ -438,11 +438,18 @@ const isCopyOnly = (groups: readonly string[]): boolean =>
 	groups.includes('source') &&
 	groups.every((group) => (MEAL_COPY_GROUPS as readonly string[]).includes(group));
 
-/** The newest sequence among the live recipe-following meals of the recipe bound to `?`. */
-export const FOLLOWING_MEALS_HEAD_SQL = `(SELECT COALESCE(MAX(v.last_sequence), 0) FROM meals m
+/** The newest change sequence in D1. Sequences are global, so every later commit gets a higher one. */
+const LATEST_SEQUENCE_SQL = '(SELECT COALESCE(MAX(seq), 0) FROM sync_changes)';
+
+/**
+ * 1 when a live recipe-following meal of the recipe bound to the first `?` was written after the
+ * sequence bound to the second, else 0.
+ */
+const FOLLOWING_MEAL_WRITTEN_SINCE_SQL = `(EXISTS (SELECT 1 FROM meals m
 	JOIN sync_entity_versions v ON v.audience_kind = 'household' AND v.audience_id = m.household_id
 	 AND v.entity_kind = 'meal' AND v.entity_id = m.id
-	WHERE m.source_recipe_id = ? AND m.follows_recipe = 1 AND m.deleted_at IS NULL)`;
+	WHERE m.source_recipe_id = ? AND m.follows_recipe = 1 AND m.deleted_at IS NULL
+	 AND v.last_sequence > ?))`;
 
 /** The newest sequence of the recipe bound to `?` in its owner's user audience. */
 const RECIPE_HEAD_SQL = `(SELECT COALESCE(MAX(last_sequence), 0) FROM sync_entity_versions
@@ -1639,14 +1646,35 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 	}
 
 	/**
-	 * Copies `recipe`, the version before a change, into the recipe-following meals that must not see
-	 * the change (spec §5.3): all of them when the recipe is deleted; on an edit, those cooked,
+	 * Freezes the recipe-following meals that must not see a change to `recipe`, the version before
+	 * it (spec §5.3): all of them when the recipe is deleted or purged; on an edit, those cooked,
 	 * skipped, or dated before today in their household, and those in households the owner left.
 	 * Each copy is a live household meal mutation, so a device that copied first wins quietly.
+	 *
+	 * Returns the guard the recipe change must commit under: no live recipe-following meal of the
+	 * recipe was written since this method began. It reads that point before it selects any meal, so a
+	 * meal written while it selects or copies, or before the change commits, fails the guard, and the
+	 * change retries and freezes again. Copies stop following, so they never fail it.
 	 */
-	async copyFollowingMealsBeforeRecipeChange(input: {
+	async freezeFollowingMeals(input: {
 		readonly recipe: RecipeAggregate;
-		readonly change: 'edit' | 'delete';
+		readonly change: 'edit' | 'delete' | 'purge';
+		readonly deviceId: string;
+		readonly occurredAt: string;
+		readonly receivedAt: string;
+	}): Promise<CommitGuard> {
+		const since = await readCommitGuard(this.database, LATEST_SEQUENCE_SQL);
+		await this.copyFollowingMeals(input);
+		return {
+			sql: FOLLOWING_MEAL_WRITTEN_SINCE_SQL,
+			binds: [input.recipe.id, since.value],
+			value: 0
+		};
+	}
+
+	private async copyFollowingMeals(input: {
+		readonly recipe: RecipeAggregate;
+		readonly change: 'edit' | 'delete' | 'purge';
 		readonly deviceId: string;
 		readonly occurredAt: string;
 		readonly receivedAt: string;
@@ -1679,7 +1707,7 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 			for (const { aggregate } of changes) {
 				const meal = Schema.decodeUnknownSync(RecipeFollowingMealSchema)(aggregate);
 				const copies =
-					input.change === 'delete' || !ownerMember || freezesBeforeRecipeChange(meal, today);
+					input.change !== 'edit' || !ownerMember || freezesBeforeRecipeChange(meal, today);
 				if (!copies) continue;
 				await this.commitWithResult({
 					householdId,

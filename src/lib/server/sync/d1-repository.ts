@@ -1,4 +1,5 @@
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
+import { recipeChangeKind } from '$lib/domain/meals/recipe-following.js';
 import {
 	DEFAULT_STALENESS_THRESHOLD_MINUTES,
 	isRecentEdit
@@ -34,7 +35,6 @@ import {
 	listHeldIdentities,
 	markReinstated,
 	queryAll,
-	readCommitGuard,
 	readSidecars,
 	type CommitGuard,
 	type CommitResult,
@@ -44,7 +44,6 @@ import {
 import { ServerSyncUnavailable } from './errors.js';
 import {
 	D1HouseholdSyncRepository,
-	FOLLOWING_MEALS_HEAD_SQL,
 	householdsFollowingRecipe,
 	sharedRecipeStatements
 } from './household-d1-repository.js';
@@ -1021,45 +1020,44 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			mutationId: input.mutation.mutationId
 		};
 		const isRecipe = input.mutation.entityKind === 'recipe';
-		const incomingRecipe = decodedIncoming.aggregate as StoredRecipe;
-		const guards: CommitGuard[] = [];
-		if (isRecipe && current !== null && isRecipeAggregate(current as StoredRecipe)) {
-			const deletes = !isRecipeAggregate(incomingRecipe) || incomingRecipe.deletedAt !== null;
-			const edits = acceptedGroups.some((group) => group !== 'deletion');
-			// Meals that must keep this version take their copies before it changes (spec §8.7).
-			if (deletes || edits) {
-				await new D1HouseholdSyncRepository(this.database).copyFollowingMealsBeforeRecipeChange({
-					recipe: current as RecipeAggregate,
-					change: deletes ? 'delete' : 'edit',
-					deviceId: input.deviceId,
-					occurredAt: input.mutation.occurredAt,
-					receivedAt: input.receivedAt
-				});
-			}
-		}
-		// The change commits only while the recipe's following meals are as the copies left them, so
-		// a meal written in between makes it retry and copy again (spec §8.7).
-		if (isRecipe) {
-			guards.push(
-				await readCommitGuard(this.database, FOLLOWING_MEALS_HEAD_SQL, input.mutation.entityId)
-			);
-		}
-		const guardSql = commitGuardSql(guards);
-		const result =
-			input.mutation.entityKind === 'recipe'
-				? mergeRecipe(current, decodedIncoming.aggregate, acceptedGroups, revision, clock)
-				: {
-						...decodedIncoming.aggregate,
-						revision,
-						updatedAt: input.mutation.occurredAt,
-						conflictClocks: Object.fromEntries(acceptedGroups.map((group) => [group, clock]))
-					};
+		const result = isRecipe
+			? mergeRecipe(current, decodedIncoming.aggregate, acceptedGroups, revision, clock)
+			: {
+					...decodedIncoming.aggregate,
+					revision,
+					updatedAt: input.mutation.occurredAt,
+					conflictClocks: Object.fromEntries(acceptedGroups.map((group) => [group, clock]))
+				};
 		const decodedResult = decodeUserSyncAggregate(
 			input.mutation.entityKind,
 			input.mutation.entityId,
 			input.actorUserId,
 			result
 		);
+		const before =
+			isRecipe && current !== null
+				? (decodeUserSyncAggregate('recipe', input.mutation.entityId, input.actorUserId, current)
+						.aggregate as StoredRecipe)
+				: null;
+		const change =
+			before !== null && isRecipeAggregate(before)
+				? recipeChangeKind(before, decodedResult.aggregate as StoredRecipe)
+				: null;
+		// Meals that must keep this version take their copies before it changes, and the change
+		// commits only while no following meal was written since (spec §8.7).
+		const guards: CommitGuard[] =
+			change === null
+				? []
+				: [
+						await new D1HouseholdSyncRepository(this.database).freezeFollowingMeals({
+							recipe: before as RecipeAggregate,
+							change,
+							deviceId: input.deviceId,
+							occurredAt: input.mutation.occurredAt,
+							receivedAt: input.receivedAt
+						})
+					];
+		const guardSql = commitGuardSql(guards);
 		const tombstoneExpiresAt =
 			input.mutation.operation === 'delete'
 				? new Date(Date.parse(input.receivedAt) + 365 * 86_400_000).toISOString()

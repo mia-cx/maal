@@ -53,14 +53,58 @@ export const derivedMealRowId = (mealId: string, recipeRowId: string): string =>
 	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-7${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 };
 
+/** The fields a meal copy takes from `recipe`, with each row ID passed through `rowId`. */
+const recipeContent = (recipe: RecipeAggregate, rowId: (recipeRowId: string) => string) => ({
+	title: recipe.title,
+	description: recipe.description,
+	imageUrl: recipe.imageUrl,
+	yield: recipe.yield,
+	prepTimeMinutes: recipe.prepTimeMinutes,
+	cookTimeMinutes: recipe.cookTimeMinutes,
+	totalTimeMinutes: recipe.totalTimeMinutes,
+	sourceYieldText: recipe.sourceYieldText,
+	sourceDatePublished: recipe.sourceDatePublished,
+	sourceDateModified: recipe.sourceDateModified,
+	sourceLanguage: recipe.sourceLanguage,
+	sourceUrl: recipe.sourceUrl,
+	sourceSiteName: recipe.sourceSiteName,
+	sourceAuthorName: recipe.sourceAuthorName,
+	sourcePublisherName: recipe.sourcePublisherName,
+	sourceIsBasedOnUrl: recipe.sourceIsBasedOnUrl,
+	sourceImportedAt: recipe.sourceImportedAt,
+	sourceHtmlHash: recipe.sourceHtmlHash,
+	sourceRatingValue: recipe.sourceRatingValue,
+	sourceRatingCount: recipe.sourceRatingCount,
+	sourceReviewCount: recipe.sourceReviewCount,
+	sourceClaimedMinutes: recipe.sourceClaimedMinutes,
+	parseConfidence: recipe.parseConfidence,
+	ingredientConfidence: recipe.ingredientConfidence,
+	instructionConfidence: recipe.instructionConfidence,
+	nutritionConfidence: recipe.nutritionConfidence,
+	notes: recipe.userNotes,
+	ingredients: recipe.ingredients.map((row) => ({ ...row, id: rowId(row.id) })),
+	instructions: recipe.instructions.map((row) => ({ ...row, id: rowId(row.id) })),
+	instructionEvents: recipe.instructionEvents.map(({ recipeInstructionId, ...row }) => ({
+		...row,
+		id: rowId(row.id),
+		mealInstructionId: rowId(recipeInstructionId)
+	})),
+	applianceRequirements: recipe.applianceRequirements.map((row) => ({
+		...row,
+		id: rowId(row.id)
+	})),
+	classifications: recipe.classifications.map((row) => ({ ...row, id: rowId(row.id) })),
+	media: recipe.media.map((row) => ({ ...row, id: rowId(row.id) })),
+	nutritionFacts: recipe.nutritionFacts.map((row) => ({ ...row, id: rowId(row.id) }))
+});
+
 /**
  * The meal copy of `recipe` for `meal`. It keeps the meal's own fields and metadata and takes every
  * content field from the recipe, with row IDs from {@link derivedMealRowId}. Reading a
  * recipe-following meal and copying it give the same result.
  */
-export const copyRecipeIntoMeal = (meal: LiveMeal, recipe: RecipeAggregate): MealAggregate => {
-	const rowId = (recipeRowId: string) => derivedMealRowId(meal.id, recipeRowId);
-	return Schema.decodeUnknownSync(MealAggregateSchema)({
+export const copyRecipeIntoMeal = (meal: LiveMeal, recipe: RecipeAggregate): MealAggregate =>
+	Schema.decodeUnknownSync(MealAggregateSchema)({
 		schemaVersion: meal.schemaVersion,
 		revision: meal.revision,
 		createdAt: meal.createdAt,
@@ -76,48 +120,23 @@ export const copyRecipeIntoMeal = (meal: LiveMeal, recipe: RecipeAggregate): Mea
 		plannedCookUserId: meal.plannedCookUserId,
 		plannedYield: meal.plannedYield,
 		status: meal.status,
-		title: recipe.title,
-		description: recipe.description,
-		imageUrl: recipe.imageUrl,
-		yield: recipe.yield,
-		prepTimeMinutes: recipe.prepTimeMinutes,
-		cookTimeMinutes: recipe.cookTimeMinutes,
-		totalTimeMinutes: recipe.totalTimeMinutes,
-		sourceYieldText: recipe.sourceYieldText,
-		sourceDatePublished: recipe.sourceDatePublished,
-		sourceDateModified: recipe.sourceDateModified,
-		sourceLanguage: recipe.sourceLanguage,
-		sourceUrl: recipe.sourceUrl,
-		sourceSiteName: recipe.sourceSiteName,
-		sourceAuthorName: recipe.sourceAuthorName,
-		sourcePublisherName: recipe.sourcePublisherName,
-		sourceIsBasedOnUrl: recipe.sourceIsBasedOnUrl,
-		sourceImportedAt: recipe.sourceImportedAt,
-		sourceHtmlHash: recipe.sourceHtmlHash,
-		sourceRatingValue: recipe.sourceRatingValue,
-		sourceRatingCount: recipe.sourceRatingCount,
-		sourceReviewCount: recipe.sourceReviewCount,
-		sourceClaimedMinutes: recipe.sourceClaimedMinutes,
-		parseConfidence: recipe.parseConfidence,
-		ingredientConfidence: recipe.ingredientConfidence,
-		instructionConfidence: recipe.instructionConfidence,
-		nutritionConfidence: recipe.nutritionConfidence,
-		notes: recipe.userNotes,
-		ingredients: recipe.ingredients.map((row) => ({ ...row, id: rowId(row.id) })),
-		instructions: recipe.instructions.map((row) => ({ ...row, id: rowId(row.id) })),
-		instructionEvents: recipe.instructionEvents.map(({ recipeInstructionId, ...row }) => ({
-			...row,
-			id: rowId(row.id),
-			mealInstructionId: rowId(recipeInstructionId)
-		})),
-		applianceRequirements: recipe.applianceRequirements.map((row) => ({
-			...row,
-			id: rowId(row.id)
-		})),
-		classifications: recipe.classifications.map((row) => ({ ...row, id: rowId(row.id) })),
-		media: recipe.media.map((row) => ({ ...row, id: rowId(row.id) })),
-		nutritionFacts: recipe.nutritionFacts.map((row) => ({ ...row, id: rowId(row.id) }))
+		...recipeContent(recipe, (recipeRowId) => derivedMealRowId(meal.id, recipeRowId))
 	});
+
+/**
+ * What a recipe write does to the meals that follow the recipe (spec §5.3): `purge` when the
+ * recipe's content goes away, `delete` when it moves to the bin, `edit` when anything a meal copy
+ * holds changes, and null when the meals would show the same recipe. `before` and `after` must be
+ * decoded, so their fields compare in schema order.
+ */
+export const recipeChangeKind = (
+	before: RecipeAggregate,
+	after: StoredRecipe | undefined
+): 'edit' | 'delete' | 'purge' | null => {
+	if (after === undefined || !isRecipeAggregate(after)) return 'purge';
+	if (before.deletedAt === null && after.deletedAt !== null) return 'delete';
+	const content = (recipe: RecipeAggregate) => JSON.stringify(recipeContent(recipe, String));
+	return content(before) === content(after) ? null : 'edit';
 };
 
 /**

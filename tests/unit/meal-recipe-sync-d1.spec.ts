@@ -284,6 +284,42 @@ const beforeNextBatch = (write: () => Promise<unknown>): D1Database => {
 	});
 };
 
+/**
+ * D1 that runs `write` once, right after the first query whose SQL contains `fragment` returns, as
+ * when another request lands between two of a commit's reads.
+ */
+const afterQuery = (fragment: string, write: () => Promise<unknown>): D1Database => {
+	let pending: (() => Promise<unknown>) | undefined = write;
+	const watch = (statement: D1PreparedStatement): D1PreparedStatement =>
+		new Proxy(statement, {
+			get(target, key) {
+				const value = Reflect.get(target, key) as unknown;
+				if (typeof value !== 'function') return value;
+				if (key === 'bind') {
+					return (...values: unknown[]) => watch(value.apply(target, values));
+				}
+				if (key !== 'all' && key !== 'first') return value.bind(target);
+				return async (...args: unknown[]) => {
+					const result = await value.apply(target, args);
+					const run = pending;
+					pending = undefined;
+					await run?.();
+					return result;
+				};
+			}
+		});
+	return new Proxy(d1, {
+		get(target, key) {
+			if (key === 'prepare') {
+				return (sql: string) =>
+					sql.includes(fragment) ? watch(target.prepare(sql)) : target.prepare(sql);
+			}
+			const value = Reflect.get(target, key);
+			return typeof value === 'function' ? value.bind(target) : value;
+		}
+	});
+};
+
 const titles = async (database: MaalDatabase) =>
 	new Map((await listHouseholdMeals(database, householdId)).map(({ id, title }) => [id, title]));
 
@@ -503,6 +539,56 @@ describe('recipe changes racing meal writes', () => {
 		const bobDevice = await openDevice(bob);
 		await bobDevice.sync();
 		expect(await titles(bobDevice.database)).toEqual(new Map([[past.id, 'Sunday soup']]));
+	});
+
+	test('a past meal planned after a recipe edit chose its copies still keeps the old recipe', async () => {
+		const aliceDevice = await openDevice(alice);
+		const recipe = await aliceSavesRecipe(aliceDevice);
+		const past = await planRecipeAsMeal(aliceDevice.database, aliceDevice.context, recipe.id, {
+			date: '2020-01-01'
+		});
+
+		await commitRecipe(
+			{ ...recipe, title: 'Changed soup' },
+			['header'],
+			// The meal lands just after the edit selected the meals to copy.
+			afterQuery('FROM meals m JOIN households h', async () =>
+				expect(
+					await pushMeal(alice.userId, await aliceDevice.database.meals.get(past.id))
+				).toMatchObject({ status: 'accepted' })
+			)
+		);
+
+		expect(await d1FollowsRecipe(past.id)).toBe(0);
+		const bobDevice = await openDevice(bob);
+		await bobDevice.sync();
+		expect(await titles(bobDevice.database)).toEqual(new Map([[past.id, 'Sunday soup']]));
+	});
+
+	test('a meal cooked after a recipe edit read it still keeps the old recipe', async () => {
+		const aliceDevice = await openDevice(alice);
+		const recipe = await aliceSavesRecipe(aliceDevice);
+		const meal = await planRecipeAsMeal(aliceDevice.database, aliceDevice.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		await aliceDevice.sync();
+		const cooked = { ...(await aliceDevice.database.meals.get(meal.id))!, status: 'cooked' };
+
+		await commitRecipe(
+			{ ...recipe, title: 'Changed soup' },
+			['header'],
+			// The status lands just after the edit read the meal as planned, so it chose no copy.
+			afterQuery('SELECT * FROM "meals" WHERE household_id', async () =>
+				expect(await pushMeal(alice.userId, cooked, ['status'])).toMatchObject({
+					status: 'accepted'
+				})
+			)
+		);
+
+		expect(await d1FollowsRecipe(meal.id)).toBe(0);
+		const bobDevice = await openDevice(bob);
+		await bobDevice.sync();
+		expect(await titles(bobDevice.database)).toEqual(new Map([[meal.id, 'Sunday soup']]));
 	});
 
 	test('a meal planned while its recipe changes shares the changed recipe', async () => {
