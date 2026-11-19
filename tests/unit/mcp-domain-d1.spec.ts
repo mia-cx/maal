@@ -84,7 +84,7 @@ describe('shared remote D1 domain port', () => {
 			MCP_TEST_HOUSEHOLD,
 			FIRST_PAGE
 		);
-		// The household receives the meal's reference and, beside it, the recipe it shows.
+		// The household receives the meal's reference and, beside it, the version it shows.
 		expect(householdBootstrap.aggregates).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
@@ -97,9 +97,11 @@ describe('shared remote D1 domain port', () => {
 					})
 				}),
 				expect.objectContaining({
-					entityKind: 'recipe',
-					entityId: writtenRecipe.id,
-					aggregate: expect.objectContaining({ title: 'Shared soup' })
+					entityKind: 'recipeVersion',
+					aggregate: expect.objectContaining({
+						recipeId: writtenRecipe.id,
+						recipe: expect.objectContaining({ title: 'Shared soup' })
+					})
 				})
 			])
 		);

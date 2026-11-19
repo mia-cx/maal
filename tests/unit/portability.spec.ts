@@ -25,6 +25,7 @@ import {
 	listHouseholdMeals,
 	planRecipeAsMeal,
 	saveMealCheckIn,
+	updateMealHeader,
 	type MealCommandContext
 } from '$lib/client/meals/index.js';
 import {
@@ -246,7 +247,13 @@ const seedContent = async (database: MaalDatabase, recipeId = uuidv7()) => {
 		originDeviceId: deviceId,
 		occurredAt: at(11)
 	};
-	const meal = await planRecipeAsMeal(database, mealContext, recipe.id, { date: '2026-08-22' });
+	const planned = await planRecipeAsMeal(database, mealContext, recipe.id, { date: '2026-08-22' });
+	// Its first edit makes it a meal copy, with content of its own to remap and restore.
+	const meal = await updateMealHeader(database, mealContext, planned.id, {
+		title: planned.title,
+		description: planned.description,
+		cookTimeMinutes: planned.cookTimeMinutes
+	});
 	await saveMealCheckIn(database, { ...mealContext, occurredAt: at(12) }, meal.id, {
 		status: 'cooked',
 		verdict: 'repeat',

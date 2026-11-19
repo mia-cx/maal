@@ -12,6 +12,7 @@ import {
 	planRecipeAsMeal,
 	runMealRetention,
 	saveMealCheckIn,
+	updateMealHeader,
 	type MealCommandContext
 } from '$lib/client/meals/index.js';
 import { collectPortableArchive } from '$lib/client/portability/archive.js';
@@ -116,6 +117,16 @@ const failMealWrites = (database: MaalDatabase) => {
 	database.meals.hook('updating', fail);
 };
 
+/** Plans `recipeId` and edits the meal once, which makes it a meal copy (spec §5.3). */
+const planMealCopy = async (database: MaalDatabase, recipeId: string, date: string) => {
+	const planned = await planRecipeAsMeal(database, mealContext(), recipeId, { date });
+	return updateMealHeader(database, mealContext(), planned.id, {
+		title: planned.title,
+		description: planned.description,
+		cookTimeMinutes: planned.cookTimeMinutes
+	});
+};
+
 const storedMeal = async (database: MaalDatabase, id: string) =>
 	Schema.decodeUnknownSync(StoredMealSchema)(await database.meals.get(id));
 const storedRecipe = async (database: MaalDatabase, id: string) =>
@@ -135,12 +146,13 @@ describe('recipe deletion and meal provenance', () => {
 		expect(after?.sourceRecipeId).toBe(recipe.id);
 	});
 
-	test('permanent delete purges and detaches live meals when a linked meal is already deleted', async () => {
+	test('permanent delete purges and detaches live meal copies when a linked meal is already deleted', async () => {
 		const database = await openDatabase();
 		const recipe = await createRecipeFromEditor(database, recipeContext(), patch('Soup'));
-		const kept = await planRecipeAsMeal(database, mealContext(), recipe.id, { date: '2026-08-22' });
-		const removed = await planRecipeAsMeal(database, mealContext(), recipe.id, {
-			date: '2026-08-23'
+		const kept = await planMealCopy(database, recipe.id, '2026-08-22');
+		const removed = await planMealCopy(database, recipe.id, '2026-08-23');
+		const following = await planRecipeAsMeal(database, mealContext(), recipe.id, {
+			date: '2026-08-24'
 		});
 		await deleteMeal(database, mealContext(at(22)), removed.id);
 		await deleteRecipe(database, recipeContext(at(23)), recipe.id);
@@ -148,8 +160,12 @@ describe('recipe deletion and meal provenance', () => {
 		await permanentlyDeleteRecipe(database, recipeContext(at(24)), recipe.id);
 
 		expect(isRecipeAggregate(await storedRecipe(database, recipe.id))).toBe(false);
-		const [live] = await listHouseholdMeals(database, 'org_family');
-		expect(live).toMatchObject({ id: kept.id, sourceRecipeId: null, title: 'Soup' });
+		const live = new Map(
+			(await listHouseholdMeals(database, 'org_family')).map((meal) => [meal.id, meal])
+		);
+		expect(live.get(kept.id)).toMatchObject({ sourceRecipeId: null, title: 'Soup' });
+		// A recipe-following meal keeps its recipe and shows its version (spec §5.2).
+		expect(live.get(following.id)).toMatchObject({ sourceRecipeId: recipe.id, title: 'Soup' });
 		const purgeRows = await database.outbox
 			.filter(({ occurredAt }) => occurredAt === at(24))
 			.toArray();
@@ -160,15 +176,15 @@ describe('recipe deletion and meal provenance', () => {
 				aggregateId
 			}))
 		).toEqual([
-			{ scopeKind: 'household', entityKind: 'meal', aggregateId: kept.id },
-			{ scopeKind: 'user', entityKind: 'recipe', aggregateId: recipe.id }
+			{ scopeKind: 'user', entityKind: 'recipe', aggregateId: recipe.id },
+			{ scopeKind: 'household', entityKind: 'meal', aggregateId: kept.id }
 		]);
 	});
 
 	test('permanent delete commits nothing when detaching a meal fails', async () => {
 		const database = await openDatabase();
 		const recipe = await createRecipeFromEditor(database, recipeContext(), patch('Dal'));
-		const meal = await planRecipeAsMeal(database, mealContext(), recipe.id, { date: '2026-08-22' });
+		const meal = await planMealCopy(database, recipe.id, '2026-08-22');
 		const outboxBefore = await database.outbox.count();
 		failMealWrites(database);
 
@@ -184,7 +200,7 @@ describe('recipe deletion and meal provenance', () => {
 	test('retention purge of an expired recipe detaches its meals', async () => {
 		const database = await openDatabase();
 		const recipe = await createRecipeFromEditor(database, recipeContext(), patch('Curry'));
-		const meal = await planRecipeAsMeal(database, mealContext(), recipe.id, { date: '2026-08-22' });
+		const meal = await planMealCopy(database, recipe.id, '2026-08-22');
 		await deleteRecipe(database, recipeContext('2026-08-22T00:00:00.000Z'), recipe.id);
 
 		const result = await runRecipeRetention(
@@ -258,7 +274,6 @@ describe('deletion boundaries', () => {
 			await permanentlyDeleteRecipe(database, recipeContext(at(24)), recipe.id);
 
 			expect(await formerMeals()).toEqual([{ id: meal.id, title: 'Soup' }]);
-			expect(await storedMeal(database, meal.id)).toMatchObject({ sourceRecipeId: null });
 			expect(await householdOutbox(database)).toBe(outboxBefore);
 		});
 	});
@@ -351,6 +366,7 @@ describe('create recipe and plan meal', () => {
 				entityKind
 			}))
 		).toEqual([
+			{ scopeKind: 'user', scopeId: 'user_alice', entityKind: 'recipeVersion' },
 			{ scopeKind: 'user', scopeId: 'user_alice', entityKind: 'recipe' },
 			{ scopeKind: 'household', scopeId: 'org_family', entityKind: 'meal' }
 		]);

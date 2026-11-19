@@ -41,7 +41,7 @@ export const loadMealResolution = async (
 	const following = meals.filter(isRecipeFollowingMeal);
 	if (following.length === 0) return () => ({ versions: [], checkIns: [], timeZone: null });
 	const householdIds = [...new Set(following.map(({ householdId }) => householdId))];
-	const [versions, checkInRows, households] = await Promise.all([
+	const [versions, checkInRows, households, memberships] = await Promise.all([
 		readRecipeVersions(
 			database,
 			following.map(({ sourceRecipeId }) => sourceRecipeId)
@@ -50,15 +50,28 @@ export const loadMealResolution = async (
 			.where('mealId')
 			.anyOf(following.map(({ id }) => id))
 			.toArray(),
-		database.households.bulkGet(householdIds)
+		database.households.bulkGet(householdIds),
+		database.memberships.where('householdId').anyOf(householdIds).toArray()
 	]);
+	// A detached snapshot never changes with its recipes: it resolves only among the versions that
+	// took effect before it was detached (spec §4.3).
+	const detachedAt = new Map(
+		[...Map.groupBy(memberships, ({ householdId }) => householdId)].flatMap(([id, rows]) =>
+			rows.some(({ status }) => status === 'active')
+				? []
+				: rows.flatMap(({ detachedAt }) => (detachedAt === null ? [] : [[id, detachedAt] as const]))
+		)
+	);
 	const versionsByRecipe = Map.groupBy(versions, ({ recipeId }) => recipeId);
 	const checkInsByMeal = Map.groupBy(checkInRows.map(decodeCheckIn), ({ mealId }) => mealId);
 	const timeZones = new Map(
 		householdIds.map((id, index) => [id, households[index]?.timezone ?? null] as const)
 	);
 	return (meal) => ({
-		versions: versionsByRecipe.get(meal.sourceRecipeId) ?? [],
+		versions: (versionsByRecipe.get(meal.sourceRecipeId) ?? []).filter(({ effectiveAt }) => {
+			const cutoff = detachedAt.get(meal.householdId);
+			return cutoff === undefined || effectiveAt < cutoff;
+		}),
 		checkIns: checkInsByMeal.get(meal.id) ?? [],
 		timeZone: timeZones.get(meal.householdId) ?? null
 	});

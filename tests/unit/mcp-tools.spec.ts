@@ -35,7 +35,8 @@ const existingMeal: RemoteMeal = {
 		followRecipeAsMeal({ recipe: existingRecipe, householdId, date: '2026-08-23' }),
 		existingRecipe
 	),
-	followsRecipe: true
+	followsRecipe: true,
+	recipeVersionId: '0198d3bc-e600-7000-8000-0000000000b1'
 };
 
 class SpyDomain implements RemoteDomainPort {
@@ -56,6 +57,9 @@ class SpyDomain implements RemoteDomainPort {
 	async getUserRecipe(): Promise<RecipeAggregate | null> {
 		this.calls.push('getUserRecipe');
 		return this.recipe;
+	}
+	async ensureRecipeVersion(): Promise<void> {
+		this.calls.push('ensureRecipeVersion');
 	}
 	async writeUserRecipe(input: { aggregate: RecipeAggregate }): Promise<RecipeAggregate> {
 		this.calls.push('writeUserRecipe');
@@ -80,8 +84,12 @@ class SpyDomain implements RemoteDomainPort {
 		this.mealWrites.push(input);
 		if (input.operation === 'delete') return null;
 		this.meal = isRecipeFollowingMeal(input.aggregate)
-			? { ...copyRecipeIntoMeal(input.aggregate, this.recipe), followsRecipe: true }
-			: { ...input.aggregate, followsRecipe: false };
+			? {
+					...copyRecipeIntoMeal(input.aggregate, this.recipe),
+					followsRecipe: true,
+					recipeVersionId: existingMeal.recipeVersionId
+				}
+			: { ...input.aggregate, followsRecipe: false, recipeVersionId: null };
 		return this.meal;
 	}
 	async getMealCheckIn(): Promise<MealCheckIn | null> {
@@ -200,7 +208,7 @@ const adapterCases: ReadonlyArray<{
 	{
 		name: 'create_household_meals',
 		args: { meals: [{ customMeal: recipeInput }, { userRecipeId: existingRecipe.id }] },
-		expected: ['writeHouseholdMeal', 'getUserRecipe', 'writeHouseholdMeal']
+		expected: ['writeHouseholdMeal', 'getUserRecipe', 'ensureRecipeVersion', 'writeHouseholdMeal']
 	},
 	{
 		name: 'get_household_meal',
@@ -220,13 +228,7 @@ const adapterCases: ReadonlyArray<{
 	{
 		name: 'create_meal_check_in',
 		args: { mealId: existingMeal.id, verdict: 'repeat', cooked: true },
-		expected: [
-			'getHouseholdMeal',
-			'getMealCheckIn',
-			'writeMealCheckIn',
-			'writeHouseholdMeal',
-			'writeHouseholdMeal'
-		]
+		expected: ['getHouseholdMeal', 'getMealCheckIn', 'writeMealCheckIn', 'writeHouseholdMeal']
 	},
 	{ name: 'list_meal_check_ins', args: {}, expected: ['listMealCheckIns'] },
 	{ name: 'get_food_profile', args: {}, expected: ['getUserFoodProfile'] },
@@ -507,6 +509,16 @@ describe('MCP tool parity with the prototype', () => {
 			cookTime: 40
 		})) as { checkIn: MealCheckIn };
 		expect(result.checkIn.cookTimeMinutes).toBeNull();
+	});
+
+	test('create_meal_check_in pins the version a following meal shows and copies nothing', async () => {
+		const domain = new SpyDomain();
+		const result = (await runTool(domain, 'create_meal_check_in', {
+			mealId: existingMeal.id,
+			verdict: 'repeat'
+		})) as { checkIn: MealCheckIn };
+		expect(result.checkIn.recipeVersionId).toBe(existingMeal.recipeVersionId);
+		expect(domain.mealWrites.map(({ conflictGroups }) => conflictGroups)).toEqual([['status']]);
 	});
 
 	test('create_meal_check_in keeps cook time from the planned cook who cooked', async () => {

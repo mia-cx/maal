@@ -710,7 +710,9 @@ const planRecipeVersions = async (
 			recipeId,
 			ownerUserId: input.ownerUserId,
 			recipe:
-				archived.recipe === null ? null : input.remapContent(archived.recipe, recipeId, copied)
+				archived.recipe === null
+					? null
+					: { ...input.remapContent(archived.recipe, recipeId, copied), conflictClocks: {} }
 		};
 		planned.push(row);
 		addWrite(state, 'recipeVersions', row);

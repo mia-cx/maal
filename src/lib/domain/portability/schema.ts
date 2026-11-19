@@ -155,7 +155,12 @@ export const PortableDeletedRecipesFileSchema = PortableRecipesFileSchema;
 /** The versions of the exported recipes, which their recipe-following meals resolve among (§9). */
 export const PortableRecipeVersionsFileSchema = Schema.Struct({
 	...FileVersionFields,
-	versions: Schema.Array(RecipeVersionSchema.pipe(Schema.omit('conflictClocks')))
+	versions: Schema.Array(
+		Schema.Struct({
+			...RecipeVersionSchema.fields,
+			recipe: Schema.NullOr(PortableRecipeSchema)
+		}).pipe(Schema.omit('conflictClocks'))
+	)
 });
 
 export const PortableDetachedHouseholdsFileSchema = Schema.Struct({

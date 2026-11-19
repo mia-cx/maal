@@ -249,7 +249,10 @@ export const buildPortableArchive = (
 		);
 	const portableVersions = versions
 		.filter(({ recipeId }) => exportedRecipeIds.has(recipeId))
-		.map(withoutConflictClocks);
+		.map((version) => ({
+			...withoutConflictClocks(version),
+			recipe: version.recipe === null ? null : withoutConflictClocks(version.recipe)
+		}));
 	// Meal provenance stays as the household has it, even when the recipe belongs to another member.
 	const portableMeals = meals.map(withoutConflictClocks);
 	const portableCheckIns = checkIns.map(withoutConflictClocks);

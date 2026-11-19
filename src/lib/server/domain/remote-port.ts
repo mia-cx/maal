@@ -5,7 +5,8 @@ import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
 import {
 	copyRecipeIntoMeal,
 	planRecipeFollowingMeal,
-	resolveMealVersion
+	resolveMealVersion,
+	versionChange
 } from '$lib/domain/meals/recipe-following.js';
 import {
 	MEAL_CONFLICT_GROUPS,
@@ -24,10 +25,11 @@ import {
 	RECIPE_CONFLICT_GROUPS,
 	RecipeAggregateSchema,
 	RecipeImportedCandidateSchema,
+	StoredRecipeSchema,
 	type RecipeAggregate,
 	type RecipeImportedCandidate
 } from '$lib/domain/recipes/schema.js';
-import { recipeVersion } from '$lib/domain/recipes/versions.js';
+import { recipeVersion, type RecipeVersion } from '$lib/domain/recipes/versions.js';
 import {
 	FoodUserAliasSchema,
 	FoodUserEntrySchema,
@@ -214,6 +216,9 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		operation: 'upsert' | 'delete';
 	}): Promise<RecipeAggregate> {
 		const now = new Date().toISOString() as `${string}Z`;
+		const [before] = await this.users.readEntities(input.actorUserId, [
+			{ entityKind: 'recipe', entityId: input.aggregate.id }
+		]);
 		const { receipt, aggregate } = await this.users.commitWithResult({
 			actorUserId: input.actorUserId,
 			deviceId: this.deviceId,
@@ -234,26 +239,37 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		if (receipt.status === 'rejected') {
 			throw new RemoteDomainError('write_rejected', 'The recipe command was rejected.');
 		}
+		// A tool's recipe change adds its version on the Worker, as a device adds its own (§5.2).
+		const change = versionChange(
+			before === undefined
+				? undefined
+				: (fromSnapshot(StoredRecipeSchema, before.aggregate) ?? undefined),
+			fromSnapshot(StoredRecipeSchema, aggregate) ?? undefined
+		);
+		if (change !== null) {
+			await this.commitVersion(
+				input.actorUserId,
+				recipeVersion({
+					id: uuidv7(),
+					recipeId: input.aggregate.id,
+					ownerUserId: input.actorUserId,
+					effectiveAt: now,
+					recipe: change === 'content' ? recipeFromSnapshot(aggregate) : null
+				}),
+				now
+			);
+		}
 		if (input.operation === 'delete') return input.aggregate;
 		const result = recipeFromSnapshot(aggregate);
 		if (!result) throw new RemoteDomainError('not_found', 'The written recipe was not found.');
 		return result;
 	}
 
-	/**
-	 * The first version of a recipe stored before versions existed, which planning adds (spec §5.2).
-	 * Nothing happens when D1 holds a version of it.
-	 */
-	async ensureRecipeVersion(actorUserId: string, recipe: RecipeAggregate): Promise<void> {
-		if ((await readRecipeVersions(this.database, [recipe.id])).length > 0) return;
-		const now = new Date().toISOString() as `${string}Z`;
-		const version = recipeVersion({
-			id: uuidv7(),
-			recipeId: recipe.id,
-			ownerUserId: recipe.ownerUserId,
-			effectiveAt: recipe.updatedAt,
-			recipe
-		});
+	private async commitVersion(
+		actorUserId: string,
+		version: RecipeVersion,
+		receivedAt: string
+	): Promise<void> {
 		const { receipt } = await this.users.commitWithResult({
 			actorUserId,
 			deviceId: this.deviceId,
@@ -269,11 +285,30 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 				aggregate: version
 			},
 			mode: 'live',
-			receivedAt: now
+			receivedAt
 		});
 		if (receipt.status === 'rejected') {
 			throw new RemoteDomainError('write_rejected', 'The recipe version was rejected.');
 		}
+	}
+
+	/**
+	 * The first version of a recipe stored before versions existed, which planning adds (spec §5.2).
+	 * Nothing happens when D1 holds a version of it.
+	 */
+	async ensureRecipeVersion(actorUserId: string, recipe: RecipeAggregate): Promise<void> {
+		if ((await readRecipeVersions(this.database, [recipe.id])).length > 0) return;
+		await this.commitVersion(
+			actorUserId,
+			recipeVersion({
+				id: uuidv7(),
+				recipeId: recipe.id,
+				ownerUserId: recipe.ownerUserId,
+				effectiveAt: recipe.updatedAt,
+				recipe
+			}),
+			new Date().toISOString()
+		);
 	}
 
 	/**

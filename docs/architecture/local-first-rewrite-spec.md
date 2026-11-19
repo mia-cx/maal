@@ -149,7 +149,8 @@ mapping only during migration. Server authorization uses permissions, not a trus
   access them. The versions of a removed recipe that a remaining household's live recipe-following meal
   follows stay (§5.2), so the meal keeps showing them, offline and in free use too.
 - **Membership revoked:** retain a read-only detached snapshot. It can be exported or explicitly forked with
-  new IDs; it never uploads under the former household identity.
+  new IDs; it never uploads under the former household identity. Its recipe-following meals resolve only
+  among versions that took effect before it was detached, so it never changes with its recipes.
 - **Delete household:** cancel and refund billing first, then enter 30-day recoverable deletion. Remote access
   stops immediately. Recovery does not recreate a subscription. Final purge removes household content and
   the WorkOS organization while retaining only required financial/idempotency audit identifiers.
