@@ -10,7 +10,6 @@ import {
 import {
 	byEffect,
 	isContentVersion,
-	newestContentVersion,
 	type ContentVersion,
 	type RecipeVersion
 } from '$lib/domain/recipes/versions.js';
@@ -170,6 +169,38 @@ export const localDateOf = (instant: string, timeZone: string | null): LocalDate
 	return formatter.format(new Date(instant)) as LocalDate;
 };
 
+/**
+ * How a recipe's owner belongs to a household, as the household's view of the owner's versions
+ * reads it: a member, or gone since `leftAt`.
+ */
+export type OwnerStanding =
+	{ readonly active: true } | { readonly active: false; readonly leftAt: string };
+
+/**
+ * The owner's standing from their membership rows in one household, each given as when it ended,
+ * or null while it is active. Undefined when the owner never belonged. One active row makes the
+ * owner a member; otherwise the latest end is when they left.
+ */
+export const ownerStanding = (
+	membershipEnds: readonly (string | null)[]
+): OwnerStanding | undefined => {
+	if (membershipEnds.length === 0) return undefined;
+	if (membershipEnds.includes(null)) return { active: true };
+	const leftAt = (membershipEnds as readonly string[]).reduce((a, b) => (a > b ? a : b));
+	return { active: false, leftAt };
+};
+
+/**
+ * Whether a household sees a version of its owner's recipe (spec §8.7): every version while the
+ * owner is a member, only those that took effect before the owner left otherwise, and none when the
+ * owner never belonged. Every reader applies this one rule: device resolution, Worker reads and
+ * household sync, MCP tools, and export.
+ */
+export const householdSeesVersion = (
+	version: RecipeVersion,
+	standing: OwnerStanding | undefined
+): boolean => standing !== undefined && (standing.active || version.effectiveAt < standing.leftAt);
+
 /** What a recipe-following meal resolves against: its recipe's versions and its check-ins. */
 export interface MealResolutionContext {
 	readonly versions: readonly RecipeVersion[];
@@ -234,46 +265,6 @@ export const resolveMeal = (
 	if (!isRecipeFollowingMeal(meal)) return meal;
 	const version = resolveMealVersion(meal, context);
 	return version === null ? null : copyRecipeIntoMeal(meal, version.recipe);
-};
-
-/** How long a superseded version stays at least, the window of ordinary change retention (§8.3). */
-export const VERSION_RETENTION_MS = 90 * 86_400_000;
-
-/**
- * The versions of one recipe that collection removes (spec §5.2). `versions` are all of the recipe's
- * versions, `meals` its live recipe-following meals, and `contextOf` what each meal resolves against,
- * as readers load it, so a meal keeps the version it shows even when its household sees only some of
- * the versions. A version stays while it is the newest content version of a recipe that exists, while
- * a meal resolves to it or a check-in pins it, while it caps a meal's candidates, or until it and the
- * version after it took effect more than {@link VERSION_RETENTION_MS} before `now`.
- */
-export const collectableVersions = (input: {
-	readonly versions: readonly RecipeVersion[];
-	readonly meals: readonly RecipeFollowingMeal[];
-	readonly contextOf: (meal: RecipeFollowingMeal) => MealResolutionContext;
-	readonly recipeExists: boolean;
-	readonly now: Date;
-}): RecipeVersion[] => {
-	const sorted = input.versions.toSorted(byEffect);
-	const needed = new Set<string>();
-	for (const meal of input.meals) {
-		const context = input.contextOf(meal);
-		const resolved = resolveMealVersion(meal, context);
-		if (resolved !== null) needed.add(resolved.id);
-		const cap = deletionCap(meal, context.versions.toSorted(byEffect));
-		if (cap !== undefined) needed.add(cap.id);
-		for (const { recipeVersionId } of context.checkIns) {
-			if (recipeVersionId !== null) needed.add(recipeVersionId);
-		}
-	}
-	const newest = newestContentVersion(sorted);
-	if (input.recipeExists && newest !== undefined) needed.add(newest.id);
-	const horizon = input.now.getTime() - VERSION_RETENTION_MS;
-	const settled = (version: RecipeVersion | undefined) =>
-		version === undefined || Date.parse(version.effectiveAt) < horizon;
-	return sorted.filter(
-		(version, index) => !needed.has(version.id) && settled(version) && settled(sorted[index + 1])
-	);
 };
 
 /** Where and for how many a recipe is planned. Omitted fields are null; servings follow the recipe. */

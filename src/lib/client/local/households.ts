@@ -1,6 +1,7 @@
 import { Data, Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
 
+import { loadMealResolution } from '$lib/client/meals/resolution.js';
 import { DomainIdSchema, UtcInstantSchema } from '$lib/domain/contracts/primitives.js';
 import {
 	HouseholdAppliancePatchSchema,
@@ -16,6 +17,9 @@ import {
 	type Profile
 } from '$lib/domain/household/contracts.js';
 import { requireCachedPermission } from '$lib/domain/household/permissions.js';
+
+import { resolveMeal } from '$lib/domain/meals/recipe-following.js';
+import { StoredMealSchema, isLiveMeal, isRecipeFollowingMeal } from '$lib/domain/meals/schema.js';
 
 import { executeLocalCommand } from './commands.js';
 import type { MaalDatabase } from './database.js';
@@ -385,11 +389,30 @@ export const forkDetachedHouseholdSnapshot = async (
 	if (!household) throw new LocalHouseholdMissing({ householdId: input.householdId });
 	const occurredAt = Schema.decodeUnknownSync(UtcInstantSchema)(input.occurredAt ?? nowUtc());
 	const newHouseholdId = uuidv7();
-	const meals = await database.meals.where('householdId').equals(input.householdId).toArray();
+	const stored = await database.meals.where('householdId').equals(input.householdId).toArray();
+	// The fork has none of the snapshot's boundaries, so each recipe-following meal becomes a copy of
+	// the version it shows here, and its check-ins pin nothing (spec §4.3, §9).
+	const following = stored
+		.filter(({ followsRecipe }) => followsRecipe === true)
+		.map((row) => Schema.decodeUnknownSync(StoredMealSchema)(row))
+		.filter(isLiveMeal)
+		.filter(isRecipeFollowingMeal);
+	const contextOf = await loadMealResolution(database, following);
+	const copies = new Map(
+		following.flatMap((meal) => {
+			const copy = resolveMeal(meal, contextOf(meal));
+			return copy === null ? [] : [[meal.id, copy] as const];
+		})
+	);
+	const meals = stored.map((meal) => copies.get(meal.id) ?? meal);
 	const mealIds = new Set(meals.map(({ id }) => id));
-	const checkIns = await database.mealCheckIns
-		.filter((checkIn) => typeof checkIn.mealId === 'string' && mealIds.has(checkIn.mealId))
-		.toArray();
+	const checkIns = (
+		await database.mealCheckIns
+			.filter((checkIn) => typeof checkIn.mealId === 'string' && mealIds.has(checkIn.mealId))
+			.toArray()
+	).map((checkIn) =>
+		copies.has(checkIn.mealId as string) ? { ...checkIn, recipeVersionId: null } : checkIn
+	);
 	const appliances = await database.householdAppliances
 		.where('householdId')
 		.equals(input.householdId)

@@ -150,7 +150,9 @@ mapping only during migration. Server authorization uses permissions, not a trus
   follows stay (§5.2), so the meal keeps showing them, offline and in free use too.
 - **Membership revoked:** retain a read-only detached snapshot. It can be exported or explicitly forked with
   new IDs; it never uploads under the former household identity. Its recipe-following meals resolve only
-  among versions that took effect before it was detached, so it never changes with its recipes.
+  among versions that took effect before it was detached, so it never changes with its recipes. A fork
+  turns each of them into a meal copy of the version it shows, and its check-ins pin nothing, because the
+  fork has no such boundary.
 - **Delete household:** cancel and refund billing first, then enter 30-day recoverable deletion. Remote access
   stops immediately. Recovery does not recreate a subscription. Final purge removes household content and
   the WorkOS organization while retaining only required financial/idempotency audit identifiers.
@@ -231,8 +233,8 @@ Deleted recipe content is recoverable for 30 days. Restore clears the tombstone 
 Permanent deletion or expiry purges content and retains a minimal sync tombstone for one year. A recent edit
 from another device also brings a deleted recipe back (§8.5).
 
-Deleting or purging a recipe changes no meal. Its recipe-following meals keep showing its versions, which
-stay while a meal needs them, so no meal loses its content.
+Deleting or purging a recipe changes no meal. Its recipe-following meals keep showing its versions, so no
+meal loses its content.
 
 **Recipe versions.** `RecipeVersion`: `id`, `recipeId`, `ownerUserId`, `effectiveAt`, nullable `recipe`, and
 the common fields, with `deletedAt` always null. `recipe` is the complete recipe aggregate as of the version;
@@ -256,29 +258,15 @@ insert-only in its owner's user audience, so versions never conflict.
   differ, it adds a version of the recipe, effective at the later of its commit time and one millisecond
   after that newest version. That version commits only while the recipe is still the one it matches and
   no version of the recipe was written since the comparison. When another recipe commit lands first, it
-  adds nothing, since that commit matches its own recipe.
+  adds nothing, since that commit matches its own recipe. A recipe change from an MCP tool, which sends no
+  version, is versioned by the Worker instead (§7.4).
 
-**Version collection.** A version is collected when all of these hold:
-
-1. It is not the newest content version of a recipe that still exists.
-2. No live recipe-following meal resolves to it (§5.3), no live check-in on a live meal pins it (§5.4), and
-   no live recipe-following meal's candidates stop at it, for a deletion marker. Each meal resolves among
-   the versions its household sees (§8.7), exactly as readers resolve it.
-3. It, and the version after it if there is one, took effect more than 90 days ago, the window of ordinary
-   change retention (§8.3). Moving a meal into an older window is rare, so this keeps most versions a
-   reschedule could reach.
-
-The Worker collects versions in scheduled maintenance. For each recipe, it reads the versions, the
-recipe-following meals, and the check-ins, and deletes the collected versions in one batch. The batch
-commits only while no version, meal, or check-in of that recipe was written since the read, so a meal or
-check-in synced meanwhile keeps the version it needs. It appends each deletion to the owner's user audience
-and to every household holding a recipe-following meal of the recipe, and devices remove the versions it
-names. Collection is the only way a version disappears.
-
-A device applies the same rule itself only to versions no server holds: those of a profile whose user scope
-has never synced. It removes a synced version when the Worker's deletion arrives, or when no live meal on
-the device follows its recipe and its owner has no profile on the device. Synced versions have one
-collector, so every device holds the same versions and resolves each meal the same way.
+**Versions are kept.** V1 never collects versions. The one deletion is a purge's: the transaction that purges
+a recipe also deletes its versions, but only while no meal and no check-in references the recipe: no meal
+follows it or names it as provenance, and no check-in pins one of its versions. In D1 that check runs inside
+the purge's own batch, so a meal or check-in that commits first keeps the versions. A device runs the same
+check in its purge transaction and drops the deleted versions' unsent pushes. Nothing syncs a version's
+deletion.
 
 ### 5.3 Meal
 
@@ -515,8 +503,13 @@ or protocol session state. Tools call the same D1 domain commands as HTTP/sync a
 Meal tools return a recipe-following meal with the content of the version it resolves to and
 `followsRecipe: true`, and a meal copy with `followsRecipe: false`. Planning a saved recipe creates a
 recipe-following meal, after giving the recipe its first version if it has none. A tool check-in pins like
-any check-in (§5.4), and a tool edit to a meal's recipe fields copies first (§5.3). Recipe changes through
-MCP add their versions on the Worker, through the same path as synced ones.
+any check-in (§5.4), and a tool edit to a meal's recipe fields copies first (§5.3). A tool sends no version
+of its own, so the Worker versions each tool recipe change from the recipe it committed: a content version
+when the newest one differs from it, or a deletion marker when the change deleted it. The version takes
+effect at the later of the request time and one millisecond after the recipe's latest version, and commits
+only while the recipe head and the recipe's versions are what it read. After a race it reads again, and
+it adds nothing once a later commit changed the content, which versions its own. Overlapping tool writes
+therefore always leave the newest version matching the recipe.
 
 ### 7.5 Synchronization
 
@@ -667,8 +660,16 @@ leaves it; its meals keep resolving among the versions it received.
 - **What a household sees.** A household sees a recipe's versions only while the recipe's owner belongs
   to it: every version while the owner is a member, and after the owner leaves only those that took effect
   before they left. Its meals resolve among those versions alone, wherever they are read: on a device, in a
-  Worker read such as an MCP tool, and in version collection. Edits the owner makes after leaving stay
-  private. A device that detaches a household snapshot applies the same cutoff at its detachment time.
+  Worker read such as an MCP tool, and in an export. One shared function holds this rule, and each reader
+  supplies the owner's standing from its own data: the Worker from `household_memberships`, where a
+  membership that is not active ended at its `updated_at`; a device from its membership rows, where it
+  ended at `detachedAt`, or `updatedAt` without one. Edits the owner makes after leaving stay private.
+  A device holds versions from several sources: its profiles' own, and every household it syncs. It
+  therefore resolves an owner it has no membership row for among only the versions that household's sync
+  delivered (`householdVersions`), which the Worker filtered by the same rule. A household every profile
+  on the device left is a detached snapshot, whose view ends at its detachment as though every owner left
+  then. Removing a profile from a device records the versions each remaining household sees as delivered
+  to it, since the profile's membership rows go with it.
 
 - **Who may follow.** A meal may start following a recipe only when the writer owns it or the household
   already receives it, because a live recipe-following meal there follows it. Anyone else can see the
@@ -680,9 +681,8 @@ leaves it; its meals keep resolving among the versions it received.
   another owner, with `recipe_not_owned`. Otherwise a member could version another member's followed
   recipe and change what the household's meals show. A device never rewrites or deletes a version: a
   push of an existing version ID, or a deletion of one, is rejected as `recipe_version_immutable`.
-- **Wire.** Household pulls and bootstrap pages carry `recipeVersion` changes with the complete version,
-  and its deletion when the Worker collects it (§5.2). They are pull-only: a household push of a
-  `recipeVersion` is malformed.
+- **Wire.** Household pulls and bootstrap pages carry `recipeVersion` changes with the complete version.
+  They are pull-only: a household push of a `recipeVersion` is malformed.
 - **Order.** User and household scopes sync independently, so a meal can reach D1 before its recipe's
   versions. A meal that starts following a recipe D1 holds no version of gets `source_recipe_pending`, a
   retryable unavailable error, and the device retries after its recipe sync. One that starts following a
@@ -694,8 +694,9 @@ leaves it; its meals keep resolving among the versions it received.
   following a recipe its household did not follow yet appends every version of the recipe, and commits
   only while no version of the recipe was written since it read them. Each bootstrap page carries the
   versions of the recipes its recipe-following meals follow.
-- **Device apply.** A device stores shared versions in `recipeVersions` beside its own profiles' versions.
-  A version is immutable, so storing one that is already there changes nothing.
+- **Device apply.** A device stores shared versions in `recipeVersions` beside its own profiles' versions,
+  and records in `householdVersions` which household's sync delivered each. A version is immutable, so
+  storing one that is already there changes nothing.
 - **Free use.** Without sync, every profile on a device shares one Dexie database, so recipe-following
   meals resolve locally with no Worker or D1 request.
 
@@ -711,15 +712,17 @@ V1 portable archives are unencrypted ZIP files with:
 - `deleted-recipes.json` and `detached-households.json` when visible.
 
 The active user may export everything they can see, including complete accessible household snapshots and
-recoverable deleted recipes. `meals.json` holds both meal kinds as stored. A recipe-following meal of the
-exporter's own recipe stays a reference, because its recipe and versions are in the archive; one that
-follows another member's recipe is exported as a meal copy of the version it resolves to, because the
-archive holds only the exporter's recipes. Only a check-in on a meal exported as recipe-following keeps
-its pin, which names a version in the archive; every other check-in's pin is cleared, because its meal
-holds its own content. Import requires each
-recipe-following meal's recipe and each pinned version to resolve among the imported or local records.
-Versions import insert-only: a version already on the device stays as it is. Credentials, PIN verifiers,
-billing capability, sync clocks/cursors/outbox, leases, and MCP secrets are excluded. URL media/provenance is included; third-party bytes are not fetched.
+recoverable deleted recipes. `meals.json` holds both meal kinds. A recipe-following meal of the exporter's own
+recipe, in a household the exporter still belongs to, stays a reference, because its recipe and versions are
+in the archive. Every other recipe-following meal is exported as a meal copy of the version it resolves to on
+the exporting device: one of another member's recipe, because the archive holds only the exporter's recipes,
+and every one in a detached snapshot, because a restore has no detachment to cut its versions off at. Only a
+check-in on a meal exported as recipe-following keeps its pin, which names a version in the archive; every
+other check-in's pin is cleared, because its meal holds its own content. Import requires each recipe-following
+meal's recipe and each pinned version to resolve among the imported or local records. Versions import
+insert-only: a version already on the device stays as it is. Credentials, PIN verifiers, billing capability,
+sync clocks/cursors/outbox, leases, and MCP secrets are excluded. URL media/provenance is included;
+third-party bytes are not fetched.
 
 Empty restore preserves IDs. Merge no-ops identical IDs and asks `keep local`, `replace`, or `import as copy`
 for divergent collisions, with a bulk choice. Copy remaps the complete reference graph. An importing user owns
@@ -752,8 +755,8 @@ These are implementation proofs, not unresolved product decisions:
 3. Sync model tests: live D1 ordering, staleness-threshold backfill window, month-old stale upload, edit revival
    within and rejection beyond the threshold, visible rejection feedback, idempotent retries,
    lapse/resubscription, expired cursor bootstrap, tombstone expiry, revoked membership, two-profile device,
-   recipe versions shared with a household, two devices resolving a meal to the same version, and version
-   collection under concurrent sync.
+   recipe versions shared with a household, two devices resolving a meal to the same version, and a purge
+   keeping the versions of a recipe a meal or check-in references.
 4. Schema round trips: every prototype field and constraint, especially taxonomy aliases/conversions,
    instruction-event discriminants, confidence ranges, source fidelity, and import copy reference remapping.
 5. PWA browser tests: first install, offline reopen, multi-tab update, quota abort, migration recovery, and no
@@ -787,6 +790,8 @@ product decision.
 - **WebSocket push.** Replace foreground polling with server push of new sequences.
 - **Device-only data for MCP.** Use Cloudflare Tunnels so MCP can read data that exists only on a device and
   was never synced to D1.
+- **Recipe version collection.** V1 keeps every version (§5.2). Revisit with a simple, safe rule if storage
+  matters.
 - **Change history for product analysis.** Keep ordinary changes beyond 90 days to study how people plan and
   cook. This conflicts with the 90-day retention rule in §8.3, so it needs a privacy decision before any
   design work.

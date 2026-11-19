@@ -1,15 +1,18 @@
 /**
  * D1 reads and writes for immutable recipe versions (spec §5.2, §8.7), shared by the user and
- * household sync repositories, the MCP domain port, and version collection.
+ * household sync repositories and the MCP domain port.
  */
 import { Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
 
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
-import type { MealResolutionContext } from '$lib/domain/meals/recipe-following.js';
+import {
+	householdSeesVersion,
+	ownerStanding,
+	type MealResolutionContext
+} from '$lib/domain/meals/recipe-following.js';
 import {
 	MealCheckInSchema,
-	RecipeFollowingMealSchema,
 	isRecipeFollowingMeal,
 	type LiveMeal,
 	type RecipeFollowingMeal
@@ -59,8 +62,9 @@ export const readRecipeVersions = async (
 };
 
 /**
- * The versions of these recipes that a household receives (spec §8.7): every version while the
- * recipe's owner belongs to it, and only those that took effect before the owner left otherwise.
+ * The versions of these recipes that a household sees (spec §8.7), by {@link householdSeesVersion}
+ * over the owner's membership in the household, which is unique per household and user. A
+ * membership that is not active ended at its `updated_at`.
  */
 export const readHouseholdVersions = async (
 	database: D1Database,
@@ -69,18 +73,32 @@ export const readHouseholdVersions = async (
 ): Promise<RecipeVersion[]> => {
 	const unique = [...new Set(recipeIds)];
 	if (unique.length === 0) return [];
-	return decodeVersionRows(
-		await queryAll(
-			database,
-			`SELECT v.* FROM recipe_versions v WHERE v.recipe_id IN (${JSON_IDS})
-			 AND (EXISTS (SELECT 1 FROM household_memberships hm WHERE hm.household_id = ?
-			   AND hm.workos_user_id = v.owner_user_id AND hm.status = 'active')
-			  OR v.effective_at <= (SELECT MAX(hm.updated_at) FROM household_memberships hm
-			   WHERE hm.household_id = ? AND hm.workos_user_id = v.owner_user_id))`,
-			JSON.stringify(unique),
-			householdId,
-			householdId
-		)
+	const rows = await queryAll<
+		Record<string, unknown> & {
+			id: string;
+			owner_status: string | null;
+			owner_updated_at: string;
+		}
+	>(
+		database,
+		`SELECT v.*, hm.status AS owner_status, hm.updated_at AS owner_updated_at
+		 FROM recipe_versions v LEFT JOIN household_memberships hm
+		  ON hm.household_id = ? AND hm.workos_user_id = v.owner_user_id
+		 WHERE v.recipe_id IN (${JSON_IDS})`,
+		householdId,
+		JSON.stringify(unique)
+	);
+	const standings = new Map(
+		rows.map(({ id, owner_status, owner_updated_at }) => [
+			id,
+			ownerStanding(
+				owner_status === null ? [] : [owner_status === 'active' ? null : owner_updated_at]
+			)
+		])
+	);
+	// Decoding drops the joined membership columns.
+	return decodeVersionRows(rows).filter((version) =>
+		householdSeesVersion(version, standings.get(version.id))
 	);
 };
 
@@ -97,28 +115,6 @@ const decodeVersionRows = (rows: readonly Record<string, unknown>[]): RecipeVers
 			return [];
 		}
 	});
-
-/** The live recipe-following meals of a recipe, as the domain types them. */
-export const followingMealsOf = async (
-	database: D1Database,
-	recipeId: string
-): Promise<RecipeFollowingMeal[]> =>
-	(
-		await queryAll(
-			database,
-			`SELECT id, household_id, date, time, sort_order, planned_cook_user_id, planned_yield,
-			 status, schema_version, revision, created_at, updated_at, deleted_at
-			 FROM meals WHERE followed_recipe_id = ? AND deleted_at IS NULL`,
-			recipeId
-		)
-	).map((row) =>
-		Schema.decodeUnknownSync(RecipeFollowingMealSchema)({
-			...camelize(row),
-			conflictClocks: {},
-			sourceRecipeId: recipeId,
-			followsRecipe: true
-		})
-	);
 
 /**
  * Reads what these meals resolve against in D1: the versions of their recipes that each meal's
@@ -217,8 +213,8 @@ export const householdsReceivingRecipe = async (
 
 /**
  * Statements that share `versions` with each household as pull-only household `recipeVersion`
- * changes, and move each household's latest sequence (spec §8.7). A version with `deletedAt` set is
- * shared as its deletion. Append them to the batch that commits the version or the meal.
+ * changes, and move each household's latest sequence (spec §8.7). Append them to the batch that
+ * commits the version or the meal.
  */
 export const sharedVersionStatements = (
 	database: D1Database,
@@ -241,7 +237,7 @@ export const sharedVersionStatements = (
 						 (mutation_id, actor_user_id, origin_device_id, audience_kind, audience_id, entity_kind,
 						  entity_id, conflict_group, operation, resulting_revision, occurred_at, received_at,
 						  payload, tombstone_expires_at)
-						 VALUES (?, ?, ?, 'household', ?, 'recipeVersion', ?, 'shared', ?, 1, ?, ?, ?, NULL)`
+						 VALUES (?, ?, ?, 'household', ?, 'recipeVersion', ?, 'shared', 'upsert', 1, ?, ?, ?, NULL)`
 					)
 					.bind(
 						mutationId,
@@ -249,7 +245,6 @@ export const sharedVersionStatements = (
 						input.deviceId,
 						householdId,
 						version.id,
-						version.deletedAt === null ? 'upsert' : 'delete',
 						input.occurredAt,
 						input.receivedAt,
 						JSON.stringify({

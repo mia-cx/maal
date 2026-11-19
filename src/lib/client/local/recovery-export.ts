@@ -61,6 +61,7 @@ const recoveryDecoders = {
 	userAttributions: PortableUserAttributionSchema,
 	recipes: StoredRecipeSchema,
 	recipeVersions: RecipeVersionSchema,
+	householdVersions: Schema.Struct({ householdId: Schema.String, versionId: Schema.String }),
 	meals: StoredMealSchema,
 	mealCheckIns: MealCheckInSchema,
 	foods: FoodSchema,

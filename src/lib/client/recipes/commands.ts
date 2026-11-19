@@ -31,7 +31,7 @@ import {
 	type RecipePurgeTombstone
 } from '$lib/domain/recipes/schema.js';
 
-import { executeRecipeCommands } from './versions.js';
+import { executeRecipeCommands, removePurgedRecipeVersions } from './versions.js';
 import {
 	normalizeIngredientSource,
 	parseInstructionEvents
@@ -653,7 +653,18 @@ const purgeRecipe = async (
 		},
 		recipeId
 	);
-	const [result] = await executeRecipeCommands(database, [purge, ...detach]);
+	const tables = [
+		database.recipes,
+		database.recipeVersions,
+		database.meals,
+		database.mealCheckIns,
+		database.outbox
+	];
+	const [result] = await database.transaction('rw', tables, async () => {
+		const results = await executeRecipeCommands(database, [purge, ...detach]);
+		await removePurgedRecipeVersions(database, recipeId);
+		return results;
+	});
 	return decode(
 		StoredRecipeSchema,
 		result!.aggregates[0],

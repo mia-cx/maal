@@ -5,8 +5,7 @@ import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
 import {
 	copyRecipeIntoMeal,
 	planRecipeFollowingMeal,
-	resolveMealVersion,
-	sameRecipeContent
+	resolveMealVersion
 } from '$lib/domain/meals/recipe-following.js';
 import {
 	MEAL_CONFLICT_GROUPS,
@@ -28,12 +27,7 @@ import {
 	type RecipeAggregate,
 	type RecipeImportedCandidate
 } from '$lib/domain/recipes/schema.js';
-import {
-	byEffect,
-	newestContentVersion,
-	recipeVersion,
-	type RecipeVersion
-} from '$lib/domain/recipes/versions.js';
+import { recipeVersion, type RecipeVersion } from '$lib/domain/recipes/versions.js';
 import {
 	FoodUserAliasSchema,
 	FoodUserEntrySchema,
@@ -220,6 +214,7 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		operation: 'upsert' | 'delete';
 	}): Promise<RecipeAggregate> {
 		const now = new Date().toISOString() as `${string}Z`;
+		// A tool sends no version of its own, so the commit versions the recipe it leaves (§5.2).
 		const { receipt, aggregate } = await this.users.commitWithResult({
 			actorUserId: input.actorUserId,
 			deviceId: this.deviceId,
@@ -235,34 +230,11 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 				aggregate: input.aggregate
 			},
 			mode: 'live',
-			receivedAt: now
+			receivedAt: now,
+			versionsRecipe: true
 		});
 		if (receipt.status === 'rejected') {
 			throw new RemoteDomainError('write_rejected', 'The recipe command was rejected.');
-		}
-		// A tool's recipe change adds its version on the Worker, as a device adds its own (§5.2):
-		// content the newest version lacks, or a deletion after a live version.
-		const committed = recipeFromSnapshot(aggregate);
-		const versions = (await readRecipeVersions(this.database, [input.aggregate.id])).toSorted(
-			byEffect
-		);
-		const newest = newestContentVersion(versions);
-		const live = committed !== null && committed.deletedAt === null;
-		const adds = live
-			? newest === undefined || !sameRecipeContent(newest.recipe, committed)
-			: versions.at(-1)?.recipe != null;
-		if (adds) {
-			await this.commitVersion(
-				input.actorUserId,
-				recipeVersion({
-					id: uuidv7(),
-					recipeId: input.aggregate.id,
-					ownerUserId: input.actorUserId,
-					effectiveAt: now,
-					recipe: live ? committed : null
-				}),
-				now
-			);
 		}
 		if (input.operation === 'delete') return input.aggregate;
 		const result = recipeFromSnapshot(aggregate);

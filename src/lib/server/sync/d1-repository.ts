@@ -12,6 +12,7 @@ import {
 	type StoredRecipe
 } from '$lib/domain/recipes/schema.js';
 import {
+	byEffect,
 	justAfter,
 	newestContentVersion,
 	recipeVersion,
@@ -46,6 +47,7 @@ import {
 	markReinstated,
 	queryAll,
 	readCommitGuard,
+	readCommitGuards,
 	readSidecars,
 	type CommitGuard,
 	type CommitResult,
@@ -489,6 +491,18 @@ const mergeRecipe = (
 	return { ...next, revision, updatedAt: clock.occurredAt, conflictClocks: clocks };
 };
 
+/**
+ * True when `column` names a version of the purged recipe bound to `?1` and no meal and no check-in
+ * references the recipe (spec §5.2). A purge deletes those versions in its own batch, so a meal or
+ * check-in that commits first keeps them.
+ */
+const unreferencedVersionSql = (
+	column: string
+): string => `${column} IN (SELECT id FROM recipe_versions WHERE recipe_id = ?1)
+	AND NOT EXISTS (SELECT 1 FROM meals WHERE followed_recipe_id = ?1 OR source_recipe_id = ?1)
+	AND NOT EXISTS (SELECT 1 FROM meal_check_ins c JOIN recipe_versions v ON v.id = c.recipe_version_id
+	 WHERE v.recipe_id = ?1)`;
+
 const normalizedStatements = (
 	database: D1Database,
 	entityKind: UserSyncEntityKind,
@@ -503,7 +517,19 @@ const normalizedStatements = (
 		return [upsert(database, table, pickSnake(aggregate, columns))];
 	}
 	if ('purgedAt' in aggregate) {
-		return [database.prepare('DELETE FROM recipes WHERE id = ?').bind(String(aggregate.id))];
+		const recipeId = String(aggregate.id);
+		return [
+			database.prepare('DELETE FROM recipes WHERE id = ?').bind(recipeId),
+			database
+				.prepare(
+					`DELETE FROM sync_entity_versions WHERE audience_kind = 'user'
+					 AND entity_kind = 'recipeVersion' AND ${unreferencedVersionSql('entity_id')}`
+				)
+				.bind(recipeId),
+			database
+				.prepare(`DELETE FROM recipe_versions WHERE ${unreferencedVersionSql('id')}`)
+				.bind(recipeId)
+		];
 	}
 	const recipeId = String(aggregate.id);
 	const statements = [upsert(database, 'recipes', pickSnake(aggregate, RECIPE_PARENT_COLUMNS))];
@@ -781,7 +807,13 @@ const syntheticChange = (
 
 const ENTITY_HEAD_SQL = entityHeadSql('user');
 
-type UserCommitInput = Parameters<UserSyncRepository['commit']>[0];
+type UserCommitInput = Parameters<UserSyncRepository['commit']>[0] & {
+	/**
+	 * Set by a writer that sends no version of its own, such as an MCP tool: a recipe commit then
+	 * versions the recipe it leaves (spec §5.2).
+	 */
+	readonly versionsRecipe?: boolean;
+};
 
 export class D1UserSyncRepository implements UserSyncRepository {
 	constructor(private readonly database: D1Database) {}
@@ -1284,7 +1316,9 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			const recipe = decodedResult.aggregate as StoredRecipe;
 			const incoming = decodedIncoming.aggregate;
 			await this.retryRaced(() =>
-				this.matchNewestVersion(input, recipe, incoming, committedSequence)
+				input.versionsRecipe
+					? this.versionCommittedRecipe(input, recipe, committedSequence)
+					: this.matchNewestVersion(input, recipe, incoming, committedSequence)
 			);
 		}
 		return { receipt: receiptFromRow(receipt), aggregate: decodedResult.aggregate };
@@ -1386,6 +1420,98 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			[recipeHead, versionHead]
 		);
 		if (result === COMMIT_RACED) return COMMIT_RACED;
+	}
+
+	/**
+	 * Versions a recipe commit whose writer sends no version, such as an MCP tool's (spec §5.2): the
+	 * recipe as D1 holds it, or a deletion marker once it is deleted. The version commits only while
+	 * the recipe head and the recipe's versions are what this read, so it always matches the
+	 * committed recipe; after a race it reads again. Once a later commit changed the content, that
+	 * commit versions its own, and this adds nothing.
+	 */
+	private async versionCommittedRecipe(
+		input: UserCommitInput,
+		committed: StoredRecipe,
+		committedSequence: number
+	): Promise<void | typeof COMMIT_RACED> {
+		const recipeId = input.mutation.entityId;
+		const [[recipeHead, versionHead], versions] = await Promise.all([
+			readCommitGuards(this.database, [
+				{ sql: ENTITY_HEAD_SQL, binds: [input.actorUserId, 'recipe', recipeId] },
+				{ sql: VERSION_HEAD_SQL, binds: [recipeId] }
+			]),
+			readRecipeVersions(this.database, [recipeId])
+		]);
+		// While the head is this commit's, D1 holds the committed recipe; otherwise read what won.
+		const stored =
+			recipeHead.value === committedSequence
+				? committed
+				: await this.readStoredRecipe(input.actorUserId, recipeId);
+		const live = (recipe: StoredRecipe | undefined) =>
+			recipe !== undefined && isRecipeAggregate(recipe) && recipe.deletedAt === null
+				? recipe
+				: null;
+		const mine = live(committed);
+		const current = live(stored);
+		if (mine === null ? current !== null : current === null || !sameRecipeContent(mine, current)) {
+			return;
+		}
+		const sorted = versions.toSorted(byEffect);
+		const newest = newestContentVersion(sorted);
+		const last = sorted.at(-1);
+		const needed =
+			current === null
+				? last !== undefined && last.recipe !== null
+				: newest === undefined || !sameRecipeContent(newest.recipe, current);
+		if (!needed) return;
+		const effectiveAt =
+			last !== undefined && justAfter(last.effectiveAt) > input.receivedAt
+				? justAfter(last.effectiveAt)
+				: (input.receivedAt as `${string}Z`);
+		const version = recipeVersion({
+			id: uuidv7(),
+			recipeId,
+			ownerUserId: input.actorUserId,
+			effectiveAt,
+			recipe: current
+		});
+		const result = await this.attemptCommit(
+			{
+				...input,
+				mode: 'live',
+				mutation: {
+					schemaVersion: CURRENT_SCHEMA_VERSION,
+					mutationId: uuidv7(),
+					originDeviceId: input.mutation.originDeviceId,
+					entityKind: 'recipeVersion',
+					entityId: version.id,
+					conflictGroups: ['row'],
+					operation: 'upsert',
+					occurredAt: effectiveAt,
+					aggregate: version
+				}
+			},
+			[recipeHead, versionHead]
+		);
+		if (result === COMMIT_RACED) return COMMIT_RACED;
+	}
+
+	/** The recipe as D1 holds it now, decoded, or undefined when D1 has none. */
+	private async readStoredRecipe(
+		actorUserId: string,
+		recipeId: string
+	): Promise<StoredRecipe | undefined> {
+		const stored =
+			(await readLatestChangedAggregate(this.database, actorUserId, 'recipe', recipeId)) ??
+			(
+				await readSnapshotChanges(this.database, actorUserId, [
+					{ entityKind: 'recipe', entityId: recipeId }
+				])
+			)[0]?.aggregate;
+		return stored == null
+			? undefined
+			: (decodeUserSyncAggregate('recipe', recipeId, actorUserId, stored)
+					.aggregate as StoredRecipe);
 	}
 
 	async prune(input: { now: string; changeCutoff: string }): Promise<void> {

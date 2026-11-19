@@ -12,6 +12,7 @@ import type { Table } from 'dexie';
 import { Schema } from 'effect';
 
 import type { LocalStoreName, MaalDatabase } from '$lib/client/local/database.js';
+import { deviceVersionVisibility } from '$lib/client/meals/resolution.js';
 import { PortableArchiveError } from '$lib/domain/contracts/errors.js';
 import { GLOBAL_TAXONOMY_SEED_VERSION } from '$lib/domain/taxonomy/global-seed.js';
 import {
@@ -142,6 +143,7 @@ export const PORTABLE_SOURCE_STORES = [
 	'householdAppliances',
 	'recipes',
 	'recipeVersions',
+	'householdVersions',
 	'meals',
 	'mealCheckIns',
 	'userAttributions',
@@ -166,7 +168,11 @@ export const PORTABLE_SOURCE_STORES = [
 
 type PortableSourceStore = (typeof PORTABLE_SOURCE_STORES)[number];
 type StoreRow<K extends PortableSourceStore> =
-	MaalDatabase[K] extends Table<infer Row, string> ? Row : never;
+	MaalDatabase[K] extends Table<infer Row, string>
+		? Row
+		: MaalDatabase[K] extends Table<infer Row, [string, string]>
+			? Row
+			: never;
 
 /** Every row of each source store, as the live database or a recovery read returns them. */
 export type PortableSource = { readonly [K in PortableSourceStore]: readonly StoreRow<K>[] };
@@ -215,20 +221,32 @@ export const buildPortableArchive = (
 	const timeZones = new Map(
 		source.households.map(({ householdId, timezone }) => [householdId, timezone])
 	);
-	// A meal following one of the exported recipes stays a reference, since the recipe and its
-	// versions are in the archive; one following another member's recipe goes out as a copy of the
-	// version it resolves to (spec §9).
+	const sees = deviceVersionVisibility(source);
+	const versionsByRecipe = Map.groupBy(versions, ({ recipeId }) => recipeId);
+	const checkInsByMeal = Map.groupBy(allCheckIns, ({ mealId }) => mealId);
+	const exporterActiveIn = new Set(
+		memberships.filter(({ status }) => status === 'active').map(({ householdId }) => householdId)
+	);
+	// A meal following one of the exported recipes in a household the exporter still belongs to
+	// stays a reference, since the recipe and its versions are in the archive. Every other
+	// recipe-following meal, of another member's recipe or in a detached snapshot, goes out as a copy
+	// of the version it shows here, so a restore shows the same (spec §9).
 	const meals = source.meals
 		.map((record) => decode(StoredMealSchema, record, 'decode meal for export'))
 		.filter(isLiveMeal)
 		.filter(({ householdId, deletedAt }) => householdIds.has(householdId) && deletedAt === null)
 		.flatMap((meal): LiveMeal[] => {
-			if (!isRecipeFollowingMeal(meal) || exportedRecipeIds.has(meal.sourceRecipeId)) {
+			if (
+				!isRecipeFollowingMeal(meal) ||
+				(exportedRecipeIds.has(meal.sourceRecipeId) && exporterActiveIn.has(meal.householdId))
+			) {
 				return [meal];
 			}
 			const copy = resolveMeal(meal, {
-				versions,
-				checkIns: allCheckIns,
+				versions: (versionsByRecipe.get(meal.sourceRecipeId) ?? []).filter((version) =>
+					sees(meal.householdId, version)
+				),
+				checkIns: checkInsByMeal.get(meal.id) ?? [],
 				timeZone: timeZones.get(meal.householdId) ?? null
 			});
 			return copy === null ? [] : [copy];

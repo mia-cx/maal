@@ -234,7 +234,11 @@ describe('recipe statistics', () => {
 		await database.uiState.put({ key: activeHouseholdKey(aliceProfileId), value: 'org_other' });
 		expect(await statsFor()).toMatchObject({ plannedCount: 2, timesCooked: 1 });
 
-		await database.memberships.put(membership('org_other', 'detached'));
+		await database.memberships.put({
+			...membership('org_other', 'detached'),
+			detachedAt: at(6),
+			updatedAt: at(6)
+		});
 		expect(await statsFor()).toMatchObject({ plannedCount: 2, timesCooked: 1 });
 
 		await database.memberships.put(membership('org_other', 'revoked'));

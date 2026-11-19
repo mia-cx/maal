@@ -946,6 +946,12 @@ describe('portable imports and sync', () => {
 			date: '2026-08-30'
 		});
 		// Another member's recipe, shared with the household: the archive holds only Alice's recipes.
+		const aliceMembership = (await source.memberships.toArray())[0]!;
+		await source.memberships.put({
+			...aliceMembership,
+			membershipId: 'membership_bob',
+			workosUserId: 'user_bob'
+		});
 		const bobsRecipe = await commitImportedRecipeCandidate(
 			source,
 			{ authSlotId: 'slot-bob', ownerUserId: 'user_bob', originDeviceId: deviceId },

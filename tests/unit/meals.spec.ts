@@ -27,6 +27,7 @@ import {
 	type MealCommandContext
 } from '$lib/client/meals/index.js';
 import { MaalDatabase, openMaalDatabase } from '$lib/client/local/database.js';
+import type { MembershipRecord } from '$lib/client/local/records.js';
 import { executeLocalCommands } from '$lib/client/local/commands.js';
 import {
 	commitImportedRecipeCandidate,
@@ -36,7 +37,6 @@ import {
 	updateRecipeFromEditor,
 	type RecipeCommandContext
 } from '$lib/client/recipes/index.js';
-import { runRecipeVersionRetention } from '$lib/client/recipes/version-retention.js';
 import type { Membership } from '$lib/domain/household/contracts.js';
 import {
 	MealCheckInSchema,
@@ -49,9 +49,27 @@ import {
 } from '$lib/domain/recipes/schema.js';
 
 const databases: MaalDatabase[] = [];
+const aliceMembership: MembershipRecord = {
+	membershipId: 'membership_alice',
+	householdId: 'org_family',
+	workosUserId: 'user_alice',
+	roleSlug: 'admin',
+	permissions: ['meals:read', 'meals:write'],
+	status: 'active',
+	directoryManaged: false,
+	workosCreatedAt: '2026-08-20T10:00:00.000Z',
+	lastVerifiedAt: '2026-08-20T10:00:00.000Z',
+	updatedAt: '2026-08-20T10:00:00.000Z',
+	source: 'workos',
+	detachedAt: null,
+	denialCode: null
+};
+
+/** A device where Alice belongs to the household she plans in, as every planner does. */
 const openDatabase = async (): Promise<MaalDatabase> => {
 	const database = await openMaalDatabase(`meals-${crypto.randomUUID()}`);
 	databases.push(database);
+	await database.memberships.put(aliceMembership);
 	return database;
 };
 
@@ -235,21 +253,6 @@ const joinHousehold = async (database: MaalDatabase, timezone: string | null = n
 		updatedAt: at(20),
 		deletedAt: null,
 		conflictClocks: {}
-	});
-	await database.memberships.put({
-		membershipId: 'membership_alice',
-		householdId: 'org_family',
-		workosUserId: 'user_alice',
-		roleSlug: 'admin',
-		permissions: ['meals:read', 'meals:write'],
-		status: 'active',
-		directoryManaged: false,
-		workosCreatedAt: at(20),
-		lastVerifiedAt: at(20),
-		updatedAt: at(20),
-		source: 'workos',
-		detachedAt: null,
-		denialCode: null
 	});
 };
 
@@ -455,59 +458,6 @@ describe('recipe-following meals', () => {
 		expect(await titleOf(database, before.id)).toBe('Sunday soup');
 		expect(await titleOf(database, after.id)).toBe('Changed soup');
 	});
-
-	test('device collection keeps every version a meal or check-in needs and drops the rest', async () => {
-		const database = await openDatabase();
-		await joinHousehold(database);
-		await database.profiles.put({
-			profileId: uuidv7(),
-			workosUserId: 'user_alice',
-			displayName: 'Alice',
-			email: 'alice@example.test',
-			profilePictureUrl: null,
-			locale: 'en-NL',
-			timezone: null,
-			pinSalt: null,
-			pinVerifier: null,
-			lockPolicy: 'none',
-			lastUsedAt: at(20),
-			authState: 'authenticated'
-		});
-		const on = (date: string) => `${date}T10:00:00.000Z` as `${string}Z`;
-		const recipe = await commitImportedRecipeCandidate(
-			database,
-			recipeContext(on('2026-01-01')),
-			completeRecipe()
-		);
-		await editRecipe(database, recipe.id, on('2026-02-01'), 'February soup');
-		const february = await planRecipeAsMeal(database, mealContext(on('2026-02-02')), recipe.id, {
-			date: '2026-02-15'
-		});
-		await editRecipe(database, recipe.id, on('2026-03-01'), 'March soup');
-		// Checked in early, so it pins March although its date falls after April's edit.
-		const april = await planRecipeAsMeal(database, mealContext(on('2026-03-02')), recipe.id, {
-			date: '2026-04-20'
-		});
-		await saveMealCheckIn(database, mealContext(on('2026-03-05')), april.id, {
-			status: 'cooked',
-			verdict: 'repeat'
-		});
-		await editRecipe(database, recipe.id, on('2026-04-01'), 'April soup');
-		await editRecipe(database, recipe.id, on('2026-05-01'), 'May soup');
-		await editRecipe(database, recipe.id, on('2026-08-01'), 'August soup');
-
-		const removed = await runRecipeVersionRetention(database, new Date('2026-08-20T00:00:00Z'));
-
-		const kept = (await database.recipeVersions.toArray())
-			.map(({ recipe }) => (recipe as { title: string }).title)
-			.toSorted();
-		// January and April went; May stays because August took effect within 90 days.
-		expect(removed).toHaveLength(2);
-		expect(kept).toEqual(['August soup', 'February soup', 'March soup', 'May soup']);
-		expect(await titleOf(database, february.id)).toBe('February soup');
-		expect(await titleOf(database, april.id)).toBe('March soup');
-		expect(await database.outbox.where('aggregateId').anyOf(removed).count()).toBe(0);
-	});
 });
 
 describe('meal lifecycle and focused check-ins', () => {
@@ -712,6 +662,11 @@ describe('household meal pool', () => {
 		const scheduled = await plan(mealContext(), '2026-08-23');
 		const deleted = await plan(mealContext(), null);
 		await deleteMeal(database, mealContext(at(22)), deleted.id);
+		await database.memberships.put({
+			...aliceMembership,
+			membershipId: 'membership_alice_other',
+			householdId: 'org_other'
+		});
 		await plan({ ...mealContext(), householdId: 'org_other' }, null);
 
 		const emissions: string[][] = [];

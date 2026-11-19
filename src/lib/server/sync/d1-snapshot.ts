@@ -137,17 +137,23 @@ export interface CommitGuard {
 	readonly value: number;
 }
 
+/** Reads several guards' current values in one statement. */
+export const readCommitGuards = async (
+	database: D1Database,
+	guards: readonly Omit<CommitGuard, 'value'>[]
+): Promise<CommitGuard[]> => {
+	const row = await database
+		.prepare(`SELECT ${guards.map(({ sql }, index) => `${sql} AS g${index}`).join(', ')}`)
+		.bind(...guards.flatMap(({ binds }) => binds))
+		.first<Record<string, number>>();
+	return guards.map((guard, index) => ({ ...guard, value: row?.[`g${index}`] ?? 0 }));
+};
+
 export const readCommitGuard = async (
 	database: D1Database,
 	sql: string,
 	...binds: SqlValue[]
-): Promise<CommitGuard> => {
-	const row = await database
-		.prepare(`SELECT ${sql} AS value`)
-		.bind(...binds)
-		.first<{ value: number }>();
-	return { sql, binds, value: row?.value ?? 0 };
-};
+): Promise<CommitGuard> => (await readCommitGuards(database, [{ sql, binds }]))[0]!;
 
 /** `guards` as a condition to append after another one with ` AND`, and its binds. */
 export const commitGuardSql = (guards: readonly CommitGuard[]) => ({

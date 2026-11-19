@@ -36,6 +36,7 @@ import type {
 	BackfillCheckpointRecord,
 	BillingCapabilityRecord,
 	HouseholdApplianceRecord,
+	HouseholdVersionRecord,
 	HouseholdInviteRecord,
 	HouseholdRecord,
 	LocalAggregateRecord,
@@ -115,13 +116,14 @@ export const DATABASE_V6_STORES = {
 } as const;
 
 /**
- * v7 adds immutable recipe versions, which recipe-following meals resolve to, and indexes meals by
- * their recipe for version collection (spec §5.2, §5.3).
+ * v7 adds immutable recipe versions, which recipe-following meals resolve to, the versions each
+ * household's sync delivered, and indexes meals by their recipe (spec §5.2, §5.3, §8.7).
  */
 export const DATABASE_STORES = {
 	...DATABASE_V6_STORES,
 	meals: `${DATABASE_V1_STORES.meals},sourceRecipeId`,
-	recipeVersions: '&id,recipeId'
+	recipeVersions: '&id,recipeId',
+	householdVersions: '&[householdId+versionId],householdId'
 } as const;
 
 export type LocalStoreName = keyof typeof DATABASE_STORES;
@@ -146,6 +148,7 @@ export class MaalDatabase extends Dexie {
 	householdAppliances!: Table<HouseholdApplianceRecord, string>;
 	recipes!: Table<LocalAggregateRecord, string>;
 	recipeVersions!: Table<LocalAggregateRecord, string>;
+	householdVersions!: Table<HouseholdVersionRecord, [string, string]>;
 	meals!: Table<LocalAggregateRecord, string>;
 	mealCheckIns!: Table<LocalAggregateRecord, string>;
 	foods!: Table<Food, string>;

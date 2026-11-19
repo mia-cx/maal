@@ -119,6 +119,32 @@ export const executeRecipeCommands = (
 	});
 };
 
+/**
+ * Removes a purged recipe's versions with their unsent outbox rows, unless a meal or check-in on this
+ * device still references the recipe (spec §5.2). Run it in the purge's transaction.
+ */
+export const removePurgedRecipeVersions = async (
+	database: MaalDatabase,
+	recipeId: string
+): Promise<void> => {
+	const ids = new Set(
+		(await database.recipeVersions.where('recipeId').equals(recipeId).primaryKeys()).map(String)
+	);
+	if (ids.size === 0) return;
+	const referenced =
+		(await database.meals.where('sourceRecipeId').equals(recipeId).count()) > 0 ||
+		(await database.mealCheckIns
+			.filter((row) => ids.has(String((row as { recipeVersionId?: unknown }).recipeVersionId)))
+			.count()) > 0;
+	if (referenced) return;
+	await database.recipeVersions.bulkDelete([...ids]);
+	await database.outbox
+		.where('aggregateId')
+		.anyOf([...ids])
+		.filter(({ entityKind, status }) => entityKind === 'recipeVersion' && status !== 'acknowledged')
+		.delete();
+};
+
 /** Every stored version of these recipes, decoded. */
 export const readRecipeVersions = async (
 	database: MaalDatabase,

@@ -21,7 +21,6 @@ import {
 
 import { pruneAcknowledgedOutbox, recordServerChanges, scopeOutbox } from './outbox.js';
 import { noteReinstatement } from './reinstatements.js';
-import { storeSyncedAggregate } from './versions.js';
 
 /** The auth slot and household a coordinator applies server changes for. */
 export interface HouseholdApplyScope {
@@ -137,16 +136,19 @@ const decodeSharedVersion = (change: HouseholdSyncChange): RecipeVersion => {
 };
 
 /**
- * Stores the recipe versions shared with the household, or removes the ones the Worker collected
+ * Stores the recipe versions shared with the household and records that its sync delivered them
  * (spec §8.7). A version is immutable, so storing one already here changes nothing.
  */
 const applySharedVersions = async (
 	database: MaalDatabase,
+	householdId: string,
 	versions: readonly RecipeVersion[]
 ): Promise<void> => {
-	for (const version of versions) {
-		await storeSyncedAggregate(database, 'recipeVersions', version.id, version);
-	}
+	if (versions.length === 0) return;
+	await database.recipeVersions.bulkPut([...versions]);
+	await database.householdVersions.bulkPut(
+		versions.map(({ id }) => ({ householdId, versionId: id }))
+	);
 };
 
 const detachMealCheckIns = async (database: MaalDatabase, mealId: string): Promise<void> => {
@@ -172,13 +174,14 @@ export const applyHouseholdPullPage = async (
 			...new Set(tables),
 			database.outbox,
 			database.recipeVersions,
+			database.householdVersions,
 			database.mealCheckIns,
 			database.authSlots,
 			database.syncScopes,
 			database.reinstatements
 		],
 		async () => {
-			await applySharedVersions(database, sharedVersions);
+			await applySharedVersions(database, householdId, sharedVersions);
 			const pending = await pendingHouseholdOutbox(database, householdId, decoded);
 			const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));
 			const pendingByKey = Map.groupBy(pending, (row) => keyFor(row.entityKind, row.aggregateId));
@@ -336,13 +339,14 @@ export const applyHouseholdBootstrap = async (
 			...new Set(tables),
 			database.outbox,
 			database.recipeVersions,
+			database.householdVersions,
 			database.mealCheckIns,
 			database.authSlots,
 			database.syncScopes,
 			database.reinstatements
 		],
 		async () => {
-			await applySharedVersions(database, sharedVersions);
+			await applySharedVersions(database, householdId, sharedVersions);
 			const pending = await pendingHouseholdOutbox(database, householdId, [
 				...decoded,
 				...response.instructions

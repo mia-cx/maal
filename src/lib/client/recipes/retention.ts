@@ -5,7 +5,6 @@ import { runMealRetention } from '$lib/client/meals/retention.js';
 import { UtcInstantSchema, type UtcInstant } from '$lib/domain/contracts/primitives.js';
 
 import { runRecipeRetention } from './commands.js';
-import { runRecipeVersionRetention } from './version-retention.js';
 
 const RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1_000;
 
@@ -59,7 +58,7 @@ export const runForegroundRecipeRetention = async (
 	};
 };
 
-/** Runs recipe, meal, and recipe-version retention now, every six hours, and whenever the app becomes visible. */
+/** Runs recipe and meal retention now, every six hours, and whenever the app becomes visible. */
 export const startForegroundRecipeRetention = (database: MaalDatabase): void => {
 	let running = false;
 	const run = async (): Promise<void> => {
@@ -75,11 +74,6 @@ export const startForegroundRecipeRetention = (database: MaalDatabase): void => 
 			await runMealRetention(database);
 		} catch {
 			console.error(JSON.stringify({ event: 'local_meal_retention_failed' }));
-		}
-		try {
-			await runRecipeVersionRetention(database);
-		} catch {
-			console.error(JSON.stringify({ event: 'local_recipe_version_retention_failed' }));
 		} finally {
 			running = false;
 		}

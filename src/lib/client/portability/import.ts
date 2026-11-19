@@ -49,6 +49,7 @@ export type PortableImportStore = Exclude<
 	| 'outbox'
 	| 'syncScopes'
 	| 'backfillCheckpoints'
+	| 'householdVersions'
 	| 'uiState'
 	| 'reinstatements'
 >;
