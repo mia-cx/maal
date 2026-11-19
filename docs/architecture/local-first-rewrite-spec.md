@@ -146,7 +146,9 @@ mapping only during migration. Server authorization uses permissions, not a trus
 - **Sign out:** revoke exactly that auth slot and keep the offline profile/data.
 - **Remove from this device:** confirm, offer export, revoke the slot, remove private recipes/preferences and
   all pending mutations owned by that profile. Shared household aggregates remain if another local member can
-  access them.
+  access them. A recipe that a remaining household's live recipe-following meal follows is not private: it
+  stays as a shared recipe (§8.7), so the meal keeps showing it, offline and in free use too, and household
+  sync keeps it current.
 - **Membership revoked:** retain a read-only detached snapshot. It can be exported or explicitly forked with
   new IDs; it never uploads under the former household identity.
 - **Delete household:** cancel and refund billing first, then enter 30-day recoverable deletion. Remote access
@@ -280,10 +282,12 @@ ID and the recipe row ID, so two devices that copy the same recipe revision writ
 reading a recipe-following meal derives the same IDs, so the meal keeps its row IDs when it is copied.
 
 A copy is its own mutation: it writes the `source` group, which holds `followsRecipe`, and every content
-group. An edit in the same gesture follows as a second mutation that owns only its own group. The Worker
-accepts a copy only while D1 still holds the meal as recipe-following. A copy that finds a meal copy there
-is rejected with `meal_already_copied`, and the device quietly takes the authoritative meal (§8.6), so two
-devices that copy the same meal converge without a conflict notice. The edit that followed still applies.
+group, and nothing else. An edit in the same gesture follows as a second mutation that owns only its own
+group. The Worker accepts a copy only while D1 still holds the meal as recipe-following. A copy that finds a
+meal copy there is rejected with `meal_already_copied`, and the device quietly takes the authoritative meal
+(§8.6), so two devices that copy the same meal converge without a conflict notice. The edit that followed
+still applies. A mutation that also writes the meal's own groups, such as an archive's Replace (§9), is a
+full replacement, not a copy, and applies to a meal copy like any other write.
 
 Pushing a meal's changes back to its recipe is a separate, explicit event that the person triggers. It
 writes the meal's content to the recipe as an ordinary recipe edit, with its rule-4 copies, and the meal
@@ -603,6 +607,12 @@ Following keeps that view current, and only for recipes a member chose to plan t
 recipe-following meal in the household references the recipe; members keep the version they last received.
 A household whose recipe owner has left gets copies at the owner's next recipe change instead (§5.3 rule 4).
 
+- **Who may follow.** A recipe-following meal may name a recipe only when the writer owns it or the household
+  already receives it, because a live recipe-following meal there follows it. Anyone else can see the
+  recipe only through a meal copy they write themselves, so following it would share what they never saw.
+  The Worker checks every write that leaves a meal recipe-following, live or backfill, before it stores or
+  shares anything, and rejects the rest with `recipe_not_shared`. The rejection carries no recipe content,
+  and the device shows the §8.6 notice.
 - **Wire.** Household pulls and bootstrap pages carry `recipe` changes with the complete recipe aggregate.
   They are pull-only: a household push of a `recipe` is malformed.
 - **Order.** User and household scopes sync independently, so a recipe-following meal can reach D1 before
@@ -611,16 +621,20 @@ A household whose recipe owner has left gets copies at the owner's next recipe c
   `tombstoned_entity`.
 - **Fan-out.** The D1 transaction that commits a recipe change also appends one household `recipe` change for
   each household that holds a live recipe-following meal of it. Committing a recipe-following meal appends
-  its recipe to that household when D1 holds the recipe. Each bootstrap page carries the recipe of every
-  recipe-following meal on the page.
+  its recipe to that household when D1 holds the recipe, and commits only while the recipe is unchanged since
+  the meal read it, so a recipe change in between makes the meal retry. Each bootstrap page carries the
+  recipe of every recipe-following meal on the page.
 - **Worker copies.** Before it commits a recipe change that edits content or deletes the recipe, the Worker
   copies the current D1 recipe into the recipe-following meals that rules 3 and 4 select, as household meal
   changes. The copies land ahead of the recipe change, so no member sees an old meal take the new content.
-  Recipe changes through MCP take the same path. The owner's devices make the same copies locally; the
-  Worker's or the device's copy wins, and the other is a quiet `meal_already_copied` rejection (§8.6).
-- **Device apply.** A device stores a shared recipe in `recipes` unless one of its signed-in profiles owns
-  it, where the owner's user sync is authoritative, or the local copy is newer or has unsent edits. Menus
-  list only the active profile's own recipes, so a shared recipe never appears in another member's menu.
+  The recipe change then commits only while the recipe's recipe-following meals are as the copies left them;
+  a meal written in between makes the change retry and select its copies again. Recipe changes through MCP
+  take the same path. The owner's devices make the same copies locally; the Worker's or the device's copy
+  wins, and the other is a quiet `meal_already_copied` rejection (§8.6).
+- **Device apply.** A device stores a shared recipe in `recipes` unless its owner is signed in on the device,
+  where the owner's user sync is authoritative, or the local copy is newer or has unsent edits. An owner who
+  signed out or must reauthenticate syncs nothing, so the household's copy applies. Menus list only the
+  active profile's own recipes, so a shared recipe never appears in another member's menu.
 - **Free use.** Without sync, every profile on a device shares one Dexie database, so recipe-following
   meals resolve locally with no Worker or D1 request.
 
