@@ -57,6 +57,33 @@ export const readRecipeVersions = async (
 	);
 };
 
+/**
+ * The stored versions of these recipes that `householdId` receives: those of a recipe one of its
+ * live recipe-following meals follows (spec §8.7). The check and the read are one statement, so a
+ * departure that copies the household's meals after a reader read them leaves the leaver's
+ * versions out here, instead of sharing an edit they made after leaving. A meal read before the
+ * departure then resolves to nothing, as a meal whose version has not arrived does.
+ */
+export const readHouseholdRecipeVersions = async (
+	database: D1Database,
+	householdId: string,
+	recipeIds: readonly string[]
+): Promise<RecipeVersion[]> => {
+	const unique = [...new Set(recipeIds)];
+	if (unique.length === 0) return [];
+	return decodeVersionRows(
+		await queryAll(
+			database,
+			`SELECT v.* FROM recipe_versions v
+			 WHERE v.recipe_id IN (${JSON_IDS})
+			 AND EXISTS (SELECT 1 FROM meals m WHERE m.household_id = ?
+			  AND m.followed_recipe_id = v.recipe_id AND m.deleted_at IS NULL)`,
+			JSON.stringify(unique),
+			householdId
+		)
+	);
+};
+
 const decodeVersionRows = (rows: readonly Record<string, unknown>[]): RecipeVersion[] =>
 	rows.flatMap((row) => {
 		try {
@@ -72,20 +99,22 @@ const decodeVersionRows = (rows: readonly Record<string, unknown>[]): RecipeVers
 	});
 
 /**
- * Reads what these meals resolve against in D1: the versions of their recipes, the live check-ins
- * on them, and their households' timezones (spec §5.3). A household follows only its current
- * members' recipes and receives every version of them (spec §8.7), so this is the same rule as on
- * a device, from the same data.
+ * Reads what these meals of `householdId` resolve against in D1: the versions of their recipes the
+ * household receives, the live check-ins on them, and the household's timezone (spec §5.3). A
+ * household follows only its current members' recipes and receives every version of them
+ * (spec §8.7), so this is the same rule as on a device, from the same data.
  */
 export const loadMealResolution = async (
 	database: D1Database,
+	householdId: string,
 	meals: readonly LiveMeal[]
 ): Promise<(meal: RecipeFollowingMeal) => MealResolutionContext> => {
 	const following = meals.filter(isRecipeFollowingMeal);
 	if (following.length === 0) return () => ({ versions: [], checkIns: [], timeZone: null });
-	const [versionsByRecipe, checkInRows, timeZoneRows] = await Promise.all([
-		readRecipeVersions(
+	const [versionsByRecipe, checkInRows, household] = await Promise.all([
+		readHouseholdRecipeVersions(
 			database,
+			householdId,
 			following.map(({ sourceRecipeId }) => sourceRecipeId)
 		).then((versions) => Map.groupBy(versions, ({ recipeId }) => recipeId)),
 		queryAll(
@@ -93,11 +122,10 @@ export const loadMealResolution = async (
 			`SELECT * FROM meal_check_ins WHERE deleted_at IS NULL AND meal_id IN (${JSON_IDS})`,
 			JSON.stringify(following.map(({ id }) => id))
 		),
-		queryAll<{ household_id: string; timezone: string | null }>(
-			database,
-			`SELECT household_id, timezone FROM households WHERE household_id IN (${JSON_IDS})`,
-			JSON.stringify([...new Set(following.map(({ householdId }) => householdId))])
-		)
+		database
+			.prepare('SELECT timezone FROM households WHERE household_id = ?')
+			.bind(householdId)
+			.first<{ timezone: string | null }>()
 	]);
 	const checkIns = checkInRows.flatMap((row) => {
 		try {
@@ -112,11 +140,10 @@ export const loadMealResolution = async (
 		}
 	});
 	const checkInsByMeal = Map.groupBy(checkIns, ({ mealId }) => mealId);
-	const timeZones = new Map(timeZoneRows.map((row) => [row.household_id, row.timezone]));
 	return (meal) => ({
 		versions: versionsByRecipe.get(meal.sourceRecipeId) ?? [],
 		checkIns: checkInsByMeal.get(meal.id) ?? [],
-		timeZone: timeZones.get(meal.householdId) ?? null
+		timeZone: household?.timezone ?? null
 	});
 };
 

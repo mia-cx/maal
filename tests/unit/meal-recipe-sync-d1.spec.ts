@@ -41,6 +41,7 @@ import { readUnseenRejections } from '$lib/client/sync/rejections.js';
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
 import { planRecipeFollowingMeal } from '$lib/domain/meals/recipe-following.js';
 import { MEAL_CONFLICT_GROUPS } from '$lib/domain/meals/schema.js';
+import type { RecipeAggregate } from '$lib/domain/recipes/schema.js';
 import { newestContentVersion, recipeVersion } from '$lib/domain/recipes/versions.js';
 import { D1RemoteDomainPort } from '$lib/server/domain/remote-port.js';
 import { HouseholdAdministrationRepository } from '$lib/server/household-administration/repository.js';
@@ -848,6 +849,89 @@ describe('a member leaving the household', () => {
 		}
 
 		await expect(followers(recipe.id)).resolves.toEqual([]);
+	});
+
+	/**
+	 * D1 whose next recipe-version read waits until Alice leaves and then edits her recipe in
+	 * private, as when both land between a reader's meal read and its version read.
+	 */
+	const leavesBeforeVersionRead = (recipe: RecipeAggregate): D1Database => {
+		let pending = true;
+		const leaveThenEdit = async () => {
+			await revoke(alice.userId);
+			await new D1RemoteDomainPort(d1, MCP_TEST_DEVICE).writeUserRecipe({
+				actorUserId: alice.userId,
+				aggregate: { ...recipe, title: 'Private after leaving' },
+				conflictGroups: ['header'],
+				operation: 'upsert'
+			});
+		};
+		return new Proxy(d1, {
+			get(target, key) {
+				if (key === 'prepare') {
+					return (sql: string) => {
+						const statement = target.prepare(sql);
+						if (!pending || !sql.includes('FROM recipe_versions')) return statement;
+						return {
+							bind: (...values: unknown[]) => {
+								const bound = statement.bind(...values);
+								return {
+									all: async () => {
+										if (pending) {
+											pending = false;
+											await leaveThenEdit();
+										}
+										return bound.all();
+									}
+								};
+							}
+						};
+					};
+				}
+				const value = Reflect.get(target, key);
+				return typeof value === 'function' ? value.bind(target) : value;
+			}
+		});
+	};
+
+	test('a household bootstrap racing the departure never shares the leaver’s later edits', async () => {
+		const aliceDevice = await openDevice(alice);
+		const recipe = await saveRecipe(aliceDevice);
+		const meal = await planRecipeAsMeal(aliceDevice.database, aliceDevice.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		await aliceDevice.sync();
+
+		const page = await bootstrapHouseholdSync(
+			new D1HouseholdSyncRepository(leavesBeforeVersionRead(recipe)),
+			householdId,
+			{
+				protocolVersion: 1,
+				deviceId: uuidv7(),
+				audience: { kind: 'household', id: householdId },
+				manifest: [],
+				afterEntityKey: null,
+				limit: 100
+			}
+		);
+
+		expect(page.aggregates.map(({ entityId }) => entityId)).toContain(meal.id);
+		expect(JSON.stringify(page.aggregates)).not.toContain('Private after leaving');
+	});
+
+	test('an MCP meal read racing the departure shows the copy, not the leaver’s later edit', async () => {
+		const aliceDevice = await openDevice(alice);
+		const recipe = await saveRecipe(aliceDevice);
+		const meal = await planRecipeAsMeal(aliceDevice.database, aliceDevice.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		await aliceDevice.sync();
+
+		const port = new D1RemoteDomainPort(leavesBeforeVersionRead(recipe), MCP_TEST_DEVICE);
+		await expect(port.getHouseholdMeal(householdId, meal.id)).resolves.toMatchObject({
+			title: 'Sunday soup',
+			followsRecipe: false
+		});
 	});
 });
 

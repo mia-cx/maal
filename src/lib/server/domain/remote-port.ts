@@ -290,21 +290,29 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 
 	/**
 	 * Resolves stored meals the way tools show them: a recipe-following meal with the version it
-	 * resolves to (spec §5.3). Deleted, purged, and unresolvable meals are left out.
+	 * resolves to (spec §5.3). Deleted, purged, and unresolvable meals are left out; `complete` is
+	 * false when a recipe-following meal did not resolve.
 	 */
-	private async resolveMeals(values: readonly unknown[]): Promise<RemoteMeal[]> {
+	private async resolveMeals(
+		householdId: string,
+		values: readonly unknown[]
+	): Promise<{ readonly meals: RemoteMeal[]; readonly complete: boolean }> {
 		const meals = values
 			.map((value) => fromSnapshot(StoredMealSchema, value))
 			.filter(
 				(meal): meal is LiveMeal => meal !== null && isLiveMeal(meal) && meal.deletedAt === null
 			);
-		const contextOf = await loadMealResolution(this.database, meals);
-		return meals.flatMap((meal): RemoteMeal[] => {
+		const contextOf = await loadMealResolution(this.database, householdId, meals);
+		let complete = true;
+		const resolved = meals.flatMap((meal): RemoteMeal[] => {
 			if (!isRecipeFollowingMeal(meal)) {
 				return [{ ...meal, followsRecipe: false, recipeVersionId: null }];
 			}
 			const version = resolveMealVersion(meal, contextOf(meal));
-			if (version === null) return [];
+			if (version === null) {
+				complete = false;
+				return [];
+			}
 			return [
 				{
 					...copyRecipeIntoMeal(meal, version.recipe),
@@ -313,18 +321,38 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 				}
 			];
 		});
+		return { meals: resolved, complete };
+	}
+
+	/**
+	 * Reads meals with `read` and resolves them. A member's departure that copies a meal between
+	 * the two reads leaves it unresolved (spec §8.7), so the meals are read once more, which finds
+	 * the copy.
+	 */
+	private async readResolvedMeals(
+		householdId: string,
+		read: () => Promise<readonly unknown[]>
+	): Promise<RemoteMeal[]> {
+		const first = await this.resolveMeals(householdId, await read());
+		if (first.complete) return first.meals;
+		return (await this.resolveMeals(householdId, await read())).meals;
 	}
 
 	async listHouseholdMeals(householdId: string): Promise<readonly RemoteMeal[]> {
-		const changes = await this.households.readEntitiesOfKinds(householdId, ['meal']);
-		return this.resolveMeals(changes.map(({ aggregate }) => aggregate));
+		return this.readResolvedMeals(householdId, async () =>
+			(await this.households.readEntitiesOfKinds(householdId, ['meal'])).map(
+				({ aggregate }) => aggregate
+			)
+		);
 	}
 
 	async getHouseholdMeal(householdId: string, mealId: string): Promise<RemoteMeal | null> {
-		const [change] = await this.households.readEntities(householdId, [
-			{ entityKind: 'meal', entityId: mealId }
-		]);
-		return change ? ((await this.resolveMeals([change.aggregate]))[0] ?? null) : null;
+		const [meal] = await this.readResolvedMeals(householdId, async () =>
+			(
+				await this.households.readEntities(householdId, [{ entityKind: 'meal', entityId: mealId }])
+			).map(({ aggregate }) => aggregate)
+		);
+		return meal ?? null;
 	}
 
 	async writeHouseholdMeal(input: {
@@ -357,7 +385,10 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 			throw new RemoteDomainError('write_rejected', 'The meal command was rejected.');
 		}
 		if (input.operation === 'delete') return null;
-		const [result] = await this.resolveMeals([aggregate]);
+		const written = await this.resolveMeals(input.householdId, [aggregate]);
+		const result = written.complete
+			? written.meals[0]
+			: await this.getHouseholdMeal(input.householdId, input.aggregate.id);
 		if (!result) throw new RemoteDomainError('not_found', 'The written meal was not found.');
 		return result;
 	}

@@ -53,6 +53,7 @@ import {
 	ACTIVE_MEMBER_SQL,
 	VERSION_HEAD_SQL,
 	loadMealResolution,
+	readHouseholdRecipeVersions,
 	readRecipeVersions,
 	sharedVersionSnapshot,
 	sharedVersionStatements
@@ -1021,7 +1022,7 @@ export const departureCopies = async (
 		.filter(isLiveMeal)
 		.filter(isRecipeFollowingMeal);
 	const [contextOf, liveRecipes] = await Promise.all([
-		loadMealResolution(database, meals),
+		loadMealResolution(database, householdId, meals),
 		queryAll<{ id: string }>(
 			database,
 			`SELECT id FROM recipes WHERE id IN (${JSON_IDS})`,
@@ -1141,7 +1142,8 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 			audience(householdId),
 			await readSnapshotChanges(this.database, householdId, selected)
 		);
-		// Each page carries the versions its recipe-following meals resolve among (spec §8.7).
+		// Each page carries the versions its recipe-following meals resolve among, as long as the
+		// household still receives them (spec §8.7).
 		const followedRecipeIds = aggregates.flatMap(({ entityKind, aggregate }) =>
 			entityKind === 'meal' &&
 			isLiveMeal(aggregate as StoredMeal) &&
@@ -1149,9 +1151,9 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 				? [(aggregate as { sourceRecipeId: string }).sourceRecipeId]
 				: []
 		);
-		const sharedVersions = (await readRecipeVersions(this.database, followedRecipeIds)).map(
-			(version) => sharedVersionSnapshot(version, state.latestSequence)
-		);
+		const sharedVersions = (
+			await readHouseholdRecipeVersions(this.database, householdId, followedRecipeIds)
+		).map((version) => sharedVersionSnapshot(version, state.latestSequence));
 		return {
 			...state,
 			aggregates: [...sharedVersions, ...aggregates],
