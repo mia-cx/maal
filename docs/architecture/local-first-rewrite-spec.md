@@ -712,10 +712,11 @@ V1 portable archives are unencrypted ZIP files with:
 - `deleted-recipes.json` and `detached-households.json` when visible.
 
 The active user may export everything they can see, including complete accessible household snapshots and
-recoverable deleted recipes. `meals.json` holds both meal kinds. A recipe-following meal of the exporter's own
-recipe, in a household the exporter still belongs to, stays a reference, because its recipe and versions are
-in the archive. Every other recipe-following meal is exported as a meal copy of the version it resolves to on
-the exporting device, because the archive holds only the exporter's recipes. A recovery archive resolves its
+recoverable deleted recipes. `meals.json` holds both meal kinds. A recipe-following meal stays a reference
+only when the archive holds its recipe and the version it resolves to: the exporter's own recipe, live or
+deleted but not purged, in a household the exporter still belongs to. Every other recipe-following meal is
+exported as a meal copy of the version it resolves to on the exporting device, because the archive holds
+only the exporter's unpurged recipes. A fork holds no recipes, so each of its meals is a meal copy. A recovery archive resolves its
 meals the same way, before it leaves out other members' versions. Only a check-in on a meal exported as
 recipe-following keeps its pin, which names a version in the archive; every other check-in's pin is cleared,
 because its meal holds its own content. Import requires each recipe-following meal's recipe and each pinned

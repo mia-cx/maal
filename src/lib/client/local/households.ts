@@ -441,20 +441,28 @@ export const forkDetachedHouseholdSnapshot = async (
 	if (!household) throw new LocalHouseholdMissing({ householdId: input.householdId });
 	const occurredAt = Schema.decodeUnknownSync(UtcInstantSchema)(input.occurredAt ?? nowUtc());
 	const newHouseholdId = uuidv7();
-	// Its recipe-following meals became meal copies when it was detached (spec §4.3).
-	const meals = await database.meals.where('householdId').equals(input.householdId).toArray();
+	// The fork holds no recipes, so every meal in it is a meal copy (spec §4.3). Detaching copied the
+	// snapshot's recipe-following meals; one whose version was not here then forks as the copy it
+	// shows now, or is left out while its version is missing, as every view leaves it out.
+	const rows = await database.meals.where('householdId').equals(input.householdId).toArray();
+	const following = rows
+		.map((row) => Schema.decodeUnknownSync(StoredMealSchema)(row))
+		.filter(isLiveMeal)
+		.filter(isRecipeFollowingMeal);
+	const contextOf = await loadMealResolution(database, following);
+	const copies = new Map(following.map((meal) => [meal.id, resolveMeal(meal, contextOf(meal))]));
+	const meals = rows.flatMap((row) => {
+		if (!copies.has(row.id)) return [row];
+		const copy = copies.get(row.id);
+		return copy ? [copy] : [];
+	});
 	const mealIds = new Set(meals.map(({ id }) => id));
-	const followingIds = new Set(
-		meals.filter(({ followsRecipe }) => followsRecipe === true).map(({ id }) => id)
-	);
 	// A meal copy holds its own content, so its check-ins in the fork pin nothing.
 	const checkIns = (
 		await database.mealCheckIns
 			.filter((checkIn) => typeof checkIn.mealId === 'string' && mealIds.has(checkIn.mealId))
 			.toArray()
-	).map((checkIn) =>
-		followingIds.has(checkIn.mealId as string) ? checkIn : { ...checkIn, recipeVersionId: null }
-	);
+	).map((checkIn) => ({ ...checkIn, recipeVersionId: null }));
 	const appliances = await database.householdAppliances
 		.where('householdId')
 		.equals(input.householdId)

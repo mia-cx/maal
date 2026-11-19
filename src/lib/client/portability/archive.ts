@@ -31,7 +31,7 @@ import {
 	PortableUsersFileSchema,
 	type PortableArchive
 } from '$lib/domain/portability/schema.js';
-import { resolveMeal } from '$lib/domain/meals/recipe-following.js';
+import { resolveMeal, resolveMealVersion } from '$lib/domain/meals/recipe-following.js';
 import {
 	MealCheckInSchema,
 	StoredMealSchema,
@@ -180,11 +180,22 @@ const exporterMemberships = (source: Pick<PortableSource, 'memberships'>, export
 	);
 
 /**
- * The live meals `exporterId` can see in `source`, as an archive holds them (spec §9). A meal that
- * follows one of the exporter's recipes in a household they still belong to stays a reference, since
- * the recipe and its versions go in the archive. Every other recipe-following meal goes out as a copy
- * of the version it shows here, because the archive holds only the exporter's recipes. A meal whose
- * version is not on this device is left out, as every view leaves it out.
+ * The recipes an archive of `exporterId` holds with all their versions (spec §9): the exporter's
+ * own, live or deleted. A purged recipe is only a tombstone, so the archive holds neither it nor
+ * its versions.
+ */
+const exportedRecipes = (source: Pick<PortableSource, 'recipes'>, exporterId: string) =>
+	source.recipes
+		.filter(({ ownerUserId }) => ownerUserId === exporterId)
+		.map((record) => decode(StoredRecipeSchema, record, 'decode recipe for export'))
+		.filter(isRecipeAggregate);
+
+/**
+ * The live meals `exporterId` can see in `source`, as an archive holds them (spec §9). A
+ * recipe-following meal stays a reference only when the archive holds its recipe and the version
+ * it resolves to: one of the exporter's recipes, in a household they still belong to. Every other
+ * recipe-following meal goes out as a copy of the version it shows here. A meal whose version is
+ * not on this device is left out, as every view leaves it out.
  */
 export const exportedMeals = (source: PortableSource, exporterId: string): LiveMeal[] => {
 	const memberships = exporterMemberships(source, exporterId);
@@ -192,11 +203,7 @@ export const exportedMeals = (source: PortableSource, exporterId: string): LiveM
 	const activeIn = new Set(
 		memberships.filter(({ status }) => status === 'active').map(({ householdId }) => householdId)
 	);
-	const exporterRecipeIds = new Set(
-		source.recipes
-			.filter(({ ownerUserId }) => ownerUserId === exporterId)
-			.map(({ id }) => String(id))
-	);
+	const exportedRecipeIds = new Set(exportedRecipes(source, exporterId).map(({ id }) => id));
 	const versionsByRecipe = Map.groupBy(
 		source.recipeVersions.map((record) =>
 			decode(RecipeVersionSchema, record, 'decode recipe version for export')
@@ -217,17 +224,16 @@ export const exportedMeals = (source: PortableSource, exporterId: string): LiveM
 		.filter(isLiveMeal)
 		.filter(({ householdId, deletedAt }) => householdIds.has(householdId) && deletedAt === null)
 		.flatMap((meal): LiveMeal[] => {
-			if (
-				!isRecipeFollowingMeal(meal) ||
-				(exporterRecipeIds.has(meal.sourceRecipeId) && activeIn.has(meal.householdId))
-			) {
-				return [meal];
-			}
-			const copy = resolveMeal(meal, {
+			if (!isRecipeFollowingMeal(meal)) return [meal];
+			const context = {
 				versions: versionsByRecipe.get(meal.sourceRecipeId) ?? [],
 				checkIns: checkInsByMeal.get(meal.id) ?? [],
 				timeZone: timeZones.get(meal.householdId) ?? null
-			});
+			};
+			const reference =
+				exportedRecipeIds.has(meal.sourceRecipeId) && activeIn.has(meal.householdId);
+			if (reference) return resolveMealVersion(meal, context) === null ? [] : [meal];
+			const copy = resolveMeal(meal, context);
 			return copy === null ? [] : [copy];
 		});
 };
@@ -252,10 +258,7 @@ export const buildPortableArchive = (
 		)
 		.map(withoutConflictClocks);
 	const appliances = portableHouseholdRows(source.householdAppliances, householdIds);
-	const recipes = source.recipes
-		.filter(({ ownerUserId }) => ownerUserId === exporterId)
-		.map((record) => decode(StoredRecipeSchema, record, 'decode recipe for export'))
-		.filter(isRecipeAggregate);
+	const recipes = exportedRecipes(source, exporterId);
 	const activeRecipes = recipes
 		.filter(({ deletedAt }) => deletedAt === null)
 		.map(withoutConflictClocks);

@@ -1084,6 +1084,62 @@ describe('archives and shared devices', () => {
 		expect(await titles(restored.database)).toEqual(new Map([[meal.id, 'Sunday soup']]));
 	});
 
+	test('a meal of a purged recipe restores from an export as the copy it shows', async () => {
+		const aliceDevice = await openDevice(alice);
+		await aliceDevice.database.households.put(familyKitchen);
+		const recipe = await saveRecipe(aliceDevice);
+		const meal = await planRecipeAsMeal(aliceDevice.database, aliceDevice.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		await permanentlyDeleteRecipe(aliceDevice.database, aliceDevice.recipeContext(), recipe.id);
+		const archive = await decodePortableArchive(
+			await exportPortableArchive(aliceDevice.database, alice.profileId)
+		);
+
+		const restored = await openDevice(alice);
+		await restored.database.households.put(familyKitchen);
+		await commitPortableImport(
+			restored.database,
+			await planPortableImport(restored.database, archive, alice.profileId)
+		);
+
+		expect(await titles(restored.database)).toEqual(new Map([[meal.id, 'Sunday soup']]));
+	});
+
+	test('a fork holds no recipes, so a meal still following one forks as the copy it shows', async () => {
+		const device = await openDevice(alice);
+		await device.database.households.put(familyKitchen);
+		const recipe = await saveRecipe(device);
+		const meal = await planRecipeAsMeal(device.database, device.context, recipe.id, {
+			date: '2099-01-01'
+		});
+		const { checkIn } = await saveMealCheckIn(device.database, device.context, meal.id, {
+			status: 'cooked',
+			verdict: 'repeat'
+		});
+		// A snapshot whose meal still follows its recipe: its version was not here when it detached.
+		await device.database.memberships.update(`membership_${alice.userId}`, {
+			status: 'detached',
+			detachedAt: joinedAt
+		});
+
+		const fork = await forkDetachedHouseholdSnapshot(device.database, {
+			profileId: alice.profileId,
+			householdId
+		});
+
+		const forked = await device.database.meals
+			.where('householdId')
+			.equals(fork.householdId)
+			.toArray();
+		expect(forked).toMatchObject([{ title: 'Sunday soup' }]);
+		expect(forked[0]).not.toHaveProperty('followsRecipe', true);
+		const forkedCheckIns = await device.database.mealCheckIns
+			.filter(({ id }) => id !== checkIn.id && id !== undefined)
+			.toArray();
+		expect(forkedCheckIns).toMatchObject([{ verdict: 'repeat', recipeVersionId: null }]);
+	});
+
 	test('importing with Keep local leaves a kept recipe’s meals on the local content', async () => {
 		const device = await openDevice(alice);
 		await device.database.households.put(familyKitchen);
