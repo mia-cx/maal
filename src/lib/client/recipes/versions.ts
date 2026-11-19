@@ -37,7 +37,8 @@ const RecipeVersionPayloadSchema = Schema.Struct({
 /** The command that stores a new version, insert-only, in its owner's user scope (spec §5.2). */
 const versionCommand = (
 	context: { readonly authSlotId: string; readonly originDeviceId: string },
-	version: RecipeVersion
+	version: RecipeVersion,
+	mutationId: string = uuidv7()
 ): LocalCommand => ({
 	authSlotId: context.authSlotId,
 	scopeKind: 'user',
@@ -48,8 +49,7 @@ const versionCommand = (
 	operation: 'upsert',
 	originDeviceId: context.originDeviceId,
 	occurredAt: version.effectiveAt,
-	// Minted before the recipe command's own ID, so the version is sent ahead of the recipe change.
-	mutationId: uuidv7(),
+	mutationId,
 	payload: { recipeId: version.recipeId, effectiveAt: version.effectiveAt },
 	payloadSchema: RecipeVersionPayloadSchema,
 	writes: [
@@ -72,36 +72,16 @@ const versionCommand = (
 	]
 });
 
-/**
- * The version a recipe command adds, or null (spec §5.2). It previews the command's write against
- * the stored recipe, so call it inside the transaction that commits the command.
- */
-const versionFor = async (
-	database: MaalDatabase,
-	command: LocalCommand
-): Promise<LocalCommand | null> => {
-	const stored = await database.recipes.get(command.aggregateId);
-	const before =
-		stored === undefined ? undefined : decode(StoredRecipeSchema, stored, 'read recipe');
-	const after = decode(StoredRecipeSchema, command.writes[0]!.update(before), 'preview recipe');
-	const change = versionChange(before, after);
-	if (change === null) return null;
-	return versionCommand(
-		command,
-		recipeVersion({
-			id: uuidv7(),
-			recipeId: command.aggregateId,
-			ownerUserId: command.scopeId,
-			effectiveAt: decode(UtcInstantSchema, command.occurredAt, 'decode recipe change time'),
-			recipe: change === 'content' && isRecipeAggregate(after) ? after : null
-		})
-	);
+const readStoredRecipe = async (database: MaalDatabase, recipeId: string) => {
+	const stored = await database.recipes.get(recipeId);
+	return stored === undefined ? undefined : decode(StoredRecipeSchema, stored, 'read recipe');
 };
 
 /**
  * Commits one gesture's commands in a single transaction, adding the version each recipe command
- * makes (spec §5.2) ahead of it. Every recipe write of this device goes through here. Results follow
- * `commands`.
+ * makes (spec §5.2). The version holds the recipe exactly as committed, and its mutation ID is
+ * minted before the commands run, so it uploads ahead of the recipe change it records. Every recipe
+ * write of this device goes through here. Results follow `commands`.
  */
 export const executeRecipeCommands = (
 	database: MaalDatabase,
@@ -114,16 +94,28 @@ export const executeRecipeCommands = (
 		...commands.flatMap(({ writes }) => writes.map(({ store }) => database.table(store)))
 	]);
 	return database.transaction('rw', [...tables], async () => {
-		const all: LocalCommand[] = [];
-		const positions: number[] = [];
-		for (const command of commands) {
-			const version = command.entityKind === 'recipe' ? await versionFor(database, command) : null;
-			if (version !== null) all.push(version);
-			positions.push(all.length);
-			all.push(command);
-		}
-		const results = await executeLocalCommands(database, all);
-		return positions.map((position) => results[position]!);
+		const recipeCommands = commands.flatMap((command, index) =>
+			command.entityKind === 'recipe' ? [{ command, index, mutationId: uuidv7() }] : []
+		);
+		const before = await Promise.all(
+			recipeCommands.map(({ command }) => readStoredRecipe(database, command.aggregateId))
+		);
+		const results = await executeLocalCommands(database, commands);
+		const versions = recipeCommands.flatMap(({ command, index, mutationId }, position) => {
+			const after = decode(StoredRecipeSchema, results[index]!.aggregates[0], 'read recipe');
+			const change = versionChange(before[position], after);
+			if (change === null) return [];
+			const version = recipeVersion({
+				id: uuidv7(),
+				recipeId: command.aggregateId,
+				ownerUserId: command.scopeId,
+				effectiveAt: decode(UtcInstantSchema, command.occurredAt, 'decode recipe change time'),
+				recipe: change === 'content' && isRecipeAggregate(after) ? after : null
+			});
+			return [versionCommand(command, version, mutationId)];
+		});
+		if (versions.length > 0) await executeLocalCommands(database, versions);
+		return results;
 	});
 };
 

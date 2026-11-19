@@ -6,7 +6,11 @@ import {
 	DEFAULT_STALENESS_THRESHOLD_MINUTES,
 	isRecentEdit
 } from '$lib/domain/household/staleness.js';
-import { isRecipeAggregate, type StoredRecipe } from '$lib/domain/recipes/schema.js';
+import {
+	isRecipeAggregate,
+	type RecipeAggregate,
+	type StoredRecipe
+} from '$lib/domain/recipes/schema.js';
 import {
 	justAfter,
 	newestContentVersion,
@@ -1252,7 +1256,13 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			.bind(input.mutation.mutationId)
 			.first<ReceiptRow>();
 		if (!receipt) throw new TypeError('The committed mutation has no receipt.');
-		if (isRecipe) await this.matchNewestVersion(input, decodedResult.aggregate as StoredRecipe);
+		if (isRecipe) {
+			await this.matchNewestVersion(
+				input,
+				decodedResult.aggregate as StoredRecipe,
+				decodedIncoming.aggregate
+			);
+		}
 		return { receipt: receiptFromRow(receipt), aggregate: decodedResult.aggregate };
 	}
 
@@ -1267,9 +1277,9 @@ export class D1UserSyncRepository implements UserSyncRepository {
 		if (input.mutation.operation === 'delete') return RECIPE_VERSION_IMMUTABLE;
 		const row = await this.database
 			.prepare(
-				`SELECT EXISTS (SELECT 1 FROM recipe_versions WHERE id = ?) AS stored,
-				 EXISTS (SELECT 1 FROM recipes WHERE id = ?1 AND owner_user_id <> ?3)
-				  OR EXISTS (SELECT 1 FROM recipe_versions WHERE recipe_id = ?1 AND owner_user_id <> ?3)
+				`SELECT EXISTS (SELECT 1 FROM recipe_versions WHERE id = ?1) AS stored,
+				 EXISTS (SELECT 1 FROM recipes WHERE id = ?2 AND owner_user_id <> ?3)
+				  OR EXISTS (SELECT 1 FROM recipe_versions WHERE recipe_id = ?2 AND owner_user_id <> ?3)
 				  AS foreign_recipe`
 			)
 			.bind(version.id, version.recipeId, input.actorUserId)
@@ -1280,19 +1290,34 @@ export class D1UserSyncRepository implements UserSyncRepository {
 	}
 
 	/**
-	 * Keeps the recipe's newest content version equal to the recipe (spec §5.2). Concurrent edits from
-	 * two devices merge by conflict group into content no device versioned; this adds that version,
-	 * effective at the later of the commit time and one millisecond after the newest version.
+	 * Keeps the recipe's newest content version equal to the recipe (spec §5.2). Edits from two of the
+	 * owner's devices can leave the recipe with content its newest version lacks: a merge by conflict
+	 * group made content no device versioned, or an older edit won by commit order. This adds a
+	 * version of the recipe, effective at the later of the commit time and one millisecond after the
+	 * newest version. Otherwise the content is a device's own edit whose version is still on its way,
+	 * since a device sends its versions ahead of the recipe change, so nothing is added.
 	 */
-	private async matchNewestVersion(input: UserCommitInput, recipe: StoredRecipe): Promise<void> {
+	private async matchNewestVersion(
+		input: UserCommitInput,
+		recipe: StoredRecipe,
+		incoming: unknown
+	): Promise<void> {
 		if (!isRecipeAggregate(recipe)) return;
-		const newest = newestContentVersion(await readRecipeVersions(this.database, [recipe.id]));
+		const versions = await readRecipeVersions(this.database, [recipe.id]);
+		const newest = newestContentVersion(versions);
 		if (newest === undefined || sameRecipeContent(newest.recipe, recipe)) return;
+		const mergedByGroup =
+			!isRecipeAggregate(incoming as StoredRecipe) ||
+			!sameRecipeContent(incoming as RecipeAggregate, recipe);
+		const olderWon = versions.some(
+			(version) => version.recipe !== null && sameRecipeContent(version.recipe, recipe)
+		);
+		if (!mergedByGroup && !olderWon) return;
 		const effectiveAt =
 			justAfter(newest.effectiveAt) > input.receivedAt
 				? justAfter(newest.effectiveAt)
 				: (input.receivedAt as `${string}Z`);
-		const merged = recipeVersion({
+		const matching = recipeVersion({
 			id: uuidv7(),
 			recipeId: recipe.id,
 			ownerUserId: recipe.ownerUserId,
@@ -1307,11 +1332,11 @@ export class D1UserSyncRepository implements UserSyncRepository {
 				mutationId: uuidv7(),
 				originDeviceId: input.mutation.originDeviceId,
 				entityKind: 'recipeVersion',
-				entityId: merged.id,
+				entityId: matching.id,
 				conflictGroups: ['row'],
 				operation: 'upsert',
 				occurredAt: effectiveAt,
-				aggregate: merged
+				aggregate: matching
 			}
 		});
 	}
