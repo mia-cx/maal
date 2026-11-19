@@ -10,6 +10,7 @@ import type {
 	UserSyncEntityKind
 } from '$lib/sync/contracts.js';
 
+import { storeSyncedAggregate } from './versions.js';
 import { pruneAcknowledgedOutbox, recordServerChanges, scopeOutbox } from './outbox.js';
 import { noteReinstatement } from './reinstatements.js';
 
@@ -20,6 +21,8 @@ export interface UserApplyScope {
 }
 
 const keyFor = (entityKind: string, entityId: string): string => `${entityKind}\u0000${entityId}`;
+
+const storeAggregate = storeSyncedAggregate;
 
 const pendingUserOutbox = (database: MaalDatabase, workosUserId: string): Promise<OutboxRecord[]> =>
 	scopeOutbox(database, 'user', workosUserId);
@@ -55,10 +58,10 @@ export const applyUserPullPage = async (
 	if (response.changes.some(({ sequence }) => sequence > response.throughSequence)) {
 		throw new TypeError('A sync page cannot advance behind one of its changes.');
 	}
-	const tables = [...new Set(decoded.map(({ store }) => database.table(store)))];
+	const tables = decoded.map(({ store }) => database.table(store));
 	await database.transaction(
 		'rw',
-		[...tables, database.outbox, database.syncScopes, database.reinstatements],
+		[...new Set(tables), database.outbox, database.syncScopes, database.reinstatements],
 		async () => {
 			const pending = await pendingUserOutbox(database, workosUserId);
 			const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));
@@ -77,16 +80,13 @@ export const applyUserPullPage = async (
 						});
 					}
 				}
-				await database.table(aggregate.store).put(aggregate.aggregate);
+				await storeAggregate(database, aggregate.store, aggregate.entityId, aggregate.aggregate);
 			}
 			// Pending intent wins until acknowledged, including a hard delete that left no record.
 			for (const aggregate of decoded) {
 				const key = keyFor(aggregate.entityKind, aggregate.entityId);
 				if (!localIntent.has(key)) continue;
-				const local = localIntent.get(key);
-				const table = database.table(aggregate.store);
-				if (local === undefined) await table.delete(aggregate.entityId);
-				else await table.put(local);
+				await storeAggregate(database, aggregate.store, aggregate.entityId, localIntent.get(key));
 			}
 			await recordServerChanges(
 				database,
@@ -142,10 +142,13 @@ export const applyUserMutationReceipts = async (
 			return { receipt, row, authoritative };
 		})
 	);
-	const tables = resolved.flatMap(({ authoritative }) =>
-		authoritative ? [database.table(authoritative.store)] : []
-	);
-	await database.transaction('rw', [...new Set(tables), database.outbox], async () => {
+	const tables = new Set([
+		...resolved.flatMap(({ authoritative }) =>
+			authoritative ? [database.table(authoritative.store)] : []
+		),
+		database.outbox
+	]);
+	await database.transaction('rw', [...tables], async () => {
 		const restorations = new Map<string, NonNullable<(typeof resolved)[number]['authoritative']>>();
 		const acknowledged: OutboxRecord[] = [];
 		for (const { receipt, row, authoritative } of resolved) {
@@ -174,10 +177,8 @@ export const applyUserMutationReceipts = async (
 				keyFor(row.entityKind, row.aggregateId)
 			)
 		);
-		for (const [key, authoritative] of restorations) {
-			if (!unresolvedKeys.has(key)) {
-				await database.table(authoritative.store).put(authoritative.aggregate);
-			}
+		for (const [key, { store, entityId, aggregate }] of restorations) {
+			if (!unresolvedKeys.has(key)) await storeAggregate(database, store, entityId, aggregate);
 		}
 	});
 };
@@ -208,7 +209,7 @@ export const applyUserBootstrap = async (
 					await noteReinstatement(database, aggregate.store, response.aggregates[index]!, now);
 				}
 				if (!pendingKeys.has(keyFor(aggregate.entityKind, aggregate.entityId))) {
-					await database.table(aggregate.store).put(aggregate.aggregate);
+					await storeAggregate(database, aggregate.store, aggregate.entityId, aggregate.aggregate);
 				}
 			}
 			for (const instruction of response.instructions) {
@@ -216,9 +217,12 @@ export const applyUserBootstrap = async (
 					instruction.action === 'delete_acknowledged_absence' &&
 					!pendingKeys.has(keyFor(instruction.entityKind, instruction.entityId))
 				) {
-					await database
-						.table(USER_SYNC_ENTITY_DESCRIPTORS[instruction.entityKind].store)
-						.delete(instruction.entityId);
+					await storeAggregate(
+						database,
+						USER_SYNC_ENTITY_DESCRIPTORS[instruction.entityKind].store,
+						instruction.entityId,
+						undefined
+					);
 				}
 			}
 			await recordServerChanges(

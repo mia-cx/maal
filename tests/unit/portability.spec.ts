@@ -22,8 +22,10 @@ import { applyUserPullPage } from '$lib/client/sync/apply.js';
 import { CURRENT_PROTOCOL_VERSION } from '$lib/domain/contracts/versions.js';
 import { UserFoodPreferenceSchema } from '$lib/domain/taxonomy/schema.js';
 import {
+	listHouseholdMeals,
 	planRecipeAsMeal,
 	saveMealCheckIn,
+	updateMealHeader,
 	type MealCommandContext
 } from '$lib/client/meals/index.js';
 import {
@@ -245,7 +247,13 @@ const seedContent = async (database: MaalDatabase, recipeId = uuidv7()) => {
 		originDeviceId: deviceId,
 		occurredAt: at(11)
 	};
-	const meal = await planRecipeAsMeal(database, mealContext, recipe.id, { date: '2026-08-22' });
+	const planned = await planRecipeAsMeal(database, mealContext, recipe.id, { date: '2026-08-22' });
+	// Its first edit makes it a meal copy, with content of its own to remap and restore.
+	const meal = await updateMealHeader(database, mealContext, planned.id, {
+		title: planned.title,
+		description: planned.description,
+		cookTimeMinutes: planned.cookTimeMinutes
+	});
 	await saveMealCheckIn(database, { ...mealContext, occurredAt: at(12) }, meal.id, {
 		status: 'cooked',
 		verdict: 'repeat',
@@ -826,6 +834,51 @@ describe('portable imports and sync', () => {
 		});
 	});
 
+	test('replacing a recipe from an archive keeps the version a past meal was cooked with', async () => {
+		const database = await openDatabase();
+		const seeded = await seedContent(database);
+		const mealContext: MealCommandContext = {
+			authSlotId: 'slot-alice',
+			householdId: seeded.householdId,
+			reporterUserId: seeded.workosUserId,
+			originDeviceId: deviceId,
+			occurredAt: at(12)
+		};
+		const past = await planRecipeAsMeal(database, mealContext, seeded.recipe.id, {
+			date: '2020-01-01'
+		});
+		const upcoming = await planRecipeAsMeal(database, mealContext, seeded.recipe.id, {
+			date: '2099-01-01'
+		});
+		const exported = await ownArchive(database, seeded.profileId);
+		const archive = {
+			...exported,
+			recipes: {
+				...exported.recipes,
+				recipes: exported.recipes.recipes.map((recipe) => ({ ...recipe, title: 'Changed soup' }))
+			}
+		};
+
+		const preview = await planPortableImport(database, archive, seeded.profileId);
+		await commitPortableImport(
+			database,
+			await planPortableImport(database, archive, seeded.profileId, {
+				...keepAll(preview),
+				...Object.fromEntries(
+					preview.collisions
+						.filter(({ store }) => store === 'recipes')
+						.map(({ collisionId }) => [collisionId, 'replace' as const])
+				)
+			})
+		);
+
+		const titles = new Map(
+			(await listHouseholdMeals(database, seeded.householdId)).map(({ id, title }) => [id, title])
+		);
+		expect(titles.get(past.id)).toBe('Sunday soup');
+		expect(titles.get(upcoming.id)).toBe('Changed soup');
+	});
+
 	test('imported rows keep their archive timestamps, so importing again changes nothing', async () => {
 		const source = await openDatabase();
 		const seeded = await seedContent(source);
@@ -877,6 +930,69 @@ describe('portable imports and sync', () => {
 		await expect(target.recipes.get(seeded.recipe.id)).resolves.toMatchObject({
 			savedFromHouseholdId: null
 		});
+	});
+
+	test('export and import round-trip both meal kinds', async () => {
+		const source = await openDatabase();
+		const seeded = await seedContent(source);
+		const mealContext: MealCommandContext = {
+			authSlotId: 'slot-alice',
+			householdId: seeded.householdId,
+			reporterUserId: seeded.workosUserId,
+			originDeviceId: deviceId,
+			occurredAt: at(12)
+		};
+		const following = await planRecipeAsMeal(source, mealContext, seeded.recipe.id, {
+			date: '2026-08-30'
+		});
+		// Another member's recipe, shared with the household: the archive holds only Alice's recipes.
+		const aliceMembership = (await source.memberships.toArray())[0]!;
+		await source.memberships.put({
+			...aliceMembership,
+			membershipId: 'membership_bob',
+			workosUserId: 'user_bob'
+		});
+		const bobsRecipe = await commitImportedRecipeCandidate(
+			source,
+			{ authSlotId: 'slot-bob', ownerUserId: 'user_bob', originDeviceId: deviceId },
+			candidate('Bob’s stew')
+		);
+		const followingBobs = await planRecipeAsMeal(source, mealContext, bobsRecipe.id, {
+			date: '2026-08-31'
+		});
+
+		const archive = await ownArchive(source, seeded.profileId);
+		const archived = new Map(archive.meals.meals.map((meal) => [meal.id, meal]));
+		expect(archived.get(seeded.meal.id)).toMatchObject({ title: 'Sunday soup' });
+		expect(archived.get(following.id)).toMatchObject({
+			followsRecipe: true,
+			sourceRecipeId: seeded.recipe.id
+		});
+		expect(archived.get(following.id)).not.toHaveProperty('title');
+		expect(archived.get(followingBobs.id)).toMatchObject({ title: 'Bob’s stew' });
+		expect(archived.get(followingBobs.id)).not.toHaveProperty('followsRecipe');
+
+		const target = await openDatabase();
+		const targetIdentity = await seedIdentity(target);
+		await commitPortableImport(
+			target,
+			await planPortableImport(target, archive, targetIdentity.profileId)
+		);
+		await expect(target.meals.get(following.id)).resolves.toMatchObject({
+			followsRecipe: true,
+			sourceRecipeId: seeded.recipe.id
+		});
+		await expect(target.meals.get(seeded.meal.id)).resolves.not.toHaveProperty('followsRecipe');
+		const restored = new Map(
+			(await listHouseholdMeals(target, seeded.householdId)).map((meal) => [meal.id, meal.title])
+		);
+		expect(restored).toEqual(
+			new Map([
+				[seeded.meal.id, 'Sunday soup'],
+				[following.id, 'Sunday soup'],
+				[followingBobs.id, 'Bob’s stew']
+			])
+		);
 	});
 
 	test('meal provenance to a recipe that is not on this device survives export and import', async () => {

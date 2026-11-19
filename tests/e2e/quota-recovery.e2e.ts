@@ -62,14 +62,18 @@ const localCommandCounts = async (name: string) => {
 		request.onerror = () => reject(request.error);
 		request.onsuccess = () => resolve(request.result);
 	});
-	const transaction = database.transaction(['recipes', 'outbox']);
+	const transaction = database.transaction(['recipes', 'recipeVersions', 'outbox']);
 	const count = (store: string) =>
 		new Promise<number>((resolve, reject) => {
 			const request = transaction.objectStore(store).count();
 			request.onerror = () => reject(request.error);
 			request.onsuccess = () => resolve(request.result);
 		});
-	const result = { recipes: await count('recipes'), outbox: await count('outbox') };
+	const result = {
+		recipes: await count('recipes'),
+		recipeVersions: await count('recipeVersions'),
+		outbox: await count('outbox')
+	};
 	database.close();
 	return result;
 };
@@ -124,8 +128,10 @@ test('quota aborts a command atomically and leaves recovery export usable', asyn
 	await expect
 		.poll(() => page.evaluate(localCommandCounts, databaseName))
 		.toEqual({
+			// The recipe and its first version, each with its outbox row (spec §5.2).
 			recipes: 1,
-			outbox: 1
+			recipeVersions: 1,
+			outbox: 2
 		});
 
 	await page.evaluate((key) => localStorage.setItem(key, '1'), quotaFailureKey);
@@ -136,8 +142,10 @@ test('quota aborts a command atomically and leaves recovery export usable', asyn
 	await expect
 		.poll(() => page.evaluate(localCommandCounts, databaseName))
 		.toEqual({
+			// The recipe and its first version, each with its outbox row (spec §5.2).
 			recipes: 1,
-			outbox: 1
+			recipeVersions: 1,
+			outbox: 2
 		});
 
 	await page.goto('/recovery');

@@ -10,7 +10,7 @@ import {
 	type MaalDatabase
 } from '$lib/client/local/database.js';
 import { exportRecoveryArchives } from '$lib/client/local/recovery-export.js';
-import { planRecipeAsMeal, saveMealCheckIn } from '$lib/client/meals/index.js';
+import { planRecipeAsMeal, saveMealCheckIn, updateMealHeader } from '$lib/client/meals/index.js';
 import {
 	commitPortableImport,
 	decodePortableArchive,
@@ -142,7 +142,13 @@ const seedContent = async (database: MaalDatabase) => {
 		originDeviceId: uuidv7(),
 		occurredAt: at
 	};
-	const meal = await planRecipeAsMeal(database, context, recipe.id, { date: '2026-08-22' });
+	const planned = await planRecipeAsMeal(database, context, recipe.id, { date: '2026-08-22' });
+	// Its first edit makes it a meal copy, which holds the content these repairs look at.
+	const meal = await updateMealHeader(database, context, planned.id, {
+		title: planned.title,
+		description: planned.description,
+		cookTimeMinutes: planned.cookTimeMinutes
+	});
 	await saveMealCheckIn(database, context, meal.id, {
 		status: 'cooked',
 		verdict: 'repeat',

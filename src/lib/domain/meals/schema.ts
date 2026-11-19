@@ -81,21 +81,30 @@ export type MealInstructionEvent = typeof MealInstructionEventSchema.Type;
 const hasUniqueValues = <A>(items: readonly A[], key: (item: A) => string | number): boolean =>
 	new Set(items.map(key)).size === items.length;
 
-export const MealAggregateSchema = Schema.Struct({
+/** Fields every meal stores itself, whether it follows its recipe or holds a copy. */
+const MealOwnFields = {
 	...MutableAggregateFields,
 	id: DomainIdSchema,
 	householdId: NonEmptyStringSchema,
-	sourceRecipeId: NullableStringSchema,
-	title: NonEmptyStringSchema,
-	description: NullableStringSchema,
-	imageUrl: NullableStringSchema,
 	date: Schema.NullOr(LocalDateSchema),
 	time: Schema.NullOr(LocalTimeSchema),
 	sortOrder: Schema.NullOr(PositionSchema),
 	plannedCookUserId: NullableStringSchema,
-	yield: NullableFiniteNumberSchema,
 	plannedYield: Schema.NullOr(Schema.Int.pipe(Schema.greaterThan(0))),
-	status: MealStatusSchema,
+	status: MealStatusSchema
+} as const;
+
+/**
+ * A meal copy: it holds its own recipe content and never changes with a recipe. On a copy,
+ * `sourceRecipeId` is provenance only (spec §5.3).
+ */
+export const MealAggregateSchema = Schema.Struct({
+	...MealOwnFields,
+	sourceRecipeId: NullableStringSchema,
+	title: NonEmptyStringSchema,
+	description: NullableStringSchema,
+	imageUrl: NullableStringSchema,
+	yield: NullableFiniteNumberSchema,
 	prepTimeMinutes: NullableNonNegativeIntSchema,
 	cookTimeMinutes: NullableNonNegativeIntSchema,
 	totalTimeMinutes: NullableNonNegativeIntSchema,
@@ -150,6 +159,17 @@ export const MealAggregateSchema = Schema.Struct({
 );
 export type MealAggregate = typeof MealAggregateSchema.Type;
 
+/**
+ * A recipe-following meal: it stores no recipe content and shows the version of its recipe it
+ * resolves to, until its first content edit copies that version into it (spec §5.3).
+ */
+export const RecipeFollowingMealSchema = Schema.Struct({
+	...MealOwnFields,
+	sourceRecipeId: NonEmptyStringSchema,
+	followsRecipe: Schema.Literal(true)
+});
+export type RecipeFollowingMeal = typeof RecipeFollowingMealSchema.Type;
+
 export const MealPurgeTombstoneSchema = Schema.Struct({
 	...MutableAggregateFields,
 	id: DomainIdSchema,
@@ -159,10 +179,21 @@ export const MealPurgeTombstoneSchema = Schema.Struct({
 });
 export type MealPurgeTombstone = typeof MealPurgeTombstoneSchema.Type;
 
-export const StoredMealSchema = Schema.Union(MealAggregateSchema, MealPurgeTombstoneSchema);
+export const StoredMealSchema = Schema.Union(
+	MealAggregateSchema,
+	RecipeFollowingMealSchema,
+	MealPurgeTombstoneSchema
+);
 export type StoredMeal = typeof StoredMealSchema.Type;
+/** A live meal of either kind: everything stored except a purge tombstone. */
+export type LiveMeal = MealAggregate | RecipeFollowingMeal;
+
+/** True for a meal copy. */
 export const isMealAggregate = (record: StoredMeal): record is MealAggregate =>
 	'ingredients' in record;
+export const isRecipeFollowingMeal = (record: StoredMeal): record is RecipeFollowingMeal =>
+	'followsRecipe' in record;
+export const isLiveMeal = (record: StoredMeal): record is LiveMeal => !('purgedAt' in record);
 
 export const MealVerdictSchema = Schema.Literal('repeat', 'neutral', 'avoid');
 export type MealVerdict = typeof MealVerdictSchema.Type;
@@ -174,7 +205,12 @@ export const MealCheckInSchema = Schema.Struct({
 	mealId: Schema.NullOr(DomainIdSchema),
 	cookTimeMinutes: Schema.NullOr(Schema.Int.pipe(Schema.greaterThan(0))),
 	verdict: MealVerdictSchema,
-	reason: NullableStringSchema
+	reason: NullableStringSchema,
+	/**
+	 * The recipe version a recipe-following meal was cooked with, which the meal shows from then on;
+	 * null on a meal copy (spec §5.4). A record without the field decodes to null.
+	 */
+	recipeVersionId: Schema.optionalWith(Schema.NullOr(DomainIdSchema), { default: () => null })
 });
 export type MealCheckIn = typeof MealCheckInSchema.Type;
 
@@ -182,6 +218,7 @@ export const MEAL_CONFLICT_GROUPS = [
 	'header',
 	'schedule',
 	'status',
+	'source',
 	'ingredients',
 	'instructions',
 	'appliances',
@@ -190,6 +227,20 @@ export const MEAL_CONFLICT_GROUPS = [
 	'nutrition',
 	'deletion'
 ] as const;
+
+/** The groups that hold recipe content. A recipe-following meal owns none of them. */
+export const MEAL_CONTENT_GROUPS = [
+	'header',
+	'ingredients',
+	'instructions',
+	'appliances',
+	'classifications',
+	'media',
+	'nutrition'
+] as const;
+
+/** The groups a copy writes: `source` (which holds `followsRecipe`) and every content group. */
+export const MEAL_COPY_GROUPS = ['source', ...MEAL_CONTENT_GROUPS] as const;
 
 export const mealHasValidOptionalPairs = (meal: MealAggregate): boolean =>
 	meal.ingredients.every(({ baseUnitId, baseUnitFamilyId }) =>

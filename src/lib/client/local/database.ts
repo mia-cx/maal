@@ -53,7 +53,7 @@ import type {
 import { pauseLocalCommits } from './commit-activity.js';
 import { publishLocalDatabaseEvent } from './database-events.js';
 
-export const CURRENT_DATABASE_VERSION = 6 as const;
+export const CURRENT_DATABASE_VERSION = 7 as const;
 
 export const DATABASE_V1_STORES = {
 	meta: '&key',
@@ -109,9 +109,19 @@ export const DATABASE_V5_STORES = {
 	userAttributions: '&workosUserId,displayName'
 } as const;
 
-export const DATABASE_STORES = {
+export const DATABASE_V6_STORES = {
 	...DATABASE_V5_STORES,
 	reinstatements: '&[entityKind+entityId]'
+} as const;
+
+/**
+ * v7 adds immutable recipe versions, which recipe-following meals resolve to, and indexes meals by
+ * their recipe (spec §5.2, §5.3).
+ */
+export const DATABASE_STORES = {
+	...DATABASE_V6_STORES,
+	meals: `${DATABASE_V1_STORES.meals},sourceRecipeId`,
+	recipeVersions: '&id,recipeId'
 } as const;
 
 export type LocalStoreName = keyof typeof DATABASE_STORES;
@@ -135,6 +145,7 @@ export class MaalDatabase extends Dexie {
 	householdInvites!: Table<HouseholdInviteRecord, string>;
 	householdAppliances!: Table<HouseholdApplianceRecord, string>;
 	recipes!: Table<LocalAggregateRecord, string>;
+	recipeVersions!: Table<LocalAggregateRecord, string>;
 	meals!: Table<LocalAggregateRecord, string>;
 	mealCheckIns!: Table<LocalAggregateRecord, string>;
 	foods!: Table<Food, string>;
@@ -231,8 +242,8 @@ export class MaalDatabase extends Dexie {
 				]);
 			});
 		this.version(5).stores(DATABASE_V5_STORES);
-		this.version(CURRENT_DATABASE_VERSION)
-			.stores(DATABASE_STORES)
+		this.version(6)
+			.stores(DATABASE_V6_STORES)
 			.upgrade(async (transaction) => {
 				const timestamp = nowUtc();
 				await transaction
@@ -245,7 +256,22 @@ export class MaalDatabase extends Dexie {
 				await transaction.table<MetaRecord, string>('meta').bulkPut([
 					{
 						key: 'migrationState',
-						value: { from: 5, to: CURRENT_DATABASE_VERSION, state: 'complete' },
+						value: { from: 5, to: 6, state: 'complete' },
+						updatedAt: timestamp
+					},
+					{ key: 'databaseVersion', value: 6, updatedAt: timestamp }
+				]);
+			});
+		// Existing meals are meal copies and existing recipes get their first version when planned,
+		// so v7 adds stores and an index without changing a record.
+		this.version(CURRENT_DATABASE_VERSION)
+			.stores(DATABASE_STORES)
+			.upgrade(async (transaction) => {
+				const timestamp = nowUtc();
+				await transaction.table<MetaRecord, string>('meta').bulkPut([
+					{
+						key: 'migrationState',
+						value: { from: 6, to: CURRENT_DATABASE_VERSION, state: 'complete' },
 						updatedAt: timestamp
 					},
 					{

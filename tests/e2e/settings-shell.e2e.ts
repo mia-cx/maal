@@ -124,7 +124,7 @@ const seed = async (page: Page, paid = false) => {
 		.poll(() =>
 			page.evaluate(async () =>
 				(await indexedDB.databases()).some(
-					(candidate) => candidate.name === 'maal-v1:production' && candidate.version === 60
+					(candidate) => candidate.name === 'maal-v1:production' && candidate.version === 70
 				)
 			)
 		)

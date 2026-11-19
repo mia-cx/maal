@@ -12,7 +12,7 @@ import {
 	liveMealPool,
 	listHouseholdMeals,
 	mealAggregateToScheduleMeal,
-	mealHeaderCommand,
+	mealHeaderCommands,
 	mealScheduleCommand,
 	membershipsToHouseholdMembers,
 	planRecipeAsMeal,
@@ -27,24 +27,49 @@ import {
 	type MealCommandContext
 } from '$lib/client/meals/index.js';
 import { MaalDatabase, openMaalDatabase } from '$lib/client/local/database.js';
+import type { MembershipRecord } from '$lib/client/local/records.js';
 import { executeLocalCommands } from '$lib/client/local/commands.js';
 import {
 	commitImportedRecipeCandidate,
+	deleteRecipe,
 	permanentlyDeleteRecipe,
+	restoreRecipe,
 	updateRecipeFromEditor,
 	type RecipeCommandContext
 } from '$lib/client/recipes/index.js';
 import type { Membership } from '$lib/domain/household/contracts.js';
-import { MealCheckInSchema } from '$lib/domain/meals/schema.js';
+import {
+	MealCheckInSchema,
+	StoredMealSchema,
+	isRecipeFollowingMeal
+} from '$lib/domain/meals/schema.js';
 import {
 	RecipeImportedCandidateSchema,
 	type RecipeImportedCandidate
 } from '$lib/domain/recipes/schema.js';
 
 const databases: MaalDatabase[] = [];
+const aliceMembership: MembershipRecord = {
+	membershipId: 'membership_alice',
+	householdId: 'org_family',
+	workosUserId: 'user_alice',
+	roleSlug: 'admin',
+	permissions: ['meals:read', 'meals:write'],
+	status: 'active',
+	directoryManaged: false,
+	workosCreatedAt: '2026-08-20T10:00:00.000Z',
+	lastVerifiedAt: '2026-08-20T10:00:00.000Z',
+	updatedAt: '2026-08-20T10:00:00.000Z',
+	source: 'workos',
+	detachedAt: null,
+	denialCode: null
+};
+
+/** A device where Alice belongs to the household she plans in, as every planner does. */
 const openDatabase = async (): Promise<MaalDatabase> => {
 	const database = await openMaalDatabase(`meals-${crypto.randomUUID()}`);
 	databases.push(database);
+	await database.memberships.put(aliceMembership);
 	return database;
 };
 
@@ -209,11 +234,60 @@ const completeRecipe = (): RecipeImportedCandidate => {
 	});
 };
 
-describe('lossless local meal snapshots', () => {
-	test('clones the complete recipe and remains independent after recipe edits and provenance detach', async () => {
+const joinHousehold = async (database: MaalDatabase, timezone: string | null = null) => {
+	await database.households.put({
+		householdId: 'org_family',
+		name: 'Family',
+		locale: 'en-NL',
+		timezone,
+		weekStartsOn: 1,
+		defaultPlannedYield: 4,
+		preferredDinnerTime: null,
+		stalenessThresholdMinutes: 180,
+		createdByUserId: 'user_alice',
+		deletionState: 'active',
+		localOnly: false,
+		schemaVersion: 1,
+		revision: 1,
+		createdAt: at(20),
+		updatedAt: at(20),
+		deletedAt: null,
+		conflictClocks: {}
+	});
+};
+
+const editRecipe = (
+	database: MaalDatabase,
+	recipeId: string,
+	occurredAt: `${string}Z`,
+	title = 'Changed soup'
+) =>
+	updateRecipeFromEditor(database, recipeContext(occurredAt), recipeId, {
+		title,
+		description: null,
+		imageUrl: null,
+		sourceUrl: null,
+		sourceSiteName: null,
+		sourceAuthorName: null,
+		sourcePublisherName: null,
+		sourceIsBasedOnUrl: null,
+		prepTimeMinutes: null,
+		cookTimeMinutes: 5,
+		yield: 2,
+		ingredients: [],
+		instructions: []
+	});
+
+const storedMeal = async (database: MaalDatabase, mealId: string) =>
+	Schema.decodeUnknownSync(StoredMealSchema)(await database.meals.get(mealId));
+
+const titleOf = async (database: MaalDatabase, mealId: string) =>
+	(await listHouseholdMeals(database, 'org_family')).find(({ id }) => id === mealId)?.title;
+
+describe('recipe-following meals', () => {
+	test('an unedited meal stores only its reference and live queries show each recipe edit', async () => {
 		const database = await openDatabase();
-		const candidate = completeRecipe();
-		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), candidate);
+		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
 		const meal = await planRecipeAsMeal(database, mealContext(), recipe.id, {
 			date: '2026-08-23',
 			time: '18:30',
@@ -221,56 +295,168 @@ describe('lossless local meal snapshots', () => {
 			plannedYield: 6
 		});
 
-		expect(meal.id).not.toBe(recipe.id);
-		expect(meal.sourceRecipeId).toBe(recipe.id);
+		const stored = await storedMeal(database, meal.id);
+		expect(isRecipeFollowingMeal(stored)).toBe(true);
+		expect(stored).not.toHaveProperty('title');
+		expect(meal).toMatchObject({
+			sourceRecipeId: recipe.id,
+			title: 'Sunday soup',
+			plannedYield: 6,
+			sourceHtmlHash: 'sha256:complete',
+			notes: 'Use the wide pot.'
+		});
 		expect(meal.applianceRequirements).toHaveLength(1);
-		expect(meal.instructionEvents).toHaveLength(1);
 		expect(meal.classifications).toHaveLength(1);
 		expect(meal.media).toHaveLength(1);
 		expect(meal.nutritionFacts).toHaveLength(1);
 		expect(meal.instructions[0]?.id).not.toBe(recipe.instructions[0]?.id);
 		expect(meal.instructionEvents[0]?.mealInstructionId).toBe(meal.instructions[0]?.id);
-		expect(meal.sourceHtmlHash).toBe('sha256:complete');
-		expect(meal.notes).toBe('Use the wide pot.');
 
-		await updateRecipeFromEditor(database, recipeContext(at(22)), recipe.id, {
-			title: 'Changed soup',
+		const titles: string[] = [];
+		const subscription = liveMealCalendarRange(database, 'org_family', {
+			start: '2026-08-23',
+			end: '2026-08-23'
+		}).subscribe({ next: ({ meals }) => titles.push(meals[0]!.title) });
+		try {
+			await vi.waitFor(() => expect(titles).toEqual(['Sunday soup']));
+			await editRecipe(database, recipe.id, at(22));
+			await vi.waitFor(() => expect(titles.at(-1)).toBe('Changed soup'));
+		} finally {
+			subscription.unsubscribe();
+		}
+		expect(isRecipeFollowingMeal(await storedMeal(database, meal.id))).toBe(true);
+	});
+
+	test('a past meal shows the version in effect on its date, and a future one the latest', async () => {
+		const database = await openDatabase();
+		await joinHousehold(database);
+		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
+		const past = await planRecipeAsMeal(database, mealContext(), recipe.id, { date: '2026-08-21' });
+		const upcoming = await planRecipeAsMeal(database, mealContext(), recipe.id, {
+			date: '2026-08-30'
+		});
+
+		await editRecipe(database, recipe.id, at(25));
+
+		expect(await titleOf(database, past.id)).toBe('Sunday soup');
+		expect(await titleOf(database, upcoming.id)).toBe('Changed soup');
+		// Freezing is a read rule: the edit wrote nothing to either meal.
+		expect(isRecipeFollowingMeal(await storedMeal(database, past.id))).toBe(true);
+		expect(await database.outbox.filter(({ entityKind }) => entityKind === 'meal').count()).toBe(2);
+	});
+
+	test('devices with different clocks resolve a meal to the same version', async () => {
+		const deviceA = await openDatabase();
+		await joinHousehold(deviceA, 'Pacific/Auckland');
+		const recipe = await commitImportedRecipeCandidate(deviceA, recipeContext(), completeRecipe());
+		const friday = await planRecipeAsMeal(deviceA, mealContext(), recipe.id, {
+			date: '2026-08-21'
+		});
+		const saturday = await planRecipeAsMeal(deviceA, mealContext(), recipe.id, {
+			date: '2026-08-22'
+		});
+		// 13:00 UTC on Friday is already Saturday 01:00 in Auckland, so Friday's dinner was cooked
+		// before this edit and Saturday's after it.
+		await editRecipe(deviceA, recipe.id, '2026-08-21T13:00:00.000Z');
+		const deviceB = await openDatabase();
+		for (const store of ['households', 'recipeVersions', 'meals'] as const) {
+			await deviceB.table(store).bulkPut(await deviceA.table(store).toArray());
+		}
+
+		const titlesAt = async (database: MaalDatabase, now: string) => {
+			vi.useFakeTimers({ now: new Date(now), toFake: ['Date'] });
+			try {
+				return [await titleOf(database, friday.id), await titleOf(database, saturday.id)];
+			} finally {
+				vi.useRealTimers();
+			}
+		};
+		const expected = ['Sunday soup', 'Changed soup'];
+		expect(await titlesAt(deviceA, '2026-08-21T14:00:00.000Z')).toEqual(expected);
+		expect(await titlesAt(deviceB, '2031-01-01T00:00:00.000Z')).toEqual(expected);
+	});
+
+	test('the first edit copies the version it shows and detaches the meal from later edits', async () => {
+		const database = await openDatabase();
+		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
+		const meal = await planRecipeAsMeal(database, mealContext(), recipe.id, {
+			date: '2026-08-23'
+		});
+
+		await updateMealHeader(database, mealContext(at(22)), meal.id, {
+			title: 'Leftover soup',
 			description: null,
-			imageUrl: null,
-			sourceUrl: null,
-			sourceSiteName: null,
-			sourceAuthorName: null,
-			sourcePublisherName: null,
-			sourceIsBasedOnUrl: null,
-			prepTimeMinutes: null,
-			cookTimeMinutes: 5,
-			yield: 2,
-			ingredients: [],
-			instructions: []
+			cookTimeMinutes: 20
 		});
-		expect((await listHouseholdMeals(database, 'org_family'))[0]?.title).toBe('Sunday soup');
-		expect(await database.recipes.count()).toBe(1);
+		const copied = await storedMeal(database, meal.id);
+		expect(isRecipeFollowingMeal(copied)).toBe(false);
+		// The copy keeps the row IDs the meal showed while it followed the recipe.
+		expect(copied).toMatchObject({
+			title: 'Leftover soup',
+			sourceRecipeId: recipe.id,
+			ingredients: meal.ingredients
+		});
+		const rows = await database.outbox.filter(({ occurredAt }) => occurredAt === at(22)).toArray();
+		expect(rows.map(({ conflictGroup }) => conflictGroup)).toEqual(['source', 'header']);
 
-		await database.memberships.put({
-			membershipId: 'membership_alice',
-			householdId: 'org_family',
-			workosUserId: 'user_alice',
-			roleSlug: 'admin',
-			permissions: ['meals:read', 'meals:write'],
-			status: 'active',
-			directoryManaged: false,
-			workosCreatedAt: at(20),
-			lastVerifiedAt: at(20),
-			updatedAt: at(20),
-			source: 'workos',
-			detachedAt: null,
-			denialCode: null
+		await editRecipe(database, recipe.id, at(23));
+		expect(await titleOf(database, meal.id)).toBe('Leftover soup');
+		expect((await listHouseholdMeals(database, 'org_family'))[0]?.ingredients).toHaveLength(1);
+	});
+
+	test('a check-in pins the version it was cooked with', async () => {
+		const database = await openDatabase();
+		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
+		const [created] = await database.recipeVersions.toArray();
+		const meal = await planRecipeAsMeal(database, mealContext(), recipe.id, {
+			date: '2026-08-30'
 		});
+
+		const { checkIn } = await saveMealCheckIn(database, mealContext(at(22)), meal.id, {
+			status: 'cooked',
+			verdict: 'repeat'
+		});
+		await editRecipe(database, recipe.id, at(23));
+
+		expect(checkIn.recipeVersionId).toBe(created!.id);
+		// Without the pin, the meal's date would show the edit.
+		expect(await titleOf(database, meal.id)).toBe('Sunday soup');
+		expect(isRecipeFollowingMeal(await storedMeal(database, meal.id))).toBe(true);
+	});
+
+	test('deleting or purging a recipe keeps every meal’s content', async () => {
+		const database = await openDatabase();
+		await joinHousehold(database);
+		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
+		const meal = await planRecipeAsMeal(database, mealContext(), recipe.id, { date: '2026-08-30' });
+
+		await deleteRecipe(database, recipeContext(at(22)), recipe.id);
+		expect(await titleOf(database, meal.id)).toBe('Sunday soup');
 		await permanentlyDeleteRecipe(database, recipeContext(at(23)), recipe.id);
-		const detached = (await listHouseholdMeals(database, 'org_family'))[0]!;
-		expect(detached.sourceRecipeId).toBeNull();
-		expect(detached.title).toBe('Sunday soup');
-		expect(detached.ingredients).toHaveLength(1);
+
+		const shown = (await listHouseholdMeals(database, 'org_family'))[0]!;
+		expect(shown).toMatchObject({ id: meal.id, sourceRecipeId: recipe.id, title: 'Sunday soup' });
+		expect(shown.ingredients).toHaveLength(1);
+		expect(isRecipeFollowingMeal(await storedMeal(database, meal.id))).toBe(true);
+	});
+
+	test('a meal planned before a deletion does not follow edits made after the restore', async () => {
+		const database = await openDatabase();
+		await joinHousehold(database);
+		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
+		const before = await planRecipeAsMeal(database, mealContext(at(21)), recipe.id, {
+			date: '2026-08-30'
+		});
+
+		await deleteRecipe(database, recipeContext(at(22)), recipe.id);
+		await restoreRecipe(database, recipeContext(at(23)), recipe.id);
+		const after = await planRecipeAsMeal(database, mealContext(at(24)), recipe.id, {
+			date: '2026-08-30'
+		});
+		await editRecipe(database, recipe.id, at(25));
+
+		expect(await titleOf(database, before.id)).toBe('Sunday soup');
+		expect(await titleOf(database, after.id)).toBe('Changed soup');
 	});
 });
 
@@ -303,7 +489,8 @@ describe('meal lifecycle and focused check-ins', () => {
 			reason: 'Good enough for Tuesday.'
 		});
 		expect(checkedIn.checkIn).not.toHaveProperty('cooked');
-		expect(await database.outbox.count()).toBe(5);
+		expect(checkedIn.checkIn.recipeVersionId).not.toBeNull();
+		expect(await database.outbox.count()).toBe(6);
 		expect(
 			(await database.outbox.filter(({ occurredAt }) => occurredAt === at(23)).toArray()).map(
 				({ entityKind, aggregateId, conflictGroup }) => ({
@@ -475,6 +662,11 @@ describe('household meal pool', () => {
 		const scheduled = await plan(mealContext(), '2026-08-23');
 		const deleted = await plan(mealContext(), null);
 		await deleteMeal(database, mealContext(at(22)), deleted.id);
+		await database.memberships.put({
+			...aliceMembership,
+			membershipId: 'membership_alice_other',
+			householdId: 'org_other'
+		});
 		await plan({ ...mealContext(), householdId: 'org_other' }, null);
 
 		const emissions: string[][] = [];
@@ -539,7 +731,13 @@ describe('meal sheet edits', () => {
 			date: '2026-08-23',
 			time: '18:30'
 		});
+		const originalMeal = await database.meals.get(meal.id);
 		const originalOutbox = await database.outbox.toArray();
+		const headerCommands = await mealHeaderCommands(database, mealContext(at(24)), meal.id, {
+			title: 'Leftover soup',
+			description: null,
+			cookTimeMinutes: 20
+		});
 		const failSchedule = (changes: unknown) => {
 			if (
 				typeof changes === 'object' &&
@@ -555,11 +753,7 @@ describe('meal sheet edits', () => {
 		try {
 			await expect(
 				executeLocalCommands(database, [
-					mealHeaderCommand(mealContext(at(24)), meal.id, {
-						title: 'Leftover soup',
-						description: null,
-						cookTimeMinutes: 20
-					}),
+					...headerCommands,
 					mealScheduleCommand(mealContext(at(24)), meal.id, {
 						date: '2026-08-25',
 						time: '19:00',
@@ -571,11 +765,11 @@ describe('meal sheet edits', () => {
 			database.meals.hook('updating').unsubscribe(failSchedule);
 		}
 
-		expect(await database.meals.get(meal.id)).toEqual(meal);
+		expect(await database.meals.get(meal.id)).toEqual(originalMeal);
 		expect(await database.outbox.toArray()).toEqual(originalOutbox);
 	});
 
-	test('saves a custom meal header with its own outbox row and conflict clock', async () => {
+	test('copies a recipe-following meal, then saves its header with its own outbox row and clock', async () => {
 		const database = await openDatabase();
 		const recipe = await commitImportedRecipeCandidate(database, recipeContext(), completeRecipe());
 		const meal = await planRecipeAsMeal(database, mealContext(), recipe.id, {
@@ -605,7 +799,10 @@ describe('meal sheet edits', () => {
 				aggregateId,
 				conflictGroup
 			])
-		).toEqual([['meal', meal.id, 'header']]);
+		).toEqual([
+			['meal', meal.id, 'source'],
+			['meal', meal.id, 'header']
+		]);
 	});
 
 	test('maps a check-in without inventing familiarity or an adjusted cook time', async () => {

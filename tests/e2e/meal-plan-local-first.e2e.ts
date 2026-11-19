@@ -181,7 +181,7 @@ const seed = async (page: Page) => {
 			page.evaluate(async () => {
 				const databases = await indexedDB.databases();
 				return databases.some(
-					({ name, version }) => name === 'maal-v1:production' && version === 60
+					({ name, version }) => name === 'maal-v1:production' && version === 70
 				);
 			})
 		)
@@ -279,7 +279,7 @@ test('renders the first-visit plan with an error when the saved schedule state c
 			page.evaluate(async () => {
 				const databases = await indexedDB.databases();
 				return databases.some(
-					({ name, version }) => name === 'maal-v1:production' && version === 60
+					({ name, version }) => name === 'maal-v1:production' && version === 70
 				);
 			})
 		)
@@ -605,8 +605,29 @@ test.describe('meal sheet', () => {
 	test('saves a custom meal’s name from the sheet', async ({ page }) => {
 		await seed(page);
 		const { targetDay } = await planRecipeOn(page, '2026-08-23');
+		// The card moves before the schedule write commits, so wait for the stored date.
+		await expect.poll(async () => (await readStore(page, 'meals'))[0]?.date).toBe('2026-08-23');
 		const [meal] = await readStore(page, 'meals');
-		await putRow(page, 'meals', { ...meal, sourceRecipeId: null, cookTimeMinutes: null });
+		const [recipe] = await readStore(page, 'recipes');
+		// A custom meal is a meal copy with no source recipe; the planned meal only follows one.
+		const custom: Row = {
+			...recipe,
+			...meal,
+			notes: recipe!.userNotes,
+			instructionEvents: [],
+			sourceRecipeId: null,
+			cookTimeMinutes: null
+		};
+		for (const key of [
+			'followsRecipe',
+			'ownerUserId',
+			'savedFromHouseholdId',
+			'userNotes',
+			'searchTokens'
+		]) {
+			delete custom[key];
+		}
+		await putRow(page, 'meals', custom);
 		await page.reload();
 
 		await targetDay.getByRole('button', { name: 'Open Gingery chicken rice bowls' }).click();

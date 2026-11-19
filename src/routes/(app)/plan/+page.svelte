@@ -9,7 +9,7 @@
 		liveMealPool,
 		defaultScheduleUiState,
 		mealAggregateToScheduleMeal,
-		mealHeaderCommand,
+		mealHeaderCommands,
 		mealScheduleCommand,
 		membershipsToHouseholdMembers,
 		planRecipeAsMeal,
@@ -144,11 +144,11 @@
 				meal.cookTimeMinutes !== previous.cookTimeMinutes);
 		if (headerChanged) {
 			commands.push(
-				mealHeaderCommand(context, meal.id, {
+				...(await mealHeaderCommands(database, context, meal.id, {
 					title: meal.title,
 					description: meal.description ?? null,
 					cookTimeMinutes: meal.cookTimeMinutes ?? null
-				})
+				}))
 			);
 		}
 		commands.push(

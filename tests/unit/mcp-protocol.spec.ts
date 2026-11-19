@@ -2,13 +2,18 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import type { Server } from '@modelcontextprotocol/server';
 import { describe, expect, test } from 'vitest';
 
-import type { MealAggregate, MealCheckIn } from '$lib/domain/meals/schema.js';
+import {
+	isRecipeFollowingMeal,
+	type LiveMeal,
+	type MealCheckIn
+} from '$lib/domain/meals/schema.js';
 import type { RecipeAggregate } from '$lib/domain/recipes/schema.js';
 import type { UserFoodPreference } from '$lib/domain/taxonomy/schema.js';
 import type {
 	RemoteDomainPort,
 	RemoteFoodProfile,
-	RemoteHouseholdSummary
+	RemoteHouseholdSummary,
+	RemoteMeal
 } from '$lib/server/domain/remote-port.js';
 import { MAAL_API_SCOPES, createMaalMcpHandler, tools } from '$lib/server/mcp/index.js';
 
@@ -16,7 +21,7 @@ const householdId = 'org_family';
 const privateArgument = 'https://private.example/recipe?token=do-not-echo';
 
 class ProtocolDomain implements RemoteDomainPort {
-	readonly meals: MealAggregate[] = [];
+	readonly meals: RemoteMeal[] = [];
 
 	async listHouseholds(): Promise<readonly RemoteHouseholdSummary[]> {
 		return [{ id: householdId, name: 'Family', locale: 'en-US', timezone: 'Europe/Amsterdam' }];
@@ -27,18 +32,23 @@ class ProtocolDomain implements RemoteDomainPort {
 	async getUserRecipe(): Promise<RecipeAggregate | null> {
 		return null;
 	}
+	async ensureRecipeVersion(): Promise<void> {}
 	async writeUserRecipe(input: { aggregate: RecipeAggregate }): Promise<RecipeAggregate> {
 		return input.aggregate;
 	}
-	async listHouseholdMeals(): Promise<readonly MealAggregate[]> {
+	async listHouseholdMeals(): Promise<readonly RemoteMeal[]> {
 		return this.meals;
 	}
-	async getHouseholdMeal(_householdId: string, mealId: string): Promise<MealAggregate | null> {
+	async getHouseholdMeal(_householdId: string, mealId: string): Promise<RemoteMeal | null> {
 		return this.meals.find(({ id }) => id === mealId) ?? null;
 	}
-	async writeHouseholdMeal(input: { aggregate: MealAggregate }): Promise<MealAggregate> {
-		this.meals.push(input.aggregate);
-		return input.aggregate;
+	async writeHouseholdMeal(input: { aggregate: LiveMeal }): Promise<RemoteMeal | null> {
+		if (isRecipeFollowingMeal(input.aggregate)) {
+			throw new Error('The protocol tests plan custom meals only.');
+		}
+		const meal = { ...input.aggregate, followsRecipe: false, recipeVersionId: null };
+		this.meals.push(meal);
+		return meal;
 	}
 	async getMealCheckIn(): Promise<MealCheckIn | null> {
 		return null;

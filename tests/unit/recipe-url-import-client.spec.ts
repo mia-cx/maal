@@ -258,7 +258,9 @@ describe('confirmUrlImport', () => {
 			sourceHtmlHash: 'sha256:soup',
 			ownerUserId: USER_ID
 		});
-		const outbox = await database.outbox.toArray();
+		const outbox = (await database.outbox.toArray()).filter(
+			({ entityKind }) => entityKind === 'recipe'
+		);
 		expect(outbox).toHaveLength(1);
 		expect(outbox[0]).toMatchObject({ entityKind: 'recipe', aggregateId: recipe.id });
 	});
@@ -320,7 +322,9 @@ describe('confirmUrlImport', () => {
 			updatedAt: occurredAt,
 			revision: existing.revision + 1
 		});
-		const outbox = await database.outbox.toCollection().sortBy('occurredAt');
+		const outbox = (await database.outbox.toCollection().sortBy('occurredAt')).filter(
+			({ entityKind }) => entityKind === 'recipe'
+		);
 		expect(outbox).toHaveLength(2);
 		expect(outbox[1]).toMatchObject({
 			aggregateId: existing.id,
@@ -400,6 +404,7 @@ describe('commitImportedCandidateAndPlanMeal', () => {
 				entityKind
 			}))
 		).toEqual([
+			{ scopeKind: 'user', scopeId: USER_ID, entityKind: 'recipeVersion' },
 			{ scopeKind: 'user', scopeId: USER_ID, entityKind: 'recipe' },
 			{ scopeKind: 'household', scopeId: HOUSEHOLD_ID, entityKind: 'meal' }
 		]);

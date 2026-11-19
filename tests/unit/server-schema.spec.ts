@@ -49,6 +49,7 @@ const expectedTableNames = [
 	'recipe_instructions',
 	'recipe_media',
 	'recipe_nutrition_facts',
+	'recipe_versions',
 	'recipes',
 	'stripe_events',
 	'sync_changes',

@@ -86,6 +86,29 @@ export const recipes = sqliteTable(
 	]
 );
 
+/**
+ * Immutable recipe versions (spec §5.2). `recipe_id` has no foreign key, so a version outlives the
+ * purge of its recipe while a meal needs it. `recipe` is the complete recipe aggregate as JSON, or
+ * null for a deletion marker: a version is always read whole and never queried by field.
+ */
+export const recipeVersions = sqliteTable(
+	'recipe_versions',
+	{
+		id: text('id').primaryKey(),
+		ownerUserId: text('owner_user_id')
+			.notNull()
+			.references(() => users.workosUserId, { onDelete: 'cascade' }),
+		recipeId: text('recipe_id').notNull(),
+		effectiveAt: text('effective_at').notNull(),
+		recipe: text('recipe'),
+		...mutableColumns()
+	},
+	(table) => [
+		index('recipe_versions_recipe_idx').on(table.recipeId, table.effectiveAt),
+		index('recipe_versions_owner_idx').on(table.ownerUserId)
+	]
+);
+
 export const recipeIngredients = sqliteTable(
 	'recipe_ingredients',
 	{

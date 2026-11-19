@@ -8,8 +8,8 @@ import {
 	D1RemoteDomainPort,
 	allMealConflictGroups,
 	allRecipeConflictGroups,
-	cloneRecipeAsMeal,
-	createRecipeAggregate
+	createRecipeAggregate,
+	followRecipeAsMeal
 } from '$lib/server/domain/remote-port.js';
 import { candidateFromToolRecipe, makeCheckIn } from '$lib/server/mcp/builders.js';
 import { D1HouseholdSyncRepository } from '$lib/server/sync/household-d1-repository.js';
@@ -67,22 +67,24 @@ describe('shared remote D1 domain port', () => {
 			])
 		);
 
-		const meal = cloneRecipeAsMeal({
+		const meal = followRecipeAsMeal({
 			recipe: writtenRecipe,
 			householdId: MCP_TEST_HOUSEHOLD,
 			date: '2026-08-24'
 		});
-		const writtenMeal = await port.writeHouseholdMeal({
+		const writtenMeal = (await port.writeHouseholdMeal({
 			actorUserId: MCP_TEST_USER,
 			householdId: MCP_TEST_HOUSEHOLD,
 			aggregate: meal,
 			conflictGroups: allMealConflictGroups,
 			operation: 'upsert'
-		});
+		}))!;
+		expect(writtenMeal).toMatchObject({ followsRecipe: true, title: 'Shared soup' });
 		const householdBootstrap = await new D1HouseholdSyncRepository(database).bootstrap(
 			MCP_TEST_HOUSEHOLD,
 			FIRST_PAGE
 		);
+		// The household receives the meal's reference and, beside it, the version it shows.
 		expect(householdBootstrap.aggregates).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
@@ -90,7 +92,15 @@ describe('shared remote D1 domain port', () => {
 					entityId: writtenMeal.id,
 					aggregate: expect.objectContaining({
 						householdId: MCP_TEST_HOUSEHOLD,
-						title: 'Shared soup'
+						followsRecipe: true,
+						sourceRecipeId: writtenRecipe.id
+					})
+				}),
+				expect.objectContaining({
+					entityKind: 'recipeVersion',
+					aggregate: expect.objectContaining({
+						recipeId: writtenRecipe.id,
+						recipe: expect.objectContaining({ title: 'Shared soup' })
 					})
 				})
 			])
@@ -144,10 +154,10 @@ describe('shared remote D1 domain port', () => {
 
 	test('returns the committed aggregate when the write batch throws after committing', async () => {
 		const port = new D1RemoteDomainPort(database, MCP_TEST_DEVICE);
-		const meal = await port.writeHouseholdMeal({
+		const meal = (await port.writeHouseholdMeal({
 			actorUserId: MCP_TEST_USER,
 			householdId: MCP_TEST_HOUSEHOLD,
-			aggregate: cloneRecipeAsMeal({
+			aggregate: followRecipeAsMeal({
 				recipe: await port.writeUserRecipe({
 					actorUserId: MCP_TEST_USER,
 					aggregate: createRecipeAggregate({
@@ -166,7 +176,7 @@ describe('shared remote D1 domain port', () => {
 			}),
 			conflictGroups: allMealConflictGroups,
 			operation: 'upsert'
-		});
+		}))!;
 		const checkIn = makeCheckIn({
 			existing: null,
 			mealId: meal.id,
@@ -220,11 +230,11 @@ describe('shared remote D1 domain port', () => {
 			conflictGroups: allRecipeConflictGroups,
 			operation: 'upsert'
 		});
-		const writeMeal = () =>
-			port.writeHouseholdMeal({
+		const writeMeal = async () =>
+			(await port.writeHouseholdMeal({
 				actorUserId: MCP_TEST_USER,
 				householdId: MCP_TEST_HOUSEHOLD,
-				aggregate: cloneRecipeAsMeal({
+				aggregate: followRecipeAsMeal({
 					recipe,
 					householdId: MCP_TEST_HOUSEHOLD,
 					date: '2026-08-24',
@@ -232,7 +242,7 @@ describe('shared remote D1 domain port', () => {
 				}),
 				conflictGroups: allMealConflictGroups,
 				operation: 'upsert'
-			});
+			}))!;
 		const mealA = await writeMeal();
 		const mealB = await writeMeal();
 		const checkIn = makeCheckIn({
@@ -333,7 +343,7 @@ describe('shared remote D1 domain port', () => {
 		await port.writeHouseholdMeal({
 			actorUserId: MCP_TEST_USER,
 			householdId: MCP_TEST_HOUSEHOLD,
-			aggregate: cloneRecipeAsMeal({ recipe, householdId: MCP_TEST_HOUSEHOLD }),
+			aggregate: followRecipeAsMeal({ recipe, householdId: MCP_TEST_HOUSEHOLD }),
 			conflictGroups: allMealConflictGroups,
 			operation: 'upsert'
 		});

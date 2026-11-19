@@ -1,6 +1,7 @@
 import { Data, Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
 
+import { loadMealResolution } from '$lib/client/meals/resolution.js';
 import { DomainIdSchema, UtcInstantSchema } from '$lib/domain/contracts/primitives.js';
 import {
 	HouseholdAppliancePatchSchema,
@@ -16,6 +17,9 @@ import {
 	type Profile
 } from '$lib/domain/household/contracts.js';
 import { requireCachedPermission } from '$lib/domain/household/permissions.js';
+
+import { resolveMeal } from '$lib/domain/meals/recipe-following.js';
+import { StoredMealSchema, isLiveMeal, isRecipeFollowingMeal } from '$lib/domain/meals/schema.js';
 
 import { executeLocalCommand } from './commands.js';
 import type { MaalDatabase } from './database.js';
@@ -220,6 +224,60 @@ export const updateHouseholdAppliances = async (
 	).aggregates;
 };
 
+/** The stores {@link copyMealsOnDeparture} reads and writes, for the caller's transaction. */
+export const departureStores = (database: MaalDatabase) => [
+	database.profiles,
+	database.memberships,
+	database.households,
+	database.meals,
+	database.mealCheckIns,
+	database.recipeVersions
+];
+
+/**
+ * Turns a household's live recipe-following meals into meal copies of the versions they show, on
+ * this device only, once `leaverUserId`'s membership here has ended (spec §4.3). A household
+ * follows only its current members' recipes, so the meals of the leaver's recipes copy. Once no
+ * local profile is an active member, the household is a detached snapshot that never syncs again,
+ * so every one of its following meals copies. The Worker copies the same meals for the remaining
+ * members. Call it inside a transaction over {@link departureStores}.
+ */
+export const copyMealsOnDeparture = async (
+	database: MaalDatabase,
+	householdId: string,
+	leaverUserId: string
+): Promise<void> => {
+	const localUsers = new Set(
+		(await database.profiles.toArray()).map(({ workosUserId }) => workosUserId)
+	);
+	const detached =
+		(await database.memberships
+			.where('householdId')
+			.equals(householdId)
+			.filter(({ status, workosUserId }) => status === 'active' && localUsers.has(workosUserId))
+			.first()) === undefined;
+	const following = (
+		await database.meals
+			.where('householdId')
+			.equals(householdId)
+			.filter(({ followsRecipe }) => followsRecipe === true)
+			.toArray()
+	)
+		.map((row) => Schema.decodeUnknownSync(StoredMealSchema)(row))
+		.filter(isLiveMeal)
+		.filter(isRecipeFollowingMeal);
+	const contextOf = await loadMealResolution(database, following);
+	const copies = following.flatMap((meal) => {
+		const context = contextOf(meal);
+		if (!detached && !context.versions.some(({ ownerUserId }) => ownerUserId === leaverUserId)) {
+			return [];
+		}
+		const copy = resolveMeal(meal, context);
+		return copy === null ? [] : [copy];
+	});
+	if (copies.length > 0) await database.meals.bulkPut(copies);
+};
+
 export const detachHouseholdSnapshot = async (
 	database: MaalDatabase,
 	input: {
@@ -242,10 +300,7 @@ export const detachHouseholdSnapshot = async (
 
 	await database.transaction(
 		'rw',
-		database.memberships,
-		database.outbox,
-		database.syncScopes,
-		database.profiles,
+		[database.outbox, database.syncScopes, ...departureStores(database)],
 		async () => {
 			await database.memberships.update(membership.membershipId, {
 				status: 'detached',
@@ -253,6 +308,7 @@ export const detachHouseholdSnapshot = async (
 				denialCode: input.denialCode,
 				updatedAt: detachedAt
 			});
+			await copyMealsOnDeparture(database, input.householdId, profile.workosUserId);
 			await database.outbox
 				.filter(
 					(mutation) =>
@@ -385,11 +441,29 @@ export const forkDetachedHouseholdSnapshot = async (
 	if (!household) throw new LocalHouseholdMissing({ householdId: input.householdId });
 	const occurredAt = Schema.decodeUnknownSync(UtcInstantSchema)(input.occurredAt ?? nowUtc());
 	const newHouseholdId = uuidv7();
-	const meals = await database.meals.where('householdId').equals(input.householdId).toArray();
+	// The fork holds no recipes, so every meal in it is a meal copy (spec §4.3). Detaching copied the
+	// snapshot's recipe-following meals; one whose version was not here then forks as the copy it
+	// shows now, or is left out while its version is missing, as every view leaves it out.
+	const rows = await database.meals.where('householdId').equals(input.householdId).toArray();
+	const following = rows
+		.filter(({ followsRecipe }) => followsRecipe === true)
+		.map((row) => Schema.decodeUnknownSync(StoredMealSchema)(row))
+		.filter(isLiveMeal)
+		.filter(isRecipeFollowingMeal);
+	const contextOf = await loadMealResolution(database, following);
+	const copies = new Map(following.map((meal) => [meal.id, resolveMeal(meal, contextOf(meal))]));
+	const meals = rows.flatMap((row): (typeof rows)[number][] => {
+		if (!copies.has(row.id)) return [row];
+		const copy = copies.get(row.id);
+		return copy ? [copy] : [];
+	});
 	const mealIds = new Set(meals.map(({ id }) => id));
-	const checkIns = await database.mealCheckIns
-		.filter((checkIn) => typeof checkIn.mealId === 'string' && mealIds.has(checkIn.mealId))
-		.toArray();
+	// A meal copy holds its own content, so its check-ins in the fork pin nothing.
+	const checkIns = (
+		await database.mealCheckIns
+			.filter((checkIn) => typeof checkIn.mealId === 'string' && mealIds.has(checkIn.mealId))
+			.toArray()
+	).map((checkIn) => ({ ...checkIn, recipeVersionId: null }));
 	const appliances = await database.householdAppliances
 		.where('householdId')
 		.equals(input.householdId)

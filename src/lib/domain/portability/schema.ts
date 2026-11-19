@@ -2,8 +2,13 @@ import { Schema } from 'effect';
 
 import { UtcInstantSchema } from '$lib/domain/contracts/primitives.js';
 import { HouseholdApplianceSchema, HouseholdSchema } from '$lib/domain/household/contracts.js';
-import { MealAggregateSchema, MealCheckInSchema } from '$lib/domain/meals/schema.js';
+import {
+	MealAggregateSchema,
+	MealCheckInSchema,
+	RecipeFollowingMealSchema
+} from '$lib/domain/meals/schema.js';
 import { RecipeAggregateSchema } from '$lib/domain/recipes/schema.js';
+import { RecipeVersionSchema } from '$lib/domain/recipes/versions.js';
 import {
 	FoodAliasSchema,
 	FoodHouseholdAliasSchema,
@@ -33,7 +38,11 @@ export const PortableHouseholdApplianceSchema = HouseholdApplianceSchema.pipe(
 	Schema.omit('conflictClocks')
 );
 export const PortableRecipeSchema = RecipeAggregateSchema.pipe(Schema.omit('conflictClocks'));
-export const PortableMealSchema = MealAggregateSchema.pipe(Schema.omit('conflictClocks'));
+/** Either meal kind as stored: a meal copy, or a recipe-following meal's reference (spec §9). */
+export const PortableMealSchema = Schema.Union(
+	MealAggregateSchema.pipe(Schema.omit('conflictClocks')),
+	RecipeFollowingMealSchema.pipe(Schema.omit('conflictClocks'))
+);
 export const PortableMealCheckInSchema = MealCheckInSchema.pipe(Schema.omit('conflictClocks'));
 const PortableFoodUserAliasSchema = FoodUserAliasSchema.pipe(Schema.omit('conflictClocks'));
 const PortableFoodHouseholdAliasSchema = FoodHouseholdAliasSchema.pipe(
@@ -143,6 +152,17 @@ export const PortablePreferencesFileSchema = Schema.Struct({
 
 export const PortableDeletedRecipesFileSchema = PortableRecipesFileSchema;
 
+/** The versions of the exported recipes, which their recipe-following meals resolve among (§9). */
+export const PortableRecipeVersionsFileSchema = Schema.Struct({
+	...FileVersionFields,
+	versions: Schema.Array(
+		Schema.Struct({
+			...RecipeVersionSchema.fields,
+			recipe: Schema.NullOr(PortableRecipeSchema)
+		}).pipe(Schema.omit('conflictClocks'))
+	)
+});
+
 export const PortableDetachedHouseholdsFileSchema = Schema.Struct({
 	...FileVersionFields,
 	households: Schema.Array(
@@ -163,6 +183,7 @@ export type PortableCheckInsFile = typeof PortableCheckInsFileSchema.Type;
 export type PortableTaxonomyFile = typeof PortableTaxonomyFileSchema.Type;
 export type PortablePreferencesFile = typeof PortablePreferencesFileSchema.Type;
 export type PortableDetachedHouseholdsFile = typeof PortableDetachedHouseholdsFileSchema.Type;
+export type PortableRecipeVersionsFile = typeof PortableRecipeVersionsFileSchema.Type;
 
 export interface PortableArchive {
 	readonly manifest: PortableManifest;
@@ -175,4 +196,6 @@ export interface PortableArchive {
 	readonly preferences: PortablePreferencesFile;
 	readonly deletedRecipes?: PortableRecipesFile;
 	readonly detachedHouseholds?: PortableDetachedHouseholdsFile;
+	/** Absent from archives written before recipe versions existed. */
+	readonly recipeVersions?: PortableRecipeVersionsFile;
 }

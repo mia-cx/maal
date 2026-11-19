@@ -5,9 +5,15 @@ import {
 	HouseholdSchema,
 	MembershipSchema
 } from '$lib/domain/household/contracts.js';
-import { MealCheckInSchema, StoredMealSchema, isMealAggregate } from '$lib/domain/meals/schema.js';
+import {
+	MealCheckInSchema,
+	StoredMealSchema,
+	isLiveMeal,
+	isRecipeFollowingMeal
+} from '$lib/domain/meals/schema.js';
 import { PortableUserAttributionSchema } from '$lib/domain/portability/schema.js';
 import { StoredRecipeSchema, isRecipeAggregate } from '$lib/domain/recipes/schema.js';
+import { RecipeVersionSchema } from '$lib/domain/recipes/versions.js';
 import {
 	GLOBAL_FOOD_ALIAS_SEED,
 	GLOBAL_FOOD_SEED,
@@ -38,6 +44,7 @@ import {
 	PORTABLE_SOURCE_STORES,
 	buildPortableArchive,
 	createPortableArchiveBlob,
+	exportedMeals,
 	type PortableSource,
 	type PortableUserAttribution
 } from '$lib/client/portability/archive.js';
@@ -59,6 +66,7 @@ const recoveryDecoders = {
 	householdAppliances: HouseholdApplianceSchema,
 	userAttributions: PortableUserAttributionSchema,
 	recipes: StoredRecipeSchema,
+	recipeVersions: RecipeVersionSchema,
 	meals: StoredMealSchema,
 	mealCheckIns: MealCheckInSchema,
 	foods: FoodSchema,
@@ -126,9 +134,20 @@ const closeRecoverySource = (
 			})
 		])
 	) as unknown as RecoverySource;
+	// Meals resolve before scoping, while another member's versions are still here: a meal of their
+	// recipe goes out as a copy of the version it shows, and their versions stay out (spec §9).
+	// Every other meal keeps its source row, so a repair shared by several archives counts once.
+	const exported = new Map(
+		exportedMeals(source as unknown as PortableSource, exporterId).map((meal) => [meal.id, meal])
+	);
 	const closed: { -readonly [K in keyof RecoverySource]: RecoverySource[K] } = {
 		...scoped,
-		households
+		households,
+		meals: scoped.meals.flatMap((row) => {
+			const meal = exported.get(row.id);
+			if (meal === undefined) return [];
+			return isRecipeFollowingMeal(row) && !isRecipeFollowingMeal(meal) ? [meal] : [row];
+		})
 	};
 	const repairStore = <K extends keyof RecoverySource>(
 		store: K,
@@ -254,7 +273,7 @@ const closeRecoverySource = (
 			? { ...next, savedFromHouseholdId: null }
 			: next;
 	});
-	closed.meals = closed.meals.filter((row) => isMealAggregate(row) && row.deletedAt === null);
+	closed.meals = closed.meals.filter((row) => isLiveMeal(row) && row.deletedAt === null);
 	repairStore('meals', repairContent);
 	const mealIds = new Set(closed.meals.map((row) => row.id));
 	closed.mealCheckIns = source.mealCheckIns.filter(

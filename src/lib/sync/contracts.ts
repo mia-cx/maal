@@ -8,6 +8,7 @@ import {
 
 export const USER_SYNC_ENTITY_KINDS = [
 	'recipe',
+	'recipeVersion',
 	'foodUserAlias',
 	'foodUserEntry',
 	'unitUserAlias',
@@ -19,6 +20,12 @@ export const USER_SYNC_ENTITY_KINDS = [
 
 export const UserSyncEntityKindSchema = Schema.Literal(...USER_SYNC_ENTITY_KINDS);
 export type UserSyncEntityKind = typeof UserSyncEntityKindSchema.Type;
+
+/** Rejects a push that would rewrite or delete a recipe version, which is immutable (spec §8.7). */
+export const RECIPE_VERSION_IMMUTABLE = 'recipe_version_immutable' as const;
+
+/** Rejects a version of a recipe another user owns, which would change their meals (spec §8.7). */
+export const RECIPE_NOT_OWNED = 'recipe_not_owned' as const;
 
 export const UserSyncAudienceSchema = Schema.Struct({
 	kind: Schema.Literal('user'),

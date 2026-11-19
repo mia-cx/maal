@@ -5,13 +5,15 @@ import type { MaalDatabase } from '$lib/client/local/database.js';
 import { LocalDecodeError } from '$lib/domain/contracts/errors.js';
 import { LocalDateSchema } from '$lib/domain/contracts/primitives.js';
 import {
-	MealAggregateSchema,
 	MealCheckInSchema,
 	StoredMealSchema,
-	isMealAggregate,
+	isLiveMeal,
+	type LiveMeal,
 	type MealAggregate,
 	type MealCheckIn
 } from '$lib/domain/meals/schema.js';
+
+import { resolveLocalMeals } from './resolution.js';
 
 export type MealCalendarRange = Readonly<{ start: string; end: string }>;
 
@@ -64,11 +66,21 @@ const queryHouseholdMealRangeRows = async (
 		.between([householdId, range.start], [householdId, range.end], true, true)
 		.toArray();
 
-const decodeMealRows = (rows: readonly unknown[]): MealAggregate[] =>
-	rows
-		.map(decodeMeal)
-		.filter((meal): meal is MealAggregate => isMealAggregate(meal) && meal.deletedAt === null)
-		.map((meal) => Schema.decodeUnknownSync(MealAggregateSchema)(meal));
+/**
+ * Decodes live, undeleted meals as readers show them: a recipe-following meal as the version it
+ * resolves to. The reads inside a live query make it re-run when a version, pin, or timezone changes.
+ * A meal whose version is not on this device yet is left out until it arrives (spec §5.3).
+ */
+export const resolveMealRows = async (
+	database: MaalDatabase,
+	rows: readonly unknown[]
+): Promise<MealAggregate[]> =>
+	resolveLocalMeals(
+		database,
+		rows
+			.map(decodeMeal)
+			.filter((meal): meal is LiveMeal => isLiveMeal(meal) && meal.deletedAt === null)
+	);
 
 const queryMealCheckInRows = async (
 	database: MaalDatabase,
@@ -92,17 +104,20 @@ export const listHouseholdMealsInRange = async (
 	range: MealCalendarRange
 ): Promise<MealAggregate[]> => {
 	const decodedRange = decodeRange(range);
-	return decodeMealRows(await queryHouseholdMealRangeRows(database, householdId, decodedRange));
+	return resolveMealRows(
+		database,
+		await queryHouseholdMealRangeRows(database, householdId, decodedRange)
+	);
 };
 
 export const listHouseholdMeals = async (
 	database: MaalDatabase,
 	householdId: string
 ): Promise<MealAggregate[]> =>
-	(await database.meals.where('householdId').equals(householdId).toArray())
-		.map(decodeMeal)
-		.filter((meal): meal is MealAggregate => isMealAggregate(meal) && meal.deletedAt === null)
-		.map((meal) => Schema.decodeUnknownSync(MealAggregateSchema)(meal));
+	resolveMealRows(
+		database,
+		await database.meals.where('householdId').equals(householdId).toArray()
+	);
 
 export const listMealCheckIns = async (
 	database: MaalDatabase,
@@ -119,7 +134,7 @@ export const readMealCalendarRange = async (
 ): Promise<MealCalendarRangeResult> => {
 	const decodedRange = decodeRange(range);
 	const mealRows = await queryHouseholdMealRangeRows(database, householdId, decodedRange);
-	const meals = decodeMealRows(mealRows);
+	const meals = await resolveMealRows(database, mealRows);
 	const checkInRows = await queryMealCheckInRows(database, new Set(meals.map(({ id }) => id)));
 	const checkIns = decodeMealCheckInRows(checkInRows);
 	onRead?.({
@@ -159,7 +174,10 @@ export const readMealPool = async (
 	const dated = new Set(datedKeys);
 	const undatedKeys = householdKeys.filter((key) => !dated.has(key));
 	const rows = await database.meals.bulkGet(undatedKeys);
-	const meals = decodeMealRows(rows.filter((row) => row !== undefined));
+	const meals = await resolveMealRows(
+		database,
+		rows.filter((row) => row !== undefined)
+	);
 	const checkIns = decodeMealCheckInRows(
 		await queryMealCheckInRows(database, new Set(meals.map(({ id }) => id)))
 	);

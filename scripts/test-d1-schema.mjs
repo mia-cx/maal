@@ -12,7 +12,8 @@ const expectedMigrations = [
 	'0000_rewrite_baseline.sql',
 	'0001_global_taxonomy_seed.sql',
 	'0002_dry_bug.sql',
-	'0003_household_staleness_threshold.sql'
+	'0003_household_staleness_threshold.sql',
+	'0004_recipe_versions.sql'
 ];
 
 const run = (persistenceDirectory, args, expectedSuccess = true) => {
@@ -128,6 +129,15 @@ try {
 		emptyPersistenceDirectory,
 		"INSERT INTO meals (id, household_id, title, status) VALUES ('meal_bad_status', 'org_1', 'Soup', 'postponed');",
 		false
+	);
+	// A meal written without the column is a meal copy, as every meal was before 0004.
+	execute(
+		emptyPersistenceDirectory,
+		"INSERT INTO meals (id, household_id, title) VALUES ('meal_copy', 'org_1', 'Soup');"
+	);
+	assert.deepEqual(
+		query(emptyPersistenceDirectory, "SELECT followed_recipe_id FROM meals WHERE id = 'meal_copy'"),
+		[{ followed_recipe_id: null }]
 	);
 	execute(
 		emptyPersistenceDirectory,

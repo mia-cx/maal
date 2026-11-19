@@ -24,14 +24,23 @@ import {
 	PortableManifestSchema,
 	PortableMealsFileSchema,
 	PortablePreferencesFileSchema,
+	PortableRecipeVersionsFileSchema,
 	PortableRecipesFileSchema,
 	PortableTaxonomyFileSchema,
 	PortableUserAttributionSchema,
 	PortableUsersFileSchema,
 	type PortableArchive
 } from '$lib/domain/portability/schema.js';
-import { MealCheckInSchema, StoredMealSchema, isMealAggregate } from '$lib/domain/meals/schema.js';
+import { resolveMeal, resolveMealVersion } from '$lib/domain/meals/recipe-following.js';
+import {
+	MealCheckInSchema,
+	StoredMealSchema,
+	isLiveMeal,
+	isRecipeFollowingMeal,
+	type LiveMeal
+} from '$lib/domain/meals/schema.js';
 import { StoredRecipeSchema, isRecipeAggregate } from '$lib/domain/recipes/schema.js';
+import { RecipeVersionSchema } from '$lib/domain/recipes/versions.js';
 
 configure({ useWebWorkers: false });
 
@@ -52,7 +61,8 @@ export const REQUIRED_PORTABLE_ENTRY_NAMES = [
 
 export const OPTIONAL_PORTABLE_ENTRY_NAMES = [
 	'deleted-recipes.json',
-	'detached-households.json'
+	'detached-households.json',
+	'recipe-versions.json'
 ] as const;
 
 export const KNOWN_PORTABLE_ENTRY_NAMES = [
@@ -131,6 +141,7 @@ export const PORTABLE_SOURCE_STORES = [
 	'households',
 	'householdAppliances',
 	'recipes',
+	'recipeVersions',
 	'meals',
 	'mealCheckIns',
 	'userAttributions',
@@ -162,6 +173,71 @@ export type PortableSource = { readonly [K in PortableSourceStore]: readonly Sto
 
 export type PortableUserAttribution = typeof PortableUserAttributionSchema.Type;
 
+/** The households whose content `exporterId` can export: those they did not lose for good. */
+const exporterMemberships = (source: Pick<PortableSource, 'memberships'>, exporterId: string) =>
+	source.memberships.filter(
+		({ workosUserId, status }) => workosUserId === exporterId && status !== 'revoked'
+	);
+
+/**
+ * The recipes an archive of `exporterId` holds with all their versions (spec §9): the exporter's
+ * own, live or deleted. A purged recipe is only a tombstone, so the archive holds neither it nor
+ * its versions.
+ */
+const exportedRecipes = (source: Pick<PortableSource, 'recipes'>, exporterId: string) =>
+	source.recipes
+		.filter(({ ownerUserId }) => ownerUserId === exporterId)
+		.map((record) => decode(StoredRecipeSchema, record, 'decode recipe for export'))
+		.filter(isRecipeAggregate);
+
+/**
+ * The live meals `exporterId` can see in `source`, as an archive holds them (spec §9). A
+ * recipe-following meal stays a reference only when the archive holds its recipe and the version
+ * it resolves to: one of the exporter's recipes, in a household they still belong to. Every other
+ * recipe-following meal goes out as a copy of the version it shows here. A meal whose version is
+ * not on this device is left out, as every view leaves it out.
+ */
+export const exportedMeals = (source: PortableSource, exporterId: string): LiveMeal[] => {
+	const memberships = exporterMemberships(source, exporterId);
+	const householdIds = new Set(memberships.map(({ householdId }) => householdId));
+	const activeIn = new Set(
+		memberships.filter(({ status }) => status === 'active').map(({ householdId }) => householdId)
+	);
+	const exportedRecipeIds = new Set(exportedRecipes(source, exporterId).map(({ id }) => id));
+	const versionsByRecipe = Map.groupBy(
+		source.recipeVersions.map((record) =>
+			decode(RecipeVersionSchema, record, 'decode recipe version for export')
+		),
+		({ recipeId }) => recipeId
+	);
+	const checkInsByMeal = Map.groupBy(
+		source.mealCheckIns.map((record) =>
+			decode(MealCheckInSchema, record, 'decode check-in for export')
+		),
+		({ mealId }) => mealId
+	);
+	const timeZones = new Map(
+		source.households.map(({ householdId, timezone }) => [householdId, timezone])
+	);
+	return source.meals
+		.map((record) => decode(StoredMealSchema, record, 'decode meal for export'))
+		.filter(isLiveMeal)
+		.filter(({ householdId, deletedAt }) => householdIds.has(householdId) && deletedAt === null)
+		.flatMap((meal): LiveMeal[] => {
+			if (!isRecipeFollowingMeal(meal)) return [meal];
+			const context = {
+				versions: versionsByRecipe.get(meal.sourceRecipeId) ?? [],
+				checkIns: checkInsByMeal.get(meal.id) ?? [],
+				timeZone: timeZones.get(meal.householdId) ?? null
+			};
+			const reference =
+				exportedRecipeIds.has(meal.sourceRecipeId) && activeIn.has(meal.householdId);
+			if (reference) return resolveMealVersion(meal, context) === null ? [] : [meal];
+			const copy = resolveMeal(meal, context);
+			return copy === null ? [] : [copy];
+		});
+};
+
 /**
  * Builds the archive of everything `exporter` can see in `source`. `localUsers` are this
  * device's profiles; their attribution wins over cached attributions of the same user.
@@ -173,9 +249,7 @@ export const buildPortableArchive = (
 	options: PortableExportOptions = {}
 ): PortableArchive => {
 	const exporterId = exporter.workosUserId;
-	const memberships = source.memberships.filter(
-		({ workosUserId, status }) => workosUserId === exporterId && status !== 'revoked'
-	);
+	const memberships = exporterMemberships(source, exporterId);
 	const householdIds = new Set(memberships.map(({ householdId }) => householdId));
 	const households = source.households
 		.filter(
@@ -184,28 +258,42 @@ export const buildPortableArchive = (
 		)
 		.map(withoutConflictClocks);
 	const appliances = portableHouseholdRows(source.householdAppliances, householdIds);
-	const recipes = source.recipes
-		.filter(({ ownerUserId }) => ownerUserId === exporterId)
-		.map((record) => decode(StoredRecipeSchema, record, 'decode recipe for export'))
-		.filter(isRecipeAggregate);
+	const recipes = exportedRecipes(source, exporterId);
 	const activeRecipes = recipes
 		.filter(({ deletedAt }) => deletedAt === null)
 		.map(withoutConflictClocks);
 	const deletedRecipes = recipes
 		.filter(({ deletedAt }) => deletedAt !== null)
 		.map(withoutConflictClocks);
-	const meals = source.meals
-		.map((record) => decode(StoredMealSchema, record, 'decode meal for export'))
-		.filter(isMealAggregate)
-		.filter(({ householdId, deletedAt }) => householdIds.has(householdId) && deletedAt === null);
+	const exportedRecipeIds = new Set(recipes.map(({ id }) => id));
+	const versions = source.recipeVersions.map((record) =>
+		decode(RecipeVersionSchema, record, 'decode recipe version for export')
+	);
+	const allCheckIns = source.mealCheckIns.map((record) =>
+		decode(MealCheckInSchema, record, 'decode check-in for export')
+	);
+	const meals = exportedMeals(source, exporterId);
 	const mealIds = new Set(meals.map(({ id }) => id));
-	const checkIns = source.mealCheckIns
-		.map((record) => decode(MealCheckInSchema, record, 'decode check-in for export'))
+	// Only a meal exported as recipe-following resolves through a pin, and its versions are in the
+	// archive. Every other meal holds its content, so its check-ins pin nothing.
+	const followingMealIds = new Set(meals.filter(isRecipeFollowingMeal).map(({ id }) => id));
+	const checkIns = allCheckIns
 		.filter(
 			(row) =>
 				(row.mealId !== null && mealIds.has(row.mealId)) ||
 				(row.mealId === null && row.reporterUserId === exporterId)
+		)
+		.map((row) =>
+			row.mealId !== null && followingMealIds.has(row.mealId)
+				? row
+				: { ...row, recipeVersionId: null }
 		);
+	const portableVersions = versions
+		.filter(({ recipeId }) => exportedRecipeIds.has(recipeId))
+		.map((version) => ({
+			...withoutConflictClocks(version),
+			recipe: version.recipe === null ? null : withoutConflictClocks(version.recipe)
+		}));
 	// Meal provenance stays as the household has it, even when the recipe belongs to another member.
 	const portableMeals = meals.map(withoutConflictClocks);
 	const portableCheckIns = checkIns.map(withoutConflictClocks);
@@ -274,6 +362,9 @@ export const buildPortableArchive = (
 		...(deletedRecipes.length > 0
 			? { deletedRecipes: { version: PORTABLE_FILE_VERSION, recipes: deletedRecipes } }
 			: {}),
+		...(portableVersions.length > 0
+			? { recipeVersions: { version: PORTABLE_FILE_VERSION, versions: portableVersions } }
+			: {}),
 		...(memberships.some(({ status }) => status === 'detached')
 			? {
 					detachedHouseholds: {
@@ -300,6 +391,9 @@ export const buildPortableArchive = (
 		['preferences.json', content.preferences],
 		...(content.deletedRecipes
 			? ([['deleted-recipes.json', content.deletedRecipes]] as [string, unknown][])
+			: []),
+		...(content.recipeVersions
+			? ([['recipe-versions.json', content.recipeVersions]] as [string, unknown][])
 			: []),
 		...(content.detachedHouseholds
 			? ([['detached-households.json', content.detachedHouseholds]] as [string, unknown][])
@@ -351,6 +445,15 @@ export const buildPortableArchive = (
 						PortableDetachedHouseholdsFileSchema,
 						content.detachedHouseholds,
 						'validate detached households export'
+					)
+				}
+			: {}),
+		...(content.recipeVersions
+			? {
+					recipeVersions: decode(
+						PortableRecipeVersionsFileSchema,
+						content.recipeVersions,
+						'validate recipe versions export'
 					)
 				}
 			: {})
@@ -410,6 +513,9 @@ const archiveEntries = (archive: PortableArchive): [PortableEntryName, unknown][
 		: []),
 	...(archive.detachedHouseholds
 		? ([['detached-households.json', archive.detachedHouseholds]] as [PortableEntryName, unknown][])
+		: []),
+	...(archive.recipeVersions
+		? ([['recipe-versions.json', archive.recipeVersions]] as [PortableEntryName, unknown][])
 		: [])
 ];
 
@@ -595,6 +701,15 @@ export const decodePortableArchive = async (blob: Blob): Promise<PortableArchive
 							PortableDetachedHouseholdsFileSchema,
 							value('detached-households.json'),
 							'decode detached-households.json'
+						)
+					}
+				: {}),
+			...(seen.has('recipe-versions.json')
+				? {
+						recipeVersions: decode(
+							PortableRecipeVersionsFileSchema,
+							value('recipe-versions.json'),
+							'decode recipe-versions.json'
 						)
 					}
 				: {})

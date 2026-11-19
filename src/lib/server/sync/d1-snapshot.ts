@@ -127,6 +127,41 @@ export const entityHeadSql = (audienceKind: AudienceKind): string =>
 	  AND entity_id = ?)`;
 
 /**
+ * Another head a write batch depends on: `sql`, a scalar subquery over `binds`, returned `value`
+ * when the commit read it. The batch commits only while it still does, so a concurrent write to
+ * that state rolls the batch back and the commit retries.
+ */
+export interface CommitGuard {
+	readonly sql: string;
+	readonly binds: readonly SqlValue[];
+	readonly value: number;
+}
+
+/** Reads several guards' current values in one statement. */
+export const readCommitGuards = async (
+	database: D1Database,
+	guards: readonly Omit<CommitGuard, 'value'>[]
+): Promise<CommitGuard[]> => {
+	const row = await database
+		.prepare(`SELECT ${guards.map(({ sql }, index) => `${sql} AS g${index}`).join(', ')}`)
+		.bind(...guards.flatMap(({ binds }) => binds))
+		.first<Record<string, number>>();
+	return guards.map((guard, index) => ({ ...guard, value: row?.[`g${index}`] ?? 0 }));
+};
+
+export const readCommitGuard = async (
+	database: D1Database,
+	sql: string,
+	...binds: SqlValue[]
+): Promise<CommitGuard> => (await readCommitGuards(database, [{ sql, binds }]))[0]!;
+
+/** `guards` as a condition to append after another one with ` AND`, and its binds. */
+export const commitGuardSql = (guards: readonly CommitGuard[]) => ({
+	sql: guards.map(({ sql }) => ` AND ${sql} = ?`).join(''),
+	binds: guards.flatMap(({ binds, value }) => [...binds, value])
+});
+
+/**
  * Lists held entities in entity-key order, optionally after a key, within kinds, or up to a
  * limit. `heldSql` is a predicate on the version row `v` with the audience ID bound as `?1`.
  */

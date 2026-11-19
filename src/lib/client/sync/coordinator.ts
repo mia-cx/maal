@@ -69,6 +69,8 @@ const LEASE_TTL_MS = 20_000;
 const PULL_PAGE_SIZE = 100;
 
 const BACKFILL_ENTITY_ORDER: readonly UserSyncEntityKind[] = [
+	// A recipe's versions go first, so the Worker holds them when it compares the recipe (spec §8.3).
+	'recipeVersion',
 	'recipe',
 	'foodUserEntry',
 	'foodUserAlias',

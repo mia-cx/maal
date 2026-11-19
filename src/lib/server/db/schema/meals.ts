@@ -45,6 +45,13 @@ export const meals = sqliteTable(
 		sourceRecipeId: text('source_recipe_id').references(() => recipes.id, {
 			onDelete: 'set null'
 		}),
+		/**
+		 * Set on a recipe-following meal, which stores no content and shows a version of this recipe
+		 * (spec §5.3). It has no foreign key, so it survives the purge that nulls `source_recipe_id`.
+		 * Such a meal's `title` is empty: SQLite cannot relax NOT NULL without rebuilding `meals`, and
+		 * dropping the table in D1 would cascade into every meal sidecar and check-in.
+		 */
+		followedRecipeId: text('followed_recipe_id'),
 		title: text('title').notNull(),
 		description: text('description'),
 		imageUrl: text('image_url'),
@@ -86,6 +93,7 @@ export const meals = sqliteTable(
 		index('meals_household_date_sort_idx').on(table.householdId, table.date, table.sortOrder),
 		index('meals_household_status_idx').on(table.householdId, table.status),
 		index('meals_source_recipe_idx').on(table.sourceRecipeId),
+		index('meals_followed_recipe_idx').on(table.followedRecipeId),
 		index('meals_planned_cook_idx').on(table.plannedCookUserId),
 		index('meals_updated_idx').on(table.updatedAt),
 		enumCheck('meals_status_check', table.status, mealStatusValues),
@@ -322,6 +330,8 @@ export const mealCheckIns = sqliteTable(
 		cookTimeMinutes: integer('cook_time_minutes'),
 		verdict: text('verdict', { enum: mealVerdictValues }).notNull(),
 		reason: text('reason'),
+		/** The recipe version this check-in pinned as cooked (spec §5.4). */
+		recipeVersionId: text('recipe_version_id'),
 		...mutableColumns()
 	},
 	(table) => [

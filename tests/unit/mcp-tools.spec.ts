@@ -1,15 +1,21 @@
 import { describe, expect, test, vi } from 'vitest';
 
-import type { MealAggregate, MealCheckIn } from '$lib/domain/meals/schema.js';
+import { copyRecipeIntoMeal } from '$lib/domain/meals/recipe-following.js';
+import {
+	MEAL_COPY_GROUPS,
+	isRecipeFollowingMeal,
+	type LiveMeal,
+	type MealCheckIn
+} from '$lib/domain/meals/schema.js';
 import type { RecipeAggregate, RecipeImportedCandidate } from '$lib/domain/recipes/schema.js';
 import type { UserFoodPreference } from '$lib/domain/taxonomy/schema.js';
 import {
-	cloneRecipeAsMeal,
 	createRecipeAggregate,
-	linkedMealMatchesRecipeSnapshot,
+	followRecipeAsMeal,
 	type RemoteDomainPort,
 	type RemoteFoodProfile,
-	type RemoteHouseholdSummary
+	type RemoteHouseholdSummary,
+	type RemoteMeal
 } from '$lib/server/domain/remote-port.js';
 import { candidateFromToolRecipe, patchRecipe } from '$lib/server/mcp/builders.js';
 import { MAAL_API_SCOPES, tools, type McpContext } from '$lib/server/mcp/index.js';
@@ -24,11 +30,14 @@ const existingRecipe = createRecipeAggregate({
 		instructions: ['Simmer.']
 	})
 });
-const existingMeal = cloneRecipeAsMeal({
-	recipe: existingRecipe,
-	householdId,
-	date: '2026-08-23'
-});
+const existingMeal: RemoteMeal = {
+	...copyRecipeIntoMeal(
+		followRecipeAsMeal({ recipe: existingRecipe, householdId, date: '2026-08-23' }),
+		existingRecipe
+	),
+	followsRecipe: true,
+	recipeVersionId: '0198d3bc-e600-7000-8000-0000000000b1'
+};
 
 class SpyDomain implements RemoteDomainPort {
 	readonly calls: string[] = [];
@@ -49,27 +58,38 @@ class SpyDomain implements RemoteDomainPort {
 		this.calls.push('getUserRecipe');
 		return this.recipe;
 	}
+	async ensureRecipeVersion(): Promise<void> {
+		this.calls.push('ensureRecipeVersion');
+	}
 	async writeUserRecipe(input: { aggregate: RecipeAggregate }): Promise<RecipeAggregate> {
 		this.calls.push('writeUserRecipe');
 		this.recipe = input.aggregate;
 		return this.recipe;
 	}
-	async listHouseholdMeals(): Promise<readonly MealAggregate[]> {
+	async listHouseholdMeals(): Promise<readonly RemoteMeal[]> {
 		this.calls.push('listHouseholdMeals');
 		return [this.meal];
 	}
-	async getHouseholdMeal(): Promise<MealAggregate | null> {
+	async getHouseholdMeal(): Promise<RemoteMeal | null> {
 		this.calls.push('getHouseholdMeal');
 		return this.meal;
 	}
-	readonly mealWrites: { aggregate: MealAggregate; conflictGroups: readonly string[] }[] = [];
+	readonly mealWrites: { aggregate: LiveMeal; conflictGroups: readonly string[] }[] = [];
 	async writeHouseholdMeal(input: {
-		aggregate: MealAggregate;
+		aggregate: LiveMeal;
 		conflictGroups: readonly string[];
-	}): Promise<MealAggregate> {
+		operation: 'upsert' | 'delete';
+	}): Promise<RemoteMeal | null> {
 		this.calls.push('writeHouseholdMeal');
 		this.mealWrites.push(input);
-		this.meal = input.aggregate;
+		if (input.operation === 'delete') return null;
+		this.meal = isRecipeFollowingMeal(input.aggregate)
+			? {
+					...copyRecipeIntoMeal(input.aggregate, this.recipe),
+					followsRecipe: true,
+					recipeVersionId: existingMeal.recipeVersionId
+				}
+			: { ...input.aggregate, followsRecipe: false, recipeVersionId: null };
 		return this.meal;
 	}
 	async getMealCheckIn(): Promise<MealCheckIn | null> {
@@ -168,7 +188,7 @@ const adapterCases: ReadonlyArray<{
 	{
 		name: 'update_user_recipe',
 		args: { recipeId: existingRecipe.id, patch: { title: 'Updated soup' } },
-		expected: ['getUserRecipe', 'writeUserRecipe', 'listHouseholdMeals', 'writeHouseholdMeal']
+		expected: ['getUserRecipe', 'writeUserRecipe']
 	},
 	{
 		name: 'delete_user_recipe',
@@ -188,7 +208,7 @@ const adapterCases: ReadonlyArray<{
 	{
 		name: 'create_household_meals',
 		args: { meals: [{ customMeal: recipeInput }, { userRecipeId: existingRecipe.id }] },
-		expected: ['writeHouseholdMeal', 'getUserRecipe', 'writeHouseholdMeal']
+		expected: ['writeHouseholdMeal', 'getUserRecipe', 'ensureRecipeVersion', 'writeHouseholdMeal']
 	},
 	{
 		name: 'get_household_meal',
@@ -262,61 +282,42 @@ describe('MCP tool adapters', () => {
 		}
 	);
 
-	test('recipe propagation preserves scheduled meal state and skips ad-hoc overrides', async () => {
+	test('planning a saved recipe writes a recipe-following meal with no recipe content', async () => {
 		const domain = new SpyDomain();
-		const definition = tools.find(({ name }) => name === 'update_user_recipe')!;
-		await definition.handler(contextFor(domain), {
-			recipeId: existingRecipe.id,
-			patch: { title: 'Updated soup' }
-		});
-		expect(domain.meal).toMatchObject({
-			title: 'Updated soup',
-			date: existingMeal.date,
-			status: existingMeal.status,
+		await tools
+			.find(({ name }) => name === 'create_household_meal')!
+			.handler(contextFor(domain), { userRecipeId: existingRecipe.id });
+		const [planned] = domain.mealWrites;
+		expect(planned!.aggregate).toMatchObject({
+			followsRecipe: true,
 			sourceRecipeId: existingRecipe.id
 		});
-		expect(linkedMealMatchesRecipeSnapshot(domain.meal, domain.recipe)).toBe(true);
-
-		const overridden = new SpyDomain();
-		overridden.meal = { ...overridden.meal, title: 'My ad-hoc title' };
-		await definition.handler(contextFor(overridden), {
-			recipeId: existingRecipe.id,
-			patch: { title: 'Another title' }
-		});
-		expect(overridden.meal.title).toBe('My ad-hoc title');
-		expect(overridden.calls).not.toContain('writeHouseholdMeal');
+		expect(planned!.aggregate).not.toHaveProperty('title');
 	});
 
-	test('recipe propagation skips paid households without live and projected meals write access', async () => {
+	test('a substitution copies a recipe-following meal first, as its own write', async () => {
 		const domain = new SpyDomain();
-		const definition = tools.find(({ name }) => name === 'update_user_recipe')!;
-		await definition.handler(
-			contextFor(domain, {
-				principal: {
-					...principal,
-					effectiveHouseholds: [
-						{ ...principal.effectiveHouseholds[0], permissions: ['recipes:write'] }
-					]
-				}
-			}),
-			{ recipeId: existingRecipe.id, patch: { title: 'Private update' } }
-		);
-		expect(domain.calls).toEqual(['getUserRecipe', 'writeUserRecipe']);
+		await tools
+			.find(({ name }) => name === 'update_household_meal')!
+			.handler(contextFor(domain), {
+				mealId: existingMeal.id,
+				patch: { ingredients: ['1 leek'] }
+			});
+		expect(domain.mealWrites.map(({ conflictGroups }) => conflictGroups)).toEqual([
+			MEAL_COPY_GROUPS,
+			['ingredients']
+		]);
+		expect(domain.mealWrites[0]!.aggregate).toMatchObject({ title: 'Existing soup' });
+		expect(domain.meal).toMatchObject({ followsRecipe: false });
+		expect(domain.meal.ingredients.map(({ originalText }) => originalText)).toEqual(['1 leek']);
 	});
 
-	test('recipe propagation also requires the key meals write scope', async () => {
+	test('a schedule change keeps the meal following its recipe', async () => {
 		const domain = new SpyDomain();
-		const definition = tools.find(({ name }) => name === 'update_user_recipe')!;
-		await definition.handler(
-			contextFor(domain, {
-				principal: {
-					...principal,
-					scopes: principal.scopes.filter((scope) => scope !== 'meals:write')
-				}
-			}),
-			{ recipeId: existingRecipe.id, patch: { title: 'Private update' } }
-		);
-		expect(domain.calls).toEqual(['getUserRecipe', 'writeUserRecipe']);
+		await tools
+			.find(({ name }) => name === 'update_household_meal')!
+			.handler(contextFor(domain), { mealId: existingMeal.id, patch: { date: '2026-08-25' } });
+		expect(domain.mealWrites.map(({ conflictGroups }) => conflictGroups)).toEqual([['schedule']]);
 	});
 
 	test('URL meal import consumes the limiter, parses once, then writes recipe and meal through the port', async () => {
@@ -478,7 +479,7 @@ describe('MCP tool parity with the prototype', () => {
 		const result = (await runTool(domain, 'update_household_meal', {
 			mealId: existingMeal.id,
 			patch: { ingredients: ['2 leeks'], instructions: ['Roast.'] }
-		})) as { meal: MealAggregate };
+		})) as { meal: RemoteMeal };
 
 		expect(result.meal.ingredients.map(({ originalText }) => originalText)).toEqual(['2 leeks']);
 		expect(result.meal.instructions.map(({ text }) => text)).toEqual(['Roast.']);
@@ -508,6 +509,16 @@ describe('MCP tool parity with the prototype', () => {
 			cookTime: 40
 		})) as { checkIn: MealCheckIn };
 		expect(result.checkIn.cookTimeMinutes).toBeNull();
+	});
+
+	test('create_meal_check_in pins the version a following meal shows and copies nothing', async () => {
+		const domain = new SpyDomain();
+		const result = (await runTool(domain, 'create_meal_check_in', {
+			mealId: existingMeal.id,
+			verdict: 'repeat'
+		})) as { checkIn: MealCheckIn };
+		expect(result.checkIn.recipeVersionId).toBe(existingMeal.recipeVersionId);
+		expect(domain.mealWrites.map(({ conflictGroups }) => conflictGroups)).toEqual([['status']]);
 	});
 
 	test('create_meal_check_in keeps cook time from the planned cook who cooked', async () => {

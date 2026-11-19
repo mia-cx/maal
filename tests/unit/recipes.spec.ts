@@ -21,6 +21,7 @@ import {
 	type RecipeEditorPatch
 } from '$lib/client/recipes/index.js';
 import { MaalDatabase, openMaalDatabase } from '$lib/client/local/database.js';
+import { copyRecipeIntoMeal, planRecipeFollowingMeal } from '$lib/domain/meals/recipe-following.js';
 import {
 	RecipeImportedCandidateSchema,
 	StoredRecipeSchema,
@@ -272,9 +273,17 @@ describe('recipe aggregate contract', () => {
 			media: updated.media,
 			nutritionFacts: updated.nutritionFacts
 		}).toEqual(hiddenBefore);
-		expect(await database.outbox.count()).toBe(2);
+		// The import and the save each change what a meal shows, so each adds a version.
+		expect(await outboxKinds(database)).toEqual({ recipe: 2, recipeVersion: 2 });
 	});
 });
+
+const outboxKinds = async (database: MaalDatabase): Promise<Record<string, number>> =>
+	Object.fromEntries(
+		[...Map.groupBy(await database.outbox.toArray(), ({ entityKind }) => entityKind)].map(
+			([kind, rows]) => [kind, rows.length]
+		)
+	);
 
 describe('offline recipe commands and queries', () => {
 	test('creates and searches a manual recipe through the normal command path', async () => {
@@ -300,7 +309,7 @@ describe('offline recipe commands and queries', () => {
 		expect((await searchRecipes(database, 'user_alice', 'creme')).map(({ id }) => id)).toEqual([
 			recipe.id
 		]);
-		expect(await database.outbox.count()).toBe(1);
+		expect(await outboxKinds(database)).toEqual({ recipe: 1, recipeVersion: 1 });
 	});
 
 	test('soft-deletes and restores within the recovery window as new mutations', async () => {
@@ -315,25 +324,25 @@ describe('offline recipe commands and queries', () => {
 
 		const restored = await restoreRecipe(database, context(at(23)), recipe.id);
 		expect(restored.deletedAt).toBeNull();
-		expect(await database.outbox.count()).toBe(3);
+		// The deletion adds a marker; the restore adds nothing (spec §5.2).
+		expect(await outboxKinds(database)).toEqual({ recipe: 3, recipeVersion: 2 });
 	});
 
 	test('purges only recipe content, retains a one-year marker, and never removes copied meals', async () => {
 		const database = await openDatabase();
 		const recipe = await commitImportedRecipeCandidate(database, context(), importedCandidate());
 		const copiedMealId = uuidv7();
-		await database.meals.put({
-			id: copiedMealId,
-			householdId: 'org_family',
-			sourceRecipeId: recipe.id,
-			title: recipe.title,
-			schemaVersion: 1,
-			revision: 1,
-			createdAt: at(21),
-			updatedAt: at(21),
-			deletedAt: null,
-			conflictClocks: {}
-		});
+		await database.meals.put(
+			copyRecipeIntoMeal(
+				planRecipeFollowingMeal({
+					recipe,
+					householdId: 'org_family',
+					mealId: copiedMealId,
+					occurredAt: at(21)
+				}),
+				recipe
+			)
+		);
 
 		const tombstone = await permanentlyDeleteRecipe(database, context(at(22)), recipe.id);
 		expect(tombstone).toMatchObject({

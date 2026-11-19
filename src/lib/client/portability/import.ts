@@ -1,3 +1,4 @@
+import { Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
 
 import { runTrackedLocalCommit } from '$lib/client/local/commit-activity.js';
@@ -5,7 +6,14 @@ import type { LocalStoreName, MaalDatabase } from '$lib/client/local/database.js
 import { activeHouseholdKey } from '$lib/client/local/profiles.js';
 import { requestLocalSync, type SyncRequestedScope } from '$lib/client/sync/requests.js';
 import { PortableArchiveError } from '$lib/domain/contracts/errors.js';
+import { sameRecipeContent } from '$lib/domain/meals/recipe-following.js';
 import type { PortableArchive } from '$lib/domain/portability/schema.js';
+import { RecipeAggregateSchema } from '$lib/domain/recipes/schema.js';
+import {
+	RecipeVersionSchema,
+	newestContentVersion,
+	recipeVersion
+} from '$lib/domain/recipes/versions.js';
 import {
 	HOUSEHOLD_SYNC_ENTITY_DESCRIPTORS,
 	type HouseholdSyncEntityDescriptor
@@ -371,7 +379,16 @@ const archiveNames = (archive: PortableArchive): Map<string, string> => {
 	]) {
 		names.set(entry.id, entry.canonicalLabel);
 	}
-	for (const meal of archive.meals.meals) names.set(meal.id, meal.title);
+	const recipeTitles = new Map(
+		[...archive.recipes.recipes, ...(archive.deletedRecipes?.recipes ?? [])].map(
+			({ id, title }) => [id, title] as const
+		)
+	);
+	for (const meal of archive.meals.meals) {
+		// A recipe-following meal is named after the recipe it shows.
+		const title = 'title' in meal ? meal.title : recipeTitles.get(meal.sourceRecipeId);
+		if (title !== undefined) names.set(meal.id, title);
+	}
 	return names;
 };
 
@@ -551,8 +568,19 @@ const validatePlannedReferences = async (
 		}
 		return ids;
 	};
-	const [householdIds, mealIds, foodIds, unitIds, foodAliasIds, unitAliasIds] = await Promise.all([
+	const [
+		householdIds,
+		recipeIds,
+		versionIds,
+		mealIds,
+		foodIds,
+		unitIds,
+		foodAliasIds,
+		unitAliasIds
+	] = await Promise.all([
 		idsFor('households'),
+		idsFor('recipes'),
+		idsFor('recipeVersions'),
 		idsFor('meals'),
 		idsFor('foods', 'foodUserEntries', 'foodHouseholdEntries'),
 		idsFor('units', 'unitUserEntries', 'unitHouseholdEntries'),
@@ -608,10 +636,14 @@ const validatePlannedReferences = async (
 			requireReference(ingredient.baseUnitFamilyId, unitIds, 'recipe unit family');
 		}
 	}
-	// Meal provenance may name another member's recipe, which syncs only to its owner, so it is
-	// not required to resolve on this device.
+	// A meal copy's provenance may name another member's recipe, which syncs only to its owner, so
+	// it is not required to resolve on this device. A recipe-following meal shows its recipe, so
+	// that recipe must be imported or already here (spec §9).
 	for (const row of state.writes.get('meals') ?? []) {
 		requireReference(row.householdId, householdIds, 'meal household');
+		if (row.followsRecipe === true) {
+			requireReference(row.sourceRecipeId, recipeIds, 'followed recipe');
+		}
 		for (const ingredient of (row.ingredients as Record<string, unknown>[] | undefined) ?? []) {
 			requireReference(ingredient.baseFoodId, foodIds, 'meal food');
 			requireReference(ingredient.baseUnitId, unitIds, 'meal unit');
@@ -620,6 +652,7 @@ const validatePlannedReferences = async (
 	}
 	for (const row of state.writes.get('mealCheckIns') ?? []) {
 		requireReference(row.mealId, mealIds, 'check-in meal');
+		requireReference(row.recipeVersionId, versionIds, 'pinned recipe version');
 	}
 	for (const row of state.writes.get('userFoodPreferences') ?? []) {
 		requireReference(row.foodId, foodIds, 'food preference');
@@ -639,6 +672,89 @@ const validatePlannedReferences = async (
 			requireReference(row.preferredUnitAliasId, unitAliasIds, 'unit display alias');
 		}
 	}
+};
+
+/**
+ * Plans the archive's recipe versions (spec §9) and returns their IDs on this device, and the
+ * archived versions withheld from it. Versions are insert-only: one already here stays as it is. A
+ * recipe imported as a copy brings copies of its versions. A recipe kept local brings none, so its
+ * meals keep showing the local recipe; a version of it that is not here is withheld. A written
+ * recipe whose newest version does not hold its content, such as a replaced one or one from an
+ * archive without versions, gets a version: effective now when it has one, else at the recipe's
+ * `updatedAt`.
+ */
+const planRecipeVersions = async (
+	database: MaalDatabase,
+	state: PlannerState,
+	archive: PortableArchive,
+	input: {
+		readonly recipeIds: ReadonlyMap<string, string>;
+		readonly ownerUserId: string;
+		readonly remapContent: (
+			recipe: object,
+			recipeId: string,
+			copied: boolean
+		) => Record<string, unknown>;
+	}
+): Promise<{ versionIds: Map<string, string>; withheld: Set<string> }> => {
+	const versionIds = new Map<string, string>();
+	const withheld = new Set<string>();
+	const planned: Record<string, unknown>[] = [];
+	const written = new Set((state.writes.get('recipes') ?? []).map(({ id }) => String(id)));
+	const kept = new Set(
+		state.collisions
+			.filter(({ store, localId }) => store === 'recipes' && !written.has(localId))
+			.map(({ localId }) => localId)
+	);
+	for (const archived of archive.recipeVersions?.versions ?? []) {
+		const recipeId = input.recipeIds.get(archived.recipeId);
+		if (recipeId === undefined) continue;
+		const copied = recipeId !== archived.recipeId;
+		const id = copied ? uuidv7() : archived.id;
+		const here = !copied && (await database.recipeVersions.get(id)) !== undefined;
+		if (kept.has(recipeId) && !here) {
+			withheld.add(archived.id);
+			continue;
+		}
+		versionIds.set(archived.id, id);
+		if (here) continue;
+		const row = {
+			...copyRecord(archived),
+			id,
+			recipeId,
+			ownerUserId: input.ownerUserId,
+			recipe:
+				archived.recipe === null
+					? null
+					: { ...input.remapContent(archived.recipe, recipeId, copied), conflictClocks: {} }
+		};
+		planned.push(row);
+		addWrite(state, 'recipeVersions', row);
+	}
+	const now = new Date().toISOString();
+	for (const recipe of state.writes.get('recipes') ?? []) {
+		const content = Schema.decodeUnknownSync(RecipeAggregateSchema)({
+			...recipe,
+			conflictClocks: {}
+		});
+		const versions = [
+			...planned.filter(({ recipeId }) => recipeId === content.id),
+			...(await database.recipeVersions.where('recipeId').equals(content.id).toArray())
+		].map((row) => Schema.decodeUnknownSync(RecipeVersionSchema)({ ...row, conflictClocks: {} }));
+		const newest = newestContentVersion(versions);
+		if (newest !== undefined && sameRecipeContent(newest.recipe, content)) continue;
+		const effectiveAt = newest === undefined ? content.updatedAt : now;
+		addWrite(state, 'recipeVersions', {
+			...recipeVersion({
+				id: uuidv7(),
+				recipeId: content.id,
+				ownerUserId: input.ownerUserId,
+				effectiveAt,
+				recipe: content
+			})
+		});
+	}
+	return { versionIds, withheld };
 };
 
 export const planPortableImport = async (
@@ -780,6 +896,13 @@ export const planPortableImport = async (
 		}
 	}
 
+	const { versionIds, withheld } = await planRecipeVersions(database, state, archive, {
+		recipeIds,
+		ownerUserId: profile.workosUserId,
+		remapContent: (recipe, recipeId, copied) =>
+			remapRecipe(recipe, recipeId, profile.workosUserId, knownHouseholdIds, taxonomyIds, copied)
+	});
+
 	for (const archived of archive.meals.meals) {
 		const householdId = householdIds.get(archived.householdId) ?? archived.householdId;
 		const householdChanged = householdId !== archived.householdId;
@@ -832,7 +955,12 @@ export const planPortableImport = async (
 		const candidate = {
 			...copyRecord(archived),
 			id: mealChanged ? uuidv7() : archived.id,
-			mealId: mappedMealId
+			mealId: mappedMealId,
+			// A pin on a withheld version would show content the person kept out, so it pins nothing.
+			recipeVersionId:
+				archived.recipeVersionId !== null && withheld.has(archived.recipeVersionId)
+					? null
+					: mapId(versionIds, archived.recipeVersionId)
 		};
 		const decision = await resolveCandidate(database, state, 'mealCheckIns', candidate, true);
 		candidate.id = decision.id;
@@ -981,19 +1109,16 @@ export const commitPortableImport = async (
 							(descriptor.entityKind !== 'meal_check_in' ||
 								row.reporterUserId === plan.importerWorkosUserId)
 					}));
-					await database
-						.table(store)
-						.bulkPut(
-							prepared.map(({ row, mutationId, replacement }) =>
-								importedAggregate(
-									descriptor,
-									row,
-									originDeviceId,
-									mutationId,
-									replacement ? importedAt : text(row.updatedAt)
-								)
-							)
-						);
+					const aggregates = prepared.map(({ row, mutationId, replacement }) =>
+						importedAggregate(
+							descriptor,
+							row,
+							originDeviceId,
+							mutationId,
+							replacement ? importedAt : text(row.updatedAt)
+						)
+					);
+					await database.table(store).bulkPut(aggregates);
 					for (const { row, mutationId, replacement } of prepared) {
 						const id = rowId(store, row);
 						const scopeId =

@@ -531,4 +531,17 @@ describe('household administration Worker service', () => {
 			status: 'active'
 		});
 	});
+
+	test('a repeated revocation keeps the time the member left', async () => {
+		await bootstrapHousehold();
+		const bobMembership = (await repository.membership('org_family', bobId))!.membershipId;
+		await repository.markMembershipRevoked(bobMembership, '2026-08-22T09:00:00.000Z');
+		await repository.markMembershipRevoked(bobMembership, '2026-08-23T09:00:00.000Z');
+		await expect(
+			database
+				.prepare('SELECT status, updated_at FROM household_memberships WHERE membership_id = ?')
+				.bind(bobMembership)
+				.first()
+		).resolves.toEqual({ status: 'revoked', updated_at: '2026-08-22T09:00:00.000Z' });
+	});
 });

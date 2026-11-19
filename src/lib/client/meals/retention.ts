@@ -6,8 +6,8 @@ import { UtcInstantSchema, type UtcInstant } from '$lib/domain/contracts/primiti
 import {
 	MealPurgeTombstoneSchema,
 	StoredMealSchema,
-	isMealAggregate,
-	type MealAggregate,
+	isLiveMeal,
+	type LiveMeal,
 	type MealPurgeTombstone
 } from '$lib/domain/meals/schema.js';
 
@@ -15,7 +15,7 @@ const TOMBSTONE_RETENTION_MS = 365 * 86_400_000;
 const UNRESOLVED_OUTBOX_STATUSES: readonly OutboxStatus[] = ['pending', 'sending', 'quarantined'];
 
 /** Reduces a deleted meal to the minimal tombstone kept for one year once its content is removed. */
-export const mealTombstone = (meal: MealAggregate, purgedAt: UtcInstant): MealPurgeTombstone => ({
+export const mealTombstone = (meal: LiveMeal, purgedAt: UtcInstant): MealPurgeTombstone => ({
 	schemaVersion: meal.schemaVersion,
 	revision: meal.revision,
 	createdAt: meal.createdAt,
@@ -65,7 +65,7 @@ export const runMealRetention = async (
 		);
 
 		const purgeable = deleted.filter(
-			(meal): meal is MealAggregate => isMealAggregate(meal) && acknowledgedDeletes.has(meal.id)
+			(meal): meal is LiveMeal => isLiveMeal(meal) && acknowledgedDeletes.has(meal.id)
 		);
 		const purged = purgeable.slice(0, batchSize);
 		if (purged.length > 0) {
@@ -77,7 +77,7 @@ export const runMealRetention = async (
 		const expiredCandidates = deleted
 			.filter(
 				(record) =>
-					!isMealAggregate(record) &&
+					!isLiveMeal(record) &&
 					Date.parse(record.retainUntil) <= Date.parse(now) &&
 					!awaitingUpload.has(record.id)
 			)

@@ -3,6 +3,7 @@ import { Data, Schema } from 'effect';
 import { createAuthSlotId, MAX_AUTHENTICATED_SLOTS } from '$lib/auth-slots/contracts.js';
 import { DomainIdSchema, UtcInstantSchema } from '$lib/domain/contracts/primitives.js';
 import { ProfileSchema, type Profile } from '$lib/domain/household/contracts.js';
+import { StoredMealSchema, isRecipeFollowingMeal } from '$lib/domain/meals/schema.js';
 
 import type { MaalDatabase } from './database.js';
 
@@ -301,7 +302,30 @@ export const removeProfileFromDevice = async (
 			}
 		}
 
-		await database.recipes.where('ownerUserId').equals(profile.workosUserId).delete();
+		// The versions of removed recipes that retained meals follow stay, so those meals keep
+		// showing on this device, even offline or without sync (spec §4.3).
+		const removedHouseholds = new Set(removedHouseholdIds);
+		const ownRecipes = database.recipes.where('ownerUserId').equals(profile.workosUserId);
+		const ownRecipeIds = await ownRecipes.primaryKeys();
+		const retainedFollowing = (
+			await database.meals
+				.where('sourceRecipeId')
+				.anyOf(ownRecipeIds)
+				.filter((meal) => !removedHouseholds.has(meal.householdId ?? ''))
+				.toArray()
+		)
+			.map((row) => Schema.decodeUnknownSync(StoredMealSchema)(row))
+			.filter(isRecipeFollowingMeal)
+			.filter(({ deletedAt }) => deletedAt === null);
+		const followedRecipeIds = new Set(
+			retainedFollowing.map(({ sourceRecipeId }) => sourceRecipeId)
+		);
+		await ownRecipes.delete();
+		await database.recipeVersions
+			.where('recipeId')
+			.anyOf(ownRecipeIds)
+			.filter(({ recipeId }) => !followedRecipeIds.has(String(recipeId)))
+			.delete();
 		await database.mealCheckIns
 			.filter(
 				(checkIn) =>

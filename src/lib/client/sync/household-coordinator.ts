@@ -8,6 +8,7 @@ import {
 	type SyncLease
 } from '$lib/client/local/leases.js';
 import type { MaalDatabase } from '$lib/client/local/database.js';
+import { copyMealsOnDeparture, departureStores } from '$lib/client/local/households.js';
 import { markProfileReauthRequired } from '$lib/client/local/profiles.js';
 import type { BackfillCheckpointRecord, OutboxRecord } from '$lib/client/local/records.js';
 import {
@@ -696,8 +697,7 @@ export const createHouseholdSyncCoordinator = (
 		const detachedAt = utc(now());
 		await options.database.transaction(
 			'rw',
-			options.database.memberships,
-			options.database.outbox,
+			[options.database.outbox, ...departureStores(options.database)],
 			async () => {
 				if (membership) {
 					await options.database.memberships.update(membership.membershipId, {
@@ -706,6 +706,7 @@ export const createHouseholdSyncCoordinator = (
 						denialCode: code,
 						updatedAt: detachedAt
 					});
+					await copyMealsOnDeparture(options.database, options.householdId, options.workosUserId);
 				}
 				for (const row of await scopeOutbox(options.database, 'household', options.householdId)) {
 					if (row.authSlotId !== options.authSlotId) continue;
