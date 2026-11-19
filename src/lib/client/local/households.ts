@@ -446,6 +446,7 @@ export const forkDetachedHouseholdSnapshot = async (
 	// shows now, or is left out while its version is missing, as every view leaves it out.
 	const rows = await database.meals.where('householdId').equals(input.householdId).toArray();
 	const following = rows
+		.filter(({ followsRecipe }) => followsRecipe === true)
 		.map((row) => Schema.decodeUnknownSync(StoredMealSchema)(row))
 		.filter(isLiveMeal)
 		.filter(isRecipeFollowingMeal);
