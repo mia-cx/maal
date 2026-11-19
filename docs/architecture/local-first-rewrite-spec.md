@@ -509,9 +509,11 @@ moves the head, fails the guarded write, and the retry decides against that dele
 The same threshold is the backfill skew window in §8.2, so one household setting decides when a change is
 too old to count as current.
 
-A device that applies a `reinstated` upsert while its own copy is absent or deleted records the entity in
-`reinstatements`. The entity then appears exactly as if another member had just created it, plus a
-**Reinstated** badge on its recipe or meal card. Opening the recipe or meal on that device clears the badge.
+A bootstrap page marks a live entity `reinstated` while a retained change revived it and no deletion
+followed. A device that applies a `reinstated` upsert while its own copy is absent or deleted records the
+entity in `reinstatements`, through a pull or through a bootstrap of a scope it synced before. The entity
+then appears exactly as if another member had just created it, plus a **Reinstated** badge on its recipe or
+meal card. Opening the recipe or meal on that device clears the badge.
 
 ### 8.6 Rejected writes reach the person
 

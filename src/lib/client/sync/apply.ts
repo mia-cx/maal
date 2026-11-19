@@ -197,11 +197,16 @@ export const applyUserBootstrap = async (
 	}
 	await database.transaction(
 		'rw',
-		[...new Set(tables), database.outbox, database.syncScopes],
+		[...new Set(tables), database.outbox, database.syncScopes, database.reinstatements],
 		async () => {
 			const pending = await pendingUserOutbox(database, workosUserId);
 			const pendingKeys = new Set(pending.map((row) => keyFor(row.entityKind, row.aggregateId)));
-			for (const aggregate of decoded) {
+			const current = await database.syncScopes.get(['user', workosUserId]);
+			for (const [index, aggregate] of decoded.entries()) {
+				// A device that never synced this scope never saw the deletion, so it gets no badge.
+				if (current?.cursor != null) {
+					await noteReinstatement(database, aggregate.store, response.aggregates[index]!, now);
+				}
 				if (!pendingKeys.has(keyFor(aggregate.entityKind, aggregate.entityId))) {
 					await database.table(aggregate.store).put(aggregate.aggregate);
 				}
@@ -222,7 +227,6 @@ export const applyUserBootstrap = async (
 				response.aggregates,
 				now
 			);
-			const current = await database.syncScopes.get(['user', workosUserId]);
 			await database.syncScopes.put({
 				scopeKind: 'user',
 				scopeId: workosUserId,

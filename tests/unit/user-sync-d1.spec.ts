@@ -18,13 +18,19 @@ import { markRejectionsSeen, readUnseenRejections } from '$lib/client/sync/rejec
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
 import { renewalCutoff } from '$lib/server/billing/entitlement.js';
 import {
+	bootstrapUserSync,
 	D1UserSyncRepository,
+	ServerSyncBootstrapRequired,
 	d1UserSyncCapabilityAuthorizer,
 	pullUserSync,
 	pushUserSync
 } from '$lib/server/sync/index.js';
 import type { LiveWorkOSMembership } from '$lib/server/auth-slots/adapter.js';
-import { SyncTransportError, type SyncMutation } from '$lib/sync/contracts.js';
+import {
+	SyncBootstrapRequired,
+	SyncTransportError,
+	type SyncMutation
+} from '$lib/sync/contracts.js';
 import { commitBetweenReads } from './d1-interleave.js';
 import { applyD1Migrations, readD1MigrationFiles } from './d1-test-migrations.js';
 
@@ -1000,9 +1006,16 @@ describe('a recent edit against a deletion, across two devices', () => {
 		});
 		await local.uiState.put({ key: 'activeProfileId', value: profileId });
 		const transport: UserSyncTransport = {
-			pull: (_slot, request) => pullUserSync(repository, userId, request),
+			// The HTTP client turns the Worker's bootstrap-required response into the client error.
+			pull: (_slot, request) =>
+				pullUserSync(repository, userId, request).catch((error: unknown) => {
+					if (error instanceof ServerSyncBootstrapRequired) {
+						throw new SyncBootstrapRequired({ ...error });
+					}
+					throw error;
+				}),
 			push: (_slot, request) => pushUserSync(repository, userId, request, serverNow),
-			bootstrap: () => Promise.reject(new Error('unused')),
+			bootstrap: (_slot, request) => bootstrapUserSync(repository, userId, request),
 			backfill: () => Promise.reject(new Error('unused'))
 		};
 		const coordinator = createUserSyncCoordinator({
@@ -1084,6 +1097,25 @@ describe('a recent edit against a deletion, across two devices', () => {
 		// The phone never saw the recipe disappear, so it shows no badge.
 		expect(await readReinstatedIds(phone.local, 'recipe')).toEqual(new Set());
 		await expect(readUnseenRejections(phone.local)).resolves.toEqual([]);
+	});
+
+	test('a laptop that recovers through bootstrap still marks the revived recipe Reinstated', async () => {
+		const { recipeId, laptop, phoneSyncsAt } = await editAgainstDeletion();
+		await phoneSyncsAt('2026-08-21T12:40:00.000Z');
+		// Retention moved past the laptop's cursor, so it bootstraps instead of pulling the revival.
+		await database
+			.prepare(
+				"UPDATE sync_scope_state SET earliest_retained_sequence = latest_sequence WHERE audience_kind = 'user'"
+			)
+			.run();
+
+		await expect(laptop.coordinator.syncNow()).resolves.toBe('complete');
+
+		expect(await laptop.local.recipes.get(recipeId)).toMatchObject({
+			title: 'Phone soup',
+			deletedAt: null
+		});
+		expect(await readReinstatedIds(laptop.local, 'recipe')).toEqual(new Set([recipeId]));
 	});
 
 	test('an edit that reaches D1 after three hours is rejected, and the phone says so', async () => {

@@ -85,6 +85,41 @@ const splitEntityKey = (key: string): [string, string] => {
 	return separator === -1 ? [key, ''] : [key.slice(0, separator), key.slice(separator + 1)];
 };
 
+/**
+ * Marks the live bootstrap changes whose entity a retained change brought back with no deletion
+ * since (spec §8.5), so a device recovering through bootstrap shows the Reinstated badge as a pull
+ * would have.
+ */
+export const markReinstated = async <
+	Change extends EntityIdentity & { readonly operation: 'upsert' | 'delete' }
+>(
+	database: D1Database,
+	audience: { readonly kind: AudienceKind; readonly id: string },
+	changes: readonly Change[]
+): Promise<Change[]> => {
+	const live = changes.filter(({ operation }) => operation === 'upsert');
+	if (live.length === 0) return [...changes];
+	const rows = await queryAll<{ entity_kind: string; entity_id: string }>(
+		database,
+		`SELECT DISTINCT c.entity_kind, c.entity_id FROM sync_changes c
+		 WHERE c.audience_kind = ${kindLiteral(audience.kind)} AND c.audience_id = ?
+		 AND (c.entity_kind, c.entity_id) IN (${JSON_IDENTITIES})
+		 AND json_extract(c.payload, '$.payload.reinstated') = 1
+		 AND NOT EXISTS (SELECT 1 FROM sync_changes d
+		  WHERE d.entity_kind = c.entity_kind AND d.entity_id = c.entity_id
+		  AND d.audience_kind = c.audience_kind AND d.audience_id = c.audience_id
+		  AND d.operation = 'delete' AND d.seq > c.seq)`,
+		audience.id,
+		identitiesJson(live)
+	);
+	const revived = new Set(rows.map((row) => entityKey(row.entity_kind, row.entity_id)));
+	return changes.map((change) =>
+		change.operation === 'upsert' && revived.has(entityKey(change.entityKind, change.entityId))
+			? { ...change, reinstated: true as const }
+			: change
+	);
+};
+
 /** The newest committed sequence for one entity; any commit to the entity moves it. */
 export const entityHeadSql = (audienceKind: AudienceKind): string =>
 	`(SELECT COALESCE(MAX(last_sequence), 0) FROM sync_entity_versions

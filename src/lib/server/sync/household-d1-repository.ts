@@ -26,6 +26,7 @@ import {
 	identitiesJson,
 	kindLiteral,
 	listHeldIdentities,
+	markReinstated,
 	queryAll,
 	readSidecars,
 	type CommitResult,
@@ -837,7 +838,11 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 		const last = selected.at(-1);
 		return {
 			...state,
-			aggregates: await readSnapshotChanges(this.database, householdId, selected),
+			aggregates: await markReinstated(
+				this.database,
+				audience(householdId),
+				await readSnapshotChanges(this.database, householdId, selected)
+			),
 			authoritativeIds,
 			nextEntityKey:
 				identities.length > page.limit && last

@@ -27,6 +27,7 @@ import {
 	identitiesJson,
 	kindLiteral,
 	listHeldIdentities,
+	markReinstated,
 	queryAll,
 	readSidecars,
 	type CommitResult,
@@ -813,7 +814,11 @@ export class D1UserSyncRepository implements UserSyncRepository {
 		const last = selected.at(-1);
 		return {
 			...state,
-			aggregates: await readSnapshotChanges(this.database, workosUserId, selected),
+			aggregates: await markReinstated(
+				this.database,
+				audience(workosUserId),
+				await readSnapshotChanges(this.database, workosUserId, selected)
+			),
 			authoritativeIds,
 			nextEntityKey:
 				identities.length > page.limit && last
