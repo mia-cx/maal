@@ -16,6 +16,7 @@ Local meal planning is free. A household subscription adds Cloudflare D1 sync, c
 Stripe handles subscriptions. The configured staging host is [staging.maal.is](https://staging.maal.is).
 
 The [local-first rewrite specification](docs/architecture/local-first-rewrite-spec.md) defines the product and architecture.
+The [greenfield design](docs/architecture/greenfield-design.md) preserves the original rewrite plan.
 
 ## Local setup
 
