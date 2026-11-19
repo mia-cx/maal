@@ -22,6 +22,7 @@ import { applyUserPullPage } from '$lib/client/sync/apply.js';
 import { CURRENT_PROTOCOL_VERSION } from '$lib/domain/contracts/versions.js';
 import { UserFoodPreferenceSchema } from '$lib/domain/taxonomy/schema.js';
 import {
+	listHouseholdMeals,
 	planRecipeAsMeal,
 	saveMealCheckIn,
 	type MealCommandContext
@@ -877,6 +878,63 @@ describe('portable imports and sync', () => {
 		await expect(target.recipes.get(seeded.recipe.id)).resolves.toMatchObject({
 			savedFromHouseholdId: null
 		});
+	});
+
+	test('export and import round-trip both meal kinds', async () => {
+		const source = await openDatabase();
+		const seeded = await seedContent(source);
+		const mealContext: MealCommandContext = {
+			authSlotId: 'slot-alice',
+			householdId: seeded.householdId,
+			reporterUserId: seeded.workosUserId,
+			originDeviceId: deviceId,
+			occurredAt: at(12)
+		};
+		const following = await planRecipeAsMeal(source, mealContext, seeded.recipe.id, {
+			date: '2026-08-30'
+		});
+		// Another member's recipe, shared with the household: the archive holds only Alice's recipes.
+		const bobsRecipe = await commitImportedRecipeCandidate(
+			source,
+			{ authSlotId: 'slot-bob', ownerUserId: 'user_bob', originDeviceId: deviceId },
+			candidate('Bob’s stew')
+		);
+		const followingBobs = await planRecipeAsMeal(source, mealContext, bobsRecipe.id, {
+			date: '2026-08-31'
+		});
+
+		const archive = await ownArchive(source, seeded.profileId);
+		const archived = new Map(archive.meals.meals.map((meal) => [meal.id, meal]));
+		expect(archived.get(seeded.meal.id)).toMatchObject({ title: 'Sunday soup' });
+		expect(archived.get(following.id)).toMatchObject({
+			followsRecipe: true,
+			sourceRecipeId: seeded.recipe.id
+		});
+		expect(archived.get(following.id)).not.toHaveProperty('title');
+		expect(archived.get(followingBobs.id)).toMatchObject({ title: 'Bob’s stew' });
+		expect(archived.get(followingBobs.id)).not.toHaveProperty('followsRecipe');
+
+		const target = await openDatabase();
+		const targetIdentity = await seedIdentity(target);
+		await commitPortableImport(
+			target,
+			await planPortableImport(target, archive, targetIdentity.profileId)
+		);
+		await expect(target.meals.get(following.id)).resolves.toMatchObject({
+			followsRecipe: true,
+			sourceRecipeId: seeded.recipe.id
+		});
+		await expect(target.meals.get(seeded.meal.id)).resolves.not.toHaveProperty('followsRecipe');
+		const restored = new Map(
+			(await listHouseholdMeals(target, seeded.householdId)).map((meal) => [meal.id, meal.title])
+		);
+		expect(restored).toEqual(
+			new Map([
+				[seeded.meal.id, 'Sunday soup'],
+				[following.id, 'Sunday soup'],
+				[followingBobs.id, 'Bob’s stew']
+			])
+		);
 	});
 
 	test('meal provenance to a recipe that is not on this device survives export and import', async () => {

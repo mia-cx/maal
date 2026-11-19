@@ -2,12 +2,19 @@ import { Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
 
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
+import { planRecipeFollowingMeal, resolveMeal } from '$lib/domain/meals/recipe-following.js';
 import {
 	MEAL_CONFLICT_GROUPS,
+	MEAL_COPY_GROUPS,
 	MealAggregateSchema,
 	MealCheckInSchema,
+	StoredMealSchema,
+	isLiveMeal,
+	isRecipeFollowingMeal,
+	type LiveMeal,
 	type MealAggregate,
-	type MealCheckIn
+	type MealCheckIn,
+	type RecipeFollowingMeal
 } from '$lib/domain/meals/schema.js';
 import {
 	RECIPE_CONFLICT_GROUPS,
@@ -32,7 +39,10 @@ import {
 	type UserFoodPreference,
 	type UserUnitDisplayPreference
 } from '$lib/domain/taxonomy/schema.js';
-import { D1HouseholdSyncRepository } from '$lib/server/sync/household-d1-repository.js';
+import {
+	D1HouseholdSyncRepository,
+	readCurrentRecipes
+} from '$lib/server/sync/household-d1-repository.js';
 import { D1UserSyncRepository } from '$lib/server/sync/d1-repository.js';
 
 export interface RemoteHouseholdSummary {
@@ -52,6 +62,12 @@ export interface RemoteFoodProfile {
 	readonly userUnitDisplayPreferences: readonly UserUnitDisplayPreference[];
 }
 
+/**
+ * A meal as tools show it: a recipe-following meal with its recipe's current content and
+ * `followsRecipe: true`, or a meal copy with `followsRecipe: false` (spec §7.4).
+ */
+export type RemoteMeal = MealAggregate & { readonly followsRecipe: boolean };
+
 export interface RemoteDomainPort {
 	listHouseholds(householdIds: readonly string[]): Promise<readonly RemoteHouseholdSummary[]>;
 	listUserRecipes(ownerUserId: string): Promise<readonly RecipeAggregate[]>;
@@ -62,15 +78,16 @@ export interface RemoteDomainPort {
 		conflictGroups: readonly string[];
 		operation: 'upsert' | 'delete';
 	}): Promise<RecipeAggregate>;
-	listHouseholdMeals(householdId: string): Promise<readonly MealAggregate[]>;
-	getHouseholdMeal(householdId: string, mealId: string): Promise<MealAggregate | null>;
+	listHouseholdMeals(householdId: string): Promise<readonly RemoteMeal[]>;
+	getHouseholdMeal(householdId: string, mealId: string): Promise<RemoteMeal | null>;
+	/** Commits one meal mutation and returns the meal as tools show it, or null once deleted. */
 	writeHouseholdMeal(input: {
 		actorUserId: string;
 		householdId: string;
-		aggregate: MealAggregate;
+		aggregate: LiveMeal;
 		conflictGroups: readonly string[];
 		operation: 'upsert' | 'delete';
-	}): Promise<MealAggregate>;
+	}): Promise<RemoteMeal | null>;
 	getMealCheckIn(
 		householdId: string,
 		mealId: string,
@@ -118,11 +135,6 @@ const fromSnapshot = <A, I>(schema: Schema.Schema<A, I>, value: unknown): A | nu
 
 const recipeFromSnapshot = (value: unknown): RecipeAggregate | null =>
 	fromSnapshot(RecipeAggregateSchema, value);
-
-const mealFromSnapshot = (value: unknown): MealAggregate | null => {
-	const decoded = fromSnapshot(MealAggregateSchema, value);
-	return decoded?.deletedAt === null ? decoded : null;
-};
 
 const checkInFromSnapshot = (value: unknown): MealCheckIn | null => {
 	const decoded = fromSnapshot(MealCheckInSchema, value);
@@ -219,27 +231,49 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		return result;
 	}
 
-	async listHouseholdMeals(householdId: string): Promise<readonly MealAggregate[]> {
-		const changes = await this.households.readEntitiesOfKinds(householdId, ['meal']);
-		return changes
-			.map(({ aggregate }) => mealFromSnapshot(aggregate))
-			.filter((meal): meal is MealAggregate => meal !== null);
+	/**
+	 * Resolves stored meals the way tools show them: a recipe-following meal with its recipe as it is
+	 * now. Deleted, purged, and unresolvable meals are left out.
+	 */
+	private async resolveMeals(values: readonly unknown[]): Promise<RemoteMeal[]> {
+		const meals = values
+			.map((value) => fromSnapshot(StoredMealSchema, value))
+			.filter(
+				(meal): meal is LiveMeal => meal !== null && isLiveMeal(meal) && meal.deletedAt === null
+			);
+		const recipes = await readCurrentRecipes(
+			this.database,
+			meals.filter(isRecipeFollowingMeal).map(({ sourceRecipeId }) => sourceRecipeId)
+		);
+		return meals.flatMap((meal) => {
+			const followsRecipe = isRecipeFollowingMeal(meal);
+			const resolved = resolveMeal(
+				meal,
+				followsRecipe ? recipes.get(meal.sourceRecipeId) : undefined
+			);
+			return resolved === null ? [] : [{ ...resolved, followsRecipe }];
+		});
 	}
 
-	async getHouseholdMeal(householdId: string, mealId: string): Promise<MealAggregate | null> {
+	async listHouseholdMeals(householdId: string): Promise<readonly RemoteMeal[]> {
+		const changes = await this.households.readEntitiesOfKinds(householdId, ['meal']);
+		return this.resolveMeals(changes.map(({ aggregate }) => aggregate));
+	}
+
+	async getHouseholdMeal(householdId: string, mealId: string): Promise<RemoteMeal | null> {
 		const [change] = await this.households.readEntities(householdId, [
 			{ entityKind: 'meal', entityId: mealId }
 		]);
-		return change ? mealFromSnapshot(change.aggregate) : null;
+		return change ? ((await this.resolveMeals([change.aggregate]))[0] ?? null) : null;
 	}
 
 	async writeHouseholdMeal(input: {
 		actorUserId: string;
 		householdId: string;
-		aggregate: MealAggregate;
+		aggregate: LiveMeal;
 		conflictGroups: readonly string[];
 		operation: 'upsert' | 'delete';
-	}): Promise<MealAggregate> {
+	}): Promise<RemoteMeal | null> {
 		const now = new Date().toISOString() as `${string}Z`;
 		const { receipt, aggregate } = await this.households.commitWithResult({
 			householdId: input.householdId,
@@ -262,8 +296,8 @@ export class D1RemoteDomainPort implements RemoteDomainPort {
 		if (receipt.status === 'rejected') {
 			throw new RemoteDomainError('write_rejected', 'The meal command was rejected.');
 		}
-		if (input.operation === 'delete') return input.aggregate;
-		const result = mealFromSnapshot(aggregate);
+		if (input.operation === 'delete') return null;
+		const [result] = await this.resolveMeals([aggregate]);
 		if (!result) throw new RemoteDomainError('not_found', 'The written meal was not found.');
 		return result;
 	}
@@ -505,7 +539,8 @@ export const recipeSearchTokens = (recipe: RecipeImportedCandidate): string[] =>
 	)
 ];
 
-export const cloneRecipeAsMeal = (input: {
+/** Plans `recipe` as a new recipe-following meal in `householdId` (spec §5.3). */
+export const followRecipeAsMeal = (input: {
 	recipe: RecipeAggregate;
 	householdId: string;
 	date?: string | null;
@@ -514,164 +549,45 @@ export const cloneRecipeAsMeal = (input: {
 	plannedYield?: number | null;
 	mealId?: string;
 	now?: `${string}Z`;
-}): MealAggregate => {
-	const now = input.now ?? (new Date().toISOString() as `${string}Z`);
-	const instructionIds = new Map<string, string>();
-	const instructions = input.recipe.instructions.map((instruction) => {
-		const id = uuidv7();
-		instructionIds.set(instruction.id, id);
-		return { ...instruction, id };
-	});
-	return decode(
-		MealAggregateSchema,
-		{
-			...input.recipe,
-			id: input.mealId ?? uuidv7(),
-			householdId: input.householdId,
-			sourceRecipeId: input.recipe.id,
+}): RecipeFollowingMeal =>
+	planRecipeFollowingMeal({
+		recipe: input.recipe,
+		householdId: input.householdId,
+		mealId: input.mealId ?? uuidv7(),
+		occurredAt: input.now ?? new Date().toISOString(),
+		options: {
 			date: input.date ?? null,
 			time: input.time ?? null,
-			sortOrder: null,
 			plannedCookUserId: input.plannedCookUserId ?? null,
-			plannedYield:
-				input.plannedYield ??
-				(input.recipe.yield === null ? null : Math.max(1, Math.round(input.recipe.yield))),
-			status: 'planned',
-			notes: input.recipe.userNotes,
-			revision: 0,
-			createdAt: now,
-			updatedAt: now,
-			deletedAt: null,
-			conflictClocks: {},
-			ingredients: input.recipe.ingredients.map((row) => ({ ...row, id: uuidv7() })),
-			instructions,
-			instructionEvents: input.recipe.instructionEvents.map((row) => ({
-				...row,
-				id: uuidv7(),
-				mealInstructionId: instructionIds.get(row.recipeInstructionId)
-			})),
-			applianceRequirements: input.recipe.applianceRequirements.map((row) => ({
-				...row,
-				id: uuidv7()
-			})),
-			classifications: input.recipe.classifications.map((row) => ({ ...row, id: uuidv7() })),
-			media: input.recipe.media.map((row) => ({ ...row, id: uuidv7() })),
-			nutritionFacts: input.recipe.nutritionFacts.map((row) => ({ ...row, id: uuidv7() })),
-			ownerUserId: undefined,
-			userNotes: undefined,
-			searchTokens: undefined,
-			savedFromHouseholdId: undefined
-		},
-		'Meal aggregate'
-	);
-};
+			plannedYield: input.plannedYield ?? null
+		}
+	});
 
-const recipeCopyHeader = (value: RecipeAggregate | MealAggregate) => ({
-	title: value.title,
-	description: value.description,
-	imageUrl: value.imageUrl,
-	yield: value.yield,
-	prepTimeMinutes: value.prepTimeMinutes,
-	cookTimeMinutes: value.cookTimeMinutes,
-	totalTimeMinutes: value.totalTimeMinutes,
-	sourceYieldText: value.sourceYieldText,
-	sourceDatePublished: value.sourceDatePublished,
-	sourceDateModified: value.sourceDateModified,
-	sourceLanguage: value.sourceLanguage,
-	sourceUrl: value.sourceUrl,
-	sourceSiteName: value.sourceSiteName,
-	sourceAuthorName: value.sourceAuthorName,
-	sourcePublisherName: value.sourcePublisherName,
-	sourceIsBasedOnUrl: value.sourceIsBasedOnUrl,
-	sourceImportedAt: value.sourceImportedAt,
-	sourceHtmlHash: value.sourceHtmlHash,
-	sourceRatingValue: value.sourceRatingValue,
-	sourceRatingCount: value.sourceRatingCount,
-	sourceReviewCount: value.sourceReviewCount,
-	sourceClaimedMinutes: value.sourceClaimedMinutes,
-	parseConfidence: value.parseConfidence,
-	ingredientConfidence: value.ingredientConfidence,
-	instructionConfidence: value.instructionConfidence,
-	nutritionConfidence: value.nutritionConfidence
-});
-
-const semanticSidecars = (value: unknown): string =>
-	JSON.stringify(value, (key, item: unknown) =>
-		['id', 'createdAt', 'updatedAt', 'recipeInstructionId', 'mealInstructionId'].includes(key)
-			? undefined
-			: item
-	);
-
-export const linkedMealMatchesRecipeSnapshot = (
-	meal: MealAggregate,
-	recipe: RecipeAggregate
-): boolean =>
-	meal.sourceRecipeId === recipe.id &&
-	JSON.stringify(recipeCopyHeader(meal)) === JSON.stringify(recipeCopyHeader(recipe)) &&
-	semanticSidecars(meal.ingredients) === semanticSidecars(recipe.ingredients) &&
-	semanticSidecars(meal.instructions) === semanticSidecars(recipe.instructions) &&
-	semanticSidecars(meal.instructionEvents) === semanticSidecars(recipe.instructionEvents) &&
-	semanticSidecars(meal.applianceRequirements) === semanticSidecars(recipe.applianceRequirements) &&
-	semanticSidecars(meal.classifications) === semanticSidecars(recipe.classifications) &&
-	semanticSidecars(meal.media) === semanticSidecars(recipe.media) &&
-	semanticSidecars(meal.nutritionFacts) === semanticSidecars(recipe.nutritionFacts);
-
-export const propagateRecipeUpdateToLinkedMeals = async (input: {
+/**
+ * The meal copy of a meal a tool is about to change. A recipe-following meal is copied first, as
+ * its own mutation (spec §5.3); a meal copy is returned as it is.
+ */
+export const copyMealBeforeEdit = async (input: {
 	domain: RemoteDomainPort;
 	actorUserId: string;
-	householdIds: readonly string[];
-	previous: RecipeAggregate;
-	next: RecipeAggregate;
-}): Promise<number> => {
-	let updated = 0;
-	for (const householdId of input.householdIds) {
-		const meals = await input.domain.listHouseholdMeals(householdId);
-		for (const meal of meals) {
-			if (
-				meal.status !== 'planned' ||
-				meal.deletedAt !== null ||
-				!linkedMealMatchesRecipeSnapshot(meal, input.previous)
-			) {
-				continue;
-			}
-			const propagated = cloneRecipeAsMeal({
-				recipe: input.next,
-				householdId,
-				mealId: meal.id,
-				date: meal.date,
-				time: meal.time,
-				plannedCookUserId: meal.plannedCookUserId,
-				plannedYield: meal.plannedYield
-			});
-			await input.domain.writeHouseholdMeal({
-				actorUserId: input.actorUserId,
-				householdId,
-				aggregate: {
-					...propagated,
-					sortOrder: meal.sortOrder,
-					status: meal.status,
-					notes: meal.notes,
-					revision: meal.revision,
-					createdAt: meal.createdAt,
-					deletedAt: meal.deletedAt,
-					conflictClocks: meal.conflictClocks
-				},
-				conflictGroups: [
-					'header',
-					'ingredients',
-					'instructions',
-					'appliances',
-					'classifications',
-					'media',
-					'nutrition'
-				],
-				operation: 'upsert'
-			});
-			updated += 1;
-		}
-	}
-	return updated;
+	householdId: string;
+	meal: RemoteMeal;
+}): Promise<RemoteMeal> => {
+	if (!input.meal.followsRecipe) return input.meal;
+	const copied = await input.domain.writeHouseholdMeal({
+		actorUserId: input.actorUserId,
+		householdId: input.householdId,
+		aggregate: mealCopyOf(input.meal),
+		conflictGroups: MEAL_COPY_GROUPS,
+		operation: 'upsert'
+	});
+	if (!copied) throw new RemoteDomainError('not_found', 'The copied meal was not found.');
+	return copied;
 };
+
+/** The stored meal copy behind a meal a tool read. Decoding drops the `followsRecipe` flag. */
+export const mealCopyOf = (meal: RemoteMeal): MealAggregate =>
+	decode(MealAggregateSchema, meal, 'Meal aggregate');
 
 export const allRecipeConflictGroups = RECIPE_CONFLICT_GROUPS;
 export const allMealConflictGroups = MEAL_CONFLICT_GROUPS;

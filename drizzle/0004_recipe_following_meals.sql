@@ -1,0 +1,1 @@
+ALTER TABLE `meals` ADD `follows_recipe` integer DEFAULT false NOT NULL;

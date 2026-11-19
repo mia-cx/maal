@@ -2,7 +2,11 @@ import { Schema } from 'effect';
 
 import { UtcInstantSchema } from '$lib/domain/contracts/primitives.js';
 import { HouseholdApplianceSchema, HouseholdSchema } from '$lib/domain/household/contracts.js';
-import { MealAggregateSchema, MealCheckInSchema } from '$lib/domain/meals/schema.js';
+import {
+	MealAggregateSchema,
+	MealCheckInSchema,
+	RecipeFollowingMealSchema
+} from '$lib/domain/meals/schema.js';
 import { RecipeAggregateSchema } from '$lib/domain/recipes/schema.js';
 import {
 	FoodAliasSchema,
@@ -33,7 +37,11 @@ export const PortableHouseholdApplianceSchema = HouseholdApplianceSchema.pipe(
 	Schema.omit('conflictClocks')
 );
 export const PortableRecipeSchema = RecipeAggregateSchema.pipe(Schema.omit('conflictClocks'));
-export const PortableMealSchema = MealAggregateSchema.pipe(Schema.omit('conflictClocks'));
+/** Either meal kind as stored: a meal copy, or a recipe-following meal's reference (spec §9). */
+export const PortableMealSchema = Schema.Union(
+	MealAggregateSchema.pipe(Schema.omit('conflictClocks')),
+	RecipeFollowingMealSchema.pipe(Schema.omit('conflictClocks'))
+);
 export const PortableMealCheckInSchema = MealCheckInSchema.pipe(Schema.omit('conflictClocks'));
 const PortableFoodUserAliasSchema = FoodUserAliasSchema.pipe(Schema.omit('conflictClocks'));
 const PortableFoodHouseholdAliasSchema = FoodHouseholdAliasSchema.pipe(

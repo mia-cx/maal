@@ -45,6 +45,12 @@ export const meals = sqliteTable(
 		sourceRecipeId: text('source_recipe_id').references(() => recipes.id, {
 			onDelete: 'set null'
 		}),
+		/**
+		 * A recipe-following meal stores no content and shows its recipe as it is now (spec §5.3). Its
+		 * `title` is empty: SQLite cannot relax NOT NULL without rebuilding `meals`, and dropping the
+		 * table in D1 would cascade into every meal sidecar and check-in.
+		 */
+		followsRecipe: integer('follows_recipe', { mode: 'boolean' }).notNull().default(false),
 		title: text('title').notNull(),
 		description: text('description'),
 		imageUrl: text('image_url'),

@@ -29,6 +29,13 @@
       "when": 1795043795352,
       "tag": "0003_household_staleness_threshold",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1795048317438,
+      "tag": "0004_recipe_following_meals",
+      "breakpoints": true
     }
   ]
 }

@@ -12,9 +12,10 @@ import {
 	D1RemoteDomainPort,
 	allMealConflictGroups,
 	allRecipeConflictGroups,
-	cloneRecipeAsMeal,
-	createRecipeAggregate
+	createRecipeAggregate,
+	followRecipeAsMeal
 } from '$lib/server/domain/remote-port.js';
+import { copyRecipeIntoMeal } from '$lib/domain/meals/recipe-following.js';
 import { candidateFromToolRecipe, makeCheckIn } from '$lib/server/mcp/builders.js';
 import { D1HouseholdSyncRepository } from '$lib/server/sync/household-d1-repository.js';
 import { bootstrapHouseholdSync } from '$lib/server/sync/household-service.js';
@@ -110,12 +111,12 @@ const seedMeals = async (count: number): Promise<MealAggregate[]> => {
 	const repository = new D1HouseholdSyncRepository(database);
 	const meals: MealAggregate[] = [];
 	for (let index = 0; index < count; index += 1) {
+		const source = recipe(`Soup ${index}`);
 		const meal = {
-			...cloneRecipeAsMeal({
-				recipe: recipe(`Soup ${index}`),
-				householdId: MCP_TEST_HOUSEHOLD,
-				date: '2026-08-24'
-			}),
+			...copyRecipeIntoMeal(
+				followRecipeAsMeal({ recipe: source, householdId: MCP_TEST_HOUSEHOLD, date: '2026-08-24' }),
+				source
+			),
 			sourceRecipeId: null
 		};
 		await commitMeal(repository, meal);

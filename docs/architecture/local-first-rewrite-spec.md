@@ -391,7 +391,9 @@ D1 retains the prototype's normalized domain table families and every field/cons
 - `recipes` and seven `recipe_*` sidecar tables;
 - `meals` and seven `meal_*` sidecar tables; nullable `source_recipe_id` replaces the old many-row provenance
   join because implemented commands used one source. `follows_recipe` marks a recipe-following meal, which
-  has a `source_recipe_id`, null content columns, and no sidecar rows; a meal copy has a `title`;
+  has a `source_recipe_id`, an empty `title`, null content columns, and no sidecar rows. `title` stays
+  NOT NULL because relaxing it means rebuilding `meals`, and dropping that table in D1 cascades into its
+  sidecars and check-ins;
 - `meal_check_ins`;
 - all global/user/household food, unit, alias, preference, and display-override tables from §5.5.
 

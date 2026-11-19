@@ -9,6 +9,7 @@ import {
 import type { MaalDatabase } from '$lib/client/local/database.js';
 import {
 	planMealCommand,
+	recipeChangeCopyCommands,
 	recipeProvenanceDetachCommands,
 	type MealCommandContext,
 	type PlanMealOptions
@@ -20,7 +21,8 @@ import {
 	type UtcInstant
 } from '$lib/domain/contracts/primitives.js';
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
-import { MealAggregateSchema, type MealAggregate } from '$lib/domain/meals/schema.js';
+import { copyRecipeIntoMeal } from '$lib/domain/meals/recipe-following.js';
+import { RecipeFollowingMealSchema, type MealAggregate } from '$lib/domain/meals/schema.js';
 import {
 	RECIPE_CONFLICT_GROUPS,
 	RecipeAggregateSchema,
@@ -284,6 +286,34 @@ const executeRecipeWrite = (
 	...command: Parameters<typeof recipeWriteCommand>
 ) => executeLocalCommand(database, recipeWriteCommand(...command));
 
+/**
+ * Commits a recipe edit or deletion together with the meal copies that must land first (spec §5.3):
+ * every recipe-following meal on deletion, and cooked, skipped, or past ones on an edit. The copies
+ * take the recipe as it is before this change. Returns the recipe write's result.
+ */
+const executeRecipeChange = async (
+	database: MaalDatabase,
+	change: 'edit' | 'delete',
+	...command: Parameters<typeof recipeWriteCommand>
+) => {
+	const [context, recipeId] = command;
+	const current = decode(StoredRecipeSchema, await database.recipes.get(recipeId), 'read recipe');
+	const copies = isRecipeAggregate(current)
+		? await recipeChangeCopyCommands(
+				database,
+				{ ...context, reporterUserId: context.ownerUserId },
+				current,
+				change
+			)
+		: [];
+	const results = await executeLocalCommands(database, [...copies, recipeWriteCommand(...command)]);
+	return results.at(-1)!;
+};
+
+/** A freshly planned recipe-following meal, shown with the recipe it was planned from. */
+const plannedMeal = (aggregate: unknown, recipe: RecipeAggregate): MealAggregate =>
+	copyRecipeIntoMeal(decode(RecipeFollowingMealSchema, aggregate, 'decode planned meal'), recipe);
+
 const createRecipeCommand = (
 	context: RecipeCommandContext,
 	patchInput: RecipeEditorPatch,
@@ -398,10 +428,12 @@ export const createRecipeAndPlanMeal = async (
 		command,
 		planMealCommand({ ...context, occurredAt }, recipe, options)
 	]);
-	return {
-		recipe: decode(RecipeAggregateSchema, created!.aggregates[0], 'decode created recipe'),
-		meal: decode(MealAggregateSchema, planned!.aggregates[0], 'decode planned meal')
-	};
+	const createdRecipe = decode(
+		RecipeAggregateSchema,
+		created!.aggregates[0],
+		'decode created recipe'
+	);
+	return { recipe: createdRecipe, meal: plannedMeal(planned!.aggregates[0], createdRecipe) };
 };
 
 export const updateRecipeFromEditor = async (
@@ -412,8 +444,9 @@ export const updateRecipeFromEditor = async (
 ): Promise<RecipeAggregate> => {
 	const occurredAt = commandTime(context);
 	const patch = decode(RecipeEditorPatchSchema, patchInput, 'decode recipe editor patch');
-	const result = await executeRecipeWrite(
+	const result = await executeRecipeChange(
 		database,
+		'edit',
 		{ ...context, occurredAt },
 		recipeId,
 		['header', 'ingredients', 'instructions'],
@@ -513,9 +546,10 @@ export const updateRecipeFromImportedCandidate = async (
 		'decode imported recipe candidate'
 	);
 	const conflictGroups = RECIPE_CONFLICT_GROUPS.filter((group) => group !== 'deletion');
-	const result = await executeRecipeWrite(
+	const result = await executeRecipeChange(
 		database,
-		context,
+		'edit',
+		{ ...context, occurredAt: commandTime(context) },
 		recipeId,
 		conflictGroups,
 		{ recipeId, conflictGroups, patch: candidate },
@@ -553,10 +587,12 @@ export const commitImportedCandidateAndPlanMeal = async (
 		command,
 		planMealCommand({ ...context, occurredAt }, recipe, options)
 	]);
-	return {
-		recipe: decode(RecipeAggregateSchema, created!.aggregates[0], 'decode imported recipe'),
-		meal: decode(MealAggregateSchema, planned!.aggregates[0], 'decode planned meal')
-	};
+	const importedRecipe = decode(
+		RecipeAggregateSchema,
+		created!.aggregates[0],
+		'decode imported recipe'
+	);
+	return { recipe: importedRecipe, meal: plannedMeal(planned!.aggregates[0], importedRecipe) };
 };
 
 export const deleteRecipe = async (
@@ -565,8 +601,9 @@ export const deleteRecipe = async (
 	recipeId: string
 ): Promise<RecipeAggregate> => {
 	const deletedAt = commandTime(context);
-	const result = await executeRecipeWrite(
+	const result = await executeRecipeChange(
 		database,
+		'delete',
 		{ ...context, occurredAt: deletedAt },
 		recipeId,
 		['deletion'],
@@ -634,6 +671,11 @@ const purgeRecipe = async (
 	);
 	// The recoverable delete keeps meal provenance so a restore brings the history back; only the
 	// purge severs it, together with the content, in the same transaction.
+	const recipe = requireOwnedRecipe(
+		await database.recipes.get(recipeId),
+		context.ownerUserId,
+		'read recipe to purge'
+	);
 	const detach = await recipeProvenanceDetachCommands(
 		database,
 		{
@@ -642,7 +684,7 @@ const purgeRecipe = async (
 			originDeviceId: context.originDeviceId,
 			occurredAt: purgedAt
 		},
-		recipeId
+		recipe
 	);
 	const [result] = await executeLocalCommands(database, [purge, ...detach]);
 	return decode(

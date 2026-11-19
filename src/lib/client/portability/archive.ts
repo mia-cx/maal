@@ -30,7 +30,14 @@ import {
 	PortableUsersFileSchema,
 	type PortableArchive
 } from '$lib/domain/portability/schema.js';
-import { MealCheckInSchema, StoredMealSchema, isMealAggregate } from '$lib/domain/meals/schema.js';
+import { resolveMeal } from '$lib/domain/meals/recipe-following.js';
+import {
+	MealCheckInSchema,
+	StoredMealSchema,
+	isLiveMeal,
+	isRecipeFollowingMeal,
+	type LiveMeal
+} from '$lib/domain/meals/schema.js';
 import { StoredRecipeSchema, isRecipeAggregate } from '$lib/domain/recipes/schema.js';
 
 configure({ useWebWorkers: false });
@@ -194,10 +201,25 @@ export const buildPortableArchive = (
 	const deletedRecipes = recipes
 		.filter(({ deletedAt }) => deletedAt !== null)
 		.map(withoutConflictClocks);
+	const recipesById = new Map(
+		source.recipes.map((record) => {
+			const recipe = decode(StoredRecipeSchema, record, 'decode recipe for export');
+			return [recipe.id, recipe] as const;
+		})
+	);
+	// A meal following the exporter's own recipe stays a reference, since that recipe is in the
+	// archive; one following another member's recipe goes out as a copy (spec §9).
 	const meals = source.meals
 		.map((record) => decode(StoredMealSchema, record, 'decode meal for export'))
-		.filter(isMealAggregate)
-		.filter(({ householdId, deletedAt }) => householdIds.has(householdId) && deletedAt === null);
+		.filter(isLiveMeal)
+		.filter(({ householdId, deletedAt }) => householdIds.has(householdId) && deletedAt === null)
+		.flatMap((meal): LiveMeal[] => {
+			if (!isRecipeFollowingMeal(meal)) return [meal];
+			const recipe = recipesById.get(meal.sourceRecipeId);
+			if (recipe?.ownerUserId === exporterId && isRecipeAggregate(recipe)) return [meal];
+			const copy = resolveMeal(meal, recipe);
+			return copy === null ? [] : [copy];
+		});
 	const mealIds = new Set(meals.map(({ id }) => id));
 	const checkIns = source.mealCheckIns
 		.map((record) => decode(MealCheckInSchema, record, 'decode check-in for export'))

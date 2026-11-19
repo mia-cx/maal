@@ -18,17 +18,28 @@ import {
 } from '$lib/domain/contracts/primitives.js';
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
 import {
+	copyRecipeIntoMeal,
+	freezesBeforeRecipeChange,
+	householdToday,
+	planRecipeFollowingMeal,
+	type PlanMealOptions
+} from '$lib/domain/meals/recipe-following.js';
+import {
 	MEAL_CONFLICT_GROUPS,
+	MEAL_COPY_GROUPS,
 	MealAggregateSchema,
 	MealCheckInSchema,
 	MealStatusSchema,
 	MealVerdictSchema,
 	StoredMealSchema,
-	isMealAggregate,
+	isLiveMeal,
+	isRecipeFollowingMeal,
+	type LiveMeal,
 	type MealAggregate,
 	type MealCheckIn,
 	type MealStatus,
 	type MealVerdict,
+	type RecipeFollowingMeal,
 	type StoredMeal
 } from '$lib/domain/meals/schema.js';
 import {
@@ -67,13 +78,7 @@ export interface MealCommandContext {
 	occurredAt?: UtcInstant;
 }
 
-export interface PlanMealOptions {
-	date?: string | null;
-	time?: string | null;
-	sortOrder?: number | null;
-	plannedCookUserId?: string | null;
-	plannedYield?: number | null;
-}
+export type { PlanMealOptions };
 
 export interface MealSchedulePatch {
 	date: string | null;
@@ -98,9 +103,9 @@ const commandTime = (context: Pick<MealCommandContext, 'occurredAt'>): UtcInstan
 		'decode meal mutation time'
 	);
 
-const requireMeal = (record: unknown, householdId: string, operation: string): MealAggregate => {
+const requireMeal = (record: unknown, householdId: string, operation: string): LiveMeal => {
 	const stored = decode(StoredMealSchema, record, operation);
-	if (!isMealAggregate(stored) || stored.householdId !== householdId || stored.deletedAt !== null) {
+	if (!isLiveMeal(stored) || stored.householdId !== householdId || stored.deletedAt !== null) {
 		throw new LocalDecodeError({
 			operation,
 			message: 'The meal is not available in this household.'
@@ -117,87 +122,104 @@ const requireRecipe = (record: unknown, operation: string): RecipeAggregate => {
 	return stored;
 };
 
-const clonedRecipeSnapshot = (
-	recipe: RecipeAggregate,
-	householdId: string,
-	mealId: string,
-	occurredAt: UtcInstant,
-	options: PlanMealOptions
-): MealAggregate => {
-	const instructionIds = new Map<string, string>();
-	const ingredients = recipe.ingredients.map((ingredient) => ({ ...ingredient, id: uuidv7() }));
-	const instructions = recipe.instructions.map((instruction) => {
-		const id = uuidv7();
-		instructionIds.set(instruction.id, id);
-		return { ...instruction, id };
-	});
-	return decode(
-		MealAggregateSchema,
-		{
-			schemaVersion: CURRENT_SCHEMA_VERSION,
-			revision: 0,
-			createdAt: occurredAt,
-			updatedAt: occurredAt,
-			deletedAt: null,
-			conflictClocks: {},
-			id: mealId,
-			householdId,
-			sourceRecipeId: recipe.id,
-			title: recipe.title,
-			description: recipe.description,
-			imageUrl: recipe.imageUrl,
-			date: options.date ?? null,
-			time: options.time ?? null,
-			sortOrder: options.sortOrder ?? null,
-			plannedCookUserId: options.plannedCookUserId ?? null,
-			yield: recipe.yield,
-			plannedYield:
-				options.plannedYield ??
-				(recipe.yield === null ? null : Math.max(1, Math.round(recipe.yield))),
-			status: 'planned',
-			prepTimeMinutes: recipe.prepTimeMinutes,
-			cookTimeMinutes: recipe.cookTimeMinutes,
-			totalTimeMinutes: recipe.totalTimeMinutes,
-			sourceYieldText: recipe.sourceYieldText,
-			sourceDatePublished: recipe.sourceDatePublished,
-			sourceDateModified: recipe.sourceDateModified,
-			sourceLanguage: recipe.sourceLanguage,
-			sourceUrl: recipe.sourceUrl,
-			sourceSiteName: recipe.sourceSiteName,
-			sourceAuthorName: recipe.sourceAuthorName,
-			sourcePublisherName: recipe.sourcePublisherName,
-			sourceIsBasedOnUrl: recipe.sourceIsBasedOnUrl,
-			sourceImportedAt: recipe.sourceImportedAt,
-			sourceHtmlHash: recipe.sourceHtmlHash,
-			sourceRatingValue: recipe.sourceRatingValue,
-			sourceRatingCount: recipe.sourceRatingCount,
-			sourceReviewCount: recipe.sourceReviewCount,
-			sourceClaimedMinutes: recipe.sourceClaimedMinutes,
-			parseConfidence: recipe.parseConfidence,
-			ingredientConfidence: recipe.ingredientConfidence,
-			instructionConfidence: recipe.instructionConfidence,
-			nutritionConfidence: recipe.nutritionConfidence,
-			notes: recipe.userNotes,
-			ingredients,
-			instructions,
-			instructionEvents: recipe.instructionEvents.map((event) => ({
-				...event,
-				id: uuidv7(),
-				mealInstructionId: instructionIds.get(event.recipeInstructionId)
-			})),
-			applianceRequirements: recipe.applianceRequirements.map((row) => ({
-				...row,
-				id: uuidv7()
-			})),
-			classifications: recipe.classifications.map((row) => ({ ...row, id: uuidv7() })),
-			media: recipe.media.map((row) => ({ ...row, id: uuidv7() })),
-			nutritionFacts: recipe.nutritionFacts.map((row) => ({ ...row, id: uuidv7() }))
-		},
-		'clone recipe into meal'
+/** Reads the recipe a recipe-following meal shows. A deleted recipe still has its content. */
+const requireFollowedRecipe = async (
+	database: MaalDatabase,
+	meal: RecipeFollowingMeal,
+	operation: string
+): Promise<RecipeAggregate> => {
+	const stored = decode(
+		StoredRecipeSchema,
+		await database.recipes.get(meal.sourceRecipeId),
+		operation
 	);
+	if (!isRecipeAggregate(stored)) {
+		throw new LocalDecodeError({ operation, message: 'The recipe of this meal is not available.' });
+	}
+	return stored;
 };
 
-/** Builds the command that plans `recipe` as a new meal; callers may commit it with other commands. */
+/** Decodes a committed meal of either kind, resolved the way readers show it. */
+const decodeResolvedMeal = async (
+	database: MaalDatabase,
+	aggregate: unknown,
+	operation: string
+): Promise<MealAggregate> => {
+	const meal = requireLiveMeal(decode(StoredMealSchema, aggregate, operation), operation);
+	if (!isRecipeFollowingMeal(meal)) return meal;
+	return copyRecipeIntoMeal(meal, await requireFollowedRecipe(database, meal, operation));
+};
+
+const requireLiveMeal = (stored: StoredMeal, operation: string): LiveMeal => {
+	if (!isLiveMeal(stored)) {
+		throw new LocalDecodeError({ operation, message: 'The meal was purged.' });
+	}
+	return stored;
+};
+
+/**
+ * Builds the command that copies `recipe` into a recipe-following meal (spec §5.3). It owns the
+ * `source` group and every content group, so an edit committed after it in the same transaction is a
+ * separate mutation that the Worker applies even when another device copied first. `overrides` apply
+ * to the copy, for example the null provenance of a purge.
+ */
+export const mealCopyCommand = (
+	context: Omit<MealCommandContext, 'householdId'>,
+	meal: RecipeFollowingMeal,
+	recipe: RecipeAggregate,
+	overrides: Partial<Pick<MealAggregate, 'sourceRecipeId'>> = {}
+): LocalCommand => {
+	const occurredAt = commandTime(context);
+	return {
+		authSlotId: context.authSlotId,
+		scopeKind: 'household',
+		scopeId: meal.householdId,
+		entityKind: 'meal',
+		aggregateId: meal.id,
+		conflictGroup: 'source',
+		operation: 'upsert',
+		originDeviceId: context.originDeviceId,
+		occurredAt,
+		// Minted now, so the copy sorts ahead of any edit built after it with the same timestamp.
+		mutationId: uuidv7(),
+		payload: {
+			mealId: meal.id,
+			conflictGroups: [...MEAL_COPY_GROUPS],
+			patch: { followsRecipe: false, ...overrides }
+		},
+		payloadSchema: MealMutationPayloadSchema,
+		writes: [
+			{
+				store: 'meals',
+				aggregateId: meal.id,
+				conflictGroups: MEAL_COPY_GROUPS,
+				schema: StoredMealSchema,
+				update: (current) => {
+					const live = requireMeal(current, meal.householdId, 'copy recipe into meal');
+					// Another tab may have copied it since this command was built; keep that copy.
+					if (!isRecipeFollowingMeal(live)) return { ...live, ...overrides };
+					return { ...copyRecipeIntoMeal(live, recipe), ...overrides };
+				}
+			}
+		]
+	};
+};
+
+/**
+ * The copy that must precede an edit of a meal's recipe fields: one command for a recipe-following
+ * meal, none for a meal copy. Commit it in the same transaction, ahead of the edit.
+ */
+export const copyBeforeEditCommands = async (
+	database: MaalDatabase,
+	context: MealCommandContext,
+	mealId: string
+): Promise<LocalCommand[]> => {
+	const meal = requireMeal(await database.meals.get(mealId), context.householdId, 'read meal');
+	if (!isRecipeFollowingMeal(meal)) return [];
+	return [mealCopyCommand(context, meal, await requireFollowedRecipe(database, meal, 'copy meal'))];
+};
+
+/** Builds the command that plans `recipe` as a new recipe-following meal; callers may commit it with other commands. */
 export const planMealCommand = (
 	context: MealCommandContext,
 	recipe: RecipeAggregate,
@@ -206,7 +228,13 @@ export const planMealCommand = (
 ): LocalCommand => {
 	const occurredAt = commandTime(context);
 	const id = decode(DomainIdSchema, mealId, 'decode meal ID');
-	const snapshot = clonedRecipeSnapshot(recipe, context.householdId, id, occurredAt, options);
+	const snapshot = planRecipeFollowingMeal({
+		recipe,
+		householdId: context.householdId,
+		mealId: id,
+		occurredAt,
+		options
+	});
 	return {
 		authSlotId: context.authSlotId,
 		scopeKind: 'household',
@@ -255,7 +283,7 @@ export const planRecipeAsMeal = async (
 		database,
 		planMealCommand(context, recipe, options, mealId)
 	);
-	return decode(MealAggregateSchema, result.aggregates[0], 'decode planned meal');
+	return decodeResolvedMeal(database, result.aggregates[0], 'decode planned meal');
 };
 
 export const mealScheduleCommand = (
@@ -307,7 +335,7 @@ export const updateMealSchedule = async (
 	patch: MealSchedulePatch
 ): Promise<MealAggregate> => {
 	const result = await executeLocalCommand(database, mealScheduleCommand(context, mealId, patch));
-	return decode(MealAggregateSchema, result.aggregates[0], 'decode scheduled meal');
+	return decodeResolvedMeal(database, result.aggregates[0], 'decode scheduled meal');
 };
 
 /**
@@ -324,8 +352,10 @@ export const reorderMeals = async (
 		database,
 		moves.map(({ mealId, patch }) => mealScheduleCommand({ ...context, occurredAt }, mealId, patch))
 	);
-	return results.map((result) =>
-		decode(MealAggregateSchema, result.aggregates[0], 'decode reordered meal')
+	return Promise.all(
+		results.map((result) =>
+			decodeResolvedMeal(database, result.aggregates[0], 'decode reordered meal')
+		)
 	);
 };
 
@@ -343,7 +373,9 @@ const MealHeaderPatchSchema = Schema.Struct({
 
 /**
  * Builds the command for the meal sheet's own fields (title, description, cook minutes) under the `header`
- * conflict group. The sheet only offers them for custom meals with no source recipe.
+ * conflict group. The sheet only offers them for custom meals with no source recipe. A
+ * recipe-following meal needs {@link copyBeforeEditCommands} ahead of it; {@link mealHeaderCommands}
+ * builds both.
  */
 export const mealHeaderCommand = (
 	context: MealCommandContext,
@@ -378,14 +410,31 @@ export const mealHeaderCommand = (
 				aggregateId: mealId,
 				conflictGroups: ['header'],
 				schema: StoredMealSchema,
-				update: (current) => ({
-					...requireMeal(current, context.householdId, 'update meal header'),
-					...decodedPatch
-				})
+				update: (current) => {
+					const meal = requireMeal(current, context.householdId, 'update meal header');
+					if (isRecipeFollowingMeal(meal)) {
+						throw new LocalDecodeError({
+							operation: 'update meal header',
+							message: 'A recipe-following meal is copied before its header changes.'
+						});
+					}
+					return { ...meal, ...decodedPatch };
+				}
 			}
 		]
 	};
 };
+
+/** The header edit of a meal, preceded by its copy when the meal still follows its recipe. */
+export const mealHeaderCommands = async (
+	database: MaalDatabase,
+	context: MealCommandContext,
+	mealId: string,
+	patch: MealHeaderPatch
+): Promise<LocalCommand[]> => [
+	...(await copyBeforeEditCommands(database, context, mealId)),
+	mealHeaderCommand(context, mealId, patch)
+];
 
 export const updateMealHeader = async (
 	database: MaalDatabase,
@@ -393,8 +442,11 @@ export const updateMealHeader = async (
 	mealId: string,
 	patch: MealHeaderPatch
 ): Promise<MealAggregate> => {
-	const result = await executeLocalCommand(database, mealHeaderCommand(context, mealId, patch));
-	return decode(MealAggregateSchema, result.aggregates[0], 'decode meal header update');
+	const results = await executeLocalCommands(
+		database,
+		await mealHeaderCommands(database, context, mealId, patch)
+	);
+	return decode(MealAggregateSchema, results.at(-1)!.aggregates[0], 'decode meal header update');
 };
 
 export const setMealStatus = async (
@@ -430,7 +482,7 @@ export const setMealStatus = async (
 			}
 		]
 	});
-	return decode(MealAggregateSchema, result.aggregates[0], 'decode meal status update');
+	return decodeResolvedMeal(database, result.aggregates[0], 'decode meal status update');
 };
 
 export const saveMealCheckIn = async (
@@ -450,6 +502,9 @@ export const saveMealCheckIn = async (
 		.equals([mealId, context.reporterUserId])
 		.first();
 	const checkInId = existing?.id ?? uuidv7();
+	// A check-in copies a recipe-following meal first, so history shows what was cooked. The copy's
+	// mutation ID is older than the check-in's, so it is sent first.
+	const copy = await copyBeforeEditCommands(database, { ...context, occurredAt }, mealId);
 	const checkInMutationId = uuidv7();
 	const mealStatusMutationId = uuidv7();
 	const payload = decode(
@@ -478,58 +533,62 @@ export const saveMealCheckIn = async (
 		verdict: payload.verdict,
 		reason: payload.reason
 	} satisfies MealCheckIn;
-	const result = await executeLocalCommand(database, {
-		authSlotId: context.authSlotId,
-		scopeKind: 'household',
-		scopeId: context.householdId,
-		entityKind: 'meal_check_in',
-		aggregateId: checkInId,
-		conflictGroup: 'response',
-		operation: 'upsert',
-		originDeviceId: context.originDeviceId,
-		occurredAt,
-		mutationId: checkInMutationId,
-		additionalMutations: [
-			{
-				mutationId: mealStatusMutationId,
-				entityKind: 'meal',
-				aggregateId: mealId,
-				conflictGroup: 'status',
-				operation: 'upsert'
-			}
-		],
-		payload,
-		payloadSchema: MealCheckInPayloadSchema,
-		writes: [
-			{
-				store: 'meals',
-				aggregateId: mealId,
-				mutationId: mealStatusMutationId,
-				conflictGroups: ['status'],
-				schema: StoredMealSchema,
-				update: (current) => ({
-					...requireMeal(current, context.householdId, 'check in meal'),
-					status: payload.status
-				})
-			},
-			{
-				store: 'mealCheckIns',
-				aggregateId: checkInId,
-				identity: { id: checkInId, reporterUserId: context.reporterUserId, mealId },
-				conflictGroups: ['response'],
-				schema: MealCheckInSchema,
-				update: (current) => ({
-					...(current
-						? decode(MealCheckInSchema, current, 'read prior check-in')
-						: checkInCandidate),
-					...checkInCandidate,
-					createdAt: current
-						? decode(MealCheckInSchema, current, 'read prior check-in').createdAt
-						: occurredAt
-				})
-			}
-		]
-	});
+	const results = await executeLocalCommands(database, [
+		...copy,
+		{
+			authSlotId: context.authSlotId,
+			scopeKind: 'household',
+			scopeId: context.householdId,
+			entityKind: 'meal_check_in',
+			aggregateId: checkInId,
+			conflictGroup: 'response',
+			operation: 'upsert',
+			originDeviceId: context.originDeviceId,
+			occurredAt,
+			mutationId: checkInMutationId,
+			additionalMutations: [
+				{
+					mutationId: mealStatusMutationId,
+					entityKind: 'meal',
+					aggregateId: mealId,
+					conflictGroup: 'status',
+					operation: 'upsert'
+				}
+			],
+			payload,
+			payloadSchema: MealCheckInPayloadSchema,
+			writes: [
+				{
+					store: 'meals',
+					aggregateId: mealId,
+					mutationId: mealStatusMutationId,
+					conflictGroups: ['status'],
+					schema: StoredMealSchema,
+					update: (current) => ({
+						...requireMeal(current, context.householdId, 'check in meal'),
+						status: payload.status
+					})
+				},
+				{
+					store: 'mealCheckIns',
+					aggregateId: checkInId,
+					identity: { id: checkInId, reporterUserId: context.reporterUserId, mealId },
+					conflictGroups: ['response'],
+					schema: MealCheckInSchema,
+					update: (current) => ({
+						...(current
+							? decode(MealCheckInSchema, current, 'read prior check-in')
+							: checkInCandidate),
+						...checkInCandidate,
+						createdAt: current
+							? decode(MealCheckInSchema, current, 'read prior check-in').createdAt
+							: occurredAt
+					})
+				}
+			]
+		}
+	]);
+	const result = results.at(-1)!;
 	return {
 		meal: decode(MealAggregateSchema, result.aggregates[0], 'decode checked-in meal'),
 		checkIn: decode(MealCheckInSchema, result.aggregates[1], 'decode meal check-in result')
@@ -617,57 +676,119 @@ export const deleteMeal = async (
 };
 
 /**
- * Builds the commands that null `sourceRecipeId` on every live meal copied from a purged recipe, across
- * the households the recipe owner (`reporterUserId`) belongs to. Deleted meals are skipped: their
- * content is on its way out and they cannot be edited. Commit these with the purge in one transaction.
+ * The live meals of `recipeId` that the recipe owner (`reporterUserId`) can still write: those in
+ * households with an active membership. Detached snapshots are read-only and never upload. Deleted
+ * meals are skipped: their content is on its way out and they cannot be edited.
+ */
+const writableMealsOfRecipe = async (
+	database: MaalDatabase,
+	reporterUserId: string,
+	recipeId: string
+): Promise<LiveMeal[]> => {
+	const households = new Set(
+		(
+			await database.memberships
+				.where('workosUserId')
+				.equals(reporterUserId)
+				.filter(({ status }) => status === 'active')
+				.toArray()
+		).map(({ householdId }) => householdId)
+	);
+	if (households.size === 0) return [];
+	return (
+		await database.meals
+			.where('sourceRecipeId')
+			.equals(recipeId)
+			.filter(({ householdId }) => households.has(String(householdId)))
+			.toArray()
+	)
+		.map((row) => decode(StoredMealSchema, row, 'decode meal of recipe'))
+		.filter((row): row is LiveMeal => isLiveMeal(row) && row.deletedAt === null);
+};
+
+/**
+ * Builds the copies that must land before `recipe` changes (spec §5.3): every recipe-following meal
+ * when the recipe is deleted, and on an edit only those that were cooked, skipped, or dated before
+ * today in their household. `recipe` is the version before the change. Commit these ahead of the
+ * recipe write in one transaction.
+ */
+export const recipeChangeCopyCommands = async (
+	database: MaalDatabase,
+	context: Omit<MealCommandContext, 'householdId'>,
+	recipe: RecipeAggregate,
+	change: 'edit' | 'delete'
+): Promise<LocalCommand[]> => {
+	const now = new Date(commandTime(context));
+	const following = (
+		await writableMealsOfRecipe(database, context.reporterUserId, recipe.id)
+	).filter(isRecipeFollowingMeal);
+	if (following.length === 0) return [];
+	const timeZones = new Map(
+		(
+			await database.households.bulkGet([
+				...new Set(following.map(({ householdId }) => householdId))
+			])
+		)
+			.filter((household) => household !== undefined)
+			.map(({ householdId, timezone }) => [householdId, timezone])
+	);
+	return following
+		.filter(
+			(meal) =>
+				change === 'delete' ||
+				freezesBeforeRecipeChange(
+					meal,
+					householdToday(now, timeZones.get(meal.householdId) ?? null)
+				)
+		)
+		.map((meal) => mealCopyCommand(context, meal, recipe));
+};
+
+/**
+ * Builds the commands that null `sourceRecipeId` on every live meal of a purged recipe, across the
+ * households the recipe owner (`reporterUserId`) belongs to. A meal still following the recipe takes
+ * its copy in the same write. Commit these with the purge in one transaction.
  */
 export const recipeProvenanceDetachCommands = async (
 	database: MaalDatabase,
 	context: Omit<MealCommandContext, 'householdId'>,
-	recipeId: string
+	recipe: RecipeAggregate
 ): Promise<LocalCommand[]> => {
 	const occurredAt = commandTime(context);
-	// Detached snapshots are read-only and never upload, so only active memberships are touched.
-	const memberships = await database.memberships
-		.where('workosUserId')
-		.equals(context.reporterUserId)
-		.filter(({ status }) => status === 'active')
-		.toArray();
 	const commands: LocalCommand[] = [];
-	for (const { householdId } of memberships) {
-		const linked = (await database.meals.where('householdId').equals(householdId).toArray())
-			.map((row) => decode(StoredMealSchema, row, 'decode meal provenance'))
-			.filter(
-				(row): row is MealAggregate =>
-					isMealAggregate(row) && row.deletedAt === null && row.sourceRecipeId === recipeId
+	for (const meal of await writableMealsOfRecipe(database, context.reporterUserId, recipe.id)) {
+		const householdId = meal.householdId;
+		if (isRecipeFollowingMeal(meal)) {
+			commands.push(
+				mealCopyCommand({ ...context, occurredAt }, meal, recipe, { sourceRecipeId: null })
 			);
-		for (const meal of linked) {
-			commands.push({
-				authSlotId: context.authSlotId,
-				scopeKind: 'household',
-				scopeId: householdId,
-				entityKind: 'meal',
-				aggregateId: meal.id,
-				conflictGroup: 'header',
-				operation: 'upsert',
-				originDeviceId: context.originDeviceId,
-				occurredAt,
-				payload: { mealId: meal.id, conflictGroups: ['header'], patch: { sourceRecipeId: null } },
-				payloadSchema: MealMutationPayloadSchema,
-				writes: [
-					{
-						store: 'meals',
-						aggregateId: meal.id,
-						conflictGroups: ['header'],
-						schema: StoredMealSchema,
-						update: (current) => ({
-							...requireMeal(current, householdId, 'detach recipe provenance'),
-							sourceRecipeId: null
-						})
-					}
-				]
-			});
+			continue;
 		}
+		commands.push({
+			authSlotId: context.authSlotId,
+			scopeKind: 'household',
+			scopeId: householdId,
+			entityKind: 'meal',
+			aggregateId: meal.id,
+			conflictGroup: 'header',
+			operation: 'upsert',
+			originDeviceId: context.originDeviceId,
+			occurredAt,
+			payload: { mealId: meal.id, conflictGroups: ['header'], patch: { sourceRecipeId: null } },
+			payloadSchema: MealMutationPayloadSchema,
+			writes: [
+				{
+					store: 'meals',
+					aggregateId: meal.id,
+					conflictGroups: ['header'],
+					schema: StoredMealSchema,
+					update: (current) => ({
+						...requireMeal(current, householdId, 'detach recipe provenance'),
+						sourceRecipeId: null
+					})
+				}
+			]
+		});
 	}
 	return commands;
 };

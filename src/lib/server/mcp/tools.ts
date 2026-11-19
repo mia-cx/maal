@@ -2,13 +2,15 @@ import type { ToolAnnotations } from '@modelcontextprotocol/server';
 import { Schema } from 'effect';
 import { uuidv7 } from 'uuidv7';
 
+import { MEAL_CONTENT_GROUPS } from '$lib/domain/meals/schema.js';
 import {
 	allMealConflictGroups,
 	allRecipeConflictGroups,
-	cloneRecipeAsMeal,
+	copyMealBeforeEdit,
 	createRecipeAggregate,
-	propagateRecipeUpdateToLinkedMeals,
-	type RemoteDomainPort
+	followRecipeAsMeal,
+	type RemoteDomainPort,
+	type RemoteMeal
 } from '$lib/server/domain/remote-port.js';
 import {
 	authorizeMcpRecipeImport,
@@ -66,6 +68,12 @@ const requireRecipe = async (domain: RemoteDomainPort, ownerUserId: string, reci
 const requireMeal = async (domain: RemoteDomainPort, householdId: string, mealId: string) => {
 	const meal = await domain.getHouseholdMeal(householdId, mealId);
 	if (!meal || meal.deletedAt !== null) throw toolError('not_found', 'Meal not found.');
+	return meal;
+};
+
+/** A meal an upsert just wrote; only a deletion leaves none. */
+const written = (meal: RemoteMeal | null): RemoteMeal => {
+	if (!meal) throw toolError('not_found', 'Meal not found.');
 	return meal;
 };
 
@@ -164,7 +172,7 @@ const createMeal = async (
 		} else {
 			recipe = await requireRecipe(context.domain, context.principal.ownerUserId, userRecipeId!);
 		}
-		meal = cloneRecipeAsMeal({
+		meal = followRecipeAsMeal({
 			recipe,
 			householdId,
 			date,
@@ -173,13 +181,15 @@ const createMeal = async (
 			plannedYield
 		});
 	}
-	return context.domain.writeHouseholdMeal({
-		actorUserId: context.principal.ownerUserId,
-		householdId,
-		aggregate: meal,
-		conflictGroups: allMealConflictGroups,
-		operation: 'upsert'
-	});
+	return written(
+		await context.domain.writeHouseholdMeal({
+			actorUserId: context.principal.ownerUserId,
+			householdId,
+			aggregate: meal,
+			conflictGroups: allMealConflictGroups,
+			operation: 'upsert'
+		})
+	);
 };
 
 export const tools: readonly ToolDefinition[] = [
@@ -279,7 +289,7 @@ export const tools: readonly ToolDefinition[] = [
 	{
 		name: 'update_user_recipe',
 		description:
-			'Patch a saved recipe by recipeId. Omitted fields stay unchanged. Linked planned meals update only if their copied recipe content still matches the old recipe, so ad-hoc meal overrides are preserved.',
+			'Patch a saved recipe by recipeId. Omitted fields stay unchanged. Planned meals that still follow the recipe show the change; edited, cooked, skipped, and past meals keep the version they had.',
 		inputSchema: Schema.Struct({
 			...optionalHouseholdInput,
 			recipeId: Schema.String,
@@ -294,22 +304,12 @@ export const tools: readonly ToolDefinition[] = [
 				context.principal.ownerUserId,
 				requiredText(args.recipeId, 'recipeId')
 			);
+			// The Worker copies the meals that must keep the old version before it commits (spec §8.7).
 			const recipe = await context.domain.writeUserRecipe({
 				actorUserId: context.principal.ownerUserId,
 				aggregate: patchRecipe(current, args.patch),
 				conflictGroups: ['header', 'ingredients', 'instructions'],
 				operation: 'upsert'
-			});
-			await propagateRecipeUpdateToLinkedMeals({
-				domain: context.domain,
-				actorUserId: context.principal.ownerUserId,
-				householdIds: context.principal.scopes.includes('meals:write')
-					? context.principal.effectiveHouseholds
-							.filter(({ permissions }) => permissions.includes('meals:write'))
-							.map(({ householdId }) => householdId)
-					: [],
-				previous: current,
-				next: recipe
 			});
 			return { recipe };
 		}
@@ -440,7 +440,7 @@ export const tools: readonly ToolDefinition[] = [
 	{
 		name: 'get_household_meal',
 		description:
-			'Fetch one planned or floating meal by mealId, including copied recipe details and schedule fields. Use before editing when you need the current meal-specific state.',
+			'Fetch one planned or floating meal by mealId, including its recipe details, schedule fields, and followsRecipe: true while it still shows its recipe as the recipe is now. Use before editing when you need the current meal-specific state.',
 		inputSchema: Schema.Struct({ ...optionalHouseholdInput, mealId: Schema.String }),
 		annotations: { readOnlyHint: true },
 		handler: async (context, args) => {
@@ -474,14 +474,28 @@ export const tools: readonly ToolDefinition[] = [
 			);
 			const conflictGroups = mealPatchConflictGroups(args.patch);
 			if (conflictGroups.length === 0) return { meal };
+			// An edit of the meal's recipe fields copies a recipe-following meal first (spec §5.3).
+			const editsContent = conflictGroups.some((group) =>
+				(MEAL_CONTENT_GROUPS as readonly string[]).includes(group)
+			);
+			const base = editsContent
+				? await copyMealBeforeEdit({
+						domain: context.domain,
+						actorUserId: context.principal.ownerUserId,
+						householdId: household.householdId,
+						meal
+					})
+				: meal;
 			return {
-				meal: await context.domain.writeHouseholdMeal({
-					actorUserId: context.principal.ownerUserId,
-					householdId: household.householdId,
-					aggregate: patchMeal(meal, args.patch),
-					conflictGroups,
-					operation: 'upsert'
-				})
+				meal: written(
+					await context.domain.writeHouseholdMeal({
+						actorUserId: context.principal.ownerUserId,
+						householdId: household.householdId,
+						aggregate: patchMeal(base, args.patch),
+						conflictGroups,
+						operation: 'upsert'
+					})
+				)
 			};
 		}
 	},
@@ -552,13 +566,22 @@ export const tools: readonly ToolDefinition[] = [
 				})
 			});
 			const status = cooked ? 'cooked' : 'skipped';
-			const updatedMeal = await context.domain.writeHouseholdMeal({
+			// A check-in copies a recipe-following meal, so history shows what was cooked.
+			const copied = await copyMealBeforeEdit({
+				domain: context.domain,
 				actorUserId: context.principal.ownerUserId,
 				householdId: household.householdId,
-				aggregate: { ...meal, status },
-				conflictGroups: ['status'],
-				operation: 'upsert'
+				meal
 			});
+			const updatedMeal = written(
+				await context.domain.writeHouseholdMeal({
+					actorUserId: context.principal.ownerUserId,
+					householdId: household.householdId,
+					aggregate: { ...copied, status },
+					conflictGroups: ['status'],
+					operation: 'upsert'
+				})
+			);
 			return { checkIn, meal: updatedMeal };
 		}
 	},

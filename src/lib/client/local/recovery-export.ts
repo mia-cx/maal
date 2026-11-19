@@ -5,7 +5,7 @@ import {
 	HouseholdSchema,
 	MembershipSchema
 } from '$lib/domain/household/contracts.js';
-import { MealCheckInSchema, StoredMealSchema, isMealAggregate } from '$lib/domain/meals/schema.js';
+import { MealCheckInSchema, StoredMealSchema, isLiveMeal } from '$lib/domain/meals/schema.js';
 import { PortableUserAttributionSchema } from '$lib/domain/portability/schema.js';
 import { StoredRecipeSchema, isRecipeAggregate } from '$lib/domain/recipes/schema.js';
 import {
@@ -254,7 +254,7 @@ const closeRecoverySource = (
 			? { ...next, savedFromHouseholdId: null }
 			: next;
 	});
-	closed.meals = closed.meals.filter((row) => isMealAggregate(row) && row.deletedAt === null);
+	closed.meals = closed.meals.filter((row) => isLiveMeal(row) && row.deletedAt === null);
 	repairStore('meals', repairContent);
 	const mealIds = new Set(closed.meals.map((row) => row.id));
 	closed.mealCheckIns = source.mealCheckIns.filter(

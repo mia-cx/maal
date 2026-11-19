@@ -336,7 +336,7 @@ export const seedProduct = async (
 				return candidate?.version ?? 0;
 			}, databaseName)
 		)
-		.toBe(60);
+		.toBe(70);
 	await page.goto('/manifest.webmanifest');
 	await page.evaluate(seedProductDatabase, {
 		name: databaseName,

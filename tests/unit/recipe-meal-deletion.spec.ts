@@ -25,7 +25,7 @@ import {
 	type RecipeCommandContext,
 	type RecipeEditorPatch
 } from '$lib/client/recipes/index.js';
-import { MealCheckInSchema, StoredMealSchema, isMealAggregate } from '$lib/domain/meals/schema.js';
+import { MealCheckInSchema, StoredMealSchema, isLiveMeal } from '$lib/domain/meals/schema.js';
 import { StoredRecipeSchema, isRecipeAggregate } from '$lib/domain/recipes/schema.js';
 
 const databases: MaalDatabase[] = [];
@@ -341,7 +341,7 @@ describe('deleted meal content retention', () => {
 		await deleteMeal(database, mealContext(at(22)), meal.id);
 
 		const stored = await storedMeal(database, meal.id);
-		expect(isMealAggregate(stored)).toBe(false);
+		expect(isLiveMeal(stored)).toBe(false);
 		expect(stored).toMatchObject({
 			id: meal.id,
 			householdId: 'org_family',
@@ -361,13 +361,17 @@ describe('deleted meal content retention', () => {
 
 		const pending = await runMealRetention(database, at(23));
 		expect(pending.purgedMealIds).toEqual([]);
-		expect(await storedMeal(database, meal.id)).toMatchObject({ title: 'Soup' });
+		expect(await storedMeal(database, meal.id)).toMatchObject({
+			deletedAt: at(22),
+			followsRecipe: true,
+			sourceRecipeId: recipe.id
+		});
 
 		await database.outbox.where('aggregateId').equals(meal.id).modify({ status: 'acknowledged' });
 		const acknowledged = await runMealRetention(database, at(24));
 		expect(acknowledged.purgedMealIds).toEqual([meal.id]);
 		const tombstone = await storedMeal(database, meal.id);
-		expect(isMealAggregate(tombstone)).toBe(false);
+		expect(isLiveMeal(tombstone)).toBe(false);
 		expect(tombstone).toMatchObject({ purgedAt: at(24), retainUntil: '2027-08-24T10:00:00.000Z' });
 
 		const early = await runMealRetention(database, '2027-08-23T10:00:00.000Z');

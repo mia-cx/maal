@@ -1393,24 +1393,26 @@ describe('foreground household coordinator', () => {
 			expect('purgedAt' in deleted).toBe(purged);
 			const deferred = await database.outbox.toArray();
 			expect(deferred.every((row) => row.snapshot === undefined)).toBe(true);
-			const remote = [mealId, deletedId].map((id, index): HouseholdSyncChange => {
-				const mutationId = uuidv7();
-				return {
-					sequence: index + 1,
-					mutationId,
-					originDeviceId: uuidv7(),
-					actorUserId: 'user_carol',
-					entityKind: 'meal',
-					entityId: id,
-					conflictGroups: ['header'],
-					operation: 'upsert',
-					resultingRevision: 2,
-					occurredAt: timestamp,
-					receivedAt: timestamp,
-					aggregate: meal(id, mutationId, uuidv7(), { title: 'Remote soup' }),
-					tombstoneExpiresAt: null
-				};
-			});
+			const remote = [mealId, deletedId].map(
+				(id, index): HouseholdSyncChange & { entityKind: 'meal' } => {
+					const mutationId = uuidv7();
+					return {
+						sequence: index + 1,
+						mutationId,
+						originDeviceId: uuidv7(),
+						actorUserId: 'user_carol',
+						entityKind: 'meal',
+						entityId: id,
+						conflictGroups: ['header'],
+						operation: 'upsert',
+						resultingRevision: 2,
+						occurredAt: timestamp,
+						receivedAt: timestamp,
+						aggregate: meal(id, mutationId, uuidv7(), { title: 'Remote soup' }),
+						tombstoneExpiresAt: null
+					};
+				}
+			);
 			const page = {
 				protocolVersion: 1 as const,
 				throughSequence: 1,

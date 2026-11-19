@@ -3,7 +3,11 @@ import {
 	DEFAULT_STALENESS_THRESHOLD_MINUTES,
 	isRecentEdit
 } from '$lib/domain/household/staleness.js';
-import { isRecipeAggregate, type StoredRecipe } from '$lib/domain/recipes/schema.js';
+import {
+	isRecipeAggregate,
+	type RecipeAggregate,
+	type StoredRecipe
+} from '$lib/domain/recipes/schema.js';
 import {
 	USER_SYNC_ENTITY_KINDS,
 	type MutationReceipt,
@@ -35,6 +39,11 @@ import {
 	type SqlValue
 } from './d1-snapshot.js';
 import { ServerSyncUnavailable } from './errors.js';
+import {
+	D1HouseholdSyncRepository,
+	householdsFollowingRecipe,
+	sharedRecipeStatements
+} from './household-d1-repository.js';
 import { incomingWinsHistoricalConflict, type WinningClock } from './reconciliation.js';
 import {
 	syncEntityKey,
@@ -1000,6 +1009,22 @@ export class D1UserSyncRepository implements UserSyncRepository {
 			originDeviceId: input.mutation.originDeviceId,
 			mutationId: input.mutation.mutationId
 		};
+		const isRecipe = input.mutation.entityKind === 'recipe';
+		const incomingRecipe = decodedIncoming.aggregate as StoredRecipe;
+		if (isRecipe && current !== null && isRecipeAggregate(current as StoredRecipe)) {
+			const deletes = !isRecipeAggregate(incomingRecipe) || incomingRecipe.deletedAt !== null;
+			const edits = acceptedGroups.some((group) => group !== 'deletion');
+			// Meals that must keep this version take their copies before it changes (spec §8.7).
+			if (deletes || edits) {
+				await new D1HouseholdSyncRepository(this.database).copyFollowingMealsBeforeRecipeChange({
+					recipe: current as RecipeAggregate,
+					change: deletes ? 'delete' : 'edit',
+					deviceId: input.deviceId,
+					occurredAt: input.mutation.occurredAt,
+					receivedAt: input.receivedAt
+				});
+			}
+		}
 		const result =
 			input.mutation.entityKind === 'recipe'
 				? mergeRecipe(current, decodedIncoming.aggregate, acceptedGroups, revision, clock)
@@ -1166,6 +1191,23 @@ export class D1UserSyncRepository implements UserSyncRepository {
 				 AND entity_kind = ? AND entity_id = ?`
 					)
 					.bind(input.actorUserId, input.mutation.entityKind, input.mutation.entityId)
+			);
+		}
+		// Households whose recipe-following meals show this recipe receive the change (spec §8.7).
+		if (isRecipe) {
+			statements.push(
+				...sharedRecipeStatements(this.database, {
+					recipe: decodedResult.aggregate as StoredRecipe,
+					householdIds: await householdsFollowingRecipe(
+						this.database,
+						input.mutation.entityId,
+						input.actorUserId
+					),
+					actorUserId: input.actorUserId,
+					deviceId: input.deviceId,
+					occurredAt: input.mutation.occurredAt,
+					receivedAt: input.receivedAt
+				})
 			);
 		}
 		try {

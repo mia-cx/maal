@@ -198,7 +198,7 @@ describe('shared device database', () => {
 			title: 'Preserved recipe'
 		});
 		await expect(migrated.meta.get('migrationState')).resolves.toMatchObject({
-			value: { from: 5, to: CURRENT_DATABASE_VERSION, state: 'complete' }
+			value: { from: 6, to: CURRENT_DATABASE_VERSION, state: 'complete' }
 		});
 		await expect(migrated.meta.get('databaseVersion')).resolves.toMatchObject({
 			value: CURRENT_DATABASE_VERSION

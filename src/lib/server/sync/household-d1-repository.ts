@@ -1,14 +1,36 @@
+import { Schema } from 'effect';
+import { uuidv7 } from 'uuidv7';
+
+import { UtcInstantSchema } from '$lib/domain/contracts/primitives.js';
 import { CURRENT_SCHEMA_VERSION } from '$lib/domain/contracts/versions.js';
 import {
 	DEFAULT_STALENESS_THRESHOLD_MINUTES,
 	isRecentEdit
 } from '$lib/domain/household/staleness.js';
-import { isMealAggregate, type MealAggregate } from '$lib/domain/meals/schema.js';
+import {
+	copyRecipeIntoMeal,
+	freezesBeforeRecipeChange,
+	householdToday
+} from '$lib/domain/meals/recipe-following.js';
+import {
+	MEAL_CONTENT_GROUPS,
+	MEAL_COPY_GROUPS,
+	RecipeFollowingMealSchema,
+	isLiveMeal,
+	isRecipeFollowingMeal,
+	type StoredMeal
+} from '$lib/domain/meals/schema.js';
+import {
+	StoredRecipeSchema,
+	type RecipeAggregate,
+	type StoredRecipe
+} from '$lib/domain/recipes/schema.js';
 import type { MutationReceipt } from '$lib/sync/contracts.js';
-import type {
-	HouseholdSyncChange,
-	HouseholdSyncEntityKind,
-	HouseholdSyncMutation
+import {
+	MEAL_ALREADY_COPIED,
+	type HouseholdSyncChange,
+	type HouseholdSyncEntityKind,
+	type HouseholdSyncMutation
 } from '$lib/sync/household-contracts.js';
 import { decodeHouseholdSyncAggregate } from '$lib/sync/household-entities.js';
 import { pruneSyncRetentionBatch } from '$lib/server/maintenance/sync-retention.js';
@@ -401,6 +423,26 @@ const receiptFromRow = (row: ReceiptRow, duplicate = false): MutationReceipt => 
 	};
 };
 
+const isContentGroup = (group: string): boolean =>
+	(MEAL_CONTENT_GROUPS as readonly string[]).includes(group);
+
+/**
+ * True when this upsert turns a recipe-following meal into a meal copy: it carries the `source`
+ * group and a copy (spec §5.3).
+ */
+const copiesMeal = (current: unknown, incoming: unknown, groups: readonly string[]): boolean =>
+	current !== null &&
+	isLiveMeal(current as StoredMeal) &&
+	isRecipeFollowingMeal(current as StoredMeal) &&
+	isLiveMeal(incoming as StoredMeal) &&
+	!isRecipeFollowingMeal(incoming as StoredMeal) &&
+	groups.includes('source');
+
+/**
+ * Merges the accepted groups of an incoming meal into the current one. A copy takes every content
+ * field from the incoming meal; a meal that stays recipe-following never takes content, and a meal
+ * copy never goes back to following.
+ */
 const mergeMeal = (
 	currentInput: unknown | null,
 	incomingInput: unknown,
@@ -408,12 +450,15 @@ const mergeMeal = (
 	revision: number,
 	clock: WinningClock
 ): unknown => {
-	const incoming = incomingInput as MealAggregate;
-	const current = currentInput as MealAggregate | null;
-	if (current === null || !isMealAggregate(current) || !isMealAggregate(incoming)) {
+	const incoming = incomingInput as StoredMeal;
+	const current = currentInput as StoredMeal | null;
+	if (current === null || !isLiveMeal(current) || !isLiveMeal(incoming)) {
 		return { ...incoming, revision, updatedAt: clock.occurredAt };
 	}
+	const becomesCopy = copiesMeal(current, incoming, acceptedGroups);
+	const staysFollowing = isRecipeFollowingMeal(current) && !becomesCopy;
 	const next: Record<string, unknown> = { ...current };
+	if (becomesCopy) delete next.followsRecipe;
 	const incomingRecord: Record<string, unknown> = { ...incoming };
 	const header = [
 		'sourceRecipeId',
@@ -458,11 +503,195 @@ const mergeMeal = (
 		deletion: ['deletedAt']
 	};
 	for (const group of acceptedGroups) {
+		if (group === 'source') continue;
+		if (isContentGroup(group) && (staysFollowing || isRecipeFollowingMeal(incoming))) continue;
 		for (const field of groupFields[group] ?? header) next[field] = incomingRecord[field];
 	}
 	const clocks = { ...current.conflictClocks };
 	for (const group of acceptedGroups) clocks[group] = clock;
 	return { ...next, revision, updatedAt: clock.occurredAt, conflictClocks: clocks };
+};
+
+/** The fields a recipe-following meal row stores; its content columns are null (spec §5.3). */
+const followingMealFromRow = (
+	row: Record<string, unknown>,
+	conflictClocks: Record<string, unknown>
+): unknown => {
+	const record = camelize(row);
+	return {
+		schemaVersion: record.schemaVersion,
+		revision: record.revision,
+		createdAt: record.createdAt,
+		updatedAt: record.updatedAt,
+		deletedAt: record.deletedAt,
+		conflictClocks,
+		id: record.id,
+		householdId: record.householdId,
+		sourceRecipeId: record.sourceRecipeId,
+		followsRecipe: true,
+		date: record.date,
+		time: record.time,
+		sortOrder: record.sortOrder,
+		plannedCookUserId: record.plannedCookUserId,
+		plannedYield: record.plannedYield,
+		status: record.status
+	};
+};
+
+/**
+ * The current D1 recipes, keyed by ID, as their owner's user audience serves them: the newest
+ * retained change, else the normalized row. Undecodable or missing recipes are left out.
+ */
+export const readCurrentRecipes = async (
+	database: D1Database,
+	recipeIds: readonly string[]
+): Promise<Map<string, StoredRecipe>> => {
+	const unique = [...new Set(recipeIds)];
+	if (unique.length === 0) return new Map();
+	const latest = await queryAll<{ entity_id: string; payload: string }>(
+		database,
+		`SELECT entity_id, payload, MAX(seq) AS seq FROM sync_changes
+		 WHERE audience_kind = 'user' AND entity_kind = 'recipe' AND entity_id IN (${JSON_IDS})
+		 GROUP BY entity_id`,
+		JSON.stringify(unique)
+	);
+	const found = new Map<string, unknown>(
+		latest.map((row) => [row.entity_id, decodeStoredPayload(row.payload).payload.aggregate])
+	);
+	const rest = unique.filter((id) => !found.has(id));
+	if (rest.length > 0) {
+		const [rows, sidecars, versions] = await Promise.all([
+			queryAll(database, `SELECT * FROM recipes WHERE id IN (${JSON_IDS})`, JSON.stringify(rest)),
+			readSidecars(database, 'recipe', rest),
+			queryAll<VersionRow & { entity_id: string }>(
+				database,
+				`SELECT entity_id, conflict_group, revision, last_sequence, winning_occurred_at,
+				 winning_origin_device_id, winning_mutation_id, winning_actor_user_id, winning_received_at
+				 FROM sync_entity_versions
+				 WHERE audience_kind = 'user' AND entity_kind = 'recipe' AND entity_id IN (${JSON_IDS})`,
+				JSON.stringify(rest)
+			)
+		]);
+		const versionsById = groupBy(versions, ({ entity_id }) => entity_id);
+		for (const row of rows) {
+			const id = String(row.id);
+			found.set(id, {
+				...camelize(row),
+				conflictClocks: conflictClocks(versionsById.get(id) ?? []),
+				searchTokens: [],
+				...sidecars.get(id)
+			});
+		}
+	}
+	const recipes = new Map<string, StoredRecipe>();
+	for (const [id, value] of found) {
+		try {
+			recipes.set(id, Schema.decodeUnknownSync(StoredRecipeSchema)(value));
+		} catch {
+			// A recipe that no longer matches its contract is not shared.
+		}
+	}
+	return recipes;
+};
+
+/**
+ * Households that hold a live recipe-following meal of `recipeId` and that its owner still
+ * belongs to: the households a change to the recipe is shared with (spec §8.7).
+ */
+export const householdsFollowingRecipe = async (
+	database: D1Database,
+	recipeId: string,
+	ownerUserId: string
+): Promise<string[]> =>
+	(
+		await queryAll<{ household_id: string }>(
+			database,
+			`SELECT DISTINCT m.household_id FROM meals m
+			 WHERE m.source_recipe_id = ? AND m.follows_recipe = 1 AND m.deleted_at IS NULL
+			 AND EXISTS (SELECT 1 FROM household_memberships hm WHERE hm.household_id = m.household_id
+			  AND hm.workos_user_id = ? AND hm.status = 'active')
+			 ORDER BY m.household_id`,
+			recipeId,
+			ownerUserId
+		)
+	).map(({ household_id }) => household_id);
+
+/**
+ * Statements that share `recipe` with each household: one pull-only household `recipe` change per
+ * household, carrying the complete aggregate, and the household's new latest sequence (spec §8.7).
+ * Append them to the batch that commits the recipe or the recipe-following meal.
+ */
+export const sharedRecipeStatements = (
+	database: D1Database,
+	input: {
+		readonly recipe: StoredRecipe;
+		readonly householdIds: readonly string[];
+		readonly actorUserId: string;
+		readonly deviceId: string;
+		readonly occurredAt: string;
+		readonly receivedAt: string;
+	}
+): D1PreparedStatement[] => {
+	const payload = JSON.stringify({
+		schemaVersion: CURRENT_SCHEMA_VERSION,
+		payload: { conflictGroups: ['shared'], aggregate: input.recipe }
+	});
+	const operation = input.recipe.deletedAt === null ? 'upsert' : 'delete';
+	return input.householdIds.flatMap((householdId) => {
+		const mutationId = uuidv7();
+		return [
+			database
+				.prepare(
+					`INSERT INTO sync_changes
+					 (mutation_id, actor_user_id, origin_device_id, audience_kind, audience_id, entity_kind,
+					  entity_id, conflict_group, operation, resulting_revision, occurred_at, received_at,
+					  payload, tombstone_expires_at)
+					 VALUES (?, ?, ?, 'household', ?, 'recipe', ?, 'shared', ?, ?, ?, ?, ?, NULL)`
+				)
+				.bind(
+					mutationId,
+					input.actorUserId,
+					input.deviceId,
+					householdId,
+					input.recipe.id,
+					operation,
+					Math.max(1, input.recipe.revision),
+					input.occurredAt,
+					input.receivedAt,
+					payload
+				),
+			database
+				.prepare(
+					`INSERT INTO sync_scope_state
+					 (audience_kind, audience_id, bootstrap_generation, earliest_retained_sequence,
+					  latest_sequence, updated_at)
+					 VALUES ('household', ?, 1, 0, (SELECT seq FROM sync_changes WHERE mutation_id = ?), ?)
+					 ON CONFLICT(audience_kind, audience_id) DO UPDATE SET
+					  latest_sequence = excluded.latest_sequence, updated_at = excluded.updated_at`
+				)
+				.bind(householdId, mutationId, input.receivedAt)
+		];
+	});
+};
+
+/** A bootstrap entry for a recipe the household's recipe-following meals reference. */
+const sharedRecipeSnapshot = (recipe: StoredRecipe, sequence: number): HouseholdSyncChange => {
+	const clock = Object.values(recipe.conflictClocks)[0];
+	return {
+		sequence,
+		mutationId: uuidv7(),
+		originDeviceId: clock?.originDeviceId ?? uuidv7(),
+		actorUserId: recipe.ownerUserId,
+		entityKind: 'recipe',
+		entityId: recipe.id,
+		conflictGroups: ['shared'],
+		operation: recipe.deletedAt === null ? 'upsert' : 'delete',
+		resultingRevision: Math.max(1, recipe.revision),
+		occurredAt: recipe.updatedAt,
+		receivedAt: recipe.updatedAt,
+		aggregate: recipe,
+		tombstoneExpiresAt: null
+	};
 };
 
 const normalizedStatements = (
@@ -480,7 +709,15 @@ const normalizedStatements = (
 					.bind(mealId, householdId)
 			];
 		}
-		const statements = [upsert(database, 'meals', pickSnake(aggregate, MEAL_PARENT_COLUMNS))];
+		// A recipe-following row keeps only the meal's own fields; `title` is NOT NULL, so it is empty.
+		const following = aggregate.followsRecipe === true;
+		const statements = [
+			upsert(database, 'meals', {
+				...pickSnake(aggregate, MEAL_PARENT_COLUMNS),
+				...(following ? { title: '' } : {}),
+				follows_recipe: following ? 1 : 0
+			})
+		];
 		statements.push(
 			database
 				.prepare(
@@ -712,7 +949,14 @@ const readSnapshotChanges = async (
 		} else if (entityKind === 'meal_check_in') {
 			aggregate = { ...camelize(row, ['household_id']), conflictClocks: clocks };
 		} else if (entityKind === 'meal') {
-			aggregate = { ...camelize(row), conflictClocks: clocks, ...sidecars.get(entityId) };
+			aggregate =
+				row.follows_recipe === 1
+					? followingMealFromRow(row, clocks)
+					: {
+							...camelize(row, ['follows_recipe']),
+							conflictClocks: clocks,
+							...sidecars.get(entityId)
+						};
 		} else {
 			const record = camelize(row);
 			if (entityKind === 'householdAppliance') record.available = record.available === 1;
@@ -836,13 +1080,25 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 		);
 		const selected = identities.slice(0, page.limit);
 		const last = selected.at(-1);
+		const aggregates = await markReinstated(
+			this.database,
+			audience(householdId),
+			await readSnapshotChanges(this.database, householdId, selected)
+		);
+		// Each page carries the recipes its recipe-following meals show (spec §8.7).
+		const followedRecipeIds = aggregates.flatMap(({ entityKind, aggregate }) =>
+			entityKind === 'meal' &&
+			isLiveMeal(aggregate as StoredMeal) &&
+			isRecipeFollowingMeal(aggregate as StoredMeal)
+				? [(aggregate as { sourceRecipeId: string }).sourceRecipeId]
+				: []
+		);
+		const sharedRecipes = [
+			...(await readCurrentRecipes(this.database, followedRecipeIds)).values()
+		].map((recipe) => sharedRecipeSnapshot(recipe, state.latestSequence));
 		return {
 			...state,
-			aggregates: await markReinstated(
-				this.database,
-				audience(householdId),
-				await readSnapshotChanges(this.database, householdId, selected)
-			),
+			aggregates: [...sharedRecipes, ...aggregates],
 			authoritativeIds,
 			nextEntityKey:
 				identities.length > page.limit && last
@@ -998,7 +1254,7 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 		}
 
 		const versionByGroup = new Map(versions.map((version) => [version.conflict_group, version]));
-		const acceptedGroups =
+		const winningGroups =
 			input.mode === 'live'
 				? [...input.mutation.conflictGroups]
 				: input.mutation.conflictGroups.filter((group) => {
@@ -1015,7 +1271,7 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 							stalenessThresholdMinutes
 						);
 					});
-		if (acceptedGroups.length === 0) {
+		if (winningGroups.length === 0) {
 			return rejected('historical_loser');
 		}
 
@@ -1024,6 +1280,27 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 			{ entityKind: input.mutation.entityKind, entityId: input.mutation.entityId }
 		]);
 		const current = currentChange?.aggregate ?? null;
+		const isMeal = input.mutation.entityKind === 'meal';
+		const incomingMeal = decodedIncoming.aggregate as StoredMeal;
+		// A copy only applies while D1 still holds the meal as recipe-following. Another device
+		// copied it first; the edits that came with this copy are separate mutations (spec §5.3).
+		if (
+			isMeal &&
+			input.mode === 'live' &&
+			winningGroups.includes('source') &&
+			current !== null &&
+			isLiveMeal(current as StoredMeal) &&
+			!isRecipeFollowingMeal(current as StoredMeal) &&
+			isLiveMeal(incomingMeal) &&
+			!isRecipeFollowingMeal(incomingMeal)
+		) {
+			return rejected(MEAL_ALREADY_COPIED);
+		}
+		// A copy writes every content group, whichever of them a later local edit now owns.
+		const acceptedGroups =
+			isMeal && copiesMeal(current, incomingMeal, winningGroups)
+				? [...new Set([...winningGroups, ...MEAL_COPY_GROUPS])]
+				: winningGroups;
 		const revision = Math.max(0, ...versions.map(({ revision }) => revision)) + 1;
 		const clock = {
 			occurredAt: input.mutation.occurredAt,
@@ -1233,6 +1510,30 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 					.bind(input.householdId, input.mutation.entityKind, input.mutation.entityId)
 			);
 		}
+		// Planning a recipe-following meal shares its recipe with the household (spec §8.7).
+		const stored = decodedResult.aggregate as StoredMeal;
+		if (
+			isMeal &&
+			acceptedGroups.includes('source') &&
+			isLiveMeal(stored) &&
+			isRecipeFollowingMeal(stored)
+		) {
+			const recipe = (await readCurrentRecipes(this.database, [stored.sourceRecipeId])).get(
+				stored.sourceRecipeId
+			);
+			if (recipe) {
+				statements.push(
+					...sharedRecipeStatements(this.database, {
+						recipe,
+						householdIds: [input.householdId],
+						actorUserId: input.actorUserId,
+						deviceId: input.deviceId,
+						occurredAt: input.mutation.occurredAt,
+						receivedAt: input.receivedAt
+					})
+				);
+			}
+		}
 		try {
 			await this.database.batch(statements);
 		} catch (error) {
@@ -1262,6 +1563,71 @@ export class D1HouseholdSyncRepository implements HouseholdSyncRepository {
 			)
 			.first<{ head: number; stored: number }>();
 		return row !== null && (row.head !== head || row.stored === 1);
+	}
+
+	/**
+	 * Copies `recipe`, the version before a change, into the recipe-following meals that must not see
+	 * the change (spec §5.3): all of them when the recipe is deleted; on an edit, those cooked,
+	 * skipped, or dated before today in their household, and those in households the owner left.
+	 * Each copy is a live household meal mutation, so a device that copied first wins quietly.
+	 */
+	async copyFollowingMealsBeforeRecipeChange(input: {
+		readonly recipe: RecipeAggregate;
+		readonly change: 'edit' | 'delete';
+		readonly deviceId: string;
+		readonly occurredAt: string;
+		readonly receivedAt: string;
+	}): Promise<void> {
+		const occurredAt = Schema.decodeUnknownSync(UtcInstantSchema)(input.occurredAt);
+		const rows = await queryAll<{
+			id: string;
+			household_id: string;
+			timezone: string | null;
+			owner_member: number;
+		}>(
+			this.database,
+			`SELECT m.id, m.household_id, h.timezone,
+			 EXISTS (SELECT 1 FROM household_memberships hm WHERE hm.household_id = m.household_id
+			  AND hm.workos_user_id = ? AND hm.status = 'active') AS owner_member
+			 FROM meals m JOIN households h ON h.household_id = m.household_id
+			 WHERE m.source_recipe_id = ? AND m.follows_recipe = 1 AND m.deleted_at IS NULL`,
+			input.recipe.ownerUserId,
+			input.recipe.id
+		);
+		const now = new Date(input.receivedAt);
+		for (const [householdId, group] of groupBy(rows, ({ household_id }) => household_id)) {
+			const changes = await readSnapshotChanges(
+				this.database,
+				householdId,
+				group.map(({ id }) => ({ entityKind: 'meal' as const, entityId: id }))
+			);
+			const today = householdToday(now, group[0]!.timezone);
+			const ownerMember = group[0]!.owner_member === 1;
+			for (const { aggregate } of changes) {
+				const meal = Schema.decodeUnknownSync(RecipeFollowingMealSchema)(aggregate);
+				const copies =
+					input.change === 'delete' || !ownerMember || freezesBeforeRecipeChange(meal, today);
+				if (!copies) continue;
+				await this.commitWithResult({
+					householdId,
+					actorUserId: input.recipe.ownerUserId,
+					deviceId: input.deviceId,
+					mutation: {
+						schemaVersion: CURRENT_SCHEMA_VERSION,
+						mutationId: uuidv7(),
+						originDeviceId: input.deviceId,
+						entityKind: 'meal',
+						entityId: meal.id,
+						conflictGroups: [...MEAL_COPY_GROUPS],
+						operation: 'upsert',
+						occurredAt,
+						aggregate: copyRecipeIntoMeal(meal, input.recipe)
+					},
+					mode: 'live',
+					receivedAt: input.receivedAt
+				});
+			}
+		}
 	}
 
 	async prune(input: { now: string; changeCutoff: string }): Promise<void> {

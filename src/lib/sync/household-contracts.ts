@@ -24,6 +24,22 @@ export const HOUSEHOLD_SYNC_ENTITY_KINDS = [
 export const HouseholdSyncEntityKindSchema = Schema.Literal(...HOUSEHOLD_SYNC_ENTITY_KINDS);
 export type HouseholdSyncEntityKind = typeof HouseholdSyncEntityKindSchema.Type;
 
+/**
+ * A recipe shared with the household because a recipe-following meal references it. Households
+ * only receive it: pushes never carry it (spec §8.7).
+ */
+export const HOUSEHOLD_SHARED_RECIPE_KIND = 'recipe' as const;
+
+/**
+ * Rejects a copy of a meal another device already copied. The device takes the authoritative meal
+ * without a notice, since nothing the person did was lost (spec §8.6).
+ */
+export const MEAL_ALREADY_COPIED = 'meal_already_copied' as const;
+const HouseholdSyncChangeEntityKindSchema = Schema.Literal(
+	...HOUSEHOLD_SYNC_ENTITY_KINDS,
+	HOUSEHOLD_SHARED_RECIPE_KIND
+);
+
 export const HouseholdSyncAudienceSchema = Schema.Struct({
 	kind: Schema.Literal('household'),
 	id: Schema.String.pipe(Schema.minLength(1))
@@ -78,7 +94,7 @@ export const HouseholdSyncChangeSchema = Schema.Struct({
 	mutationId: DomainIdSchema,
 	originDeviceId: DomainIdSchema,
 	actorUserId: Schema.String.pipe(Schema.minLength(1)),
-	entityKind: HouseholdSyncEntityKindSchema,
+	entityKind: HouseholdSyncChangeEntityKindSchema,
 	entityId: HouseholdEntityIdSchema,
 	conflictGroups: Schema.NonEmptyArray(Schema.String.pipe(Schema.minLength(1))),
 	operation: Schema.Literal('upsert', 'delete'),

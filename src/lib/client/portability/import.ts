@@ -371,7 +371,16 @@ const archiveNames = (archive: PortableArchive): Map<string, string> => {
 	]) {
 		names.set(entry.id, entry.canonicalLabel);
 	}
-	for (const meal of archive.meals.meals) names.set(meal.id, meal.title);
+	const recipeTitles = new Map(
+		[...archive.recipes.recipes, ...(archive.deletedRecipes?.recipes ?? [])].map(
+			({ id, title }) => [id, title] as const
+		)
+	);
+	for (const meal of archive.meals.meals) {
+		// A recipe-following meal is named after the recipe it shows.
+		const title = 'title' in meal ? meal.title : recipeTitles.get(meal.sourceRecipeId);
+		if (title !== undefined) names.set(meal.id, title);
+	}
 	return names;
 };
 
@@ -551,14 +560,16 @@ const validatePlannedReferences = async (
 		}
 		return ids;
 	};
-	const [householdIds, mealIds, foodIds, unitIds, foodAliasIds, unitAliasIds] = await Promise.all([
-		idsFor('households'),
-		idsFor('meals'),
-		idsFor('foods', 'foodUserEntries', 'foodHouseholdEntries'),
-		idsFor('units', 'unitUserEntries', 'unitHouseholdEntries'),
-		idsFor('foodAliases', 'foodUserAliases', 'foodHouseholdAliases'),
-		idsFor('unitAliases', 'unitUserAliases', 'unitHouseholdAliases')
-	]);
+	const [householdIds, recipeIds, mealIds, foodIds, unitIds, foodAliasIds, unitAliasIds] =
+		await Promise.all([
+			idsFor('households'),
+			idsFor('recipes'),
+			idsFor('meals'),
+			idsFor('foods', 'foodUserEntries', 'foodHouseholdEntries'),
+			idsFor('units', 'unitUserEntries', 'unitHouseholdEntries'),
+			idsFor('foodAliases', 'foodUserAliases', 'foodHouseholdAliases'),
+			idsFor('unitAliases', 'unitUserAliases', 'unitHouseholdAliases')
+		]);
 	const requireReference = (
 		value: unknown,
 		available: ReadonlySet<string>,
@@ -608,10 +619,14 @@ const validatePlannedReferences = async (
 			requireReference(ingredient.baseUnitFamilyId, unitIds, 'recipe unit family');
 		}
 	}
-	// Meal provenance may name another member's recipe, which syncs only to its owner, so it is
-	// not required to resolve on this device.
+	// A meal copy's provenance may name another member's recipe, which syncs only to its owner, so
+	// it is not required to resolve on this device. A recipe-following meal shows its recipe, so
+	// that recipe must be imported or already here (spec §9).
 	for (const row of state.writes.get('meals') ?? []) {
 		requireReference(row.householdId, householdIds, 'meal household');
+		if (row.followsRecipe === true) {
+			requireReference(row.sourceRecipeId, recipeIds, 'followed recipe');
+		}
 		for (const ingredient of (row.ingredients as Record<string, unknown>[] | undefined) ?? []) {
 			requireReference(ingredient.baseFoodId, foodIds, 'meal food');
 			requireReference(ingredient.baseUnitId, unitIds, 'meal unit');
