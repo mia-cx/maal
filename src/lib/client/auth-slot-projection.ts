@@ -217,6 +217,7 @@ const upsertAuthenticatedSlot = async (
 				profileId,
 				workosUserId: metadata.workosUserId,
 				sessionState: 'authenticated',
+				featureFlags: metadata.featureFlags ?? [],
 				lastRefreshedAt: metadata.verifiedAt,
 				lastVerifiedAt: metadata.verifiedAt,
 				nextRetryAt: null,

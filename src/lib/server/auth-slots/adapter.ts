@@ -8,6 +8,7 @@ export interface AuthenticatedSlot {
 	readonly sessionId: string;
 	readonly user: SafeWorkOSUser;
 	readonly organizationId: string | null;
+	readonly featureFlags?: readonly string[];
 }
 
 export interface UnauthenticatedSlot {
@@ -184,6 +185,7 @@ function normalizeAuthenticationResult(
 		authenticated: true,
 		sessionId: result.sessionId,
 		organizationId: result.organizationId ?? null,
+		featureFlags: result.featureFlags ?? [],
 		user: toSafeUser(result.user)
 	};
 }

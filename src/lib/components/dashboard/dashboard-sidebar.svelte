@@ -6,6 +6,7 @@
 	import ShoppingCartIcon from '@lucide/svelte/icons/shopping-cart';
 	import SoupIcon from '@lucide/svelte/icons/soup';
 
+	import { featurePreviewFlags } from '$lib/client/feature-previews.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import ProfileSwitcher from '$lib/components/profile-switcher.svelte';
 	import TeamSwitcher from '$lib/components/team-switcher.svelte';
@@ -15,8 +16,13 @@
 
 	let {
 		database,
-		activeNav = 'meal-plan'
-	}: { database: MaalDatabase; activeNav?: DashboardNavItem } = $props();
+		activeNav = 'meal-plan',
+		featureFlags = []
+	}: {
+		database: MaalDatabase;
+		activeNav?: DashboardNavItem;
+		featureFlags?: readonly string[];
+	} = $props();
 
 	const links = [
 		{ href: '/plan', label: m.app_meal_plan, nav: 'meal-plan', icon: CalendarDaysIcon },
@@ -26,6 +32,7 @@
 			label: m.app_pantry,
 			nav: 'pantry',
 			icon: SoupIcon,
+			flag: featurePreviewFlags.pantry,
 			unavailable: m.app_pantry_preview_unavailable
 		},
 		{
@@ -33,6 +40,7 @@
 			label: m.app_grocery_rollup,
 			nav: 'grocery-rollup',
 			icon: ShoppingCartIcon,
+			flag: featurePreviewFlags.groceryRollup,
 			unavailable: m.app_grocery_rollup_preview_unavailable
 		},
 		{ href: '/household', label: m.app_household, nav: 'household', icon: HomeIcon }
@@ -55,18 +63,19 @@
 			<Sidebar.GroupContent>
 				<Sidebar.Menu>
 					{#each links as link (link.href)}
+						{@const unavailable = 'flag' in link && !featureFlags.includes(link.flag)}
 						<Sidebar.MenuItem>
 							<Sidebar.MenuButton
 								isActive={activeNav === link.nav}
-								aria-disabled={'unavailable' in link || undefined}
-								tooltipContent={'unavailable' in link ? link.unavailable() : link.label()}
+								aria-disabled={unavailable || undefined}
+								tooltipContent={unavailable ? link.unavailable() : link.label()}
 								class={[
 									'h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!',
-									'unavailable' in link && 'text-muted-foreground'
+									unavailable && 'text-muted-foreground'
 								]}
 							>
 								{#snippet child({ props })}
-									{#if 'unavailable' in link}
+									{#if unavailable}
 										<span {...props}><link.icon /><span>{link.label()}</span></span>
 									{:else}
 										<a href={link.href} {...props}><link.icon /><span>{link.label()}</span></a>

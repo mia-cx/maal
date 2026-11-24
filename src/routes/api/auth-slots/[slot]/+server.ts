@@ -69,6 +69,7 @@ export const GET: RequestHandler = async (event) => {
 			firstName: result.user.firstName,
 			lastName: result.user.lastName,
 			profilePictureUrl: result.user.profilePictureUrl,
+			featureFlags: result.featureFlags ?? [],
 			verifiedAt: now,
 			households,
 			...(proof

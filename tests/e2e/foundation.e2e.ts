@@ -33,9 +33,12 @@ test('shows the public prototype landing page and links to the legal policies', 
 	await expect(page.getByRole('heading', { name: 'Privacy Policy' })).toBeVisible();
 });
 
-test('keeps previews unavailable and opens signed-out onboarding', async ({ page, request }) => {
-	expect((await request.get('/pantry')).status()).toBe(404);
-	expect((await request.get('/groceries')).status()).toBe(404);
+test('keeps previews unavailable and opens signed-out onboarding', async ({ page }) => {
+	for (const path of ['/pantry', '/groceries']) {
+		await page.goto(path);
+		await expect(page.getByRole('heading', { name: '404' })).toBeVisible();
+		await expect(page.getByText('Feature not available.')).toBeVisible();
+	}
 	await page.goto('/onboarding');
 	await expect(page).toHaveTitle('Set up household · Maal');
 	await expect(page.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
