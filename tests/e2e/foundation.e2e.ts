@@ -44,6 +44,16 @@ test('keeps the public legal policy index and privacy page available', async ({ 
 	await expect(page.getByRole('heading', { name: 'Privacy Policy' })).toBeVisible();
 });
 
+test('links from legal pages to the live pricing section', async ({ page }) => {
+	await page.goto('/legal');
+	await expect(page.locator('a[href$="#features"], a[href$="#how-it-works"]')).toHaveCount(0);
+	await page.getByRole('contentinfo').getByRole('link', { name: 'Pricing' }).click();
+	await expect(page).toHaveURL(new URL('/#pricing', page.url()).href);
+	await expect(
+		page.getByRole('heading', { name: 'Free forever locally, pay for sync' })
+	).toBeInViewport();
+});
+
 test('keeps previews unavailable and opens signed-out onboarding', async ({ page }) => {
 	for (const path of ['/pantry', '/groceries']) {
 		await page.goto(path);

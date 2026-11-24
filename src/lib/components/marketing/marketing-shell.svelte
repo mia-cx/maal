@@ -31,8 +31,6 @@
 			{/snippet}
 			{#snippet actions()}
 				<nav class="hidden items-center gap-6 text-xs font-medium text-muted-foreground md:flex">
-					<Anchor href={resolve('/#features')} showIcon={false}>Features</Anchor>
-					<Anchor href={resolve('/#how-it-works')} showIcon={false}>How it Works</Anchor>
 					<Anchor href={resolve('/#pricing')} showIcon={false}>Pricing</Anchor>
 				</nav>
 				<Button
