@@ -5,6 +5,7 @@ import { uuidv7 } from 'uuidv7';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import {
+	createRemoteHousehold,
 	createHouseholdInvite,
 	leaveRemoteHousehold,
 	refreshRemoteHousehold,
@@ -15,6 +16,8 @@ import {
 import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/index.js';
 import { listHouseholdsForProfile } from '$lib/client/local/households.js';
 import { collectPortableArchive } from '$lib/client/portability/archive.js';
+import { resolveLocalHouseholdSyncCapability } from '$lib/client/sync/household-capability.js';
+import { projectBillingCapability } from '$lib/domain/billing/capability.js';
 import type {
 	HouseholdAdministrationProjection,
 	HouseholdMemberIdentity
@@ -96,7 +99,8 @@ const identity = (workosUserId: string, displayName: string): HouseholdMemberIde
 });
 
 const seed = async () => {
-	const db = await openMaalDatabase(`household-admin-${crypto.randomUUID()}`);
+	const environment = `household-admin-${crypto.randomUUID()}`;
+	const db = await openMaalDatabase(environment);
 	database = db;
 	const alice = profile('user_alice', 'Alice Janssen');
 	const family = household('org_family', 'Canal kitchen');
@@ -129,7 +133,7 @@ const seed = async () => {
 		],
 		invites: []
 	};
-	return { db, alice, family, aliceMembership, bobMembership, projection };
+	return { db, environment, alice, family, aliceMembership, bobMembership, projection };
 };
 
 afterEach(async () => {
@@ -141,6 +145,56 @@ afterEach(async () => {
 });
 
 describe('household administration Dexie projection', () => {
+	test('keeps a started trial sync-enabled across restart when billing status is unavailable', async () => {
+		const { db, environment, alice, family, projection } = await seed();
+		const trialCapability = projectBillingCapability(
+			{
+				householdId: family.householdId,
+				status: 'trialing',
+				subscriberUserId: alice.workosUserId,
+				stripePriceId: 'price_monthly',
+				currentPeriodEnd: '2026-09-22T08:00:00.000Z',
+				cancelAtPeriodEnd: false,
+				interruptionStartedAt: null,
+				graceUntil: null
+			},
+			timestamp
+		);
+		await expect(
+			createRemoteHousehold(
+				db,
+				alice.profileId,
+				{
+					name: family.name,
+					locale: family.locale,
+					timezone: family.timezone,
+					idempotencyKey: 'start-trial',
+					startTrial: true
+				},
+				async (_input, init) =>
+					init?.method === 'POST'
+						? Response.json({
+								schemaVersion: 1,
+								payload: { ...projection, trialStarted: true, trialCapability }
+							})
+						: new Response(null, { status: 503 })
+			)
+		).resolves.toEqual({ householdId: family.householdId, trialStarted: true });
+		db.close();
+		database = await openMaalDatabase(environment);
+		await expect(database.billingCapabilities.get(family.householdId)).resolves.toEqual(
+			trialCapability
+		);
+		await expect(
+			resolveLocalHouseholdSyncCapability(
+				database,
+				alice.workosUserId,
+				family.householdId,
+				new Date(timestamp)
+			)
+		).resolves.toMatchObject({ enabled: true });
+	});
+
 	test('refreshes one household and leaves it detached without replacing another profile or content', async () => {
 		database = await openMaalDatabase(`household-admin-${crypto.randomUUID()}`);
 		const alice = profile('user_alice', 'Alice Janssen');

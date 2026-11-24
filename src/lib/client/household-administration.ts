@@ -10,6 +10,7 @@ import {
 	HouseholdMemberRemovalResponseSchema,
 	HouseholdMembershipResponseSchema,
 	type HouseholdAdministrationProjection,
+	type HouseholdCreationProjection,
 	CreateHouseholdInviteInputSchema,
 	createInviteCode,
 	type CreateHouseholdInviteInput
@@ -151,7 +152,7 @@ const administrationState = (database: MaalDatabase, householdId: string): Promi
 const commitHouseholdProjection = async (
 	database: MaalDatabase,
 	profileId: string,
-	projection: HouseholdAdministrationProjection,
+	projection: HouseholdCreationProjection,
 	selectHousehold: boolean,
 	expectedState?: string
 ): Promise<void> => {
@@ -166,6 +167,7 @@ const commitHouseholdProjection = async (
 			database.outbox,
 			database.authSlots,
 			database.syncScopes,
+			database.billingCapabilities,
 			...departureStores(database)
 		],
 		async () => {
@@ -208,6 +210,9 @@ const commitHouseholdProjection = async (
 						}
 					: projection.household;
 			await database.households.put(household);
+			if (projection.trialCapability) {
+				await database.billingCapabilities.put(projection.trialCapability);
+			}
 			const projectedByUser = new Map(
 				projection.members.map(({ membership }) => [membership.workosUserId, membership])
 			);
@@ -278,7 +283,7 @@ const commitCreateJoinProjection = async (
 	database: MaalDatabase,
 	profileId: string,
 	projection:
-		| HouseholdAdministrationProjection
+		| HouseholdCreationProjection
 		| { household: HouseholdAdministrationProjection['household']; membership: Membership },
 	selectHousehold: boolean
 ): Promise<void> => {

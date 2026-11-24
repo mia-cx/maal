@@ -1,15 +1,19 @@
 import type Stripe from 'stripe';
 
+import { projectBillingCapability } from '$lib/domain/billing/capability.js';
+import type { BillingCapability } from '$lib/domain/billing/contracts.js';
+
 import { TrialUnavailableError } from './errors.js';
 import { listMaalPrices, requireMaalPrice } from './pricing.js';
-import type { BillingRepository } from './repository.js';
+import type { BillingRepository, SubscriptionProjectionWrite } from './repository.js';
 import { configuredTrialDays, createStripeClient, stripeProductId } from './stripe.js';
+import { deletionAllowsProjectedSubscription } from './subscription-identity.js';
 import { assertTrialAvailable, projectionFromStripeSubscription } from './subscriptions.js';
 
 export const startConfiguredMaalTrial = (
 	environment: unknown,
 	input: Omit<Parameters<typeof startMaalTrial>[0], 'stripe' | 'productId' | 'trialDays'>
-): Promise<void> =>
+): Promise<SubscriptionProjectionWrite> =>
 	startMaalTrial({
 		...input,
 		stripe: createStripeClient(environment),
@@ -20,19 +24,25 @@ export const startConfiguredMaalTrial = (
 export const attemptOnboardingTrial = async (
 	environment: unknown,
 	input: Parameters<typeof startConfiguredMaalTrial>[1]
-): Promise<boolean> => {
-	const { repository, workosUserId, householdId } = input;
+): Promise<BillingCapability | null> => {
+	const { repository, workosUserId, householdId, now } = input;
 	try {
 		const availability = await repository.trialClaimAvailability(workosUserId, householdId);
 		if (availability !== 'available') {
-			const subscription = await repository.subscription(householdId);
-			return subscription?.status === 'trialing' && subscription.subscriberUserId === workosUserId;
+			const [subscription, deletion] = await Promise.all([
+				repository.subscription(householdId),
+				repository.deletionRequest(householdId)
+			]);
+			return subscription?.status === 'trialing' &&
+				subscription.subscriberUserId === workosUserId &&
+				deletionAllowsProjectedSubscription(deletion, subscription)
+				? projectBillingCapability(subscription, now)
+				: null;
 		}
-		await startConfiguredMaalTrial(environment, input);
-		return true;
+		return projectBillingCapability(await startConfiguredMaalTrial(environment, input), now);
 	} catch (cause) {
 		if (!(cause instanceof TrialUnavailableError)) logOnboardingTrialFailure(cause);
-		return false;
+		return null;
 	}
 };
 
@@ -53,7 +63,7 @@ export const startMaalTrial = async (input: {
 	priceId?: string;
 	trialDays: number;
 	now: string;
-}): Promise<void> => {
+}): Promise<SubscriptionProjectionWrite> => {
 	await assertTrialAvailable(input.repository, input.workosUserId, input.householdId);
 	const price = input.priceId
 		? await requireMaalPrice(input.stripe, input.productId, input.priceId)
@@ -109,20 +119,22 @@ export const startMaalTrial = async (input: {
 			stripeSubscriptionId: subscriptionId,
 			updatedAt: input.now
 		});
+		const projection = projectionFromStripeSubscription({
+			subscription,
+			householdId: input.householdId,
+			subscriberUserId: input.workosUserId,
+			eventId: `trial:${claimId}`,
+			eventCreatedAt: input.now,
+			existing: null,
+			paidPeriodSucceeded: false,
+			reportsStatus: true
+		});
 		await input.repository.commitStartedTrial({
 			claimId,
 			startedAt: input.now,
-			projection: projectionFromStripeSubscription({
-				subscription,
-				householdId: input.householdId,
-				subscriberUserId: input.workosUserId,
-				eventId: `trial:${claimId}`,
-				eventCreatedAt: input.now,
-				existing: null,
-				paidPeriodSucceeded: false,
-				reportsStatus: true
-			})
+			projection
 		});
+		return projection;
 	} catch (cause) {
 		let subscriptionRemoved = subscriptionId === null;
 		let customerRemoved = customerId === null;

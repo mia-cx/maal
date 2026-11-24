@@ -63,9 +63,11 @@ export const HouseholdAdministrationProjectionResponseSchema = versionedContract
 export const HouseholdCreationResponseSchema = versionedContract(
 	Schema.Struct({
 		...HouseholdAdministrationProjectionSchema.fields,
-		trialStarted: Schema.optional(Schema.Boolean)
+		trialStarted: Schema.optional(Schema.Boolean),
+		trialCapability: Schema.optional(BillingCapabilitySchema)
 	})
 );
+export type HouseholdCreationProjection = typeof HouseholdCreationResponseSchema.Type.payload;
 export const HouseholdOnboardingEligibilityResponseSchema = versionedContract(
 	Schema.Struct({ canStartTrial: Schema.Boolean })
 );

@@ -37,7 +37,7 @@ test('an eligible household survives a trial failure at the Stripe configuration
 	await expect(repository.trialClaimAvailability(actor.workosUserId)).resolves.toBe('available');
 	await expect(
 		attemptOnboardingTrial(noStripe, { repository, ...actor, householdId: 'org_first', now })
-	).resolves.toBe(false);
+	).resolves.toBeNull();
 	await expect(repository.subscription('org_first')).resolves.toBeNull();
 	await expect(repository.trialClaimAvailability(actor.workosUserId)).resolves.toBe('available');
 	await expect(
@@ -81,7 +81,7 @@ test('a projected trial prevents new claims by its user or household and survive
 	await expect(repository.trialClaimAvailability('user_bob')).resolves.toBe('available');
 	await expect(
 		attemptOnboardingTrial(noStripe, { repository, ...actor, householdId: 'org_second', now })
-	).resolves.toBe(false);
+	).resolves.toBeNull();
 	await expect(
 		attemptOnboardingTrial(noStripe, {
 			repository,
@@ -90,9 +90,16 @@ test('a projected trial prevents new claims by its user or household and survive
 			householdId: 'org_first',
 			now
 		})
-	).resolves.toBe(false);
+	).resolves.toBeNull();
 	await expect(
 		attemptOnboardingTrial(noStripe, { repository, ...actor, householdId: 'org_first', now })
-	).resolves.toBe(true);
+	).resolves.toMatchObject({
+		householdId: 'org_first',
+		state: 'enabled',
+		stripeStatus: 'trialing',
+		subscriberUserId: actor.workosUserId,
+		stripePriceId: 'price_fixture',
+		validUntil: '2026-12-24T06:00:00.000Z'
+	});
 	await expect(repository.subscription('org_second')).resolves.toBeNull();
 });

@@ -176,20 +176,21 @@ export const handleHouseholdAdministrationRequest = async (
 				const projection = await service.createHousehold({ actor, request, idempotencyKey });
 				if (!request.startTrial) return success(projection);
 				const householdId = projection.household.householdId;
-				let trialStarted = false;
 				try {
 					const billingActor = await requireBillingActor(event, householdId);
-					trialStarted = await attemptOnboardingTrial(event.platform?.env, {
+					const trialCapability = await attemptOnboardingTrial(event.platform?.env, {
 						repository: new BillingRepository(database),
 						householdId,
 						workosUserId: billingActor.workosUserId,
 						email: billingActor.email,
 						now: service.now()
 					});
+					if (trialCapability)
+						return success({ ...projection, trialStarted: true, trialCapability });
 				} catch (cause) {
 					logOnboardingTrialFailure(cause);
 				}
-				return success({ ...projection, trialStarted });
+				return success({ ...projection, trialStarted: false });
 			}
 			case 'joinHousehold': {
 				const request = decode(JoinRemoteHouseholdRequestSchema, await readBody(event.request));
