@@ -25,6 +25,18 @@ test('enters the local-first meal plan through the shared shell', async ({ page 
 	);
 });
 
+test('links all legal policies from the homepage footer', async ({ page }) => {
+	await page.goto('/');
+	const footer = page.getByRole('contentinfo');
+	for (const [name, path] of [
+		['Privacy Policy', '/legal/privacy'],
+		['Terms of Use', '/legal/terms'],
+		['Cookie Policy', '/legal/cookies']
+	]) {
+		await expect(footer.getByRole('link', { name })).toHaveAttribute('href', path);
+	}
+});
+
 test('keeps the public legal policy index and privacy page available', async ({ page }) => {
 	await page.goto('/legal');
 	await page.getByRole('listitem').getByRole('link', { name: 'Privacy Policy' }).click();

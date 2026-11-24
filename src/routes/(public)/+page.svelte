@@ -124,6 +124,11 @@
 
 	<footer class="frame footer">
 		<p>Maal</p>
+		<nav aria-label="Legal">
+			<a href={resolve('/legal/privacy')}>Privacy Policy</a>
+			<a href={resolve('/legal/terms')}>Terms of Use</a>
+			<a href={resolve('/legal/cookies')}>Cookie Policy</a>
+		</nav>
 		<nav aria-label={m.landing_languages()}>
 			{#each alternates as { locale: language, href } (language)}
 				{#if language !== 'x-default'}
