@@ -15,7 +15,8 @@ import { BillingCapabilitySchema } from '$lib/domain/billing/contracts.js';
 export const CreateRemoteHouseholdRequestSchema = Schema.Struct({
 	name: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(120)),
 	locale: LocaleSchema,
-	timezone: Schema.NullOr(TimeZoneSchema)
+	timezone: Schema.NullOr(TimeZoneSchema),
+	startTrial: Schema.optional(Schema.Literal(true))
 });
 export type CreateRemoteHouseholdRequest = typeof CreateRemoteHouseholdRequestSchema.Type;
 
@@ -58,6 +59,17 @@ export type HouseholdAdministrationProjection = typeof HouseholdAdministrationPr
 
 export const HouseholdAdministrationProjectionResponseSchema = versionedContract(
 	HouseholdAdministrationProjectionSchema
+);
+export const HouseholdCreationResponseSchema = versionedContract(
+	Schema.Struct({
+		...HouseholdAdministrationProjectionSchema.fields,
+		trialStarted: Schema.optional(Schema.Boolean),
+		trialCapability: Schema.optional(BillingCapabilitySchema)
+	})
+);
+export type HouseholdCreationProjection = typeof HouseholdCreationResponseSchema.Type.payload;
+export const HouseholdOnboardingEligibilityResponseSchema = versionedContract(
+	Schema.Struct({ canStartTrial: Schema.Boolean })
 );
 export const HouseholdDiscoveryEntrySchema = Schema.Struct({
 	household: HouseholdSchema,

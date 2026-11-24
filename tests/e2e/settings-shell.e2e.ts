@@ -159,10 +159,18 @@ test('opens the standalone onboarding form from the retained profile and househo
 	await expect(page.getByRole('textbox', { name: 'Household name' })).toHaveValue(
 		"Alice de Vries's kitchen"
 	);
+	await expect(page.getByRole('button', { name: 'Create household', exact: true })).toBeEnabled();
 	await expect(page.getByRole('link', { name: 'Back to meal plan' })).toHaveAttribute(
 		'href',
 		'/plan'
 	);
+
+	const creation = page.waitForRequest(
+		(request) =>
+			request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/households')
+	);
+	await page.getByRole('button', { name: 'Create household', exact: true }).click();
+	expect((await creation).postDataJSON()).not.toHaveProperty('startTrial');
 });
 
 test('opens local account and MCP settings in the shared shell without charging free content use', async ({
