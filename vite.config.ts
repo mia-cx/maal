@@ -10,6 +10,7 @@ import { sveltekit } from '@sveltejs/kit/vite';
 // unit/browser pool so runner contention cannot consume their assertion budget.
 const d1TestFiles = [
 	'tests/unit/*-d1.spec.ts',
+	'tests/unit/d1-read-cost.spec.ts',
 	'tests/unit/d1-schema-baseline.spec.ts',
 	'tests/unit/billing-live-membership.spec.ts',
 	'tests/unit/billing-trial-maintenance.spec.ts',

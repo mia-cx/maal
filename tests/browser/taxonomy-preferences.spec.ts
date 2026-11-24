@@ -1,7 +1,7 @@
 import Dexie from 'dexie';
 import { uuidv7 } from 'uuidv7';
 import { afterEach, expect, test } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 
 import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.js';
@@ -32,6 +32,24 @@ test('saves the approved household unit controls directly to Dexie', async () =>
 	await expect.element(screen.getByRole('heading', { name: 'Aliases & overrides' })).toBeVisible();
 	await screen.getByTestId('weight-unit').getByRole('button').click();
 	await page.getByText('lb', { exact: true }).click();
+	await expect.element(screen.getByRole('button', { name: 'Save overrides' })).toBeEnabled();
+
+	const poundsAlias = await database.unitAliases
+		.filter(
+			(alias) => alias.unitId === 'pounds' && alias.alias === 'lb' && alias.locale === 'en-US'
+		)
+		.first();
+	expect(poundsAlias).toBeDefined();
+	await database.unitAliases.put({
+		...poundsAlias!,
+		id: uuidv7(),
+		alias: 'pounds (updated)',
+		defaultForLocale: false
+	});
+	await screen.getByTestId('weight-unit').getByRole('button').click();
+	await page.getByPlaceholder('Search units').fill('pounds (updated)');
+	await expect.element(page.getByRole('option', { name: 'pounds (updated)' })).toBeVisible();
+	await userEvent.keyboard('{Escape}');
 	await screen.getByRole('button', { name: 'Save overrides' }).click();
 
 	await expect.poll(async () => database.householdUnitDisplayPreferences.count()).toBe(3);
