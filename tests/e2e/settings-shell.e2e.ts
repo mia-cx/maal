@@ -159,6 +159,14 @@ test('opens the standalone onboarding form from the retained profile and househo
 	await expect(page.getByRole('textbox', { name: 'Household name' })).toHaveValue(
 		"Alice de Vries's kitchen"
 	);
+	const inviteCode = page.getByPlaceholder('Paste an invite code', { exact: true });
+	await expect(inviteCode).toHaveCSS('text-transform', 'none');
+	await expect(inviteCode).toHaveCSS(
+		'font-family',
+		await page.getByRole('textbox', { name: 'Household name' }).evaluate((input) => {
+			return getComputedStyle(input).fontFamily;
+		})
+	);
 	await expect(page.getByRole('button', { name: 'Create household', exact: true })).toBeEnabled();
 	await expect(page.getByRole('link', { name: 'Back to meal plan' })).toHaveAttribute(
 		'href',
