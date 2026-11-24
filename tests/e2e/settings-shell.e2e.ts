@@ -164,6 +164,13 @@ test('opens the standalone onboarding form from the retained profile and househo
 		'href',
 		'/plan'
 	);
+
+	const creation = page.waitForRequest(
+		(request) =>
+			request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/households')
+	);
+	await page.getByRole('button', { name: 'Create household', exact: true }).click();
+	expect((await creation).postDataJSON()).not.toHaveProperty('startTrial');
 });
 
 test('opens local account and MCP settings in the shared shell without charging free content use', async ({

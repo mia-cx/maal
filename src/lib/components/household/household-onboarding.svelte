@@ -55,7 +55,8 @@
 	const createHousehold = async (event: SubmitEvent) => {
 		event.preventDefault();
 		const name = householdName.trim();
-		if (!name || busy) return;
+		if (!name || busy || (standalone && trialEligible === undefined)) return;
+		const startTrial = standalone && trialEligible === true;
 		if (createIntent?.name !== name) createIntent = { name, idempotencyKey: uuidv7() };
 		const { idempotencyKey } = createIntent;
 		busy = true;
@@ -69,7 +70,7 @@
 				locale: profile.locale,
 				timezone: profile.timezone,
 				idempotencyKey,
-				...(standalone ? { startTrial: true } : {})
+				...(startTrial ? { startTrial: true } : {})
 			});
 		} catch {
 			error = m.household_could_not_create_try_again();
