@@ -157,7 +157,7 @@
 				<Input
 					bind:value={inviteCode}
 					placeholder={m.household_paste_an_invite_code()}
-					class="h-9 font-mono uppercase"
+					class="h-9"
 				/>
 			</label>
 			<Button

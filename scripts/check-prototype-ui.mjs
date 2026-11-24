@@ -26,9 +26,11 @@ const requiredRewriteSurfaces = [
 ];
 // The local-first plan e2e suite verifies the displayed cook-time default without a
 // write on unrelated edits, and drop ordering while the drag preview is rendered.
+// The settings-shell e2e suite verifies the standalone onboarding invite-code styling.
 const engineAdaptedInteractions = [
 	'src/lib/components/dashboard/meal-preview-dialog.svelte',
-	'src/lib/components/dashboard/schedule-dnd.ts'
+	'src/lib/components/dashboard/schedule-dnd.ts',
+	'src/lib/components/household/household-onboarding.svelte'
 ];
 
 const failures = [];
