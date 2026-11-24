@@ -1,0 +1,32 @@
+<script module lang="ts">
+	export const meta = {
+		title: 'Terms of Use',
+		description: 'Terms for using Maal household meal planning services.',
+		effectiveDate: '2026-06-12',
+		summary: 'Initial Maal terms of use.'
+	};
+</script>
+
+## Using Maal
+
+Maal is a household meal planning and recipe management service. By using Maal, you agree to use it lawfully, keep your account credentials secure, and only access households and data you are authorized to access.
+
+## Households and invites
+
+Household managers are responsible for the members they invite, invite-link sharing, and settings for their household. If you join a household by invite, members with appropriate permissions may be able to see and manage household data you contribute.
+
+## Subscriptions
+
+Paid access is managed per household through Stripe. Subscription changes, cancellations, and billing portal access may be limited to household managers or the relevant billing customer.
+
+## User content
+
+You are responsible for recipes, notes, meal plans, invite links, MCP keys, and other content you add to Maal. Do not upload content that you do not have the right to use or share.
+
+## Service availability
+
+Maal may change, pause, or discontinue features. We try to keep the service reliable, but we do not guarantee uninterrupted availability or that every recipe/import/export will work for every source or use case.
+
+## Contact
+
+Questions about these terms can be sent to [maal@mia.cx](mailto:maal@mia.cx).

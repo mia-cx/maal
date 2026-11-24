@@ -1,0 +1,32 @@
+<script module lang="ts">
+	export const meta = {
+		title: 'Cookie Policy',
+		description: 'How Maal uses cookies and similar storage.',
+		effectiveDate: '2026-06-12',
+		summary: 'Initial Maal cookie policy.'
+	};
+</script>
+
+## Overview
+
+Maal uses cookies and similar browser storage to provide authentication, household selection, security, and billing flows.
+
+## Essential cookies
+
+Essential cookies keep you signed in, remember the active household, protect sessions, and route authentication callbacks. Maal cannot provide the core service without these cookies.
+
+## Third-party services
+
+WorkOS may set or rely on cookies for authentication. Stripe may use cookies or similar technologies for checkout, billing portal, fraud prevention, and payment security.
+
+## Analytics and marketing cookies
+
+Maal does not currently use non-essential analytics or marketing cookies. If that changes, this policy will be updated and consent controls will be added where required.
+
+## Managing cookies
+
+You can control cookies through your browser settings. Blocking essential cookies may prevent sign-in, household switching, subscription checkout, or other core Maal features from working.
+
+## Contact
+
+For cookie or privacy questions, email [data-governance@maal.mia.cx](mailto:data-governance@maal.mia.cx).

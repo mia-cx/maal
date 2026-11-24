@@ -55,7 +55,8 @@
 	let startEatingTime = $state('');
 	let titleDraft = $state('');
 	let descriptionDraft = $state('');
-	let cookTimeDraft = $state('');
+	let cookTimeDraft = $state('30');
+	let cookTimeEdited = $state(false);
 	let servingsDraft = $state('1');
 	let plannedCookDraft = $state('');
 	let scheduleEditorOpen = $state(false);
@@ -225,11 +226,13 @@
 			title: customMeal ? titleDraft.trim() || 'New meal' : meal.title,
 			description: customMeal ? descriptionDraft.trim() : meal.description,
 			cookTimeMinutes:
-				customMeal && cookTimeDraft.trim() === ''
-					? undefined
-					: customMeal && Number.isFinite(cookTime)
-						? Math.max(0, Math.round(cookTime))
-						: meal.cookTimeMinutes,
+				customMeal && cookTimeEdited
+					? cookTimeDraft.trim() === ''
+						? undefined
+						: Number.isFinite(cookTime)
+							? Math.max(0, Math.round(cookTime))
+							: meal.cookTimeMinutes
+					: meal.cookTimeMinutes,
 			servingsPlanned: normalizedServings(),
 			plannedCookWorkosUserId: plannedCookDraft || undefined
 		};
@@ -264,7 +267,8 @@
 		startCookingTime = meal?.time ? timeOffset(meal.time, -adjustedCookTimeMinutes) : '';
 		titleDraft = meal?.title ?? '';
 		descriptionDraft = meal?.description ?? '';
-		cookTimeDraft = String(meal?.cookTimeMinutes ?? '');
+		cookTimeDraft = String(meal?.cookTimeMinutes ?? fallbackDurationMinutes);
+		cookTimeEdited = false;
 		servingsDraft = String(Math.max(1, Math.round(meal?.servingsPlanned ?? 1)));
 		plannedCookDraft = meal?.plannedCookWorkosUserId ?? '';
 	};
@@ -419,6 +423,7 @@
 													type="text"
 													inputmode="numeric"
 													bind:value={cookTimeDraft}
+													oninput={() => (cookTimeEdited = true)}
 													class="h-9 px-3 tabular-nums"
 												/>
 											</label>

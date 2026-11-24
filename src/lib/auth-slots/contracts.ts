@@ -29,6 +29,7 @@ export const AuthenticatedAuthSlotMetadata = Schema.Struct({
 	firstName: Schema.NullOr(Schema.String),
 	lastName: Schema.NullOr(Schema.String),
 	profilePictureUrl: Schema.NullOr(Schema.String),
+	featureFlags: Schema.optional(Schema.Array(Schema.String)),
 	verifiedAt: UtcInstantSchema,
 	freshAuthentication: Schema.optional(Schema.Literal(true)),
 	pinResetNonce: Schema.optional(AuthSlotId),

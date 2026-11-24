@@ -48,7 +48,7 @@
 		);
 
 	let nextOverrideRowId = 0;
-	let appliedView = $state<HouseholdTaxonomyEditorView | null>(null);
+	let appliedRows = '';
 	let preferredMassUnit = $state('');
 	let preferredVolumeUnit = $state('');
 	let preferredTemperatureUnit = $state('');
@@ -56,40 +56,64 @@
 	let ingredientOverrideRows = $state<IngredientOverrideRow[]>([]);
 	let initialValues = $state('');
 
-	const currentValues = () =>
+	const serializeValues = (
+		mass: string,
+		volume: string,
+		temperature: string,
+		units: readonly UnitOverrideRow[],
+		ingredients: readonly IngredientOverrideRow[]
+	) =>
 		JSON.stringify({
+			mass,
+			volume,
+			temperature,
+			units: serializeUnitRows(units),
+			ingredients: serializeIngredientRows(ingredients)
+		});
+	const currentValues = () =>
+		serializeValues(
 			preferredMassUnit,
 			preferredVolumeUnit,
 			preferredTemperatureUnit,
-			unitOverrides: serializeUnitRows(unitOverrideRows),
-			ingredientOverrides: serializeIngredientRows(ingredientOverrideRows)
-		});
+			unitOverrideRows,
+			ingredientOverrideRows
+		);
+	const changed = $derived(currentValues() !== initialValues);
 	const applyView = (nextView: HouseholdTaxonomyEditorView) => {
-		preferredMassUnit =
-			nextView.displayOverrideRows.preferredMassUnit ??
-			nextView.taxonomyOptions.weightPresetOptions[0]?.value ??
-			'';
-		preferredVolumeUnit =
-			nextView.displayOverrideRows.preferredVolumeUnit ??
-			nextView.taxonomyOptions.volumePresetOptions[0]?.value ??
-			'';
-		preferredTemperatureUnit =
-			nextView.displayOverrideRows.preferredTemperatureUnit ??
-			nextView.taxonomyOptions.temperaturePresetOptions[0]?.value ??
-			'';
-		unitOverrideRows = cloneUnitRows(nextView.displayOverrideRows.unitOverrides);
-		ingredientOverrideRows = cloneIngredientRows(nextView.displayOverrideRows.ingredientOverrides);
-		initialValues = currentValues();
+		const { displayOverrideRows: rows, taxonomyOptions: options } = nextView;
+		const persisted = serializeValues(
+			rows.preferredMassUnit ?? '',
+			rows.preferredVolumeUnit ?? '',
+			rows.preferredTemperatureUnit ?? '',
+			rows.unitOverrides,
+			rows.ingredientOverrides
+		);
+		if (persisted === appliedRows && changed) return;
+		appliedRows = persisted;
+		const mass = rows.preferredMassUnit ?? options.weightPresetOptions[0]?.value ?? '';
+		const volume = rows.preferredVolumeUnit ?? options.volumePresetOptions[0]?.value ?? '';
+		const temperature =
+			rows.preferredTemperatureUnit ?? options.temperaturePresetOptions[0]?.value ?? '';
+		const incoming = serializeValues(
+			mass,
+			volume,
+			temperature,
+			rows.unitOverrides,
+			rows.ingredientOverrides
+		);
+		if (incoming === initialValues) return;
+		preferredMassUnit = mass;
+		preferredVolumeUnit = volume;
+		preferredTemperatureUnit = temperature;
+		unitOverrideRows = cloneUnitRows(rows.unitOverrides);
+		ingredientOverrideRows = cloneIngredientRows(rows.ingredientOverrides);
+		initialValues = incoming;
 	};
 
 	$effect(() => {
-		if (view !== appliedView && !saving) {
-			appliedView = view;
-			applyView(view);
-		}
+		if (!saving) applyView(view);
 	});
 
-	const changed = $derived(currentValues() !== initialValues);
 	const fieldDisabled = $derived(!canManageHousehold || saving);
 	const addUnitOverrideRow = () => {
 		unitOverrideRows = [

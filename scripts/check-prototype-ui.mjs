@@ -7,8 +7,6 @@ const exactPrototypeFiles = [
 	'src/lib/components/dashboard/schedule-header.svelte',
 	'src/lib/components/dashboard/multi-day-schedule.svelte',
 	'src/lib/components/dashboard/meal-check-in-dialog.svelte',
-	'src/lib/components/dashboard/meal-preview-dialog.svelte',
-	'src/lib/components/dashboard/schedule-dnd.ts',
 	'src/lib/components/dashboard/schedule-keyboard.ts',
 	'src/lib/components/dashboard/schedule-interactions.ts',
 	'src/lib/components/dashboard/schedule-meal-pool.svelte',
@@ -26,6 +24,12 @@ const requiredRewriteSurfaces = [
 	'src/lib/components/menu/my-menu-dashboard.svelte',
 	'src/lib/components/local-settings-dialog.svelte'
 ];
+// The local-first plan e2e suite verifies the displayed cook-time default without a
+// write on unrelated edits, and drop ordering while the drag preview is rendered.
+const engineAdaptedInteractions = [
+	'src/lib/components/dashboard/meal-preview-dialog.svelte',
+	'src/lib/components/dashboard/schedule-dnd.ts'
+];
 
 const failures = [];
 for (const file of exactPrototypeFiles) {
@@ -33,7 +37,7 @@ for (const file of exactPrototypeFiles) {
 	const current = readFileSync(file);
 	if (!prototype.equals(current)) failures.push(`${file} differs from the prototype authority`);
 }
-for (const file of requiredRewriteSurfaces) {
+for (const file of [...requiredRewriteSurfaces, ...engineAdaptedInteractions]) {
 	if (!existsSync(file)) failures.push(`${file} is missing from the rewrite`);
 }
 
@@ -43,6 +47,6 @@ if (failures.length) {
 	process.exitCode = 1;
 } else {
 	console.log(
-		`Prototype UI proof passed: ${exactPrototypeFiles.length} interaction/UI files match ${prototypeRef} exactly; ${requiredRewriteSurfaces.length} rewrite surfaces are present.`
+		`Prototype UI proof passed: ${exactPrototypeFiles.length} interaction/UI files match ${prototypeRef} exactly; ${requiredRewriteSurfaces.length} rewrite surfaces and ${engineAdaptedInteractions.length} e2e-covered adaptations are present.`
 	);
 }

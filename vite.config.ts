@@ -1,6 +1,7 @@
 import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import tailwindcss from '@tailwindcss/vite';
 import { playwright } from '@vitest/browser-playwright';
+import { mdsvex } from 'mdsvex';
 import { defineConfig } from 'vitest/config';
 import adapter from '@sveltejs/adapter-cloudflare';
 import { sveltekit } from '@sveltejs/kit/vite';
@@ -9,6 +10,7 @@ import { sveltekit } from '@sveltejs/kit/vite';
 // unit/browser pool so runner contention cannot consume their assertion budget.
 const d1TestFiles = [
 	'tests/unit/*-d1.spec.ts',
+	'tests/unit/d1-read-cost.spec.ts',
 	'tests/unit/d1-schema-baseline.spec.ts',
 	'tests/unit/billing-live-membership.spec.ts',
 	'tests/unit/billing-trial-maintenance.spec.ts',
@@ -25,6 +27,8 @@ export default defineConfig({
 	plugins: [
 		tailwindcss(),
 		sveltekit({
+			extensions: ['.svelte', '.svx'],
+			preprocess: mdsvex({ extensions: ['.svx'] }),
 			compilerOptions: {
 				// Force runes mode for the project, except for libraries. Can be removed in svelte 6.
 				runes: ({ filename }) =>
