@@ -703,7 +703,8 @@ test.describe('meal sheet', () => {
 
 		const otherTab = await context.newPage();
 		await otherTab.goto('/household');
-		await otherTab.getByLabel('Locale', { exact: true }).fill('nl-NL');
+		await otherTab.locator('label', { hasText: 'Locale' }).getByRole('button').click();
+		await otherTab.getByRole('option', { name: 'Dutch (Netherlands)', exact: true }).click();
 		await otherTab.getByRole('button', { name: 'Save household', exact: true }).click();
 		await expect.poll(async () => (await readStore(page, 'households'))[0]!.locale).toBe('nl-NL');
 		await page.bringToFront();
