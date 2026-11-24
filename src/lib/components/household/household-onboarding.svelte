@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import * as m from '$lib/paraglide/messages.js';
-	import { untrack } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { uuidv7 } from 'uuidv7';
 
 	import {
 		createRemoteHousehold,
+		fetchHouseholdOnboardingEligibility,
 		joinRemoteHousehold
 	} from '$lib/client/household-administration.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
@@ -20,6 +21,7 @@
 		inviteCode: initialInviteCode = '',
 		standalone = false,
 		hasHouseholds = false,
+		busy = $bindable(false),
 		oncomplete
 	}: {
 		database: MaalDatabase;
@@ -27,17 +29,28 @@
 		defaultHouseholdName?: string;
 		standalone?: boolean;
 		hasHouseholds?: boolean;
+		busy?: boolean;
 		/** Prefills the join field, e.g. from a shared `/invite/<code>` link. */
 		inviteCode?: string;
 		/** Runs after the new or joined household is committed to Dexie and selected. */
-		oncomplete?: (householdId: string) => void | Promise<void>;
+		oncomplete?: (householdId: string, trialStarted?: boolean) => void | Promise<void>;
 	} = $props();
 	let householdName = $state(untrack(() => defaultHouseholdName));
 	let inviteCode = $state(untrack(() => initialInviteCode));
-	let busy = $state(false);
 	let error = $state<string | null>(null);
+	let trialEligible = $state<boolean | undefined>(undefined);
 	// One idempotency key per submitted name, so retrying after a lost response reuses it.
 	let createIntent: { name: string; idempotencyKey: string } | null = null;
+
+	onMount(() => {
+		if (standalone) {
+			void fetchHouseholdOnboardingEligibility(database, profileId)
+				.catch(() => false)
+				.then((eligible) => {
+					trialEligible = eligible;
+				});
+		}
+	});
 
 	const createHousehold = async (event: SubmitEvent) => {
 		event.preventDefault();
@@ -47,24 +60,31 @@
 		const { idempotencyKey } = createIntent;
 		busy = true;
 		error = null;
-		let householdId: string;
+		let created: Awaited<ReturnType<typeof createRemoteHousehold>>;
 		try {
 			const profile = await database.profiles.get(profileId);
 			if (!profile) throw new Error('profile missing');
-			({ householdId } = await createRemoteHousehold(database, profileId, {
+			created = await createRemoteHousehold(database, profileId, {
 				name,
 				locale: profile.locale,
 				timezone: profile.timezone,
-				idempotencyKey
-			}));
+				idempotencyKey,
+				...(standalone ? { startTrial: true } : {})
+			});
 		} catch {
 			error = m.household_could_not_create_try_again();
+			busy = false;
 			return;
+		}
+		createIntent = null;
+		try {
+			await oncomplete?.(
+				created.householdId,
+				standalone ? created.trialStarted === true : undefined
+			);
 		} finally {
 			busy = false;
 		}
-		createIntent = null;
-		await oncomplete?.(householdId);
 	};
 
 	const joinHousehold = async () => {
@@ -77,11 +97,14 @@
 			({ householdId } = await joinRemoteHousehold(database, profileId, code));
 		} catch {
 			error = m.household_could_not_open_invite();
+			busy = false;
 			return;
+		}
+		try {
+			await oncomplete?.(householdId);
 		} finally {
 			busy = false;
 		}
-		await oncomplete?.(householdId);
 	};
 </script>
 
@@ -115,8 +138,15 @@
 					class="h-9"
 				/>
 			</label>
-			<Button type="submit" disabled={busy || !householdName.trim()}>
-				{busy ? m.household_creating() : m.household_create()}
+			<Button
+				type="submit"
+				disabled={busy || !householdName.trim() || (standalone && trialEligible === undefined)}
+			>
+				{busy
+					? m.household_creating()
+					: trialEligible
+						? m.household_create_and_start_trial()
+						: m.household_create()}
 			</Button>
 		</form>
 

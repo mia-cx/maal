@@ -159,6 +159,7 @@ test('opens the standalone onboarding form from the retained profile and househo
 	await expect(page.getByRole('textbox', { name: 'Household name' })).toHaveValue(
 		"Alice de Vries's kitchen"
 	);
+	await expect(page.getByRole('button', { name: 'Create household', exact: true })).toBeEnabled();
 	await expect(page.getByRole('link', { name: 'Back to meal plan' })).toHaveAttribute(
 		'href',
 		'/plan'

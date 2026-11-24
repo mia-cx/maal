@@ -8,6 +8,12 @@ import {
 	UpdateRemoteHouseholdMemberRoleRequestSchema,
 	type HouseholdAdministrationErrorCode
 } from '$lib/domain/household/administration.js';
+import {
+	attemptOnboardingTrial,
+	BillingRepository,
+	logOnboardingTrialFailure,
+	requireBillingActor
+} from '$lib/server/billing/index.js';
 import { authenticateSyncSlot } from '$lib/server/sync/auth.js';
 
 import { HouseholdAdministrationError } from './errors.js';
@@ -17,6 +23,7 @@ import { HouseholdAdministrationService, type HouseholdAdministrationActor } fro
 
 export type HouseholdAdministrationOperation =
 	| 'createHousehold'
+	| 'onboardingEligibility'
 	| 'joinHousehold'
 	| 'refreshHousehold'
 	| 'createInvite'
@@ -145,6 +152,15 @@ export const handleHouseholdAdministrationRequest = async (
 		const database = event.platform?.env.DB;
 		if (!database) throw new HouseholdAdministrationError({ code: 'd1_unavailable' });
 		const actor = await (dependencies.authenticate ?? defaultAuthenticate)(event);
+		if (operation === 'onboardingEligibility') {
+			const availability = await new BillingRepository(database).trialClaimAvailability(
+				actor.workosUserId
+			);
+			return json(
+				{ schemaVersion: 1, payload: { canStartTrial: availability === 'available' } },
+				{ headers: { 'cache-control': 'private, no-store' } }
+			);
+		}
 		const service = new HouseholdAdministrationService(
 			new HouseholdAdministrationRepository(database),
 			dependencies.identity ?? createWorkOSHouseholdIdentityAdapter(event.platform?.env),
@@ -157,7 +173,23 @@ export const handleHouseholdAdministrationRequest = async (
 					throw new HouseholdAdministrationError({ code: 'idempotency_key_required' });
 				}
 				const request = decode(CreateRemoteHouseholdRequestSchema, await readBody(event.request));
-				return success(await service.createHousehold({ actor, request, idempotencyKey }));
+				const projection = await service.createHousehold({ actor, request, idempotencyKey });
+				if (!request.startTrial) return success(projection);
+				const householdId = projection.household.householdId;
+				let trialStarted = false;
+				try {
+					const billingActor = await requireBillingActor(event, householdId);
+					trialStarted = await attemptOnboardingTrial(event.platform?.env, {
+						repository: new BillingRepository(database),
+						householdId,
+						workosUserId: billingActor.workosUserId,
+						email: billingActor.email,
+						now: service.now()
+					});
+				} catch (cause) {
+					logOnboardingTrialFailure(cause);
+				}
+				return success({ ...projection, trialStarted });
 			}
 			case 'joinHousehold': {
 				const request = decode(JoinRemoteHouseholdRequestSchema, await readBody(event.request));

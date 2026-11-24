@@ -20,6 +20,7 @@
 	}>();
 	let error = $state(false);
 	let needsSignIn = $state(false);
+	let busy = $state(false);
 
 	onMount(() => {
 		const creatingAdditionalHousehold = page.url.searchParams.get('new') === '1';
@@ -30,7 +31,7 @@
 			if (await readLockedActiveProfile(database)) return { destination: 'plan' } as const;
 			const households = await listHouseholdsForProfile(database, profile.profileId);
 			if (households.length && !creatingAdditionalHousehold)
-				return { destination: 'plan' } as const;
+				return { destination: 'has-household' } as const;
 			const slot = await database.authSlots.where('profileId').equals(profile.profileId).first();
 			if (
 				(profile.authState !== 'authenticated' && profile.authState !== 'stale') ||
@@ -47,8 +48,11 @@
 		}).subscribe({
 			next: (state) => {
 				if (state.destination === 'onboarding') onboarding = state;
-				else if (state.destination === 'plan') void goto(resolve('/plan'), { replaceState: true });
-				else needsSignIn = true;
+				else if (state.destination === 'plan' || state.destination === 'has-household') {
+					if (state.destination === 'plan' || !busy) {
+						void goto(resolve('/plan'), { replaceState: true });
+					}
+				} else needsSignIn = true;
 			},
 			error: () => {
 				error = true;
@@ -68,7 +72,17 @@
 			defaultHouseholdName={onboarding.defaultHouseholdName}
 			hasHouseholds={onboarding.hasHouseholds}
 			standalone
-			oncomplete={() => goto(resolve('/plan'))}
+			bind:busy
+			oncomplete={(_, trialStarted) =>
+				goto(
+					resolve(
+						trialStarted === undefined
+							? '/plan'
+							: trialStarted
+								? '/plan?trial=started'
+								: '/subscribe'
+					)
+				)}
 		/>
 	{/key}
 {:else if error}

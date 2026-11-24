@@ -3,6 +3,8 @@ import { Data, Schema } from 'effect';
 import {
 	HouseholdAdministrationErrorCodeSchema,
 	HouseholdAdministrationProjectionResponseSchema,
+	HouseholdCreationResponseSchema,
+	HouseholdOnboardingEligibilityResponseSchema,
 	type HouseholdAdministrationErrorCode,
 	HouseholdInviteResponseSchema,
 	HouseholdMemberRemovalResponseSchema,
@@ -32,6 +34,10 @@ const LegacyHouseholdMembershipResponseSchema = Schema.Struct({
 });
 const CreateJoinResponseSchema = Schema.Union(
 	HouseholdAdministrationProjectionResponseSchema,
+	LegacyHouseholdMembershipResponseSchema
+);
+const CreateResponseSchema = Schema.Union(
+	HouseholdCreationResponseSchema,
 	LegacyHouseholdMembershipResponseSchema
 );
 
@@ -314,9 +320,15 @@ export const createRemoteHousehold = async (
 	{
 		idempotencyKey,
 		...input
-	}: { name: string; locale: string; timezone: string | null; idempotencyKey: string },
+	}: {
+		name: string;
+		locale: string;
+		timezone: string | null;
+		idempotencyKey: string;
+		startTrial?: true;
+	},
 	fetcher: Fetch = globalThis.fetch
-): Promise<{ householdId: string }> => {
+): Promise<{ householdId: string; trialStarted?: boolean }> => {
 	const slot = await profileSlot(database, profileId);
 	const response = await requestJson(
 		fetcher,
@@ -327,12 +339,28 @@ export const createRemoteHousehold = async (
 			headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
 			body: JSON.stringify(input)
 		},
-		CreateJoinResponseSchema,
+		CreateResponseSchema,
 		{ database, authSlotId: slot.authSlotId }
 	);
 	await commitCreateJoinProjection(database, profileId, response.payload, true);
 	await refreshJoinedHouseholdBilling(database, profileId, response.payload.household, fetcher);
-	return { householdId: response.payload.household.householdId };
+	return {
+		householdId: response.payload.household.householdId,
+		...('trialStarted' in response.payload ? { trialStarted: response.payload.trialStarted } : {})
+	};
+};
+
+export const fetchHouseholdOnboardingEligibility = async (
+	database: MaalDatabase,
+	profileId: string
+): Promise<boolean> => {
+	const slot = await profileSlot(database, profileId);
+	const response = await fetch(`/api/auth-slots/${encodeURIComponent(slot.authSlotId)}/households`);
+	if (!response.ok) return false;
+	const { payload } = Schema.decodeUnknownSync(HouseholdOnboardingEligibilityResponseSchema)(
+		await response.json()
+	);
+	return payload.canStartTrial;
 };
 
 export const joinRemoteHousehold = async (
