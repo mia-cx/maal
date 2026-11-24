@@ -16,6 +16,7 @@ import {
 	retainedAuthSlots,
 	takeAuthCallbackMarker
 } from '$lib/client/auth-slot-projection.js';
+import { readActiveFeatureFlags } from '$lib/client/feature-previews.js';
 import { openMaalDatabase, type MaalDatabase } from '$lib/client/local/database.js';
 import {
 	finalizeProfileSignOut,
@@ -109,7 +110,9 @@ const authenticatedResponse = (
 	authSlotId: AuthSlotId,
 	workosUserId: string,
 	firstName: string,
-	proof: { freshAuthentication?: true; pinResetNonce?: string } = { freshAuthentication: true }
+	proof: { freshAuthentication?: true; pinResetNonce?: string; featureFlags?: string[] } = {
+		freshAuthentication: true
+	}
 ) =>
 	new Response(
 		JSON.stringify({
@@ -128,6 +131,37 @@ const authenticatedResponse = (
 		}),
 		{ status: 200, headers: { 'content-type': 'application/json' } }
 	);
+
+test('projects feature flags only for the active authenticated slot', async () => {
+	const database = await openDatabase();
+	const project = (authSlotId: AuthSlotId, response: Response) =>
+		projectAuthCallback(
+			database,
+			{ authSlotId, authStatus: 'authenticated' },
+			{
+				fetcher: async () => response,
+				locale: 'en-NL',
+				timezone: null,
+				now: timestamp
+			}
+		);
+	const alice = await project(
+		ALICE_SLOT,
+		authenticatedResponse(ALICE_SLOT, 'user_alice', 'Alice', {
+			featureFlags: ['pantry', 'grocery-rollup']
+		})
+	);
+	expect(alice.state).toBe('authenticated');
+	await expect(readActiveFeatureFlags(database)).resolves.toEqual(['pantry', 'grocery-rollup']);
+
+	await project(BOB_SLOT, authenticatedResponse(BOB_SLOT, 'user_bob', 'Bob'));
+	await expect(readActiveFeatureFlags(database)).resolves.toEqual([]);
+	await switchActiveProfile(database, alice.profileId!);
+	await expect(readActiveFeatureFlags(database)).resolves.toEqual(['pantry', 'grocery-rollup']);
+
+	await project(ALICE_SLOT, authenticatedResponse(ALICE_SLOT, 'user_alice', 'Alice'));
+	await expect(readActiveFeatureFlags(database)).resolves.toEqual([]);
+});
 
 describe('auth callback marker', () => {
 	test('removes only callback parameters before work starts and cannot replay from the clean URL', () => {

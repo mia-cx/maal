@@ -21,6 +21,7 @@ export interface AuthSlotRecord {
 	profileId: string;
 	workosUserId: string;
 	sessionState: 'authenticated' | 'reauthRequired' | 'revoked';
+	featureFlags?: readonly string[];
 	lastRefreshedAt: UtcInstant | null;
 	lastVerifiedAt: UtcInstant | null;
 	nextRetryAt: UtcInstant | null;

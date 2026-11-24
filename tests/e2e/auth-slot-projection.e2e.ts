@@ -15,7 +15,11 @@ const resetDatabase = async () => {
 	});
 };
 
-const seedProfiles = async (options: { includeBob: boolean; aliceNeedsReauth: boolean }) => {
+const seedProfiles = async (options: {
+	includeBob: boolean;
+	aliceNeedsReauth: boolean;
+	bobFeatureFlags?: string[];
+}) => {
 	const databaseName = 'maal-v1:production';
 	const aliceSlot = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 	const bobSlot = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -77,6 +81,7 @@ const seedProfiles = async (options: { includeBob: boolean; aliceNeedsReauth: bo
 			profileId: bobProfile,
 			workosUserId: 'user_bob',
 			sessionState: 'authenticated',
+			featureFlags: options.bobFeatureFlags,
 			lastRefreshedAt: seededAt,
 			lastVerifiedAt: seededAt,
 			nextRetryAt: null,
@@ -105,7 +110,12 @@ const seedProfiles = async (options: { includeBob: boolean; aliceNeedsReauth: bo
 	database.close();
 };
 
-const prepareDatabase = async (page: Page, includeBob = false, aliceNeedsReauth = false) => {
+const prepareDatabase = async (
+	page: Page,
+	includeBob = false,
+	aliceNeedsReauth = false,
+	bobFeatureFlags?: string[]
+) => {
 	await page.goto('/');
 	await page.evaluate(resetDatabase);
 	await page.goto('/plan');
@@ -124,8 +134,26 @@ const prepareDatabase = async (page: Page, includeBob = false, aliceNeedsReauth 
 			})
 		)
 		.toBe(true);
-	await page.evaluate(seedProfiles, { includeBob, aliceNeedsReauth });
+	await page.evaluate(seedProfiles, { includeBob, aliceNeedsReauth, bobFeatureFlags });
 };
+
+test('opens the original previews for the active flagged profile', async ({ page }) => {
+	await prepareDatabase(page, true, false, ['pantry', 'grocery-rollup']);
+	await page.reload();
+	const sidebar = page.getByTestId('app-sidebar');
+	for (const [path, label, message] of [
+		['/pantry', 'Pantry', 'Pantry is enabled for your account'],
+		['/groceries', 'Grocery rollup', 'Grocery rollup is enabled for your account']
+	]) {
+		const link = sidebar.getByRole('link', { name: label, exact: true });
+		await expect(link).toHaveAttribute('href', path);
+		await link.click();
+		await expect(page).toHaveURL(path);
+		await expect(page.getByRole('heading', { name: message })).toBeVisible();
+		await page.reload();
+		await expect(page.getByRole('heading', { name: message })).toBeVisible();
+	}
+});
 
 const readProjection = async (page: Page) =>
 	page.evaluate(async () => {

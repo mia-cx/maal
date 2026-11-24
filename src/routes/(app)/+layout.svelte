@@ -1,9 +1,15 @@
 <script lang="ts">
+	import { invalidate } from '$app/navigation';
 	import { navigating, page } from '$app/state';
 	import { liveQuery } from 'dexie';
 	import { onMount, type Component, type Snippet } from 'svelte';
 
 	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut.js';
+	import {
+		featurePreviewFlags,
+		featurePreviewsDependency,
+		readActiveFeatureFlags
+	} from '$lib/client/feature-previews.js';
 	import { getBrowserDatabase } from '$lib/client/local/browser.js';
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import { readLockedActiveProfile } from '$lib/client/local/profiles.js';
@@ -29,6 +35,7 @@
 	let settingsDialogError = $state<string | null>(null);
 	// `undefined` until the first check, so a locked profile's data never flashes on load.
 	let lockedProfile = $state<Profile | null | undefined>(undefined);
+	let featureFlags = $state<readonly string[]>([]);
 
 	const activeNav = $derived(activeNavItemForPath(page.url.pathname));
 	const navigatingWithinApp = $derived(Boolean(navigating.to?.url.pathname.startsWith('/')));
@@ -61,9 +68,16 @@
 	$effect(() => {
 		if (!database) return;
 		const opened = database;
-		const subscription = liveQuery(() => readLockedActiveProfile(opened)).subscribe({
-			next: (profile) => {
+		const subscription = liveQuery(() =>
+			Promise.all([readLockedActiveProfile(opened), readActiveFeatureFlags(opened)])
+		).subscribe({
+			next: ([profile, flags]) => {
 				lockedProfile = profile;
+				const changed = Object.values(featurePreviewFlags).some(
+					(flag) => featureFlags.includes(flag) !== flags.includes(flag)
+				);
+				featureFlags = flags;
+				if (changed) void invalidate(featurePreviewsDependency);
 			},
 			error: () => {
 				error = 'Local data could not be opened. Recovery may be required.';
@@ -160,7 +174,7 @@
 					{settingsDialogError}
 				</p>
 			{/if}
-			<DashboardSidebar {database} {activeNav} />
+			<DashboardSidebar {database} {activeNav} {featureFlags} />
 			{#if sidebarOpen}
 				<button
 					type="button"

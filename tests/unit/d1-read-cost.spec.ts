@@ -348,22 +348,19 @@ describe('D1 bootstrap paging', () => {
 
 /** Holds the first batch until a second batch arrives, so both commits read the same base. */
 const racingBatches = (target: D1Database) => {
-	let release: (() => void) | null = null;
-	let held = false;
+	const bothReady = Promise.withResolvers<void>();
+	let firstBatch: Promise<unknown> | undefined;
 	return new Proxy(target, {
 		get(object, property) {
 			if (property === 'batch') {
 				return async (statements: D1PreparedStatement[]) => {
-					if (!held) {
-						held = true;
-						await new Promise<void>((resolve) => (release = resolve));
-						return object.batch(statements);
+					if (!firstBatch) {
+						const batch = bothReady.promise.then(() => object.batch(statements));
+						firstBatch = batch;
+						return batch;
 					}
-					const pending = release;
-					release = null;
-					pending?.();
-					// Let the held batch commit first, then run this one against the stale read.
-					await new Promise((resolve) => setTimeout(resolve, 50));
+					bothReady.resolve();
+					await firstBatch;
 					return object.batch(statements);
 				};
 			}

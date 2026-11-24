@@ -182,8 +182,8 @@ test('keeps recovery controls and states that copied meals survive permanent del
 		onpermanentdelete
 	});
 
-	await screen.getByRole('button', { name: 'Deleted recipes (1)' }).click();
-	await expect.element(page.getByText('Deleted 2026-08-20')).toBeVisible();
+	await screen.getByRole('button', { name: 'Archive (1)' }).click();
+	await expect.element(page.getByText('Archived 2026-08-20')).toBeVisible();
 	await page.getByRole('button', { name: 'Delete forever' }).click();
 	await expect
 		.element(page.getByText(/Meals already copied from Chicken rice bowls stay in the household/))

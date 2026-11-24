@@ -631,7 +631,7 @@ test.describe('meal sheet', () => {
 		await page.reload();
 
 		await targetDay.getByRole('button', { name: 'Open Gingery chicken rice bowls' }).click();
-		await expect(page.getByLabel('Cook minutes')).toHaveValue('');
+		await expect(page.getByLabel('Cook minutes')).toHaveValue('30');
 		await page.getByLabel('Meal name').fill('Renamed bowls');
 		await page.getByRole('button', { name: 'Save meal' }).click();
 		await expect.poll(async () => (await readStore(page, 'meals'))[0]!.title).toBe('Renamed bowls');
@@ -645,7 +645,7 @@ test.describe('meal sheet', () => {
 		await page.reload();
 		await expect(targetDay).toContainText('Renamed bowls');
 		await targetDay.getByRole('button', { name: 'Open Renamed bowls' }).click();
-		await expect(page.getByLabel('Cook minutes')).toHaveValue('');
+		await expect(page.getByLabel('Cook minutes')).toHaveValue('30');
 		await page.getByLabel('Cook minutes').fill('20');
 		await page.getByRole('button', { name: 'Save meal' }).click();
 		await expect.poll(async () => (await readStore(page, 'meals'))[0]!.cookTimeMinutes).toBe(20);
@@ -703,7 +703,8 @@ test.describe('meal sheet', () => {
 
 		const otherTab = await context.newPage();
 		await otherTab.goto('/household');
-		await otherTab.getByLabel('Locale', { exact: true }).fill('nl-NL');
+		await otherTab.locator('label', { hasText: 'Locale' }).getByRole('button').click();
+		await otherTab.getByRole('option', { name: 'Dutch (Netherlands)', exact: true }).click();
 		await otherTab.getByRole('button', { name: 'Save household', exact: true }).click();
 		await expect.poll(async () => (await readStore(page, 'households'))[0]!.locale).toBe('nl-NL');
 		await page.bringToFront();

@@ -129,6 +129,39 @@ const mockRefresh = (projection: () => HouseholdAdministrationProjection) => {
 	return refreshes;
 };
 
+test('saves the prototype locale and timezone choices and preserves household section order', async () => {
+	const { database, profileId } = await seed({
+		household: household({ locale: 'en-US', timezone: 'UTC', localOnly: true })
+	});
+	const screen = await render(HouseholdSettings, { database, profileId, householdId });
+
+	await screen.getByText('English (United States)', { exact: true }).click();
+	await page.getByPlaceholder('Search locales...').fill('nederlands');
+	await page.getByRole('option', { name: 'Dutch (Netherlands)', exact: true }).click();
+	await screen.getByText('UTC', { exact: true }).click();
+	await page.getByPlaceholder('Search timezones...').fill('New York');
+	await page.getByRole('option', { name: 'America/New York', exact: true }).click();
+	await screen.getByRole('button', { name: 'Save household' }).click();
+	await expect
+		.poll(() => database.households.get(householdId))
+		.toMatchObject({
+			locale: 'nl-NL',
+			timezone: 'America/New_York'
+		});
+
+	const appliances = screen.getByRole('heading', { name: 'Appliances', exact: true });
+	const aliases = screen.getByRole('heading', { name: 'Aliases & overrides' });
+	const members = screen.getByRole('heading', { name: 'Members' });
+	await expect.element(aliases).toBeVisible();
+	expect(appliances.element().compareDocumentPosition(aliases.element())).toBe(
+		Node.DOCUMENT_POSITION_FOLLOWING
+	);
+	expect(aliases.element().compareDocumentPosition(members.element())).toBe(
+		Node.DOCUMENT_POSITION_FOLLOWING
+	);
+	await expect.element(screen.getByRole('heading', { name: 'Billing' })).not.toBeInTheDocument();
+});
+
 test('refreshes members and invites from the server on open and when focus returns', async () => {
 	const { database, profileId } = await seed();
 	const alice = membership('user_alice', 'admin');

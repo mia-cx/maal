@@ -136,7 +136,7 @@ export class BillingRepository {
 
 	async trialClaimAvailability(
 		workosUserId: string,
-		householdId: string
+		householdId?: string
 	): Promise<'available' | 'user_already_claimed' | 'household_already_claimed'> {
 		const rows = await getDb(this.database)
 			.select({
@@ -145,10 +145,12 @@ export class BillingRepository {
 			})
 			.from(billingTrialClaims)
 			.where(
-				or(
-					eq(billingTrialClaims.workosUserId, workosUserId),
-					eq(billingTrialClaims.householdId, householdId)
-				)
+				householdId === undefined
+					? eq(billingTrialClaims.workosUserId, workosUserId)
+					: or(
+							eq(billingTrialClaims.workosUserId, workosUserId),
+							eq(billingTrialClaims.householdId, householdId)
+						)
 			);
 		if (rows.some((row) => row.workosUserId === workosUserId)) return 'user_already_claimed';
 		if (rows.some((row) => row.householdId === householdId)) return 'household_already_claimed';

@@ -37,10 +37,10 @@
 	import { DEFAULT_STALENESS_THRESHOLD_MINUTES } from '$lib/domain/household/staleness.js';
 	import HouseholdTaxonomyPreferences from '$lib/components/household/household-taxonomy-preferences.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import BillingSettingsSection from '$lib/components/settings/billing-settings-section.svelte';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
+	import SearchCombobox from '$lib/components/ui/search-combobox.svelte';
 	import * as Select from '$lib/components/ui/select/index.js';
 	import { cn } from '$lib/utils.js';
 
@@ -140,16 +140,48 @@
 				? 'You are the last manager. Add another manager or delete the household instead.'
 				: null
 	);
-	const transferCandidates = $derived(
-		members
-			.filter(
-				(member) =>
-					member.status === 'active' &&
-					member.roleSlug === 'admin' &&
-					member.workosUserId !== profile?.workosUserId
-			)
-			.map(({ workosUserId, name }) => ({ workosUserId, name }))
-	);
+	const localeOptions = $derived([
+		{ value: 'en', label: m.household_locale_english(), keywords: ['english'] },
+		{ value: 'en-US', label: m.household_locale_english_us(), keywords: ['english', 'us', 'usa'] },
+		{ value: 'en-GB', label: m.household_locale_english_uk(), keywords: ['english', 'uk', 'gb'] },
+		{ value: 'nl', label: m.household_locale_dutch(), keywords: ['dutch', 'nederlands'] },
+		{
+			value: 'nl-NL',
+			label: m.household_locale_dutch_netherlands(),
+			keywords: ['dutch', 'nederlands']
+		},
+		{ value: 'fr', label: m.household_locale_french(), keywords: ['french', 'français'] },
+		{ value: 'fr-FR', label: m.household_locale_french_france(), keywords: ['french', 'français'] },
+		{
+			value: 'fr-CA',
+			label: m.household_locale_french_canada(),
+			keywords: ['french', 'canada', 'québec']
+		},
+		{ value: 'de', label: m.household_locale_german(), keywords: ['german', 'deutsch'] },
+		{ value: 'de-DE', label: m.household_locale_german_germany(), keywords: ['german', 'deutsch'] },
+		{ value: 'es', label: m.household_locale_spanish(), keywords: ['spanish', 'español'] },
+		{ value: 'es-ES', label: m.household_locale_spanish_spain(), keywords: ['spanish', 'español'] },
+		{
+			value: 'es-MX',
+			label: m.household_locale_spanish_mexico(),
+			keywords: ['spanish', 'mexico', 'español']
+		},
+		{
+			value: 'it-IT',
+			label: m.household_locale_italian_italy(),
+			keywords: ['italian', 'italiano']
+		},
+		{
+			value: 'pt-BR',
+			label: m.household_locale_portuguese_brazil(),
+			keywords: ['portuguese', 'brazil']
+		}
+	]);
+	const timezoneOptions = ['UTC', ...Intl.supportedValuesOf('timeZone')].map((timezone) => ({
+		value: timezone,
+		label: timezone.replaceAll('_', ' '),
+		keywords: timezone.split(/[/_]/)
+	}));
 	const roleOptions = [
 		{ value: 'admin', label: m.household_role_manager() },
 		{ value: 'member', label: m.household_role_adult() },
@@ -702,20 +734,28 @@
 					<Input bind:value={name} maxlength={120} readonly={readOnly} class="h-8 w-full" />
 				</label>
 				<div class="grid gap-3 md:grid-cols-3">
-					<label class="grid min-w-0 gap-1 text-xs font-medium"
-						>{m.household_locale()}<Input
+					<label class="grid min-w-0 gap-1 text-xs font-medium">
+						{m.household_locale()}
+						<SearchCombobox
 							bind:value={locale}
-							readonly={readOnly}
-							class="h-8"
-						/></label
-					>
-					<label class="grid min-w-0 gap-1 text-xs font-medium"
-						>{m.household_timezone()}<Input
+							options={localeOptions}
+							disabled={readOnly}
+							placeholder={m.household_select_locale()}
+							searchPlaceholder={m.household_search_locales()}
+							allowCustom
+							customOptionLabel={(input) => m.household_use_custom_locale({ locale: input })}
+						/>
+					</label>
+					<label class="grid min-w-0 gap-1 text-xs font-medium">
+						{m.household_timezone()}
+						<SearchCombobox
 							bind:value={timezone}
-							readonly={readOnly}
-							class="h-8"
-						/></label
-					>
+							options={timezoneOptions}
+							disabled={readOnly}
+							placeholder={m.household_select_timezone()}
+							searchPlaceholder={m.household_search_timezones()}
+						/>
+					</label>
 					<label class="grid min-w-0 gap-1 text-xs font-medium">
 						{m.household_start_of_week()}
 						<Select.Root type="single" bind:value={weekStartsOn} disabled={readOnly}>
@@ -732,7 +772,7 @@
 						</Select.Root>
 					</label>
 				</div>
-				<div class="grid gap-3 md:grid-cols-3">
+				<div class="grid gap-3 md:grid-cols-2">
 					<label class="grid min-w-0 gap-1 text-xs font-medium"
 						>{m.household_default_yield()}<Input
 							type="number"
@@ -751,6 +791,8 @@
 							class="h-8"
 						/></label
 					>
+				</div>
+				<div class="grid gap-3 md:grid-cols-2">
 					<label class="grid min-w-0 gap-1 text-xs font-medium">
 						Restore deleted items edited within
 						<Select.Root type="single" bind:value={stalenessThresholdMinutes} disabled={readOnly}>
@@ -770,21 +812,6 @@
 					</div>{/if}
 			</form>
 		</section>
-
-		{#if originDeviceId}
-			<HouseholdTaxonomyPreferences
-				{database}
-				authSlotId={authSlotId ?? `signed-out:${profileId}`}
-				{originDeviceId}
-				workosUserId={profile.workosUserId}
-				{householdId}
-				locale={household.locale}
-				canManageHousehold={!readOnly}
-				onerror={() => {
-					message = 'Household preferences could not be saved.';
-				}}
-			/>
-		{/if}
 
 		<section class="grid gap-3 border-t border-border pt-4">
 			<h2 class="text-sm font-medium">{m.household_appliances()}</h2>
@@ -816,15 +843,18 @@
 				</div>{/if}
 		</section>
 
-		{#if canManage}
-			<BillingSettingsSection
+		{#if originDeviceId}
+			<HouseholdTaxonomyPreferences
 				{database}
-				{profileId}
-				{householdId}
-				householdName={household.name}
+				authSlotId={authSlotId ?? `signed-out:${profileId}`}
+				{originDeviceId}
 				workosUserId={profile.workosUserId}
-				localOnly={household.localOnly}
-				{transferCandidates}
+				{householdId}
+				locale={household.locale}
+				canManageHousehold={!readOnly}
+				onerror={() => {
+					message = 'Household preferences could not be saved.';
+				}}
 			/>
 		{/if}
 
