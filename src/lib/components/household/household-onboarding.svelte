@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import * as m from '$lib/paraglide/messages.js';
 	import { untrack } from 'svelte';
 	import { uuidv7 } from 'uuidv7';
@@ -17,11 +18,15 @@
 		profileId,
 		defaultHouseholdName = '',
 		inviteCode: initialInviteCode = '',
+		standalone = false,
+		hasHouseholds = false,
 		oncomplete
 	}: {
 		database: MaalDatabase;
 		profileId: string;
 		defaultHouseholdName?: string;
+		standalone?: boolean;
+		hasHouseholds?: boolean;
 		/** Prefills the join field, e.g. from a shared `/invite/<code>` link. */
 		inviteCode?: string;
 		/** Runs after the new or joined household is committed to Dexie and selected. */
@@ -80,8 +85,18 @@
 	};
 </script>
 
-<section class="flex min-h-[calc(100svh-52px)] min-w-0 bg-background p-4 text-foreground">
+<section
+	class={[
+		'flex min-w-0 bg-background p-4 text-foreground',
+		standalone ? 'h-svh' : 'min-h-[calc(100svh-52px)]'
+	]}
+>
 	<div class="container mx-auto grid max-w-md content-center gap-6">
+		{#if hasHouseholds}
+			<div>
+				<Button href={resolve('/plan')} variant="ghost">{m.household_back_to_meal_plan()}</Button>
+			</div>
+		{/if}
 		<div class="grid gap-2">
 			<WordmarkLogo class="h-6 w-auto" />
 			<h1 class="text-xl font-semibold tracking-tight">{m.household_set_up_your_household()}</h1>

@@ -3,6 +3,8 @@
 	import CalendarDaysIcon from '@lucide/svelte/icons/calendar-days';
 	import HomeIcon from '@lucide/svelte/icons/house';
 	import ListIcon from '@lucide/svelte/icons/list';
+	import ShoppingCartIcon from '@lucide/svelte/icons/shopping-cart';
+	import SoupIcon from '@lucide/svelte/icons/soup';
 
 	import type { MaalDatabase } from '$lib/client/local/database.js';
 	import ProfileSwitcher from '$lib/components/profile-switcher.svelte';
@@ -19,6 +21,20 @@
 	const links = [
 		{ href: '/plan', label: m.app_meal_plan, nav: 'meal-plan', icon: CalendarDaysIcon },
 		{ href: '/menu', label: m.app_my_menu, nav: 'my-menu', icon: ListIcon },
+		{
+			href: '/pantry',
+			label: m.app_pantry,
+			nav: 'pantry',
+			icon: SoupIcon,
+			unavailable: m.app_pantry_preview_unavailable
+		},
+		{
+			href: '/groceries',
+			label: m.app_grocery_rollup,
+			nav: 'grocery-rollup',
+			icon: ShoppingCartIcon,
+			unavailable: m.app_grocery_rollup_preview_unavailable
+		},
 		{ href: '/household', label: m.app_household, nav: 'household', icon: HomeIcon }
 	] as const;
 </script>
@@ -42,11 +58,19 @@
 						<Sidebar.MenuItem>
 							<Sidebar.MenuButton
 								isActive={activeNav === link.nav}
-								tooltipContent={link.label()}
-								class="h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
+								aria-disabled={'unavailable' in link || undefined}
+								tooltipContent={'unavailable' in link ? link.unavailable() : link.label()}
+								class={[
+									'h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!',
+									'unavailable' in link && 'text-muted-foreground'
+								]}
 							>
 								{#snippet child({ props })}
-									<a href={link.href} {...props}><link.icon /><span>{link.label()}</span></a>
+									{#if 'unavailable' in link}
+										<span {...props}><link.icon /><span>{link.label()}</span></span>
+									{:else}
+										<a href={link.href} {...props}><link.icon /><span>{link.label()}</span></a>
+									{/if}
 								{/snippet}
 							</Sidebar.MenuButton>
 						</Sidebar.MenuItem>
