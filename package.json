@@ -44,10 +44,14 @@
 		"db:migrate:staging": "wrangler d1 migrations apply maal-staging --remote --env staging",
 		"db:migrate:production": "wrangler d1 migrations apply maal-prod --remote --env production",
 		"db:studio": "drizzle-kit studio",
+		"changeset": "changeset",
+		"release:version": "changeset version",
+		"test:release": "node --test .github/scripts/*.test.mjs",
 		"validate": "pnpm lint && pnpm check && pnpm test:unit && pnpm build && pnpm perf:budget && pnpm test:e2e"
 	},
 	"devDependencies": {
 		"@axe-core/playwright": "^4.13.0",
+		"@changesets/cli": "3.0.3",
 		"@cloudflare/vitest-pool-workers": "^0.18.4",
 		"@eslint/js": "^10.0.1",
 		"@fontsource-variable/inter": "^5.2.8",
