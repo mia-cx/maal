@@ -94,10 +94,11 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Only the newest main matters for the release pull request, and no deploy waits on this job.
+    # Runs queue in full rather than cancel or replace each other, so a re-run of an older push can
+    # never discard the current one; the freshness check below then skips every superseded run.
     concurrency:
       group: release-pull-request
-      cancel-in-progress: true
+      queue: max
     permissions:
       contents: write
       pull-requests: write
