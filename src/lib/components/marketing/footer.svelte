@@ -51,12 +51,6 @@
 					<Anchor href={resolve('/')}>Home</Anchor>
 				</li>
 				<li>
-					<Anchor href={landingHref('#features')}>Features</Anchor>
-				</li>
-				<li>
-					<Anchor href={landingHref('#how-it-works')}>How it works</Anchor>
-				</li>
-				<li>
 					<Anchor href={landingHref('#pricing')}>Pricing</Anchor>
 				</li>
 			</ul>

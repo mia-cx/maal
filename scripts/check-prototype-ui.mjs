@@ -13,6 +13,7 @@ const exactPrototypeFiles = [
 	'src/lib/components/dashboard/schedule-meal-pool-bar.svelte'
 ];
 const requiredRewriteSurfaces = [
+	'src/routes/(public)/+page.svelte',
 	'src/routes/(app)/plan/+page.svelte',
 	'src/routes/(app)/menu/+page.svelte',
 	'src/routes/(app)/household/+page.svelte',

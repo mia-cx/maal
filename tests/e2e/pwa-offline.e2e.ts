@@ -53,6 +53,19 @@ test('reopens the local shell offline without content API requests', async ({ co
 	expect(pageErrors).toEqual([]);
 });
 
+test('opens the landing page offline after setting up the planner', async ({ context, page }) => {
+	await page.goto('/plan');
+	await expect
+		.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)))
+		.toBe(true);
+
+	await context.setOffline(true);
+	await page.goto('/');
+	await expect(page.getByRole('heading', { level: 1 })).toHaveText('Dinner plans that can change');
+	await page.getByRole('main').getByRole('link', { name: 'Open the planner' }).click();
+	await expect(page).toHaveTitle('Meal plan · Maal');
+});
+
 test('starts the PWA coordinator silently on the recovery route', async ({ page }) => {
 	const pageErrors: string[] = [];
 	page.on('pageerror', (error) => pageErrors.push(error.message));
