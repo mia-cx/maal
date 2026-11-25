@@ -1,0 +1,199 @@
+name: Release
+
+# Every push to main deploys to staging.maal.is and opens or updates the Changesets release pull
+# request. Merging that pull request versions the app and deploys it to production.
+#
+# There is no workflow-wide concurrency: GitHub replaces a pending run in a group with the newest
+# one, which would let an ordinary push cancel a release waiting behind another run. Each deploy
+# environment queues on its own in deploy.yml instead, where the newest pending deploy of the same
+# environment always contains the one it replaces.
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Redeploy production at this 40-character release merge commit
+        type: string
+        required: true
+
+jobs:
+  release:
+    name: Identify a release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    outputs:
+      release: ${{ steps.release.outputs.release }}
+      sha: ${{ steps.release.outputs.sha }}
+      validated: ${{ steps.validate.outputs.validated }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: package.json
+
+      - name: Check release tooling
+        run: node --test .github/scripts/*.test.mjs
+
+      - name: Identify a merged release pull request
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RETRY_SHA: ${{ inputs.release_sha }}
+        run: |
+          sha="${RETRY_SHA:-$GITHUB_SHA}"
+          if ! [[ "$sha" =~ ^[a-f0-9]{40}$ ]]; then
+            echo 'release_sha must be a full commit SHA' >&2
+            exit 1
+          fi
+          git merge-base --is-ancestor "$sha" origin/main
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          # Only a commit that bumps the app's version can be a release. The commit-to-pull-request
+          # index lags a fresh merge, so ask again for a minute before calling it not a release.
+          version() { git show "$1:package.json" | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).version'; }
+          release=false
+          if [ "$(version "$sha^1")" != "$(version "$sha")" ]; then
+            for _ in 1 2 3 4 5 6; do
+              release="$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha/pulls" --paginate --slurp | tee "$RUNNER_TEMP/release-pulls.json" | node .github/scripts/release-merge.mjs "$sha" "$GITHUB_REPOSITORY")"
+              [ "$release" = true ] && break
+              sleep 10
+            done
+            # A version bump that never matches a merged release PR must not pass as an ordinary push.
+            if [ "$release" != true ]; then
+              echo "::error::$sha bumps the version but no merged release pull request matches it; re-run this workflow, or dispatch it with release_sha"
+              exit 1
+            fi
+          fi
+          if [ -n "$RETRY_SHA" ] && [ "$release" != true ]; then
+            echo "$sha is not a merged release pull request" >&2
+            exit 1
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether the release PR already passed validation
+        id: validate
+        if: github.event_name == 'push' && steps.release.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.release.outputs.sha }}
+        run: node .github/scripts/release-merge.mjs "$SHA" "$GITHUB_REPOSITORY" validated < "$RUNNER_TEMP/release-pulls.json"
+
+  version:
+    name: Open or update the release pull request
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Runs queue in full rather than cancel or replace each other, so a re-run of an older push can
+    # never discard the current one; the freshness check below then skips every superseded run.
+    concurrency:
+      group: release-pull-request
+      queue: max
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: package.json
+          cache: pnpm
+
+      # A re-run of an older push must not rebuild the release pull request from a superseded main.
+      - name: Check that this push is still the head of main
+        id: current
+        run: |
+          git fetch -q origin main
+          echo "current=$([ "$(git rev-parse origin/main)" = "$GITHUB_SHA" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        if: steps.current.outputs.current == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Open or update the release pull request
+        if: steps.current.outputs.current == 'true'
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2
+        with:
+          version-script: pnpm release:version
+          commit-message: 'chore(release): version maal'
+          pr-title: 'chore(release): version maal'
+          pr-base-branch: main
+          create-github-releases: false
+          push-git-tags: false
+
+  staging:
+    name: Deploy to staging
+    # A production redeploy leaves staging on main rather than rolling it back to the release.
+    if: github.event_name == 'push'
+    # Staging deploys main as it stands when the deploy gets its slot, so a late or re-run push never rolls it back.
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+    secrets: inherit
+    permissions:
+      contents: read
+      pull-requests: read
+
+  production:
+    name: Deploy approved release
+    needs: release
+    if: needs.release.outputs.release == 'true'
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
+      # A release ships the newest release on main when it gets the slot; a manual redeploy ships
+      # exactly the commit it names, which may roll back on purpose.
+      sha: ${{ github.event_name == 'workflow_dispatch' && needs.release.outputs.sha || '' }}
+      validated_sha: ${{ needs.release.outputs.validated == 'true' && needs.release.outputs.sha || '' }}
+    secrets: inherit
+    permissions:
+      contents: read
+      pull-requests: read
+
+  tag:
+    name: Tag the deployed release
+    needs: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      SHA: ${{ needs.production.outputs.sha }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.production.outputs.sha }}
+
+      - name: Tag the release commit
+        run: |
+          tag="v$(node -p "require('./package.json').version")"
+          git fetch --tags origin
+          if existing="$(git rev-parse -q --verify "refs/tags/$tag^{commit}")"; then
+            if [ "$existing" != "$SHA" ]; then
+              echo "::error::$tag already points at $existing, not the deployed $SHA"
+              exit 1
+            fi
+            echo "$tag already exists"
+            exit 0
+          fi
+          git tag "$tag" "$SHA"
+          git push origin "refs/tags/$tag"
