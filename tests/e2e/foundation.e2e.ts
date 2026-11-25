@@ -128,7 +128,7 @@ test('serves only localized public URLs in the sitemap and discourages preview i
 	expect(xml).toContain('hreflang="x-default" href="https://maal.is/"');
 	expect(xml).not.toContain('/plan');
 	const robots = await request.get('/robots.txt');
-	expect(await robots.text()).toBe('User-agent: *\nDisallow: /\n');
+	expect(await robots.text()).toBe('User-agent: *\nAllow: /\n');
 	expect(robots.headers()['x-robots-tag']).toBe('noindex');
 	expect((await request.get('/')).headers()['x-robots-tag']).toBe('noindex');
 	const plan = await request.get('/plan');
