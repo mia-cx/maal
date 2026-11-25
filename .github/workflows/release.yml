@@ -61,13 +61,19 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           # Only a commit that bumps the app's version can be a release. The commit-to-pull-request
           # index lags a fresh merge, so ask again for a minute before calling it not a release.
+          version() { git show "$1:package.json" | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).version'; }
           release=false
-          if ! git diff --quiet "$sha^1" "$sha" -- package.json; then
+          if [ "$(version "$sha^1")" != "$(version "$sha")" ]; then
             for _ in 1 2 3 4 5 6; do
               release="$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha/pulls" --paginate --slurp | tee "$RUNNER_TEMP/release-pulls.json" | node .github/scripts/release-merge.mjs "$sha" "$GITHUB_REPOSITORY")"
               [ "$release" = true ] && break
               sleep 10
             done
+            # A version bump that never matches a merged release PR must not pass as an ordinary push.
+            if [ "$release" != true ]; then
+              echo "::error::$sha bumps the version but no merged release pull request matches it; re-run this workflow, or dispatch it with release_sha"
+              exit 1
+            fi
           fi
           if [ -n "$RETRY_SHA" ] && [ "$release" != true ]; then
             echo "$sha is not a merged release pull request" >&2
@@ -110,10 +116,19 @@ jobs:
           node-version-file: package.json
           cache: pnpm
 
+      # A re-run of an older push must not rebuild the release pull request from a superseded main.
+      - name: Check that this push is still the head of main
+        id: current
+        run: |
+          git fetch -q origin main
+          echo "current=$([ "$(git rev-parse origin/main)" = "$GITHUB_SHA" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
       - name: Install dependencies
+        if: steps.current.outputs.current == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Open or update the release pull request
+        if: steps.current.outputs.current == 'true'
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2
         with:
           version-script: pnpm release:version
@@ -127,10 +142,10 @@ jobs:
     name: Deploy to staging
     # A production redeploy leaves staging on main rather than rolling it back to the release.
     if: github.event_name == 'push'
+    # Staging deploys main as it stands when the deploy gets its slot, so a late or re-run push never rolls it back.
     uses: ./.github/workflows/deploy.yml
     with:
       environment: staging
-      sha: ${{ github.sha }}
     secrets: inherit
     permissions:
       contents: read
@@ -171,7 +186,11 @@ jobs:
         run: |
           tag="v$(node -p "require('./package.json').version")"
           git fetch --tags origin
-          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+          if existing="$(git rev-parse -q --verify "refs/tags/$tag^{commit}")"; then
+            if [ "$existing" != "$SHA" ]; then
+              echo "::error::$tag already points at $existing, not the deployed $SHA"
+              exit 1
+            fi
             echo "$tag already exists"
             exit 0
           fi

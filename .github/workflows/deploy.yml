@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       sha:
-        description: Exact main commit to deploy; empty deploys the newest release merged into main
+        description: Exact main commit to deploy; empty deploys main to staging, or the newest release merged into main to production
         required: false
         type: string
         default: ''
@@ -42,27 +42,33 @@ jobs:
       name: ${{ inputs.environment }}
       url: ${{ inputs.environment == 'production' && 'https://maal.is' || 'https://staging.maal.is' }}
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      # Organisation-wide, so every repository deploys to the same account.
+      # Organisation-wide, so every repository deploys to the same account. The API token is
+      # scoped to the Wrangler steps that need it, away from installs, tests and the build.
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha || 'main' }}
-          fetch-depth: ${{ inputs.sha && 1 || 0 }}
+          fetch-depth: ${{ (inputs.sha || inputs.environment == 'staging') && 1 || 0 }}
 
-      # Releases reach the queue out of order and waiting runs get dropped, so whichever run holds
-      # the slot ships the newest release on main. It can never land an older release after a
-      # newer one, and a dropped run's release still goes out with the run that replaced it.
+      # Pushes reach the queue out of order and waiting runs get dropped, so whichever run holds the
+      # slot ships the newest state: staging is always main as checked out here, production the newest
+      # release on main. Neither can roll back to an older commit, and a dropped run's changes still
+      # go out with the run that replaced it.
       - name: Choose the commit to deploy
         id: target
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ inputs.sha }}
+          ENVIRONMENT: ${{ inputs.environment }}
         run: |
           if [ -n "$SHA" ]; then
             echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$ENVIRONMENT" = staging ]; then
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Ask GitHub for the newest release pull request merged from this repository, so its merge
@@ -107,14 +113,19 @@ jobs:
 
       # D1 keeps 30 days of Time Travel; this bookmark restores the database to just before the migration.
       - name: Record a recovery bookmark
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: pnpm exec wrangler d1 time-travel info DB --env "${{ inputs.environment }}"
 
       # Migrations are forward-only and the running Worker must tolerate the new schema, so they apply first.
       - name: Apply database migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: pnpm exec wrangler d1 migrations apply DB --remote --env "${{ inputs.environment }}"
 
       - name: Deploy
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           ENVIRONMENT: ${{ inputs.environment }}
           SHA: ${{ steps.target.outputs.sha }}
         run: |
