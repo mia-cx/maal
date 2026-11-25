@@ -21,13 +21,26 @@ const cardIndexAtPointer = (
 	axis: PointerAxis,
 	ignoredMealId?: string
 ): number => {
-	const cards = Array.from(target.querySelectorAll<HTMLElement>('[data-meal-card-id]')).filter(
-		(card) => card.dataset.mealCardId !== ignoredMealId
-	);
 	const pointer = axis === 'x' ? event.clientX : event.clientY;
+	// The drop-preview skeleton shifts real cards down; measure midpoints as if it
+	// were absent so a pointer below a card still counts as "after" it.
+	const skeleton = target.querySelector<HTMLElement>('[data-meal-drop-skeleton]');
+	const skeletonRect = skeleton?.getBoundingClientRect();
+	const skeletonLead = skeletonRect ? (axis === 'x' ? skeletonRect.left : skeletonRect.top) : null;
+	const skeletonShift =
+		skeleton && skeletonRect
+			? (axis === 'x' ? skeletonRect.width : skeletonRect.height) +
+				parseFloat(getComputedStyle(skeleton)[axis === 'x' ? 'marginLeft' : 'marginTop'] || '0')
+			: 0;
+	const cards = Array.from(target.querySelectorAll<HTMLElement>('[data-meal-card-id]')).filter(
+		(card) =>
+			card.dataset.mealCardId !== ignoredMealId && !card.closest('[data-meal-drop-skeleton]')
+	);
 	const index = cards.findIndex((card) => {
 		const rect = card.getBoundingClientRect();
-		const midpoint = axis === 'x' ? rect.left + rect.width / 2 : rect.top + rect.height / 2;
+		const lead = axis === 'x' ? rect.left : rect.top;
+		let midpoint = axis === 'x' ? rect.left + rect.width / 2 : rect.top + rect.height / 2;
+		if (skeletonLead !== null && lead > skeletonLead) midpoint -= skeletonShift;
 		return pointer < midpoint;
 	});
 	return index === -1 ? cards.length : index;

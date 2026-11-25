@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
+	import { getBrowserDatabase } from '$lib/client/local/browser.js';
+	import { readActiveProfile } from '$lib/client/local/profiles.js';
 	import Anchor from '$lib/components/marketing/anchor.svelte';
 	import Footer from '$lib/components/marketing/footer.svelte';
 	import PricingTable from '$lib/components/marketing/pricing-table.svelte';
@@ -88,12 +90,19 @@
 	];
 
 	let { data }: { data: PageData } = $props();
-	const startPlanningHref = $derived(data.session ? resolve('/plan') : loginHref);
+	let signedIn = $state(false);
+	const startPlanningHref = $derived(signedIn ? resolve('/plan') : loginHref);
 	let phraseIndex = $state(0);
 	let typedPhrase = $state('');
 	let timeout: ReturnType<typeof setTimeout> | undefined;
 
 	onMount(() => {
+		void getBrowserDatabase()
+			.then(readActiveProfile)
+			.then((profile) => {
+				signedIn = profile !== null && profile.authState !== 'signedOut';
+			})
+			.catch(() => {});
 		let deleting = false;
 		const tick = () => {
 			const phrase = phrases[phraseIndex];
@@ -213,7 +222,7 @@
 				<div class="mx-auto max-w-7xl px-4 py-12 md:px-6">
 					<h2 class="text-3xl font-bold md:text-4xl">Features</h2>
 					<ul class="mt-6 space-y-3 text-base leading-7 text-muted-foreground">
-						{#each features as feature}
+						{#each features as feature (feature.text)}
 							<li class="flex gap-3">
 								<feature.icon
 									class={feature.highlight
@@ -289,13 +298,7 @@
 							in a moment.
 						</p>
 					{:else}
-						<PricingTable
-							pricing={data.pricing}
-							signedIn={Boolean(data.session)}
-							trialAvailable={data.trialAvailable}
-							trialPriceId={data.trialPriceId}
-							{brand}
-						/>
+						<PricingTable pricing={data.pricing} {signedIn} {brand} />
 					{/if}
 				</div>
 			</section>

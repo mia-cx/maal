@@ -196,7 +196,7 @@
 		await tick();
 		suppressAnchorUpdate = true;
 		if (snapTimeout) clearTimeout(snapTimeout);
-		return weekGrid.scrollToKey('y', dateKey(startOfWeek(date)), behavior);
+		return weekGrid.scrollToKey('y', dateKey(startOfWeek(date, weekStartsOn)), behavior);
 	};
 
 	const adjustActiveDragStartAfterPrepend = (scrollDelta: number) => {
@@ -344,7 +344,7 @@
 	};
 
 	const scrollByWheelStep = async (direction: number) => {
-		const topWeek = wheelTargetWeek ?? currentTopWeek() ?? startOfWeek(anchorDate);
+		const topWeek = wheelTargetWeek ?? currentTopWeek() ?? startOfWeek(anchorDate, weekStartsOn);
 		const fastDisplayDate = startOfDay(addMonths(displayDateForWeek(topWeek), direction));
 		const fastScroll = fastScrollGate.shouldSkipAnimation(direction, fastDisplayDate);
 		const nextWeek = fastScroll
@@ -729,6 +729,7 @@
 								{onaddmeal}
 								{onpick}
 								{onselect}
+								{oncheckin}
 								{onselectdate}
 							/>
 						{/each}

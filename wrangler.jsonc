@@ -1,63 +1,74 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "maal",
-	"account_id": "492214885e7a580ccc1d141dfdb4dc5f",
-	"compatibility_date": "2026-06-08",
+	"name": "maal-local",
+	"compatibility_date": "2026-07-15",
 	"compatibility_flags": ["nodejs_compat"],
-	"main": ".svelte-kit/cloudflare/_worker.js",
+	"main": "src/worker.ts",
 	"assets": {
 		"binding": "ASSETS",
 		"directory": ".svelte-kit/cloudflare"
 	},
 	"workers_dev": true,
 	"preview_urls": true,
-	"vars": {
-		"MAAL_TRIAL_DAYS": "30"
+	"triggers": { "crons": ["17 3 * * *"] },
+	"observability": {
+		"enabled": true,
+		"logs": { "head_sampling_rate": 1 },
+		"traces": { "enabled": true, "head_sampling_rate": 0.01 }
 	},
-	"kv_namespaces": [
-		{
-			"binding": "MCP_KEYS",
-			"id": "504c5e835b184383bbd43e30d98d849f"
-		}
-	],
 	"d1_databases": [
 		{
 			"binding": "DB",
-			"database_name": "maal-prod",
-			"database_id": "d498dfad-9b1f-4f35-9327-441f85a97741",
+			"database_name": "maal-local",
+			"database_id": "local",
 			"migrations_dir": "drizzle"
 		}
 	],
-	"routes": [
+	"ratelimits": [
 		{
-			"pattern": "maal.mia.cx",
-			"custom_domain": true
+			"name": "RECIPE_URL_RATE_LIMIT",
+			"namespace_id": "1001",
+			"simple": { "limit": 10, "period": 60 }
 		}
 	],
 	"env": {
 		"staging": {
 			"name": "maal-staging",
-			"vars": {
-				"MAAL_TRIAL_DAYS": "30"
-			},
-			"routes": [
-				{
-					"pattern": "staging.maal.mia.cx",
-					"custom_domain": true
-				}
-			],
-			"kv_namespaces": [
-				{
-					"binding": "MCP_KEYS",
-					"id": "7e292ebdd2844315b82e1e3857cb52b5"
-				}
-			],
+			"vars": { "MAAL_PROOF_TELEMETRY": "staging-only" },
+			"routes": [{ "pattern": "staging.maal.is", "custom_domain": true }],
+			"triggers": { "crons": ["17 3 * * *"] },
 			"d1_databases": [
 				{
 					"binding": "DB",
 					"database_name": "maal-staging",
 					"database_id": "c843aee2-d94c-4f9f-b26c-02deea38b86a",
 					"migrations_dir": "drizzle"
+				}
+			],
+			"ratelimits": [
+				{
+					"name": "RECIPE_URL_RATE_LIMIT",
+					"namespace_id": "1002",
+					"simple": { "limit": 10, "period": 60 }
+				}
+			]
+		},
+		"production": {
+			"name": "maal",
+			"triggers": { "crons": ["17 3 * * *"] },
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "maal-prod",
+					"database_id": "d498dfad-9b1f-4f35-9327-441f85a97741",
+					"migrations_dir": "drizzle"
+				}
+			],
+			"ratelimits": [
+				{
+					"name": "RECIPE_URL_RATE_LIMIT",
+					"namespace_id": "1003",
+					"simple": { "limit": 10, "period": 60 }
 				}
 			]
 		}

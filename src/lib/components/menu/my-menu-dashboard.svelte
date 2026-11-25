@@ -9,41 +9,33 @@
 	import { Input } from '$lib/components/ui/input';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import SearchIcon from '@lucide/svelte/icons/search';
-	import {
-		fetchMenuRecipesPage,
-		importRecipeDraftFromUrl,
-		searchMenuRecipes
-	} from '$lib/menu/menu-client';
-	import {
-		appendMenuRecipes,
-		archivedMenuRecipesStore,
-		createMenuRecipe,
-		deleteMenuRecipe,
-		deleteMenuRecipes,
-		hydrateMenuRecipes,
-		menuRecipesStore,
-		permanentlyDeleteMenuRecipes,
-		restoreMenuRecipe,
-		restoreMenuRecipes,
-		selectMenuRecipe,
-		selectedMenuRecipeStore,
-		updateMenuRecipe
-	} from '$lib/stores/menu-recipes';
 	import MyMenuRecipeSheet from './recipe-edit-sheet.svelte';
 	import RecipeMenuCard from './recipe-menu-card.svelte';
-	import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking';
+	import { rankRecipeWindow } from '$lib/menu/recipe-ranking';
 	import { createDraftRecipe } from '$lib/menu/recipe-draft';
 	import { toggleMenuSelection } from '$lib/menu/menu-selection';
 	import type { RecipeMenuItem } from '$lib/menu/menu-types';
 
 	let {
-		recipes: initialRecipes = [],
-		archivedRecipes: initialArchivedRecipes = [],
-		nextRecipeOffset: initialNextRecipeOffset = null
+		recipes = [],
+		archivedRecipes = [],
+		onsave,
+		ondelete,
+		onrestore,
+		onpermanentdelete,
+		onopen,
+		onimporturl = async () => {
+			throw new Error('URL import requires an active Maal plan.');
+		}
 	}: {
 		recipes?: RecipeMenuItem[];
 		archivedRecipes?: RecipeMenuItem[];
-		nextRecipeOffset?: number | null;
+		onopen?: (recipe: RecipeMenuItem) => void;
+		onsave?: (recipe: RecipeMenuItem) => void | Promise<void>;
+		ondelete?: (recipe: RecipeMenuItem) => void | Promise<void>;
+		onrestore?: (recipe: RecipeMenuItem) => void | Promise<void>;
+		onpermanentdelete?: (recipes: RecipeMenuItem[]) => void | Promise<void>;
+		onimporturl?: (url: string) => Promise<RecipeMenuItem>;
 	} = $props();
 
 	let sheetOpen = $state(false);
@@ -57,24 +49,23 @@
 	let archivedRangeSelection = false;
 	let permanentDeleteRecipes = $state<RecipeMenuItem[]>([]);
 	let permanentDeleteOpen = $state(false);
-	let hydratedRecipesSignature = $state('');
-	let nextRecipeOffset = $state<number | null>(null);
-	let recipesLoading = $state(false);
-	let recipesLoadError = $state<string | null>(null);
 	let recipeSearchQuery = $state('');
-	let searchRecipes = $state<RecipeMenuItem[] | null>(null);
-	let searchLoading = $state(false);
-	let searchLoadError = $state<string | null>(null);
+	let selectedRecipeId = $state<string | null>(null);
+	/** Initial card window and the step each scroll adds; bounds the DOM for large libraries. */
+	const RECIPE_WINDOW_SIZE = 120;
+	let displayedRecipeLimit = $state(RECIPE_WINDOW_SIZE);
+	let previousRecipeSearchQuery = '';
+	let recipeScrollElement = $state<HTMLElement>();
 	let loadMoreElement = $state<HTMLElement>();
 
-	const recipes = $derived($menuRecipesStore);
-	const archivedRecipes = $derived($archivedMenuRecipesStore);
-	const selectedRecipe = $derived(draftRecipe ?? $selectedMenuRecipeStore);
-	const normalizedRecipeSearchQuery = $derived(recipeSearchQuery.trim());
-	const serverSearchActive = $derived(normalizedRecipeSearchQuery.length >= 3);
-	const displayedRecipes = $derived(
-		serverSearchActive ? (searchRecipes ?? []) : rankRecipesByRelevance(recipes, recipeSearchQuery)
+	const selectedRecipe = $derived(
+		draftRecipe ?? recipes.find((recipe) => recipe.id === selectedRecipeId) ?? null
 	);
+	const rankedRecipeWindow = $derived(
+		rankRecipeWindow(recipes, recipeSearchQuery, displayedRecipeLimit)
+	);
+	const displayedRecipes = $derived(rankedRecipeWindow.recipes);
+	const hasHiddenRecipes = $derived(rankedRecipeWindow.total > displayedRecipes.length);
 	const selectedRecipes = $derived(
 		displayedRecipes.filter((recipe) => selectedRecipeIds.includes(recipe.id))
 	);
@@ -96,35 +87,30 @@
 		archivedRecipes.filter((recipe) => selectedArchivedRecipeIds.includes(recipe.id))
 	);
 
-	$effect(() => {
-		const signature = JSON.stringify({
-			recipes: initialRecipes,
-			archivedRecipes: initialArchivedRecipes,
-			nextRecipeOffset: initialNextRecipeOffset
-		});
-		if (signature === hydratedRecipesSignature) return;
-		hydratedRecipesSignature = signature;
-		nextRecipeOffset = initialNextRecipeOffset;
-		hydrateMenuRecipes(initialRecipes, initialArchivedRecipes);
-	});
-
-	const loadMoreRecipes = async () => {
-		if (nextRecipeOffset === null || recipesLoading) return;
-		recipesLoading = true;
-		recipesLoadError = null;
-		try {
-			const body = await fetchMenuRecipesPage(nextRecipeOffset);
-			appendMenuRecipes(body.recipes);
-			nextRecipeOffset = body.nextRecipeOffset;
-		} catch {
-			recipesLoadError = m.menu_could_not_load_more_recipes();
-		} finally {
-			recipesLoading = false;
-		}
-	};
-
 	const idsMatch = (left: string[], right: string[]): boolean =>
 		left.length === right.length && left.every((id) => right.includes(id));
+
+	$effect(() => {
+		if (recipeSearchQuery === previousRecipeSearchQuery) return;
+		previousRecipeSearchQuery = recipeSearchQuery;
+		displayedRecipeLimit = RECIPE_WINDOW_SIZE;
+	});
+
+	// Re-created after every window growth, so it keeps loading while the sentinel stays in range.
+	$effect(() => {
+		const limit = displayedRecipeLimit;
+		if (!loadMoreElement || !hasHiddenRecipes) return;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries.some((entry) => entry.isIntersecting)) {
+					displayedRecipeLimit = limit + RECIPE_WINDOW_SIZE;
+				}
+			},
+			{ root: recipeScrollElement, rootMargin: '480px 0px' }
+		);
+		observer.observe(loadMoreElement);
+		return () => observer.disconnect();
+	});
 
 	$effect(() => {
 		const selectableRecipes = displayedRecipes;
@@ -162,51 +148,11 @@
 		permanentDeleteRecipes = [];
 	});
 
-	$effect(() => {
-		const query = normalizedRecipeSearchQuery;
-		if (query.length < 3) {
-			searchRecipes = null;
-			searchLoading = false;
-			searchLoadError = null;
-			return;
-		}
-
-		searchLoading = true;
-		searchLoadError = null;
-		const controller = new AbortController();
-		const timeout = setTimeout(async () => {
-			try {
-				searchRecipes = await searchMenuRecipes(query, { signal: controller.signal });
-			} catch (error) {
-				if (controller.signal.aborted) return;
-				searchLoadError = readAddRecipeError(error);
-			} finally {
-				if (!controller.signal.aborted) searchLoading = false;
-			}
-		}, 250);
-
-		return () => {
-			controller.abort();
-			clearTimeout(timeout);
-		};
-	});
-
-	$effect(() => {
-		if (!loadMoreElement || nextRecipeOffset === null || serverSearchActive) return;
-		const observer = new IntersectionObserver(
-			(entries) => {
-				if (entries.some((entry) => entry.isIntersecting)) void loadMoreRecipes();
-			},
-			{ rootMargin: '480px 0px' }
-		);
-		observer.observe(loadMoreElement);
-		return () => observer.disconnect();
-	});
-
 	const openRecipe = (recipe: RecipeMenuItem) => {
 		draftRecipe = null;
-		selectMenuRecipe(recipe.id);
+		selectedRecipeId = recipe.id;
 		sheetOpen = true;
+		onopen?.(recipe);
 	};
 
 	const archivedDate = (archivedAt?: string): string => archivedAt?.slice(0, 10) ?? '';
@@ -217,22 +163,17 @@
 	};
 
 	const openAddRecipe = () => {
-		selectMenuRecipe(null);
+		selectedRecipeId = null;
 		draftRecipe = createDraftRecipe(() => crypto.randomUUID());
 		sheetOpen = true;
 	};
 
-	const loadRecipeDraftFromUrl = (url: string): Promise<RecipeMenuItem> =>
-		importRecipeDraftFromUrl(url);
+	const loadRecipeDraftFromUrl = (url: string): Promise<RecipeMenuItem> => onimporturl(url);
 
 	const saveRecipeFromSheet = async (recipe: RecipeMenuItem) => {
-		if (!recipe.id.startsWith('draft-recipe-')) {
-			await updateMenuRecipe(recipe);
-			return;
-		}
-		await createMenuRecipe({ recipe });
+		await onsave?.(recipe);
 		draftRecipe = null;
-		selectMenuRecipe(null);
+		selectedRecipeId = recipe.id.startsWith('draft-recipe-') ? null : recipe.id;
 	};
 
 	const toggleRecipeSelection = (recipe: RecipeMenuItem, selected: boolean, range = false) => {
@@ -268,7 +209,7 @@
 		archiveActionRecipeId = 'bulk-archive';
 		archiveActionError = null;
 		try {
-			await deleteMenuRecipes(selectedRecipes);
+			await Promise.all(selectedRecipes.map((recipe) => ondelete?.(recipe)));
 			selectedRecipeIds = [];
 			lastSelectedRecipeId = null;
 		} catch (error) {
@@ -283,7 +224,7 @@
 		archiveActionRecipeId = 'bulk-restore';
 		archiveActionError = null;
 		try {
-			await restoreMenuRecipes(selectedArchivedRecipes);
+			await Promise.all(selectedArchivedRecipes.map((recipe) => onrestore?.(recipe)));
 			selectedArchivedRecipeIds = [];
 			lastSelectedArchivedRecipeId = null;
 		} catch (error) {
@@ -297,7 +238,7 @@
 		archiveActionRecipeId = recipe.id;
 		archiveActionError = null;
 		try {
-			await restoreMenuRecipe(recipe);
+			await onrestore?.(recipe);
 		} catch (error) {
 			archiveActionError = readAddRecipeError(error);
 		} finally {
@@ -316,7 +257,7 @@
 		archiveActionRecipeId = 'permanent-delete';
 		archiveActionError = null;
 		try {
-			await permanentlyDeleteMenuRecipes(permanentDeleteRecipes);
+			await onpermanentdelete?.(permanentDeleteRecipes);
 			selectedArchivedRecipeIds = [];
 			lastSelectedArchivedRecipeId = null;
 			permanentDeleteOpen = false;
@@ -344,7 +285,10 @@
 		</div>
 	</header>
 
-	<div class="@container/my-menu-main min-h-0 flex-1 overflow-auto p-3 md:p-4">
+	<div
+		bind:this={recipeScrollElement}
+		class="@container/my-menu-main min-h-0 flex-1 overflow-auto p-3 md:p-4"
+	>
 		<div class="mb-3 flex flex-wrap items-center gap-2">
 			<p class="mr-2 text-sm font-medium">
 				{selectedRecipes.length} recipe{selectedRecipes.length === 1 ? '' : 's'} selected
@@ -415,28 +359,12 @@
 				/>
 			{/each}
 		</div>
-		{#if serverSearchActive && searchLoading}
-			<p class="py-4 text-center text-xs text-muted-foreground">{m.menu_searching_recipes()}</p>
-		{:else if searchLoadError}
-			<p class="py-4 text-center text-xs text-destructive">{searchLoadError}</p>
-		{:else if recipeSearchQuery.trim() && displayedRecipes.length === 0}
+		{#if recipeSearchQuery.trim() && displayedRecipes.length === 0}
 			<p class="py-8 text-center text-sm text-muted-foreground">
 				{m.menu_no_recipes_match_query({ query: recipeSearchQuery })}
 			</p>
 		{/if}
-		<div bind:this={loadMoreElement} class="flex min-h-10 items-center justify-center py-4">
-			{#if !serverSearchActive && recipesLoading}
-				<p class="text-xs text-muted-foreground">{m.menu_loading_recipes()}</p>
-			{:else if !serverSearchActive && recipesLoadError}
-				<button
-					type="button"
-					class="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
-					onclick={loadMoreRecipes}
-				>
-					{recipesLoadError}
-				</button>
-			{/if}
-		</div>
+		<div bind:this={loadMoreElement} class="min-h-10 py-4"></div>
 
 		<Accordion.Root type="multiple" class="border-border bg-background">
 			<Accordion.Item value="archive">
@@ -575,6 +503,6 @@
 	bind:open={sheetOpen}
 	recipe={selectedRecipe}
 	onsaved={saveRecipeFromSheet}
-	ondeleted={deleteMenuRecipe}
+	ondeleted={ondelete}
 	onimporturl={loadRecipeDraftFromUrl}
 />

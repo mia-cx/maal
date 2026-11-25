@@ -1,99 +1,120 @@
 <script lang="ts">
-	import * as m from '$lib/paraglide/messages';
-	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { setActiveHouseholdId } from '$lib/stores/active-household';
-	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
+	import * as m from '$lib/paraglide/messages.js';
+	import { onMount, untrack } from 'svelte';
+	import { uuidv7 } from 'uuidv7';
+
+	import {
+		createRemoteHousehold,
+		fetchHouseholdOnboardingEligibility,
+		joinRemoteHousehold
+	} from '$lib/client/household-administration.js';
+	import type { MaalDatabase } from '$lib/client/local/database.js';
+	import { Button } from '$lib/components/ui/button/index.js';
+	import { Input } from '$lib/components/ui/input/index.js';
 	import WordmarkLogo from '$lib/components/wordmark-logo.svelte';
 
 	let {
+		database,
+		profileId,
 		defaultHouseholdName = '',
-		canStartTrial = false,
-		hasHouseholds = false
-	}: { defaultHouseholdName?: string; canStartTrial?: boolean; hasHouseholds?: boolean } = $props();
-
-	let householdName = $state('');
-	let initializedDefaultHouseholdName = $state(false);
-	let inviteCode = $state('');
-	let busy = $state(false);
+		inviteCode: initialInviteCode = '',
+		standalone = false,
+		hasHouseholds = false,
+		busy = $bindable(false),
+		oncomplete
+	}: {
+		database: MaalDatabase;
+		profileId: string;
+		defaultHouseholdName?: string;
+		standalone?: boolean;
+		hasHouseholds?: boolean;
+		busy?: boolean;
+		/** Prefills the join field, e.g. from a shared `/invite/<code>` link. */
+		inviteCode?: string;
+		/** Runs after the new or joined household is committed to Dexie and selected. */
+		oncomplete?: (householdId: string, trialStarted?: boolean) => void | Promise<void>;
+	} = $props();
+	let householdName = $state(untrack(() => defaultHouseholdName));
+	let inviteCode = $state(untrack(() => initialInviteCode));
 	let error = $state<string | null>(null);
+	let trialEligible = $state<boolean | undefined>(undefined);
+	// One idempotency key per submitted name, so retrying after a lost response reuses it.
+	let createIntent: { name: string; idempotencyKey: string } | null = null;
 
-	const readError = async (response: Response, fallback: string): Promise<string> => {
-		try {
-			const body = (await response.json()) as { message?: unknown };
-			if (typeof body.message === 'string' && body.message.trim()) return body.message;
-		} catch {
-			// Keep fallback.
+	onMount(() => {
+		if (standalone) {
+			void fetchHouseholdOnboardingEligibility(database, profileId)
+				.catch(() => false)
+				.then((eligible) => {
+					trialEligible = eligible;
+				});
 		}
-		return fallback;
-	};
-
-	$effect(() => {
-		if (initializedDefaultHouseholdName) return;
-		initializedDefaultHouseholdName = true;
-		householdName = defaultHouseholdName;
 	});
-
-	const joinInvitedHousehold = async () => {
-		const code = inviteCode.trim();
-		if (!code || busy) return;
-		busy = true;
-		error = null;
-		try {
-			await goto(resolve(`/invite/${encodeURIComponent(code)}`));
-		} catch {
-			error = m.household_could_not_open_invite();
-			busy = false;
-		}
-	};
 
 	const createHousehold = async (event: SubmitEvent) => {
 		event.preventDefault();
 		const name = householdName.trim();
-		if (!name) return;
+		if (!name || busy || (standalone && trialEligible === undefined)) return;
+		const startTrial = standalone && trialEligible === true;
+		if (createIntent?.name !== name) createIntent = { name, idempotencyKey: uuidv7() };
+		const { idempotencyKey } = createIntent;
 		busy = true;
 		error = null;
-
+		let created: Awaited<ReturnType<typeof createRemoteHousehold>>;
 		try {
-			const response = await fetch('/household/onboarding', {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ name })
-			});
-
-			if (!response.ok) {
-				error = await readError(response, m.household_could_not_create());
-				busy = false;
-				return;
-			}
-
-			const body: unknown = await response.json();
-			if (!body || typeof body !== 'object') {
-				throw new Error(m.household_invalid_onboarding_response());
-			}
-			const trialStarted = 'trialStarted' in body && body.trialStarted === true;
-			const household = 'household' in body ? body.household : null;
-			const householdId =
-				household &&
-				typeof household === 'object' &&
-				'id' in household &&
-				typeof household.id === 'string'
-					? household.id
-					: null;
-			if (!householdId) throw new Error(m.household_created_response_missing_id());
-			setActiveHouseholdId(householdId);
-			await goto(resolve(trialStarted ? '/plan?trial=started' : '/subscribe'), {
-				invalidateAll: true
+			const profile = await database.profiles.get(profileId);
+			if (!profile) throw new Error('profile missing');
+			created = await createRemoteHousehold(database, profileId, {
+				name,
+				locale: profile.locale,
+				timezone: profile.timezone,
+				idempotencyKey,
+				...(startTrial ? { startTrial: true } : {})
 			});
 		} catch {
 			error = m.household_could_not_create_try_again();
+			busy = false;
+			return;
+		}
+		createIntent = null;
+		try {
+			await oncomplete?.(
+				created.householdId,
+				standalone ? created.trialStarted === true : undefined
+			);
+		} finally {
+			busy = false;
+		}
+	};
+
+	const joinHousehold = async () => {
+		const code = inviteCode.trim();
+		if (!code || busy) return;
+		busy = true;
+		error = null;
+		let householdId: string;
+		try {
+			({ householdId } = await joinRemoteHousehold(database, profileId, code));
+		} catch {
+			error = m.household_could_not_open_invite();
+			busy = false;
+			return;
+		}
+		try {
+			await oncomplete?.(householdId);
+		} finally {
 			busy = false;
 		}
 	};
 </script>
 
-<section class="flex h-svh min-w-0 bg-background p-4 text-foreground">
+<section
+	class={[
+		'flex min-w-0 bg-background p-4 text-foreground',
+		standalone ? 'h-svh' : 'min-h-[calc(100svh-52px)]'
+	]}
+>
 	<div class="container mx-auto grid max-w-md content-center gap-6">
 		{#if hasHouseholds}
 			<div>
@@ -118,10 +139,13 @@
 					class="h-9"
 				/>
 			</label>
-			<Button type="submit" disabled={busy || !householdName.trim()}>
+			<Button
+				type="submit"
+				disabled={busy || !householdName.trim() || (standalone && trialEligible === undefined)}
+			>
 				{busy
 					? m.household_creating()
-					: canStartTrial
+					: trialEligible
 						? m.household_create_and_start_trial()
 						: m.household_create()}
 			</Button>
@@ -136,7 +160,11 @@
 					class="h-9"
 				/>
 			</label>
-			<Button variant="outline" disabled={!inviteCode.trim()} onclick={joinInvitedHousehold}>
+			<Button
+				variant="outline"
+				disabled={busy || !inviteCode.trim()}
+				onclick={() => void joinHousehold()}
+			>
 				{m.household_join_household()}
 			</Button>
 			<p class="text-xs text-muted-foreground">
@@ -144,8 +172,6 @@
 			</p>
 		</div>
 
-		{#if error}
-			<p class="text-sm text-destructive">{error}</p>
-		{/if}
+		{#if error}<p class="text-sm text-destructive" role="alert">{error}</p>{/if}
 	</div>
 </section>

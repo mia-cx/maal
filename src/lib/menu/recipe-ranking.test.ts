@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { rankRecipesByRelevance } from './recipe-ranking';
+import { rankRecipesByRelevance, rankRecipeWindow } from './recipe-ranking';
 import type { RecipeMenuItem } from '$lib/menu/menu-types';
 
 const recipe = (overrides: Partial<RecipeMenuItem>): RecipeMenuItem => ({
@@ -40,5 +40,20 @@ describe('recipe ranking', () => {
 		);
 
 		expect(ranked.map((item) => item.title)).toEqual(['Taco night']);
+	});
+
+	it('returns the same leading results and match count from a bounded window', () => {
+		const recipes = [
+			recipe({ title: 'Taco night', timesCooked: 1 }),
+			recipe({ title: 'Taco bowl', timesCooked: 3 }),
+			recipe({ title: 'Vegetable soup', timesCooked: 20 }),
+			recipe({ title: 'Taco salad', timesCooked: 2 })
+		];
+
+		const ranked = rankRecipesByRelevance(recipes, 'taco');
+		const window = rankRecipeWindow(recipes, 'taco', 2);
+
+		expect(window.total).toBe(ranked.length);
+		expect(window.recipes).toEqual(ranked.slice(0, 2));
 	});
 });

@@ -1,61 +1,191 @@
 <script lang="ts">
-	import { MyMenuDashboard, type RecipeMenuItem } from '$lib/components/menu';
-	import { activeHouseholdId, writeActiveHouseholdCookie } from '$lib/stores/active-household';
+	import { liveQuery } from 'dexie';
+	import { Schema } from 'effect';
+	import { onMount } from 'svelte';
+
 	import {
-		clearMenuRouteDataCache,
-		getCachedMenuRouteData,
-		setCachedMenuRouteData
-	} from '$lib/stores/route-data-cache';
-	import { onDestroy, onMount } from 'svelte';
-	import type { PageData } from './$types';
+		createRecipeFromEditor,
+		deleteRecipe,
+		listRecoverableRecipes,
+		listRecipes,
+		permanentlyDeleteRecipe,
+		restoreRecipe,
+		updateRecipeFromEditor,
+		type RecipeCommandContext
+	} from '$lib/client/recipes/index.js';
+	import { liveRecipeStatistics } from '$lib/client/recipes/statistics.js';
+	import { confirmUrlImport, fetchRecipeUrlCandidate } from '$lib/client/recipes/url-import.js';
+	import { getBrowserDatabase } from '$lib/client/local/browser.js';
+	import { dismissReinstatement, readReinstatedIds } from '$lib/client/sync/reinstatements.js';
+	import type { MaalDatabase } from '$lib/client/local/database.js';
+	import { DomainIdSchema } from '$lib/domain/contracts/primitives.js';
+	import type { RecipeAggregate } from '$lib/domain/recipes/schema.js';
+	import { MyMenuDashboard, type RecipeMenuItem } from '$lib/components/menu/index.js';
+	import type { RecipeMenuStats } from '$lib/menu/recipe-defaults.js';
+	import {
+		importedCandidateToMenuItem,
+		recipeAggregateToMenuItem,
+		recipeMenuItemToEditorPatch
+	} from '$lib/menu/recipe-local-adapter.js';
 
-	let { data }: { data: PageData } = $props();
-	let recipes = $state<RecipeMenuItem[]>([]);
-	let archivedRecipes = $state<RecipeMenuItem[]>([]);
-	let nextRecipeOffset = $state<number | null>(null);
-	let unsubscribeActiveHousehold: (() => void) | null = null;
-
-	$effect(() => {
-		const routeRecipes = data.recipes ?? [];
-		const routeArchivedRecipes = data.archivedRecipes ?? [];
-		const routeNextRecipeOffset = data.nextRecipeOffset ?? null;
-
-		recipes = routeRecipes;
-		archivedRecipes = routeArchivedRecipes;
-		nextRecipeOffset = routeNextRecipeOffset;
-		setCachedMenuRouteData(data.activeHouseholdId, {
-			recipes: routeRecipes,
-			archivedRecipes: routeArchivedRecipes,
-			nextRecipeOffset: routeNextRecipeOffset
-		});
+	let database = $state<MaalDatabase | null>(null);
+	let library = $state.raw<{
+		recipes: RecipeAggregate[];
+		archivedRecipes: RecipeAggregate[];
+		reinstatedIds: ReadonlySet<string>;
+	}>({
+		recipes: [],
+		archivedRecipes: [],
+		reinstatedIds: new Set()
 	});
+	let statistics = $state.raw<ReadonlyMap<string, RecipeMenuStats>>(new Map());
+	let activeOwnerUserId = $state<string | null>(null);
+	let loadError = $state<string | null>(null);
+	// Only a successful statistics emission may clear its error, not library updates.
+	let statisticsError = $state<string | null>(null);
+	const visibleError = $derived(loadError ?? statisticsError);
+
+	const toMenuItem = (recipe: RecipeAggregate) => ({
+		...recipeAggregateToMenuItem(recipe, statistics.get(recipe.id)),
+		reinstated: library.reinstatedIds.has(recipe.id)
+	});
+	const recipes = $derived(library.recipes.map(toMenuItem));
+	const archivedRecipes = $derived(library.archivedRecipes.map(toMenuItem));
+
+	const commandContext = async (): Promise<RecipeCommandContext> => {
+		if (!database || !activeOwnerUserId) throw new Error('Choose a local profile first.');
+		const activeProfileId = (await database.uiState.get('activeProfileId'))?.value;
+		if (typeof activeProfileId !== 'string') throw new Error('Choose a local profile first.');
+		const slot = await database.authSlots.where('profileId').equals(activeProfileId).first();
+		const device = await database.meta.get('deviceId');
+		return {
+			authSlotId: slot?.authSlotId ?? `signed-out:${activeProfileId}`,
+			ownerUserId: activeOwnerUserId,
+			originDeviceId: Schema.decodeUnknownSync(DomainIdSchema)(device?.value)
+		};
+	};
+
+	const saveRecipe = async (recipe: RecipeMenuItem) => {
+		if (!database) throw new Error('Local recipe storage is still opening.');
+		const context = await commandContext();
+		if (recipe.importedCandidate) {
+			await confirmUrlImport(database, context, recipe.importedCandidate, recipe);
+			return;
+		}
+		const patch = recipeMenuItemToEditorPatch(recipe);
+		if (recipe.id.startsWith('draft-recipe-')) {
+			await createRecipeFromEditor(database, context, patch);
+			return;
+		}
+		await updateRecipeFromEditor(database, context, recipe.id, patch);
+	};
+
+	const importRecipeFromUrl = async (url: string): Promise<RecipeMenuItem> => {
+		if (!database) throw new Error('Local recipe storage is still opening.');
+		const candidate = await fetchRecipeUrlCandidate(database, url);
+		return importedCandidateToMenuItem(candidate, `draft-recipe-${crypto.randomUUID()}`);
+	};
+
+	const deleteLocalRecipe = async (recipe: RecipeMenuItem) => {
+		if (!database) throw new Error('Local recipe storage is still opening.');
+		await deleteRecipe(database, await commandContext(), recipe.id);
+	};
+
+	const restoreLocalRecipe = async (recipe: RecipeMenuItem) => {
+		if (!database) throw new Error('Local recipe storage is still opening.');
+		await restoreRecipe(database, await commandContext(), recipe.id);
+	};
+
+	const permanentlyDeleteLocalRecipes = async (selected: RecipeMenuItem[]) => {
+		if (!database) throw new Error('Local recipe storage is still opening.');
+		const context = await commandContext();
+		for (const recipe of selected) await permanentlyDeleteRecipe(database, context, recipe.id);
+	};
 
 	onMount(() => {
-		const cached = getCachedMenuRouteData(data.activeHouseholdId);
-		if (cached) {
-			recipes = cached.recipes;
-			archivedRecipes = cached.archivedRecipes;
-			nextRecipeOffset = cached.nextRecipeOffset;
-		}
+		let cancelled = false;
+		let subscription: { unsubscribe: () => void } | undefined;
+		let statisticsSubscription: { unsubscribe: () => void } | undefined;
 
-		unsubscribeActiveHousehold = activeHouseholdId.subscribe((householdId) => {
-			if (!householdId) {
-				clearMenuRouteDataCache();
-				writeActiveHouseholdCookie(null);
-				recipes = [];
-				archivedRecipes = [];
-				nextRecipeOffset = null;
-				return;
-			}
-			if (householdId !== data.activeHouseholdId) {
-				const cached = getCachedMenuRouteData(householdId);
-				recipes = cached?.recipes ?? [];
-				archivedRecipes = cached?.archivedRecipes ?? [];
-				nextRecipeOffset = cached?.nextRecipeOffset ?? null;
-			}
-		});
+		void getBrowserDatabase()
+			.then((opened) => {
+				if (cancelled) {
+					opened.close();
+					return;
+				}
+				database = opened;
+				subscription = liveQuery(async () => {
+					const empty = {
+						ownerUserId: null,
+						recipes: [],
+						archivedRecipes: [],
+						reinstatedIds: new Set<string>() as ReadonlySet<string>
+					};
+					const activeProfileId = (await opened.uiState.get('activeProfileId'))?.value;
+					if (typeof activeProfileId !== 'string') return empty;
+					const profile = await opened.profiles.get(activeProfileId);
+					if (!profile) return empty;
+					const [active, deleted, reinstatedIds] = await Promise.all([
+						listRecipes(opened, profile.workosUserId),
+						listRecoverableRecipes(opened, profile.workosUserId),
+						readReinstatedIds(opened, 'recipe')
+					]);
+					return {
+						ownerUserId: profile.workosUserId,
+						recipes: active,
+						archivedRecipes: deleted,
+						reinstatedIds
+					};
+				}).subscribe({
+					next: (next) => {
+						activeOwnerUserId = next.ownerUserId;
+						library = next;
+						loadError = null;
+					},
+					error: () => {
+						loadError = 'Your local recipe library could not be read.';
+					}
+				});
+				// Separate from the library query so meal changes don't re-read every recipe.
+				statisticsSubscription = liveRecipeStatistics(opened).subscribe({
+					next: (next) => {
+						statistics = next;
+						statisticsError = null;
+					},
+					error: () => {
+						statisticsError = 'Your local recipe library could not be read.';
+					}
+				});
+			})
+			.catch(() => {
+				loadError = 'Your local recipe library could not be opened.';
+			});
+
+		return () => {
+			cancelled = true;
+			subscription?.unsubscribe();
+			statisticsSubscription?.unsubscribe();
+		};
 	});
-	onDestroy(() => unsubscribeActiveHousehold?.());
 </script>
 
-<MyMenuDashboard {recipes} {archivedRecipes} {nextRecipeOffset} />
+{#if visibleError}
+	<div role="alert" class="grid gap-1 p-4 text-sm text-destructive">
+		<p>{visibleError}</p>
+		<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+		<a class="underline underline-offset-4" href="/recovery">Open local recovery</a>
+	</div>
+{/if}
+
+<MyMenuDashboard
+	{recipes}
+	{archivedRecipes}
+	onsave={saveRecipe}
+	onimporturl={importRecipeFromUrl}
+	ondelete={deleteLocalRecipe}
+	onrestore={restoreLocalRecipe}
+	onpermanentdelete={permanentlyDeleteLocalRecipes}
+	onopen={(recipe) => {
+		if (database && recipe.reinstated) void dismissReinstatement(database, 'recipe', recipe.id);
+	}}
+/>

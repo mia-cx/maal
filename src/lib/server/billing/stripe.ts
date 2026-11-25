@@ -1,57 +1,45 @@
-import { env as privateEnv } from '$env/dynamic/private';
-import { env as publicEnv } from '$env/dynamic/public';
 import Stripe from 'stripe';
 
-interface StripeEnv {
-	STRIPE_SECRET_KEY?: string;
-	STRIPE_WEBHOOK_SECRET?: string;
-	STRIPE_PRICING_TABLE_ID?: string;
-	STRIPE_PRODUCT_ID?: string;
-	PUBLIC_STRIPE_PUBLISHABLE_KEY?: string;
+interface StripeEnvironment {
+	readonly STRIPE_SECRET_KEY?: string;
+	readonly STRIPE_WEBHOOK_SECRET?: string;
+	readonly STRIPE_PRODUCT_ID?: string;
+	readonly MAAL_TRIAL_DAYS?: string;
 }
 
-const stripeApiVersion = '2026-05-27.dahlia';
+const valueFrom = (environment: unknown, key: keyof StripeEnvironment): string | undefined =>
+	(environment as StripeEnvironment | undefined)?.[key] ?? process.env[key];
 
-const readPrivate = (
-	platformEnv: StripeEnv | undefined,
-	key: keyof StripeEnv
-): string | undefined => platformEnv?.[key] ?? privateEnv[key];
-
-const readPublicStripePublishableKey = (platformEnv: StripeEnv | undefined): string | undefined =>
-	platformEnv?.PUBLIC_STRIPE_PUBLISHABLE_KEY ?? publicEnv.PUBLIC_STRIPE_PUBLISHABLE_KEY;
-
-export const createStripeClient = (platform?: App.Platform): Stripe => {
-	const secretKey = readPrivate(platform?.env, 'STRIPE_SECRET_KEY');
-	if (!secretKey) throw new Error('STRIPE_SECRET_KEY is not set');
-
+export const createStripeClient = (environment?: unknown): Stripe => {
+	const secretKey = valueFrom(environment, 'STRIPE_SECRET_KEY');
+	if (!secretKey) throw new BillingConfigurationError('STRIPE_SECRET_KEY');
 	return new Stripe(secretKey, {
-		apiVersion: stripeApiVersion,
-		httpClient: Stripe.createFetchHttpClient()
+		apiVersion: '2026-06-24.dahlia',
+		httpClient: Stripe.createFetchHttpClient(),
+		maxNetworkRetries: 2
 	});
 };
 
-export const getStripeWebhookSecret = (platform?: App.Platform): string => {
-	const secret = readPrivate(platform?.env, 'STRIPE_WEBHOOK_SECRET');
-	if (!secret) throw new Error('STRIPE_WEBHOOK_SECRET is not set');
-	return secret;
-};
-
-export const getStripePublicConfig = (platform?: App.Platform) => ({
-	publishableKey: readPublicStripePublishableKey(platform?.env) ?? '',
-	pricingTableId: readPrivate(platform?.env, 'STRIPE_PRICING_TABLE_ID') ?? '',
-	productId: readPrivate(platform?.env, 'STRIPE_PRODUCT_ID') ?? ''
-});
-
-export const getStripeProductId = (platform?: App.Platform): string => {
-	const productId = readPrivate(platform?.env, 'STRIPE_PRODUCT_ID');
-	if (!productId) throw new Error('STRIPE_PRODUCT_ID is not set');
+export const stripeProductId = (environment?: unknown): string => {
+	const productId = valueFrom(environment, 'STRIPE_PRODUCT_ID');
+	if (!productId) throw new BillingConfigurationError('STRIPE_PRODUCT_ID');
 	return productId;
 };
 
-export const currentPeriodEndIso = (subscription: Stripe.Subscription): string | null => {
-	const periodEnd = subscription.items.data[0]?.current_period_end;
-	return periodEnd == null ? null : new Date(periodEnd * 1000).toISOString();
+export const stripeWebhookSecret = (environment?: unknown): string => {
+	const secret = valueFrom(environment, 'STRIPE_WEBHOOK_SECRET');
+	if (!secret) throw new BillingConfigurationError('STRIPE_WEBHOOK_SECRET');
+	return secret;
 };
 
-export const subscriptionPriceId = (subscription: Stripe.Subscription): string | null =>
-	subscription.items.data[0]?.price.id ?? null;
+export const configuredTrialDays = (environment?: unknown): number => {
+	const configured = Number.parseInt(valueFrom(environment, 'MAAL_TRIAL_DAYS') ?? '30', 10);
+	return Number.isSafeInteger(configured) && configured > 0 && configured <= 90 ? configured : 30;
+};
+
+export class BillingConfigurationError extends Error {
+	readonly _tag = 'BillingConfigurationError';
+	constructor(readonly setting: string) {
+		super(`Billing setting ${setting} is unavailable.`);
+	}
+}

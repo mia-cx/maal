@@ -1,18 +1,15 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import type { Component } from 'svelte';
 	import MarketingShell from '$lib/components/marketing/marketing-shell.svelte';
 	import type { LegalPolicyVersion } from '$lib/legal/types';
 
 	let {
 		document,
-		content,
-		archiveHref,
-		currentHref
+		content
 	}: {
 		document: LegalPolicyVersion;
 		content: Component;
-		archiveHref: string;
-		currentHref?: string;
 	} = $props();
 
 	let Content = $derived(content);
@@ -22,16 +19,20 @@
 	<article class="container mx-auto grid max-w-3xl gap-8 px-4 pt-28 pb-12 md:pt-32 md:pb-16">
 		<header class="grid gap-3">
 			<nav class="flex flex-wrap gap-x-4 gap-y-2 text-sm font-medium text-muted-foreground">
-				<a href="/" class="hover:text-foreground">← Back home</a>
-				<a href="/legal" class="hover:text-foreground">Legal index</a>
-				<a href={archiveHref} class="hover:text-foreground">Archive</a>
+				<a href={resolve('/')} class="hover:text-foreground">← Back home</a>
+				<a href={resolve('/legal')} class="hover:text-foreground">Legal index</a>
+				<a
+					href={resolve('/legal/[policy]/archive', { policy: document.policy })}
+					class="hover:text-foreground">Archive</a
+				>
 			</nav>
 
-			{#if document.archived && currentHref}
+			{#if document.archived}
 				<p class="rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
 					This is an archived version. <a
 						class="font-medium text-foreground underline"
-						href={currentHref}>View the current version.</a
+						href={resolve('/legal/[policy]', { policy: document.policy })}
+						>View the current version.</a
 					>
 				</p>
 			{/if}

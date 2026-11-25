@@ -17,8 +17,7 @@ export type HouseholdProfileUpdate = Partial<{
 }>;
 
 export type HouseholdProfileParseResult =
-	| { ok: true; update: HouseholdProfileUpdate }
-	| { ok: false; message: string };
+	{ ok: true; update: HouseholdProfileUpdate } | { ok: false; message: string };
 
 export const profileUpdateFromForm = (form: FormData): HouseholdProfileParseResult => {
 	const update: HouseholdProfileUpdate = {};

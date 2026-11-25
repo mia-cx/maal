@@ -5,57 +5,36 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1781371835656,
-      "tag": "0000_init_schema",
+      "when": 1787404746634,
+      "tag": "0000_rewrite_baseline",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "6",
-      "when": 1781371835657,
-      "tag": "0001_seed_global_units",
+      "when": 1787405111991,
+      "tag": "0001_global_taxonomy_seed",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "6",
-      "when": 1781371835658,
-      "tag": "0002_add_culinary_unit_aliases",
+      "when": 1791094726558,
+      "tag": "0002_dry_bug",
       "breakpoints": true
     },
     {
       "idx": 3,
       "version": "6",
-      "when": 1781371835659,
-      "tag": "0003_seed_unit_alias_plural_alias",
+      "when": 1795043795352,
+      "tag": "0003_household_staleness_threshold",
       "breakpoints": true
     },
     {
       "idx": 4,
       "version": "6",
-      "when": 1781375150433,
-      "tag": "0004_loose_piledriver",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1781577290452,
-      "tag": "0005_perfect_the_professor",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1781619444259,
-      "tag": "0006_household_membership_mutation_locks",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1781621906585,
-      "tag": "0007_petite_the_professor",
+      "when": 1795058300057,
+      "tag": "0004_recipe_versions",
       "breakpoints": true
     }
   ]

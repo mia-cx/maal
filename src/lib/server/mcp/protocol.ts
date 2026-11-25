@@ -1,88 +1,104 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { getDb } from '$lib/server/db';
-import { verifyMcpKey } from '$lib/server/auth/mcp-keys';
-import { type McpContext } from './context';
-import { registerToolHandlers } from './registry';
-import { tools } from './tools';
+import { Server } from '@modelcontextprotocol/server';
+import { createMcpHandler } from 'agents/mcp/server';
 
-export const bearerToken = (request: Request): string | null => {
-	const authorization = request.headers.get('authorization') ?? '';
-	const match = /^Bearer\s+(.+)$/i.exec(authorization);
-	return match?.[1]?.trim() ?? null;
-};
+import { D1RemoteDomainPort, type RemoteDomainPort } from '$lib/server/domain/remote-port.js';
+import { fetchRecipeCandidate } from '$lib/server/recipe-import/parser.js';
+import type { RemoteComputeLimiter } from '$lib/server/recipe-import/remote-compute.js';
 
-const mcpAuthDiscovery = {
-	authentication: {
-		type: 'bearer',
-		scheme: 'Bearer',
-		header: 'Authorization',
-		format: 'Authorization: Bearer <Maal MCP key>',
-		instructions: 'Create a Maal MCP key in Settings → MCP keys, then use it as a bearer token.'
-	}
-};
+import {
+	authorizeMcpRequest,
+	mcpAuthorizationResponse,
+	type LiveMembershipProvider
+} from './authorization.js';
+import type { McpPrincipal } from './contracts.js';
+import {
+	createMcpHouseholdAdministrationPort,
+	type McpHouseholdAdministrationPort
+} from './administration.js';
+import { registerToolHandlers } from './registry.js';
+import { tools } from './tools.js';
 
-const bearerChallenge = 'Bearer realm="Maal MCP", error="invalid_token"';
+export const MCP_ALLOWED_HOSTNAMES = [
+	'maal.mia.cx',
+	'staging.maal.is',
+	'maal.test',
+	'localhost',
+	'127.0.0.1'
+];
 
-const jsonResponse = (body: unknown, status: number, headers: HeadersInit = {}) =>
-	new Response(JSON.stringify(body), {
-		status,
-		headers: { 'content-type': 'application/json', ...headers }
-	});
-
-export const authDiscoveryResponse = (request: Request) => {
-	const body = JSON.stringify(mcpAuthDiscovery);
-	if (request.headers.get('accept')?.includes('text/event-stream')) {
-		return new Response(`event: auth\ndata: ${body}\n\n`, {
-			status: 200,
-			headers: {
-				'content-type': 'text/event-stream',
-				'cache-control': 'no-store',
-				connection: 'keep-alive'
-			}
-		});
-	}
-	return jsonResponse(mcpAuthDiscovery, 200, { 'cache-control': 'no-store' });
-};
-
-const unauthorizedResponse = (error: string) =>
-	jsonResponse({ error, ...mcpAuthDiscovery }, 401, {
-		'www-authenticate': bearerChallenge,
-		'cache-control': 'no-store'
-	});
-
-const createContext = async (
-	platform: App.Platform | undefined,
-	request: Request
-): Promise<McpContext | Response> => {
-	if (!platform?.env.DB) return jsonResponse({ error: 'Database unavailable.' }, 503);
-	const token = bearerToken(request);
-	if (!token) return unauthorizedResponse('Missing bearer MCP key.');
-	try {
-		const key = await verifyMcpKey({ platform, rawKey: token });
-		if (!key) return unauthorizedResponse('Invalid MCP key.');
-		return { platform, key, db: getDb(platform.env.DB) };
-	} catch {
-		return jsonResponse({ error: 'MCP key storage unavailable.' }, 503);
-	}
-};
-
-export const handleMcpRequest = async (platform: App.Platform | undefined, request: Request) => {
-	const context = await createContext(platform, request);
-	if (context instanceof Response) return context;
-
-	const server = new Server({ name: 'maal', version: '0.1.0' }, { capabilities: { tools: {} } });
+export const createMaalMcpServer = (
+	context: Parameters<typeof registerToolHandlers>[1]
+): Server => {
+	const server = new Server({ name: 'maal', version: '1.0.0' }, { capabilities: { tools: {} } });
 	registerToolHandlers(server, context, tools);
+	return server;
+};
 
-	const transport = new WebStandardStreamableHTTPServerTransport({
-		sessionIdGenerator: undefined,
-		enableJsonResponse: true
-	});
+export const createMaalMcpHandler = (input: {
+	principal: McpPrincipal;
+	domain: RemoteDomainPort;
+	limiter: RemoteComputeLimiter;
+	administration: McpHouseholdAdministrationPort;
+	fetchCandidate?: typeof fetchRecipeCandidate;
+	onServerCreated?: (server: Server, era: 'modern' | 'legacy') => void;
+}) =>
+	createMcpHandler(
+		({ era }) => {
+			const server = createMaalMcpServer({
+				principal: input.principal,
+				domain: input.domain,
+				limiter: input.limiter,
+				fetchRecipeCandidate: input.fetchCandidate ?? fetchRecipeCandidate,
+				administration: input.administration
+			});
+			input.onServerCreated?.(server, era);
+			return server;
+		},
+		{
+			route: '/mcp',
+			legacy: 'stateless',
+			responseMode: 'json',
+			corsOptions: false,
+			allowedHostnames: MCP_ALLOWED_HOSTNAMES,
+			allowedOriginHostnames: ['maal.mia.cx', 'staging.maal.is', 'maal.test', 'localhost']
+		}
+	);
 
+export const handleMcpPost = async (input: {
+	request: Request;
+	environment: Env;
+	membershipProvider?: LiveMembershipProvider;
+	domain?: RemoteDomainPort;
+	limiter?: RemoteComputeLimiter;
+	administration?: McpHouseholdAdministrationPort;
+	fetchCandidate?: typeof fetchRecipeCandidate;
+	onServerCreated?: (server: Server, era: 'modern' | 'legacy') => void;
+}): Promise<Response> => {
+	let principal;
 	try {
-		await server.connect(transport);
-		return await transport.handleRequest(request);
-	} finally {
-		await server.close();
+		principal = await authorizeMcpRequest({
+			request: input.request,
+			environment: input.environment,
+			...(input.membershipProvider ? { membershipProvider: input.membershipProvider } : {})
+		});
+	} catch (cause) {
+		return mcpAuthorizationResponse(cause);
 	}
+	const limiter = input.limiter ?? input.environment.RECIPE_URL_RATE_LIMIT;
+	if (!limiter) {
+		return Response.json(
+			{ error: 'remote_compute_unavailable' },
+			{ status: 503, headers: { 'cache-control': 'no-store' } }
+		);
+	}
+	const handler = createMaalMcpHandler({
+		principal,
+		domain: input.domain ?? new D1RemoteDomainPort(input.environment.DB, principal.keyId),
+		limiter,
+		administration:
+			input.administration ?? createMcpHouseholdAdministrationPort(principal, input.environment),
+		...(input.fetchCandidate ? { fetchCandidate: input.fetchCandidate } : {}),
+		...(input.onServerCreated ? { onServerCreated: input.onServerCreated } : {})
+	});
+	return handler.fetch(input.request);
 };

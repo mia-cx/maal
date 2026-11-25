@@ -1,8 +1,8 @@
 allowBuilds:
   '@tailwindcss/oxide': true
+  esbuild: true
   workerd: true
   sharp: true
-  esbuild: true
-  msgpackr-extract: true
-minimumReleaseAgeExclude:
-  - effect@4.0.0-beta.83
+
+overrides:
+  'cookie@<0.7.0': 0.7.2

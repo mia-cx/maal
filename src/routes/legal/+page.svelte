@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import MarketingShell from '$lib/components/marketing/marketing-shell.svelte';
 	import type { PageData } from './$types';
 
@@ -13,7 +14,7 @@
 <MarketingShell>
 	<section class="container mx-auto grid max-w-3xl gap-8 px-4 pt-28 pb-12 md:pt-32 md:pb-16">
 		<header class="grid gap-3">
-			<a href="/" class="text-sm font-medium text-muted-foreground hover:text-foreground"
+			<a href={resolve('/')} class="text-sm font-medium text-muted-foreground hover:text-foreground"
 				>← Back home</a
 			>
 			<h1 class="text-4xl font-bold tracking-tight">Legal</h1>
@@ -21,18 +22,21 @@
 		</header>
 
 		<ul class="grid gap-3">
-			{#each data.policies as policy}
+			{#each data.policies as policy (policy.slug)}
 				<li class="rounded-lg border border-border p-4">
 					<div class="flex flex-wrap items-start justify-between gap-3">
 						<div>
-							<a class="font-semibold underline" href={`/legal/${policy.slug}`}>{policy.title}</a>
+							<a
+								class="font-semibold underline"
+								href={resolve('/legal/[policy]', { policy: policy.slug })}>{policy.title}</a
+							>
 							<p class="mt-1 text-sm text-muted-foreground">
 								Effective {policy.current.effectiveDate}. {policy.current.summary}
 							</p>
 						</div>
 						<a
 							class="text-sm font-medium text-muted-foreground underline"
-							href={`/legal/${policy.slug}/archive`}>Archive</a
+							href={resolve('/legal/[policy]/archive', { policy: policy.slug })}>Archive</a
 						>
 					</div>
 				</li>

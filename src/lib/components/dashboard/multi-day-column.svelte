@@ -84,7 +84,7 @@
 		</span>
 	</div>
 	<div
-		role="button"
+		role="group"
 		tabindex="-1"
 		aria-label={m.app_add_meal_on_date({ date: dayKey })}
 		class="min-h-0 flex-1 space-y-1 p-1"

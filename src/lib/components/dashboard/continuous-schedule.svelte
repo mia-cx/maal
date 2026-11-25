@@ -5,8 +5,12 @@
 	import DailyScheduleDay from './daily-schedule-day.svelte';
 	import ScheduleMealPool from './schedule-meal-pool.svelte';
 	import { sortScheduledMeals } from './schedule-ordering';
-	import type { DailyScrollState } from '$lib/stores/ui-state';
-	import type { Meal, MealCheckInHandler, MealDropTarget } from './schedule-types';
+	import type {
+		DailyScrollState,
+		Meal,
+		MealCheckInHandler,
+		MealDropTarget
+	} from './schedule-types';
 
 	const edgeThreshold = 480;
 	const pageSize = 21;

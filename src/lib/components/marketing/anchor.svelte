@@ -30,6 +30,7 @@
 	);
 </script>
 
+<!-- eslint-disable svelte/no-navigation-without-resolve -- href can be external or resolved by the caller -->
 <a
 	{href}
 	target={resolvedTarget}
@@ -54,3 +55,4 @@
 		{/if}
 	{/if}
 </a>
+<!-- eslint-enable svelte/no-navigation-without-resolve -->

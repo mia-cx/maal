@@ -39,4 +39,7 @@ export type Meal = {
 	instructions?: string[];
 	latestVerdict?: MealFeedbackVerdict;
 	latestCheckIn?: MealCheckIn;
+	householdTimeZone?: string;
+	/** A recent edit brought this meal back after it was deleted on this device. */
+	reinstated?: boolean;
 };

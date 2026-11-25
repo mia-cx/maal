@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { overwriteGetLocale } from '$lib/paraglide/runtime.js';
 import {
 	filterMcpHouseholds,
 	mcpHouseholdPickerLabel,
@@ -14,6 +15,8 @@ const households: SettingsHousehold[] = [
 	{ id: 'h1', name: 'Kitchen' },
 	{ id: 'h2', name: 'Studio' }
 ];
+
+beforeAll(() => overwriteGetLocale(() => 'en'));
 
 describe('MCP key model', () => {
 	it('derives selected scopes from scope levels', () => {

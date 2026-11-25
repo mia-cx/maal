@@ -1,64 +1,109 @@
 <script lang="ts">
-	import * as m from '$lib/paraglide/messages';
-	import { invalidateAll } from '$app/navigation';
+	import { invalidate } from '$app/navigation';
 	import { navigating, page } from '$app/state';
-	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
-	import { setClientAppLocale } from '$lib/i18n/client-app-locale';
-	import { activeNavItemForPath } from '$lib/components/dashboard/active-nav';
-	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
-	import type { DashboardNavItem } from '$lib/components/dashboard/dashboard-nav';
-	import * as Popover from '$lib/components/ui/popover';
-	import * as Sidebar from '$lib/components/ui/sidebar';
-	import { featurePreviews } from '$lib/features/flags';
+	import { liveQuery } from 'dexie';
+	import { onMount, type Component, type Snippet } from 'svelte';
+
+	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut.js';
 	import {
-		activeHouseholdId,
-		setActiveHouseholdId,
-		writeActiveHouseholdCookie
-	} from '$lib/stores/active-household';
-	import { appShellUiState, updateAppShellUiState } from '$lib/stores/app-shell-ui-state';
-	import { onMount, untrack, type Snippet } from 'svelte';
-	import type { LayoutData } from './$types';
+		featurePreviewFlags,
+		featurePreviewsDependency,
+		readActiveFeatureFlags
+	} from '$lib/client/feature-previews.js';
+	import { getBrowserDatabase } from '$lib/client/local/browser.js';
+	import type { MaalDatabase } from '$lib/client/local/database.js';
+	import { readLockedActiveProfile } from '$lib/client/local/profiles.js';
+	import type { Profile } from '$lib/domain/household/contracts.js';
+	import { activeNavItemForPath } from '$lib/components/dashboard/active-nav.js';
+	import DashboardSidebar from '$lib/components/dashboard/dashboard-sidebar.svelte';
+	import ProfileLockScreen from '$lib/components/profile-lock-screen.svelte';
+	import SyncRejectionNotice from '$lib/components/sync-rejection-notice.svelte';
+	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 
 	const minSidebarWidth = 208;
 	const maxSidebarWidth = 384;
+	const shellStateKey = 'appShell';
 
-	let { children, data }: { children: Snippet; data: LayoutData } = $props();
-
-	setClientAppLocale(untrack(() => data.householdParaglideLocale));
-
-	const initialUiState = appShellUiState.get();
-	let sidebarOpen = $state(initialUiState.sidebarOpen);
-	let sidebarWidth = $state(initialUiState.sidebarWidth);
+	let { children }: { children: Snippet } = $props();
+	let database = $state<MaalDatabase | null>(null);
+	let error = $state<string | null>(null);
+	let sidebarOpen = $state(true);
+	let sidebarWidth = $state(256);
 	let resizingSidebar = $state(false);
-	let exportDataPopoverOpen = $state(false);
-	let householdStateHydrated = $state(false);
+	let SettingsDialog = $state<Component<{ database: MaalDatabase }> | null>(null);
+	let settingsDialogLoading = $state(false);
+	let settingsDialogError = $state<string | null>(null);
+	// `undefined` until the first check, so a locked profile's data never flashes on load.
+	let lockedProfile = $state<Profile | null | undefined>(undefined);
+	let featureFlags = $state<readonly string[]>([]);
 
-	const features = $derived(featurePreviews(data.session));
-	const sidebarUser = $derived({
-		name: data.session?.user.name ?? data.session?.user.email?.split('@')[0] ?? 'Local preview',
-		email: data.session?.user.email ?? 'Local preview',
-		avatar: data.session?.user.profilePictureUrl ?? '',
-		emailVerified: data.session?.user.emailVerified ?? false
-	});
-	const showDashboardShell = $derived(Boolean(data.session));
-	const activeNav = $derived<DashboardNavItem>(activeNavItemForPath(page.url.pathname));
+	const activeNav = $derived(activeNavItemForPath(page.url.pathname));
+	const navigatingWithinApp = $derived(Boolean(navigating.to?.url.pathname.startsWith('/')));
 	const isSubscribePage = $derived(page.url.pathname.startsWith('/subscribe'));
-	const subscriptionLocked = $derived(
-		Boolean(data.subscriptionLock?.locked) &&
-			!page.url.pathname.startsWith('/household') &&
-			!isSubscribePage
-	);
-	const canManageSubscription = $derived(Boolean(data.subscriptionLock?.canManageSubscription));
-	const navigatingWithinApp = $derived(
-		Boolean(
-			navigating.to?.url.pathname.startsWith('/plan') ||
-			navigating.to?.url.pathname.startsWith('/menu') ||
-			navigating.to?.url.pathname.startsWith('/household')
-		)
-	);
+
+	$effect(() => {
+		if (
+			!database ||
+			!page.url.searchParams.has('settings') ||
+			SettingsDialog ||
+			settingsDialogLoading ||
+			settingsDialogError
+		) {
+			return;
+		}
+
+		settingsDialogLoading = true;
+		void import('$lib/components/local-settings-dialog.svelte')
+			.then(({ default: dialog }) => {
+				SettingsDialog = dialog;
+			})
+			.catch(() => {
+				settingsDialogError = 'Settings could not be opened. Try reloading Maal.';
+			})
+			.finally(() => {
+				settingsDialogLoading = false;
+			});
+	});
+
+	$effect(() => {
+		if (!database) return;
+		const opened = database;
+		const subscription = liveQuery(() =>
+			Promise.all([readLockedActiveProfile(opened), readActiveFeatureFlags(opened)])
+		).subscribe({
+			next: ([profile, flags]) => {
+				lockedProfile = profile;
+				const changed = Object.values(featurePreviewFlags).some(
+					(flag) => featureFlags.includes(flag) !== flags.includes(flag)
+				);
+				featureFlags = flags;
+				if (changed) void invalidate(featurePreviewsDependency);
+			},
+			error: () => {
+				error = 'Local data could not be opened. Recovery may be required.';
+			}
+		});
+		return () => subscription.unsubscribe();
+	});
+
+	const persistShellState = async () => {
+		if (!database) return;
+		await database.uiState.put({
+			key: shellStateKey,
+			value: { sidebarOpen, sidebarWidth }
+		});
+	};
+
+	const toggleSidebar = () => {
+		sidebarOpen = !sidebarOpen;
+		void persistShellState();
+	};
 
 	const startSidebarResize = (event: PointerEvent) => {
 		resizingSidebar = true;
+		if (event.currentTarget instanceof HTMLElement) {
+			event.currentTarget.setPointerCapture(event.pointerId);
+		}
 		event.preventDefault();
 	};
 
@@ -68,45 +113,30 @@
 	};
 
 	const stopSidebarResize = () => {
+		if (!resizingSidebar) return;
 		resizingSidebar = false;
-	};
-
-	const toggleSidebar = () => {
-		if (!showDashboardShell) return;
-		sidebarOpen = !sidebarOpen;
+		void persistShellState();
 	};
 
 	onMount(() => {
-		const storedHouseholdId = activeHouseholdId.get();
-		const storedHouseholdIsAccessible = data.households.some(
-			(household) => household.id === storedHouseholdId
-		);
-
-		if (
-			storedHouseholdId &&
-			storedHouseholdId !== data.activeHouseholdId &&
-			storedHouseholdIsAccessible
-		) {
-			writeActiveHouseholdCookie(storedHouseholdId);
-			void invalidateAll().catch(() => setActiveHouseholdId(data.activeHouseholdId));
-		} else {
-			setActiveHouseholdId(data.activeHouseholdId);
-			writeActiveHouseholdCookie(data.activeHouseholdId);
-		}
-
-		householdStateHydrated = true;
-	});
-
-	$effect(() => {
-		setClientAppLocale(data.householdParaglideLocale);
-	});
-
-	$effect(() => {
-		updateAppShellUiState({ activeNav, sidebarOpen, sidebarWidth });
-	});
-
-	$effect(() => {
-		if (householdStateHydrated) setActiveHouseholdId(data.activeHouseholdId);
+		void getBrowserDatabase()
+			.then(async (opened) => {
+				database = opened;
+				const stored = await opened.uiState.get(shellStateKey);
+				if (typeof stored?.value !== 'object' || stored.value === null) return;
+				if ('sidebarOpen' in stored.value && typeof stored.value.sidebarOpen === 'boolean') {
+					sidebarOpen = stored.value.sidebarOpen;
+				}
+				if ('sidebarWidth' in stored.value && typeof stored.value.sidebarWidth === 'number') {
+					sidebarWidth = Math.min(
+						maxSidebarWidth,
+						Math.max(minSidebarWidth, stored.value.sidebarWidth)
+					);
+				}
+			})
+			.catch(() => {
+				error = 'Local data could not be opened. Recovery may be required.';
+			});
 	});
 </script>
 
@@ -120,34 +150,41 @@
 			{
 				id: 'sidebar.toggle',
 				combo: { key: 's', meta: false, ctrl: false, alt: false },
-				when: () => showDashboardShell,
 				handler: toggleSidebar
 			}
 		]
 	}}
 >
-	{#if showDashboardShell}
+	{#if database && lockedProfile}
+		<ProfileLockScreen {database} profile={lockedProfile} />
+	{:else if database && lockedProfile === null}
 		<Sidebar.Provider
 			bind:open={sidebarOpen}
 			class={resizingSidebar ? 'sidebar-resizing' : undefined}
 			style="--sidebar-width: {sidebarWidth}px;"
+			data-testid="shared-app-shell"
 		>
-			<DashboardSidebar
-				user={sidebarUser}
-				{activeNav}
-				{features}
-				households={data.households}
-				activeHouseholdId={data.activeHouseholdId}
-			/>
+			{#if SettingsDialog}
+				<SettingsDialog {database} />
+			{:else if settingsDialogError}
+				<p
+					role="alert"
+					class="fixed top-4 left-1/2 z-[80] -translate-x-1/2 rounded-lg border border-destructive/30 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
+				>
+					{settingsDialogError}
+				</p>
+			{/if}
+			<DashboardSidebar {database} {activeNav} {featureFlags} />
 			{#if sidebarOpen}
 				<button
-					aria-label={m.app_resize_sidebar()}
-					class="fixed top-0 bottom-0 z-[55] w-3 cursor-col-resize bg-transparent after:absolute after:top-0 after:bottom-0 after:left-1/2 after:w-px after:-translate-x-1/2 hover:after:bg-border"
+					type="button"
+					aria-label="Resize sidebar"
+					class="fixed top-0 bottom-0 z-[55] hidden w-3 cursor-col-resize bg-transparent after:absolute after:top-0 after:bottom-0 after:left-1/2 after:w-px after:-translate-x-1/2 hover:after:bg-border md:block"
 					style:left="{sidebarWidth - 6}px"
 					onpointerdown={startSidebarResize}
 				></button>
 			{/if}
-			<Sidebar.Inset>
+			<Sidebar.Inset class="min-w-0 overflow-hidden bg-background text-foreground">
 				{#if navigatingWithinApp}
 					<div class="fixed top-0 right-0 left-0 z-[70] h-0.5 overflow-hidden bg-transparent">
 						<div
@@ -155,83 +192,29 @@
 						></div>
 					</div>
 				{/if}
-				<div
-					class="relative min-h-svh min-w-0"
+				<main
+					data-dashboard-main
+					aria-busy={navigatingWithinApp}
+					class="@container/dashboard-main min-h-svh min-w-0 transition-opacity"
 					class:h-svh={isSubscribePage}
-					class:overflow-hidden={isSubscribePage}
+					class:overflow-y-auto={isSubscribePage}
 				>
-					<main
-						data-dashboard-main
-						aria-busy={navigatingWithinApp}
-						class="@container/dashboard-main min-h-svh min-w-0 transition-opacity"
-						class:h-svh={isSubscribePage}
-						class:overflow-y-scroll={isSubscribePage}
-						class:pointer-events-none={subscriptionLocked}
-						class:opacity-25={subscriptionLocked}
-						aria-hidden={subscriptionLocked}
-					>
-						{@render children()}
-					</main>
-					{#if subscriptionLocked}
-						<div
-							class="absolute inset-0 z-50 grid place-items-center bg-background/45 p-6 backdrop-blur-[1px]"
-						>
-							<div
-								class="max-w-md rounded-xl border border-border bg-background p-5 text-center shadow-lg"
-							>
-								<h2 class="text-base font-semibold">
-									{m.app_this_household_has_no_active_subscription()}
-								</h2>
-								{#if canManageSubscription}
-									<p class="mt-2 text-sm text-muted-foreground">
-										{m.app_subscribe_to_resume_access_for_this_househol()}
-									</p>
-									<div class="mt-4 flex justify-center gap-2">
-										<a
-											class="inline-flex h-9 items-center justify-center rounded-md bg-[var(--brand-salmon)] px-4 text-sm font-medium text-white shadow-xs transition-colors hover:bg-[var(--brand-salmon)]/90 focus-visible:ring-2 focus-visible:ring-[var(--brand-salmon)]/30 focus-visible:outline-none"
-											href="/subscribe"
-										>
-											{m.app_subscribe()}
-										</a>
-										<Popover.Root bind:open={exportDataPopoverOpen}>
-											<Popover.Trigger
-												class="inline-flex h-9 cursor-default items-center justify-center rounded-md border border-border bg-muted px-4 text-sm font-medium text-muted-foreground opacity-60 shadow-xs focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none"
-												aria-label={m.app_export_data_unavailable()}
-												onclick={(event) => event.preventDefault()}
-												onfocus={() => (exportDataPopoverOpen = true)}
-												onblur={() => (exportDataPopoverOpen = false)}
-												onmouseenter={() => (exportDataPopoverOpen = true)}
-												onmouseleave={() => (exportDataPopoverOpen = false)}
-											>
-												{m.app_export_data()}
-											</Popover.Trigger>
-											<Popover.Content
-												side="top"
-												sideOffset={8}
-												class="w-72 border border-border text-sm"
-												onmouseenter={() => (exportDataPopoverOpen = true)}
-												onmouseleave={() => (exportDataPopoverOpen = false)}
-											>
-												{m.app_email_data_governance_maal_mia_cx_to_request()}
-											</Popover.Content>
-										</Popover.Root>
-									</div>
-								{:else}
-									<p class="mt-2 text-sm text-muted-foreground">
-										{m.app_subscription_locked_export_sentence()}
-									</p>
-									<a
-										class="mt-1 inline-block text-sm font-medium underline underline-offset-4"
-										href="/export-data">{m.app_export_your_data()}</a
-									>
-								{/if}
-							</div>
-						</div>
-					{/if}
-				</div>
+					{@render children()}
+				</main>
 			</Sidebar.Inset>
+			<SyncRejectionNotice {database} />
 		</Sidebar.Provider>
 	{:else}
-		{@render children()}
+		<div class="grid min-h-svh place-items-center bg-background px-6 text-center text-foreground">
+			<div class="grid gap-2 text-sm text-muted-foreground">
+				<p>{error ?? 'Opening local Maal data…'}</p>
+				{#if error}
+					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+					<a class="text-primary underline underline-offset-4" href="/recovery"
+						>Open local recovery</a
+					>
+				{/if}
+			</div>
+		</div>
 	{/if}
 </div>

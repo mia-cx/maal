@@ -1,20 +1,28 @@
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { isRecord } from './scalars';
+import type { CallToolResult } from '@modelcontextprotocol/server';
 
-export const toolError = (code: string, message: string, suggestion?: string) => ({
+export interface ToolError {
+	readonly code: string;
+	readonly message: string;
+	readonly suggestion?: string;
+}
+
+export const toolError = (code: string, message: string, suggestion?: string): ToolError => ({
 	code,
 	message,
-	suggestion
+	...(suggestion ? { suggestion } : {})
 });
 
-export const toolResult = (value: unknown): CallToolResult => {
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === 'object' && value !== null && !Array.isArray(value);
+
+export const toolResult = (value: unknown, isError = false): CallToolResult => {
 	const structuredContent = isRecord(value) ? value : { value };
-	try {
-		const text = JSON.stringify(structuredContent, null, 2);
-		if (text) return { content: [{ type: 'text', text }], structuredContent };
-	} catch {
-		// Fall through to a protocol-safe error result.
-	}
-	const error = toolError('serialization_failed', 'Tool result could not be serialized.');
-	return { content: [{ type: 'text', text: JSON.stringify(error, null, 2) }], structuredContent: error, isError: true };
+	return {
+		content: [{ type: 'text', text: JSON.stringify(structuredContent, null, 2) }],
+		structuredContent,
+		...(isError ? { isError: true } : {})
+	};
 };
+
+export const isToolError = (value: unknown): value is ToolError =>
+	isRecord(value) && typeof value.code === 'string' && typeof value.message === 'string';

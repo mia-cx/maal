@@ -1,18 +1,21 @@
 import * as m from '$lib/paraglide/messages';
 import type { SettingsHousehold } from './types';
 
-export type McpScope =
-	| 'households:read'
-	| 'households:write'
-	| 'recipes:read'
-	| 'recipes:write'
-	| 'meals:read'
-	| 'meals:write'
-	| 'check_ins:read'
-	| 'check_ins:write'
-	| 'food_profile:read'
-	| 'food_profile:write';
-export type McpKeyPreset = 'read_only_planner' | 'meal_planner' | 'full_access';
+export const MAAL_API_SCOPES = [
+	'households:read',
+	'households:write',
+	'recipes:read',
+	'recipes:write',
+	'meals:read',
+	'meals:write',
+	'check_ins:read',
+	'check_ins:write',
+	'food_profile:read',
+	'food_profile:write'
+] as const;
+export type McpScope = (typeof MAAL_API_SCOPES)[number];
+export const MCP_KEY_PRESETS = ['read_only_planner', 'meal_planner', 'full_access'] as const;
+export type McpKeyPreset = (typeof MCP_KEY_PRESETS)[number];
 export type McpScopeLevel = 'none' | 'read' | 'write';
 export type McpScopeGroupId = 'households' | 'recipes' | 'meals' | 'checkIns' | 'foodProfile';
 export type McpScopeLevels = Partial<Record<McpScopeGroupId, McpScopeLevel>>;
@@ -84,6 +87,25 @@ export const presetLabel = (preset?: McpKeyPreset): string => {
 	if (preset === 'full_access') return m.settings_full_access();
 	return m.settings_custom();
 };
+
+export const scopesForPreset = (preset: McpKeyPreset): McpScope[] => {
+	if (preset === 'read_only_planner') {
+		return ['households:read', 'recipes:read', 'meals:read'];
+	}
+	if (preset === 'meal_planner') {
+		return ['households:read', 'recipes:read', 'meals:read', 'meals:write', 'check_ins:write'];
+	}
+	return [...MAAL_API_SCOPES];
+};
+
+export const scopeLevelsForScopes = (scopes: readonly McpScope[]): McpScopeLevels =>
+	Object.fromEntries(
+		mcpScopeGroups.map((group) => {
+			if (group.write && scopes.includes(group.write)) return [group.id, 'write'];
+			if (group.read && scopes.includes(group.read)) return [group.id, 'read'];
+			return [group.id, 'none'];
+		})
+	) as McpScopeLevels;
 
 export const selectedMcpScopesForLevels = (scopeLevels: McpScopeLevels): McpScope[] =>
 	mcpScopeGroups.flatMap((group) => {

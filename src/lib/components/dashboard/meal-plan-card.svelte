@@ -3,6 +3,7 @@
 	import { CookIcon, PrepIcon } from '$lib/components/icons/solar-outline';
 	import * as Button from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card/index.js';
+	import ReinstatedBadge from '$lib/components/reinstated-badge.svelte';
 	import { cn } from '$lib/utils.js';
 	import SparklesIcon from '@lucide/svelte/icons/sparkles';
 	import { familiarityLabels } from './meal-labels';
@@ -183,7 +184,20 @@
 	let currentDate = $state(new Date());
 	let longPressTimeout: ReturnType<typeof setTimeout> | undefined;
 
-	const localDateKey = (date: Date): string => {
+	const localDateKey = (date: Date, timeZone?: string): string => {
+		if (timeZone) {
+			const parts = Object.fromEntries(
+				new Intl.DateTimeFormat('en-CA', {
+					timeZone,
+					year: 'numeric',
+					month: '2-digit',
+					day: '2-digit'
+				})
+					.formatToParts(date)
+					.map(({ type, value }) => [type, value])
+			);
+			return `${parts.year}-${parts.month}-${parts.day}`;
+		}
 		const year = date.getFullYear();
 		const month = String(date.getMonth() + 1).padStart(2, '0');
 		const day = String(date.getDate()).padStart(2, '0');
@@ -192,10 +206,24 @@
 
 	const mealCanCheckIn = (meal: Meal, now: Date): boolean => {
 		if (!meal.date) return false;
-		const today = localDateKey(now);
+		const today = localDateKey(now, meal.householdTimeZone);
 		if (meal.date < today) return true;
 		if (meal.date > today) return false;
-		const nowMinutes = now.getHours() * 60 + now.getMinutes();
+		const zonedTime = meal.householdTimeZone
+			? Object.fromEntries(
+					new Intl.DateTimeFormat('en-GB', {
+						timeZone: meal.householdTimeZone,
+						hour: '2-digit',
+						minute: '2-digit',
+						hourCycle: 'h23'
+					})
+						.formatToParts(now)
+						.map(({ type, value }) => [type, value])
+				)
+			: null;
+		const nowMinutes = zonedTime
+			? Number(zonedTime.hour) * 60 + Number(zonedTime.minute)
+			: now.getHours() * 60 + now.getMinutes();
 		const mealMinutes = meal.time ? minutesFromTime(meal.time) : null;
 		return nowMinutes >= 18 * 60 || (mealMinutes !== null && mealMinutes <= nowMinutes);
 	};
@@ -398,6 +426,7 @@
 			>
 				<div class="flex min-w-0 items-baseline gap-2">
 					<p class="min-w-0 flex-1 truncate text-xs leading-tight font-medium">{meal.title}</p>
+					{#if meal.reinstated}<ReinstatedBadge class="-my-1 h-4 self-center" />{/if}
 					{#if displayedTime}
 						<time
 							class="hidden shrink-0 text-[0.6875rem] leading-tight text-muted-foreground tabular-nums @min-[12rem]:block"

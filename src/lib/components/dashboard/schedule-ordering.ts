@@ -2,7 +2,7 @@ import type { Meal } from './schedule-types';
 
 const fallbackOrder = 1_000_000;
 
-export const isMealInPool = (meal: Meal): boolean => !meal.date && !meal.time;
+export const isMealInPool = (meal: Meal): boolean => !meal.date;
 
 export const mealSortOrder = (meal: Meal, fallbackIndex = 0): number =>
 	meal.sortOrder ?? fallbackOrder + fallbackIndex;

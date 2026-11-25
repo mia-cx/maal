@@ -41,12 +41,14 @@ const isStringArray = (value: unknown): value is string[] | undefined =>
 
 const isIngredient = (value: unknown): value is RecipeIngredientItem =>
 	isRecord(value) &&
+	isOptionalString(value.id) &&
 	typeof value.amount === 'string' &&
 	typeof value.item === 'string' &&
 	isOptionalString(value.unit);
 
 const isInstruction = (value: unknown): value is RecipeInstructionItem =>
 	isRecord(value) &&
+	isOptionalString(value.id) &&
 	typeof value.text === 'string' &&
 	typeof value.position === 'number' &&
 	Number.isInteger(value.position) &&

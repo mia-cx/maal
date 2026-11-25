@@ -1,15 +1,16 @@
-import * as Schema from 'effect/Schema';
+import { Schema } from 'effect';
 
-export type InputSchema = Schema.Decoder<unknown>;
+export type ToolInputSchema = Schema.Schema.AnyNoContext;
 
 export const optionalHouseholdInput = { householdId: Schema.optional(Schema.String) };
 export const stringArray = Schema.Array(Schema.String);
-export const recordInput = Schema.Record(Schema.String, Schema.Unknown);
+export const recordInput = Schema.Record({ key: Schema.String, value: Schema.Unknown });
 
 export const recipeFields = {
 	title: Schema.optional(Schema.String),
 	description: Schema.optional(Schema.String),
 	image: Schema.optional(Schema.String),
+	imageUrl: Schema.optional(Schema.String),
 	sourceUrl: Schema.optional(Schema.String),
 	sourceSiteName: Schema.optional(Schema.String),
 	sourceAuthorName: Schema.optional(Schema.String),

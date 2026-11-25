@@ -1,0 +1,1 @@
+ALTER TABLE `households` ADD `staleness_threshold_minutes` integer DEFAULT 180 NOT NULL;

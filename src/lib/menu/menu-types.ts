@@ -1,12 +1,15 @@
 import type { MealFeedbackVerdict } from '$lib/domain/meal-feedback';
+import type { RecipeImportedCandidate } from '$lib/domain/recipes/schema.js';
 
 export type RecipeIngredientItem = {
+	id?: string;
 	amount: string;
 	unit?: string;
 	item: string;
 };
 
 export type RecipeInstructionItem = {
+	id?: string;
 	position: number;
 	text: string;
 };
@@ -50,4 +53,8 @@ export type RecipeMenuItem = {
 		neverAgain: number;
 		notes: string[];
 	};
+	/** Decoded remote candidate retained until the user confirms Save; never used as storage. */
+	importedCandidate?: RecipeImportedCandidate;
+	/** A recent edit brought this recipe back after it was deleted on this device. */
+	reinstated?: boolean;
 };

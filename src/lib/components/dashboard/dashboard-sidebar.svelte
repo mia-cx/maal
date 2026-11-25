@@ -1,54 +1,60 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages';
-	import { resolve } from '$app/paths';
-	import NavUser from '$lib/components/nav-user.svelte';
-	import TeamSwitcher from '$lib/components/team-switcher.svelte';
-	import * as Sidebar from '$lib/components/ui/sidebar';
-	import WordmarkLogo from '$lib/components/wordmark-logo.svelte';
 	import CalendarDaysIcon from '@lucide/svelte/icons/calendar-days';
 	import HomeIcon from '@lucide/svelte/icons/house';
 	import ListIcon from '@lucide/svelte/icons/list';
 	import ShoppingCartIcon from '@lucide/svelte/icons/shopping-cart';
 	import SoupIcon from '@lucide/svelte/icons/soup';
-	import type { FeaturePreviews } from '$lib/features/flags';
-	import type { DashboardNavItem } from './dashboard-nav';
 
-	type SidebarUser = { name: string; email: string; avatar: string; emailVerified: boolean };
-	type Household = { id: string; name: string };
-
-	const disabledFeatures: FeaturePreviews = { pantry: false, groceryRollup: false };
+	import { featurePreviewFlags } from '$lib/client/feature-previews.js';
+	import type { MaalDatabase } from '$lib/client/local/database.js';
+	import ProfileSwitcher from '$lib/components/profile-switcher.svelte';
+	import TeamSwitcher from '$lib/components/team-switcher.svelte';
+	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
+	import WordmarkLogo from '$lib/components/wordmark-logo.svelte';
+	import type { DashboardNavItem } from './dashboard-nav.js';
 
 	let {
-		user,
+		database,
 		activeNav = 'meal-plan',
-		households = [],
-		activeHouseholdId = null,
-		features = disabledFeatures
+		featureFlags = []
 	}: {
-		user: SidebarUser;
+		database: MaalDatabase;
 		activeNav?: DashboardNavItem;
-		households?: Household[];
-		activeHouseholdId?: string | null;
-		features?: FeaturePreviews;
+		featureFlags?: readonly string[];
 	} = $props();
 
-	const planHref = resolve('/plan');
-	const menuHref = resolve('/menu');
-	const pantryHref = resolve('/pantry');
-	const groceryRollupHref = resolve('/groceries');
-	const householdHref = resolve('/household');
+	const links = [
+		{ href: '/plan', label: m.app_meal_plan, nav: 'meal-plan', icon: CalendarDaysIcon },
+		{ href: '/menu', label: m.app_my_menu, nav: 'my-menu', icon: ListIcon },
+		{
+			href: '/pantry',
+			label: m.app_pantry,
+			nav: 'pantry',
+			icon: SoupIcon,
+			flag: featurePreviewFlags.pantry,
+			unavailable: m.app_pantry_preview_unavailable
+		},
+		{
+			href: '/groceries',
+			label: m.app_grocery_rollup,
+			nav: 'grocery-rollup',
+			icon: ShoppingCartIcon,
+			flag: featurePreviewFlags.groceryRollup,
+			unavailable: m.app_grocery_rollup_preview_unavailable
+		},
+		{ href: '/household', label: m.app_household, nav: 'household', icon: HomeIcon }
+	] as const;
 </script>
 
+<!-- eslint-disable svelte/no-navigation-without-resolve -->
 <Sidebar.Root
 	collapsible="icon"
 	data-testid="app-sidebar"
 	data-sveltekit-preload-code="eager"
 	data-sveltekit-preload-data="hover"
 >
-	<Sidebar.Header>
-		<TeamSwitcher {households} {activeHouseholdId} label={m.settings_households()} />
-	</Sidebar.Header>
-
+	<Sidebar.Header><TeamSwitcher {database} label={m.settings_households()} /></Sidebar.Header>
 	<Sidebar.Content>
 		<Sidebar.Group>
 			<Sidebar.GroupLabel class="h-10 px-2 text-sidebar-foreground">
@@ -56,100 +62,32 @@
 			</Sidebar.GroupLabel>
 			<Sidebar.GroupContent>
 				<Sidebar.Menu>
-					<Sidebar.MenuItem>
-						<Sidebar.MenuButton
-							isActive={activeNav === 'meal-plan'}
-							tooltipContent={m.app_meal_plan()}
-							class="h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
-						>
-							{#snippet child({ props })}
-								<a href={planHref} {...props}>
-									<CalendarDaysIcon />
-									<span>{m.app_meal_plan()}</span>
-								</a>
-							{/snippet}
-						</Sidebar.MenuButton>
-					</Sidebar.MenuItem>
-					<Sidebar.MenuItem>
-						<Sidebar.MenuButton
-							isActive={activeNav === 'my-menu'}
-							tooltipContent={m.app_my_menu()}
-							class="h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
-						>
-							{#snippet child({ props })}
-								<a href={menuHref} {...props}>
-									<ListIcon />
-									<span>{m.app_my_menu()}</span>
-								</a>
-							{/snippet}
-						</Sidebar.MenuButton>
-					</Sidebar.MenuItem>
-					<Sidebar.MenuItem>
-						<Sidebar.MenuButton
-							isActive={activeNav === 'pantry'}
-							aria-disabled={!features.pantry}
-							tooltipContent={features.pantry ? m.app_pantry() : m.app_pantry_preview_unavailable()}
-							class={`h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2! ${features.pantry ? '' : 'text-muted-foreground'}`}
-						>
-							{#snippet child({ props })}
-								{#if features.pantry}
-									<a href={pantryHref} {...props}>
-										<SoupIcon />
-										<span>{m.app_pantry()}</span>
-									</a>
-								{:else}
-									<span {...props}>
-										<SoupIcon />
-										<span>{m.app_pantry()}</span>
-									</span>
-								{/if}
-							{/snippet}
-						</Sidebar.MenuButton>
-					</Sidebar.MenuItem>
-					<Sidebar.MenuItem>
-						<Sidebar.MenuButton
-							isActive={activeNav === 'grocery-rollup'}
-							aria-disabled={!features.groceryRollup}
-							tooltipContent={features.groceryRollup
-								? m.app_grocery_rollup()
-								: m.app_grocery_rollup_preview_unavailable()}
-							class={`h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2! ${features.groceryRollup ? '' : 'text-muted-foreground'}`}
-						>
-							{#snippet child({ props })}
-								{#if features.groceryRollup}
-									<a href={groceryRollupHref} {...props}>
-										<ShoppingCartIcon />
-										<span>{m.app_grocery_rollup()}</span>
-									</a>
-								{:else}
-									<span {...props}>
-										<ShoppingCartIcon />
-										<span>{m.app_grocery_rollup()}</span>
-									</span>
-								{/if}
-							{/snippet}
-						</Sidebar.MenuButton>
-					</Sidebar.MenuItem>
-					<Sidebar.MenuItem>
-						<Sidebar.MenuButton
-							isActive={activeNav === 'household'}
-							tooltipContent={m.app_household()}
-							class="h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!"
-						>
-							{#snippet child({ props })}
-								<a href={householdHref} {...props}>
-									<HomeIcon />
-									<span>{m.app_household()}</span>
-								</a>
-							{/snippet}
-						</Sidebar.MenuButton>
-					</Sidebar.MenuItem>
+					{#each links as link (link.href)}
+						{@const unavailable = 'flag' in link && !featureFlags.includes(link.flag)}
+						<Sidebar.MenuItem>
+							<Sidebar.MenuButton
+								isActive={activeNav === link.nav}
+								aria-disabled={unavailable || undefined}
+								tooltipContent={unavailable ? link.unavailable() : link.label()}
+								class={[
+									'h-9 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-2!',
+									unavailable && 'text-muted-foreground'
+								]}
+							>
+								{#snippet child({ props })}
+									{#if unavailable}
+										<span {...props}><link.icon /><span>{link.label()}</span></span>
+									{:else}
+										<a href={link.href} {...props}><link.icon /><span>{link.label()}</span></a>
+									{/if}
+								{/snippet}
+							</Sidebar.MenuButton>
+						</Sidebar.MenuItem>
+					{/each}
 				</Sidebar.Menu>
 			</Sidebar.GroupContent>
 		</Sidebar.Group>
 	</Sidebar.Content>
-
-	<Sidebar.Footer>
-		<NavUser {user} />
-	</Sidebar.Footer>
+	<Sidebar.Footer><ProfileSwitcher {database} /></Sidebar.Footer>
 </Sidebar.Root>
+<!-- eslint-enable svelte/no-navigation-without-resolve -->

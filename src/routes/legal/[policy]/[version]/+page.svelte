@@ -14,10 +14,5 @@
 </svelte:head>
 
 {#if content}
-	<LegalShell
-		document={data.document}
-		{content}
-		archiveHref={data.archiveHref}
-		currentHref={data.currentHref}
-	/>
+	<LegalShell document={data.document} {content} />
 {/if}

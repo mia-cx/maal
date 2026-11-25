@@ -1,213 +1,194 @@
-import { env as privateEnv } from '$env/dynamic/private';
-import { and, eq, isNull } from 'drizzle-orm';
 import type Stripe from 'stripe';
-import { getDb } from '$lib/server/db';
-import { households, users } from '$lib/server/db/schema';
-import { trialDefaultPricingOptionFromPrices } from './pricing-options';
-import { createStripeClient, getStripeProductId } from './stripe';
-import {
-	deleteSubscriptionRecord,
-	loadBillingStatus,
-	markSubscriptionRollbackPending,
-	upsertSubscription
-} from './subscriptions';
 
-const defaultTrialDays = 30;
+import { projectBillingCapability } from '$lib/domain/billing/capability.js';
+import type { BillingCapability } from '$lib/domain/billing/contracts.js';
 
-const trialDays = (): number => {
-	const parsed = privateEnv.MAAL_TRIAL_DAYS
-		? Number.parseInt(privateEnv.MAAL_TRIAL_DAYS, 10)
-		: defaultTrialDays;
-	return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultTrialDays;
+import { TrialUnavailableError } from './errors.js';
+import { listMaalPrices, requireMaalPrice } from './pricing.js';
+import type { BillingRepository, SubscriptionProjectionWrite } from './repository.js';
+import { configuredTrialDays, createStripeClient, stripeProductId } from './stripe.js';
+import { deletionAllowsProjectedSubscription } from './subscription-identity.js';
+import { assertTrialAvailable, projectionFromStripeSubscription } from './subscriptions.js';
+
+export const startConfiguredMaalTrial = (
+	environment: unknown,
+	input: Omit<Parameters<typeof startMaalTrial>[0], 'stripe' | 'productId' | 'trialDays'>
+): Promise<SubscriptionProjectionWrite> =>
+	startMaalTrial({
+		...input,
+		stripe: createStripeClient(environment),
+		productId: stripeProductId(environment),
+		trialDays: configuredTrialDays(environment)
+	});
+
+export const attemptOnboardingTrial = async (
+	environment: unknown,
+	input: Parameters<typeof startConfiguredMaalTrial>[1]
+): Promise<BillingCapability | null> => {
+	const { repository, workosUserId, householdId, now } = input;
+	try {
+		const availability = await repository.trialClaimAvailability(workosUserId, householdId);
+		if (availability !== 'available') {
+			const [subscription, deletion] = await Promise.all([
+				repository.subscription(householdId),
+				repository.deletionRequest(householdId)
+			]);
+			return subscription?.status === 'trialing' &&
+				subscription.subscriberUserId === workosUserId &&
+				deletionAllowsProjectedSubscription(deletion, subscription)
+				? projectBillingCapability(subscription, now)
+				: null;
+		}
+		return projectBillingCapability(await startConfiguredMaalTrial(environment, input), now);
+	} catch (cause) {
+		if (!(cause instanceof TrialUnavailableError)) logOnboardingTrialFailure(cause);
+		return null;
+	}
 };
 
-const findDefaultTrialPriceId = async (stripe: Stripe, productId: string): Promise<string> => {
-	const prices: Stripe.Price[] = [];
-	await stripe.prices
-		.list({ product: productId, active: true, limit: 100 })
-		.autoPagingEach((price) => {
-			prices.push(price);
+export const logOnboardingTrialFailure = (cause: unknown): void => {
+	console.error(
+		'Failed to start household trial after creation',
+		cause instanceof Error ? cause.constructor.name : 'unknown'
+	);
+};
+
+export const startMaalTrial = async (input: {
+	stripe: Stripe;
+	repository: BillingRepository;
+	productId: string;
+	householdId: string;
+	workosUserId: string;
+	email: string;
+	priceId?: string;
+	trialDays: number;
+	now: string;
+}): Promise<SubscriptionProjectionWrite> => {
+	await assertTrialAvailable(input.repository, input.workosUserId, input.householdId);
+	const price = input.priceId
+		? await requireMaalPrice(input.stripe, input.productId, input.priceId)
+		: (await listMaalPrices(input.stripe, input.productId)).find(
+				({ interval }) => interval === 'month'
+			);
+	if (!price) throw new TrialConfigurationError();
+	const claimId = crypto.randomUUID();
+	try {
+		await input.repository.reserveTrial({
+			id: claimId,
+			workosUserId: input.workosUserId,
+			householdId: input.householdId,
+			reservedAt: input.now
 		});
-
-	const priceId = trialDefaultPricingOptionFromPrices(prices, productId)?.id;
-	if (!priceId) throw new Error('No paid recurring Stripe price is configured for trials.');
-	return priceId;
-};
-
-export type TrialAvailability = {
-	available: boolean;
-	reason: 'available' | 'already_used' | 'not_creator' | 'already_subscribed' | 'missing_storage';
-};
-
-export const loadTrialAvailability = async (input: {
-	database: D1Database | undefined;
-	userId: string;
-	householdId: string | null;
-}): Promise<TrialAvailability> => {
-	if (!input.database) return { available: false, reason: 'missing_storage' };
-	if (!input.householdId) return { available: false, reason: 'not_creator' };
-
-	const db = getDb(input.database);
-	const [userRow] = await db
-		.select({ trialHouseholdId: users.trialHouseholdId })
-		.from(users)
-		.where(eq(users.workosUserId, input.userId))
-		.limit(1);
-	if (userRow?.trialHouseholdId) return { available: false, reason: 'already_used' };
-
-	const [householdRow] = await db
-		.select({ createdByUserId: households.createdByUserId })
-		.from(households)
-		.where(eq(households.householdId, input.householdId))
-		.limit(1);
-	if (householdRow?.createdByUserId !== input.userId) {
-		return { available: false, reason: 'not_creator' };
+	} catch {
+		// A competing request can win either independent UNIQUE constraint after the availability read.
+		await assertTrialAvailable(input.repository, input.workosUserId, input.householdId);
+		throw new TrialStartError('claim_reservation_failed');
 	}
 
-	const billing = await loadBillingStatus(input.database, input.householdId);
-	if (billing.stripeCustomerId || billing.isPaid)
-		return { available: false, reason: 'already_subscribed' };
-
-	return { available: true, reason: 'available' };
-};
-
-export const startHouseholdTrial = async (input: {
-	platform: App.Platform | undefined;
-	user: { id: string; email: string; name?: string | null };
-	householdId: string;
-	priceId?: string | null;
-}): Promise<Stripe.Subscription> => {
-	if (!input.platform?.env.DB) throw new Error('Billing storage is not available.');
-
-	const db = getDb(input.platform.env.DB);
-	const availability = await loadTrialAvailability({
-		database: input.platform.env.DB,
-		userId: input.user.id,
-		householdId: input.householdId
-	});
-	if (!availability.available) throw new Error(`Trial is not available: ${availability.reason}.`);
-
-	const claimed = await db
-		.update(users)
-		.set({
-			trialHouseholdId: input.householdId,
-			trialStartedAt: new Date().toISOString()
-		})
-		.where(and(eq(users.workosUserId, input.user.id), isNull(users.trialHouseholdId)))
-		.returning({ workosUserId: users.workosUserId });
-	if (!claimed.length) throw new Error('Trial has already been used.');
-
-	let stripe: Stripe | null = null;
 	let customerId: string | null = null;
 	let subscriptionId: string | null = null;
-
 	try {
-		stripe = createStripeClient(input.platform);
-		const priceId =
-			input.priceId ?? (await findDefaultTrialPriceId(stripe, getStripeProductId(input.platform)));
-		const customer = await stripe.customers.create({
-			email: input.user.email,
-			name: input.user.name ?? undefined,
-			metadata: { householdId: input.householdId, workosUserId: input.user.id }
-		});
+		const customer = await input.stripe.customers.create(
+			{
+				email: input.email,
+				metadata: { householdId: input.householdId, workosUserId: input.workosUserId }
+			},
+			{ idempotencyKey: `maal-trial-customer:${claimId}` }
+		);
 		customerId = customer.id;
-		const subscription = await stripe.subscriptions.create({
-			customer: customer.id,
-			items: [{ price: priceId }],
-			metadata: { householdId: input.householdId, workosUserId: input.user.id },
-			trial_period_days: trialDays(),
-			trial_settings: { end_behavior: { missing_payment_method: 'cancel' } }
+		await input.repository.recordTrialResources({
+			id: claimId,
+			stripeCustomerId: customerId,
+			stripeSubscriptionId: null,
+			updatedAt: input.now
 		});
+		const subscription = await input.stripe.subscriptions.create(
+			{
+				customer: customer.id,
+				items: [{ price: price.id }],
+				metadata: { householdId: input.householdId, workosUserId: input.workosUserId },
+				trial_period_days: input.trialDays,
+				trial_settings: { end_behavior: { missing_payment_method: 'cancel' } }
+			},
+			{ idempotencyKey: `maal-trial-subscription:${claimId}` }
+		);
 		subscriptionId = subscription.id;
-
-		await upsertSubscription({
-			database: input.platform.env.DB,
-			householdId: input.householdId,
-			customerId: customer.id,
-			subscriberUserId: input.user.id,
-			subscription
+		await input.repository.recordTrialResources({
+			id: claimId,
+			stripeCustomerId: customerId,
+			stripeSubscriptionId: subscriptionId,
+			updatedAt: input.now
 		});
-		return subscription;
+		const projection = projectionFromStripeSubscription({
+			subscription,
+			householdId: input.householdId,
+			subscriberUserId: input.workosUserId,
+			eventId: `trial:${claimId}`,
+			eventCreatedAt: input.now,
+			existing: null,
+			paidPeriodSucceeded: false,
+			reportsStatus: true
+		});
+		await input.repository.commitStartedTrial({
+			claimId,
+			startedAt: input.now,
+			projection
+		});
+		return projection;
 	} catch (cause) {
-		const cleanupFailures: unknown[] = [];
-		let localRecordDeleted = false;
-		if (customerId && subscriptionId) {
+		let subscriptionRemoved = subscriptionId === null;
+		let customerRemoved = customerId === null;
+		if (subscriptionId) {
 			try {
-				await markSubscriptionRollbackPending({
-					database: input.platform.env.DB,
-					householdId: input.householdId,
-					customerId,
-					subscriptionId
-				});
-			} catch (cleanupCause) {
-				cleanupFailures.push(cleanupCause);
-			}
-		}
-		let subscriptionCanceled = false;
-		if (stripe && subscriptionId) {
-			try {
-				await stripe.subscriptions.update(subscriptionId, {
+				await input.stripe.subscriptions.update(subscriptionId, {
 					metadata: { maal_trial_rollback: 'start_failed' }
 				});
-			} catch (cleanupCause) {
-				cleanupFailures.push(cleanupCause);
+				await input.stripe.subscriptions.cancel(subscriptionId);
+				subscriptionRemoved = true;
+			} catch {
+				subscriptionRemoved = false;
 			}
+		}
+		if (customerId) {
 			try {
-				await stripe.subscriptions.cancel(subscriptionId);
-				subscriptionCanceled = true;
-			} catch (cleanupCause) {
-				cleanupFailures.push(cleanupCause);
+				await input.stripe.customers.del(customerId);
+				customerRemoved = true;
+			} catch {
+				customerRemoved = false;
 			}
 		}
-		let customerDeleted = false;
-		if (stripe && customerId) {
-			try {
-				await stripe.customers.del(customerId);
-				customerDeleted = true;
-			} catch (cleanupCause) {
-				cleanupFailures.push(cleanupCause);
-			}
+		if (subscriptionId && subscriptionRemoved && customerRemoved) {
+			await input.repository.completeTrialRollback(claimId, input.now);
+		} else if (subscriptionRemoved && customerRemoved) {
+			await input.repository.abandonTrialReservation(claimId);
+		} else {
+			await input.repository.markTrialRollbackPending({
+				id: claimId,
+				stripeCustomerId: customerId,
+				stripeSubscriptionId: subscriptionId,
+				updatedAt: input.now
+			});
 		}
-		// Clear local state when no external Stripe resources remain that would
-		// need webhook reconciliation. If a subscription was created but not
-		// successfully canceled, or a customer was created but not successfully
-		// deleted, the local rollback-pending row must stay for reconciliation.
-		const noSubscriptionRemains = !subscriptionId || subscriptionCanceled;
-		const noCustomerRemains = !customerId || customerDeleted;
-		if (noSubscriptionRemains && noCustomerRemains) {
-			try {
-				await db
-					.update(users)
-					.set({ trialHouseholdId: null, trialStartedAt: null })
-					.where(eq(users.workosUserId, input.user.id));
-			} catch (cleanupCause) {
-				cleanupFailures.push(cleanupCause);
-			}
-			if (customerId && subscriptionId) {
-				try {
-					await deleteSubscriptionRecord({
-						database: input.platform.env.DB,
-						householdId: input.householdId,
-						customerId,
-						subscriptionId
-					});
-					localRecordDeleted = true;
-			} catch (cleanupCause) {
-				cleanupFailures.push(cleanupCause);
-			}
-			}
-		}
-		if (cleanupFailures.length) {
-			throw new AggregateError(
-				[cause, ...cleanupFailures],
-				localRecordDeleted
-					? 'Trial start failed; local record cleaned up'
-					: noSubscriptionRemains && noCustomerRemains
-						? 'Trial start failed; external cleanup succeeded but local cleanup incomplete'
-						: 'Trial start failed and rollback was incomplete',
-				{ cause }
-			);
-		}
-		throw cause;
+		throw new TrialStartError(
+			subscriptionRemoved && customerRemoved ? 'rolled_back' : 'rollback_pending',
+			{ cause }
+		);
 	}
 };
+
+export class TrialConfigurationError extends Error {
+	readonly _tag = 'TrialConfigurationError';
+	constructor() {
+		super('A monthly Maal price is required for trials.');
+	}
+}
+
+export class TrialStartError extends Error {
+	readonly _tag = 'TrialStartError';
+	constructor(
+		readonly reason: 'claim_reservation_failed' | 'rolled_back' | 'rollback_pending',
+		options?: ErrorOptions
+	) {
+		super('The trial could not be started.', options);
+	}
+}

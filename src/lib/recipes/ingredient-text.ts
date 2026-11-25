@@ -63,7 +63,7 @@ const fractionLabels = new Map([
 	['7/8', '⅞']
 ]);
 
-const quantitySource = String.raw`(?:\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?[¼½¾⅓⅔⅛⅜⅝⅞]|\d+(?:\.\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞])`;
+const quantitySource = String.raw`(?:\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?[¼½¾⅓⅔⅛⅜⅝⅞]|\d+\s+[¼½¾⅓⅔⅛⅜⅝⅞]|\d+(?:\.\d+)?|[¼½¾⅓⅔⅛⅜⅝⅞])`;
 const quantityRangeSource = String.raw`${quantitySource}(?:\s*(?:-|–|—|to)\s*${quantitySource})?`;
 const leadingIngredientPattern = new RegExp(
 	String.raw`^\s*(${quantityRangeSource})(?:\s+([^\s,()]+))?(?:\s+|$)(.*)$`,
@@ -358,30 +358,24 @@ export const canonicalIngredientUnit = (value: string | undefined): string | und
 
 export type IngredientUnitAliases = Record<string, string>;
 
-const canonicalIngredientUnitFromAliases = (
-	value: string | undefined,
-	unitAliases: IngredientUnitAliases = {}
-): string | undefined => {
-	if (!value) return;
-	const normalized = normalizedUnit(value);
-	return canonicalUnits.get(normalized) ?? unitAliases[normalized];
-};
-
 export const parseQuantity = (value: string): number | null => {
 	const trimmed = value.trim();
+	let parsed: number;
 	const mixedFraction = /^(\d+)\s+(\d+)\/(\d+)$/.exec(trimmed);
-	if (mixedFraction) {
-		return Number(mixedFraction[1]) + Number(mixedFraction[2]) / Number(mixedFraction[3]);
-	}
 	const fraction = /^(\d+)\/(\d+)$/.exec(trimmed);
-	if (fraction) return Number(fraction[1]) / Number(fraction[2]);
-	const vulgar = trimmed.match(/[¼½¾⅓⅔⅛⅜⅝⅞]/u)?.[0];
-	if (vulgar) {
-		const whole = Number(trimmed.replace(vulgar, '').trim() || 0);
-		return whole + vulgarFractions[vulgar];
+	const vulgar = /^(?:(\d+(?:\.\d+)?)\s*)?([¼½¾⅓⅔⅛⅜⅝⅞])$/u.exec(trimmed);
+	if (mixedFraction) {
+		parsed = Number(mixedFraction[1]) + Number(mixedFraction[2]) / Number(mixedFraction[3]);
+	} else if (fraction) {
+		parsed = Number(fraction[1]) / Number(fraction[2]);
+	} else if (vulgar) {
+		parsed = Number(vulgar[1] ?? 0) + vulgarFractions[vulgar[2]];
+	} else {
+		parsed = Number(trimmed);
 	}
-	const number = Number(trimmed);
-	return Number.isFinite(number) ? number : null;
+	// Ranges ("½–1") and zero denominators produce NaN or Infinity; the source text still stands,
+	// but there is no usable quantity.
+	return Number.isFinite(parsed) ? parsed : null;
 };
 
 const commonDivisor = (left: number, right: number): number =>
@@ -428,17 +422,22 @@ export const parseIngredientLine = (
 	if (!match) return { amount: '', item: trimmed };
 
 	const quantity = match[1].trim();
-	const candidateUnit = match[2]?.trim();
-	const remainder = match[3].trim();
-	const unit = canonicalIngredientUnitFromAliases(candidateUnit, unitAliases);
-	if (unit) {
-		return { amount: quantity, unit, item: remainder };
+	// Unit aliases can span several tokens ("fl oz", "fluid ounce"); try the longest first so a
+	// multi-word unit wins over its first token alone.
+	const remainder = [match[2], match[3]].filter(Boolean).join(' ');
+	const tokens = remainder.split(/\s+/u).filter(Boolean);
+	const normalizedTokens = tokens.map(normalizedUnit);
+	const unitKeys = [...canonicalUnits.keys(), ...Object.keys(unitAliases)];
+	const maxTokens = unitKeys.reduce((longest, key) => Math.max(longest, key.split(' ').length), 1);
+	for (let count = Math.min(tokens.length, maxTokens); count >= 1; count -= 1) {
+		const candidate = normalizedTokens.slice(0, count).join(' ');
+		const unit = canonicalUnits.get(candidate) ?? unitAliases[candidate];
+		if (unit) {
+			return { amount: quantity, unit, item: tokens.slice(count).join(' ') };
+		}
 	}
 
-	return {
-		amount: quantity,
-		item: [candidateUnit, remainder].filter(Boolean).join(' ')
-	};
+	return { amount: quantity, item: remainder };
 };
 
 const toMetricAmount = (quantity: number, unit: string | undefined) => {
@@ -508,7 +507,8 @@ const normalizedInstructionUnitAlias = (value: string): string =>
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const instructionUnitPatternFor = (alias: string): string => {
+/** Regex source matching a unit alias in instruction text: `°` also matches `º`, spaces stretch. */
+export const instructionUnitPatternFor = (alias: string): string => {
 	const escaped = escapeRegExp(alias.trim()).replace(/°/gu, '[°º]');
 	return escaped.replace(/\\ /gu, '\\s+');
 };

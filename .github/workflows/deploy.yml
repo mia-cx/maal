@@ -1,0 +1,133 @@
+name: Deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: staging or production
+        required: true
+        type: string
+      sha:
+        description: Exact main commit to deploy; empty deploys main to staging, or the newest release merged into main to production
+        required: false
+        type: string
+        default: ''
+      validated_sha:
+        description: Release merge commit whose PR checks passed on the identical tree
+        required: false
+        type: string
+        default: ''
+    outputs:
+      sha:
+        description: The commit that was deployed
+        value: ${{ jobs.deploy.outputs.sha }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  deploy:
+    name: Check and deploy to ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # One deploy per environment at a time. GitHub keeps only the newest waiting run, which is
+    # why an automatic production deploy ships the newest release rather than its own commit.
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    outputs:
+      sha: ${{ steps.target.outputs.sha }}
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ inputs.environment == 'production' && 'https://maal.is' || 'https://staging.maal.is' }}
+    env:
+      # Organisation-wide, so every repository deploys to the same account. The API token is
+      # scoped to the Wrangler steps that need it, away from installs, tests and the build.
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha || 'main' }}
+          fetch-depth: ${{ (inputs.sha || inputs.environment == 'staging') && 1 || 0 }}
+
+      # Pushes reach the queue out of order and waiting runs get dropped, so whichever run holds the
+      # slot ships the newest state: staging is always main as checked out here, production the newest
+      # release on main. Neither can roll back to an older commit, and a dropped run's changes still
+      # go out with the run that replaced it.
+      - name: Choose the commit to deploy
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          if [ -n "$SHA" ]; then
+            echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$ENVIRONMENT" = staging ]; then
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Ask GitHub for the newest release pull request merged from this repository, so its merge
+          # commit is right however it was merged: merge commit, squash or rebase. Like the release
+          # check, only one that changes the app's version counts as a release.
+          sha="$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --head changeset-release/main --state merged \
+            --limit 20 --json mergeCommit,mergedAt,isCrossRepository,files \
+            --jq '[.[] | select((.isCrossRepository | not) and any(.files[]; .path == "package.json"))] | sort_by(.mergedAt) | last | .mergeCommit.oid // empty')"
+          if [ -z "$sha" ]; then
+            echo 'No release pull request has been merged into main' >&2
+            exit 1
+          fi
+          git merge-base --is-ancestor "$sha" HEAD
+          git checkout -q "$sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: package.json
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install the browser for the app's tests
+        if: ${{ !(inputs.environment == 'production' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.validated_sha == steps.target.outputs.sha) }}
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Check code
+        if: ${{ !(inputs.environment == 'production' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.validated_sha == steps.target.outputs.sha) }}
+        run: |
+          pnpm validate
+          pnpm test:d1-schema
+
+      # Each deploy needs its own artifact even when the PR supplied successful checks.
+      - name: Build the deployment artifact
+        run: pnpm build
+
+      # D1 keeps 30 days of Time Travel; this bookmark restores the database to just before the migration.
+      - name: Record a recovery bookmark
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm exec wrangler d1 time-travel info DB --env "${{ inputs.environment }}"
+
+      # Migrations are forward-only and the running Worker must tolerate the new schema, so they apply first.
+      - name: Apply database migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm exec wrangler d1 migrations apply DB --remote --env "${{ inputs.environment }}"
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          pnpm exec wrangler deploy --env "$ENVIRONMENT" --message "maal $version at ${SHA:0:7}"

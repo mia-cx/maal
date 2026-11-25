@@ -8,6 +8,7 @@
 	import type {
 		Meal,
 		MealAddHandler,
+		MealCheckInHandler,
 		MealDropTarget,
 		MealPickHandler,
 		MealSelectHandler
@@ -24,6 +25,7 @@
 		onaddmeal,
 		onpick,
 		onselect,
+		oncheckin,
 		onselectdate
 	}: {
 		day: Date;
@@ -36,6 +38,7 @@
 		onaddmeal?: MealAddHandler;
 		onpick?: MealPickHandler;
 		onselect?: MealSelectHandler;
+		oncheckin?: MealCheckInHandler;
 		onselectdate?: (date: Date) => void;
 	} = $props();
 
@@ -128,7 +131,7 @@
 
 	<div
 		bind:this={contentElement}
-		role="button"
+		role="group"
 		tabindex="-1"
 		aria-label={m.app_add_meal_on_date({ date: dayKey })}
 		class="min-h-0 flex-1 space-y-1 overflow-hidden"
@@ -145,6 +148,7 @@
 			showEmpty={false}
 			{onpick}
 			{onselect}
+			{oncheckin}
 		/>
 		{#if overflowCount > 0}
 			<button

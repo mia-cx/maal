@@ -1,69 +1,38 @@
-# Dependencies
-/node_modules/
-/.pnpm-store/
+node_modules
 
-# Build output and framework caches
-/.svelte-kit/
-/build/
-/dist/
-/.output/
-/.vite/
-/.vitest/
-
-# Cloudflare / Wrangler local state and secrets
-/.wrangler/
-.dev.vars
-.dev.vars.*
-!.dev.vars.example
-
-# Environment files
-.env
-.env.*
-!.env.example
-!.env.test
-
-# Test and debug output
-/coverage/
-/test-results/
-/playwright-report/
-/blob-report/
-/debug/
-/.tmp/
-
-# Generated files
-/worker-configuration.d.ts
-/src/lib/paraglide/
-/project.inlang/cache/
-
-# Local databases
-*.db
-*.db-journal
-*.sqlite
-*.sqlite-wal
-*.sqlite-shm
-*.sqlite3
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# TypeScript
-*.tsbuildinfo
-
-# Local editor/workspace files
-/.obsidian/
-/Scratchpad*.md
-.idea/
-*.swp
-*.swo
-*~lock~
+# Output
+.output
+.vercel
+.netlify
+.wrangler
+/.svelte-kit
+/build
 
 # OS
 .DS_Store
 Thumbs.db
-.ant-colony/
-.worktrees/
+
+# Env
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+!.env.example
+!.env.test
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Generated localization runtime
+/src/lib/paraglide
+/worker-configuration.d.ts
+# Playwright
+test-results
+playwright-report
+
+# Coverage and performance output
+coverage
+
+# Local Cloudflare state
+.wrangler

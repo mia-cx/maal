@@ -6,6 +6,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import type {
 		McpKey,
+		McpKeyPreset,
 		McpScope,
 		McpScopeGroupId,
 		McpScopeLevels
@@ -21,6 +22,7 @@
 		createdMcpKey,
 		mcpKeyFormOpen = $bindable(false),
 		mcpKeyLabel = $bindable(''),
+		mcpKeyPreset = $bindable<'custom' | McpKeyPreset>('read_only_planner'),
 		mcpKeyHouseholdKind = $bindable<'all' | 'households'>('households'),
 		mcpHouseholdPickerOpen = $bindable(false),
 		mcpHouseholdQuery = $bindable(''),
@@ -38,6 +40,7 @@
 		copyCreatedMcpKey,
 		setMcpScopeRead,
 		setMcpScopeWrite,
+		setMcpPreset,
 		toggleMcpHousehold,
 		createMcpAccessKey
 	}: {
@@ -49,6 +52,7 @@
 		createdMcpKey: string | null;
 		mcpKeyFormOpen: boolean;
 		mcpKeyLabel: string;
+		mcpKeyPreset: 'custom' | McpKeyPreset;
 		mcpKeyHouseholdKind: 'all' | 'households';
 		mcpHouseholdPickerOpen: boolean;
 		mcpHouseholdQuery: string;
@@ -66,6 +70,7 @@
 		copyCreatedMcpKey: () => void | Promise<void>;
 		setMcpScopeRead: (groupId: McpScopeGroupId, checked: boolean) => void;
 		setMcpScopeWrite: (groupId: McpScopeGroupId, checked: boolean) => void;
+		setMcpPreset: (preset: 'custom' | McpKeyPreset) => void;
 		toggleMcpHousehold: (householdId: string, checked: boolean) => void;
 		createMcpAccessKey: () => void | Promise<void>;
 	} = $props();
@@ -114,6 +119,7 @@
 	{#if mcpKeyFormOpen}
 		<McpKeyForm
 			bind:mcpKeyLabel
+			bind:mcpKeyPreset
 			bind:mcpKeyHouseholdKind
 			bind:mcpHouseholdPickerOpen
 			bind:mcpHouseholdQuery
@@ -125,6 +131,7 @@
 			{filteredMcpHouseholds}
 			{setMcpScopeRead}
 			{setMcpScopeWrite}
+			{setMcpPreset}
 			{toggleMcpHousehold}
 			cancel={() => (mcpKeyFormOpen = false)}
 			{createMcpAccessKey}

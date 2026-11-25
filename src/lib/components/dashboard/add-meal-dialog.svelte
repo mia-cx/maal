@@ -4,7 +4,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
 	import type { RecipeMenuItem } from '$lib/components/menu';
-	import { searchMenuRecipes } from '$lib/menu/menu-client';
+	import { rankRecipesByRelevance } from '$lib/menu/recipe-ranking.js';
 
 	type PickerOption =
 		| { id: string; type: 'existing'; recipe: RecipeMenuItem }
@@ -40,14 +40,7 @@
 	const normalizedQuery = $derived(query.trim());
 	const isUrl = $derived(/^https?:\/\//i.test(normalizedQuery));
 	const normalizedSearch = $derived(normalizedQuery.toLowerCase());
-	let fetchedRecipes = $state<RecipeMenuItem[]>([]);
-	let fetchRecipesError = $state<string | null>(null);
-	let fetchRecipesBusy = $state(false);
-	let fetchedRecipeQuery = $state<string | null>(null);
-
 	const showExistingRecipeOptions = $derived(showExistingRecipes ?? true);
-	const shouldFetchFuzzyRecipes = $derived(normalizedSearch.length > 3);
-	const recipeFetchQuery = $derived(shouldFetchFuzzyRecipes ? normalizedSearch : '');
 	const dialogTitle = m.app_add_meal();
 	const dialogDescription = $derived(
 		showExistingRecipeOptions
@@ -58,11 +51,7 @@
 	);
 
 	const matches = $derived(
-		showExistingRecipeOptions
-			? fetchedRecipeQuery === recipeFetchQuery
-				? fetchedRecipes
-				: recipes.slice(0, 10)
-			: []
+		showExistingRecipeOptions ? rankRecipesByRelevance(recipes, normalizedSearch).slice(0, 10) : []
 	);
 
 	const options = $derived.by((): PickerOption[] => {
@@ -88,10 +77,6 @@
 		query = '';
 		activeIndex = 0;
 		activeQuery = '';
-		fetchedRecipes = [];
-		fetchRecipesError = null;
-		fetchRecipesBusy = false;
-		fetchedRecipeQuery = null;
 	};
 
 	const chooseExisting = (recipe: RecipeMenuItem) => {
@@ -142,41 +127,6 @@
 	};
 
 	$effect(() => {
-		if (!open || !showExistingRecipeOptions || isUrl) {
-			fetchRecipesBusy = false;
-			return;
-		}
-		const query = recipeFetchQuery;
-		if (fetchedRecipeQuery === query) return;
-
-		const controller = new AbortController();
-		const timeout = setTimeout(
-			() => {
-				fetchRecipesBusy = true;
-				fetchRecipesError = null;
-				searchMenuRecipes(query, { limit: 10, picker: 'meal', signal: controller.signal })
-					.then((recipes) => {
-						fetchedRecipes = recipes;
-						fetchedRecipeQuery = query;
-					})
-					.catch((error: unknown) => {
-						if (error instanceof DOMException && error.name === 'AbortError') return;
-						fetchRecipesError = error instanceof Error ? error.message : 'Could not load recipes.';
-					})
-					.finally(() => {
-						if (!controller.signal.aborted) fetchRecipesBusy = false;
-					});
-			},
-			shouldFetchFuzzyRecipes ? 250 : 0
-		);
-
-		return () => {
-			clearTimeout(timeout);
-			controller.abort();
-		};
-	});
-
-	$effect(() => {
 		if (!open) {
 			reset();
 			return;
@@ -217,9 +167,7 @@
 				role="listbox"
 				aria-label={m.app_recipe_options()}
 			>
-				{#if showExistingRecipeOptions && !isUrl && fetchRecipesBusy}
-					<p class="px-3 py-2 text-sm text-muted-foreground">{m.menu_loading_recipes()}</p>
-				{:else if showExistingRecipeOptions && !isUrl && matches.length === 0}
+				{#if showExistingRecipeOptions && !isUrl && matches.length === 0}
 					<p class="px-3 py-2 text-sm text-muted-foreground">{m.app_no_saved_recipes_match()}</p>
 				{/if}
 				{#each options as option, index (option.id)}
@@ -272,9 +220,6 @@
 				{/each}
 			</div>
 
-			{#if fetchRecipesError}
-				<p class="text-xs text-destructive">{fetchRecipesError}</p>
-			{/if}
 			{#if error}
 				<p class="text-xs text-destructive">{error}</p>
 			{/if}

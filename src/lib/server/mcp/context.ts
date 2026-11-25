@@ -1,79 +1,105 @@
-import { getDb } from '$lib/server/db';
-import {
-	listUserHouseholds,
-	userHasHouseholdPermission,
-	type MaalHouseholdPermission
-} from '$lib/server/auth/household';
-import {
-	oneScopedHouseholdId,
-	scopeAllowsHousehold,
-	type MaalApiScope,
-	type McpKeyRecord
-} from '$lib/server/auth/mcp-keys';
-import { text } from './scalars';
-import { toolError } from './results';
+import type { RemoteDomainPort } from '$lib/server/domain/remote-port.js';
+import type { RecipeImportedCandidate } from '$lib/domain/recipes/schema.js';
+import type { RemoteComputeLimiter } from '$lib/server/recipe-import/remote-compute.js';
 
-export type McpContext = {
-	platform: App.Platform | undefined;
-	key: McpKeyRecord;
-	db: ReturnType<typeof getDb>;
-};
+import type { McpHouseholdAdministrationPort } from './administration.js';
+import type { MaalApiScope, McpEffectiveHousehold, McpPrincipal } from './contracts.js';
+import { toolError } from './results.js';
 
-export const requireScope = (key: McpKeyRecord, scope: MaalApiScope) => {
-	if (!key.scopes.includes(scope)) {
+export interface McpContext {
+	readonly principal: McpPrincipal;
+	readonly domain: RemoteDomainPort;
+	readonly limiter: RemoteComputeLimiter;
+	readonly fetchRecipeCandidate: (url: string) => Promise<RecipeImportedCandidate>;
+	readonly administration: McpHouseholdAdministrationPort;
+}
+
+export const requireScope = (principal: McpPrincipal, scope: MaalApiScope): void => {
+	if (!principal.scopes.includes(scope)) {
 		throw toolError('insufficient_scope', `This MCP key does not grant ${scope}.`);
 	}
 };
 
-const defaultHouseholdId = async (context: McpContext): Promise<string | null> => {
-	const scopedHouseholdId = oneScopedHouseholdId(context.key);
-	if (scopedHouseholdId) return scopedHouseholdId;
-	if (context.key.householdScope.kind !== 'all') return null;
+const householdArgument = (args: Record<string, unknown>): string | null =>
+	typeof args.householdId === 'string' && args.householdId.trim() ? args.householdId.trim() : null;
 
-	const households = await listUserHouseholds(context.platform, context.key.userId);
-	return households.length === 1 ? households[0].id : null;
-};
-
-export const resolveScopedHouseholdId = async (
+export const resolveHousehold = (
 	context: McpContext,
 	args: Record<string, unknown>,
-	scope: MaalApiScope
-): Promise<string> => {
-	requireScope(context.key, scope);
-	const householdId = text(args.householdId) ?? (await defaultHouseholdId(context));
+	scope: MaalApiScope,
+	permission: string
+): McpEffectiveHousehold => {
+	requireScope(context.principal, scope);
+	const requested = householdArgument(args);
+	const householdId =
+		requested ??
+		(context.principal.effectiveHouseholds.length === 1
+			? context.principal.effectiveHouseholds[0]!.householdId
+			: null);
 	if (!householdId) {
 		throw toolError(
 			'household_required',
 			'This MCP key can access multiple households. Pass householdId.'
 		);
 	}
-	if (
-		!(await scopeAllowsHousehold({ platform: context.platform, record: context.key, householdId }))
-	) {
-		throw toolError('household_forbidden', 'This MCP key is not scoped to that household.');
+	const household = context.principal.effectiveHouseholds.find(
+		(row) => row.householdId === householdId
+	);
+	if (!household) {
+		throw toolError('household_forbidden', 'This MCP key cannot access that household.');
 	}
-	return householdId;
-};
-
-export const resolveHouseholdId = async (
-	context: McpContext,
-	args: Record<string, unknown>,
-	scope: MaalApiScope,
-	permission: MaalHouseholdPermission
-): Promise<string> => {
-	const householdId = await resolveScopedHouseholdId(context, args, scope);
-	if (
-		!(await userHasHouseholdPermission(
-			context.platform,
-			context.key.userId,
-			householdId,
-			permission
-		))
-	) {
+	if (!household.permissions.includes(permission)) {
 		throw toolError(
 			'insufficient_role_permission',
 			`The MCP key owner does not have ${permission} in that household.`
 		);
 	}
-	return householdId;
+	return household;
+};
+
+export const resolveUserRecipeProof = (
+	context: McpContext,
+	args: Record<string, unknown>,
+	scope: 'recipes:read' | 'recipes:write'
+): McpEffectiveHousehold => {
+	requireScope(context.principal, scope);
+	const requested = householdArgument(args);
+	const households = requested
+		? context.principal.effectiveHouseholds.filter(({ householdId }) => householdId === requested)
+		: context.principal.effectiveHouseholds;
+	if (requested && households.length === 0) {
+		throw toolError('household_forbidden', 'This MCP key cannot access that household.');
+	}
+	const proof = households.find(({ permissions }) => permissions.includes(scope));
+	if (!proof) {
+		throw toolError(
+			'insufficient_role_permission',
+			`The MCP key owner does not have ${scope} in a granted paid household.`
+		);
+	}
+	return proof;
+};
+
+export const resolveUserDataProof = (
+	context: McpContext,
+	args: Record<string, unknown>,
+	scope: 'food_profile:read' | 'food_profile:write',
+	permission: 'recipes:read' | 'recipes:write'
+): McpEffectiveHousehold => {
+	requireScope(context.principal, scope);
+	const requested = householdArgument(args);
+	const households = requested
+		? context.principal.effectiveHouseholds.filter(({ householdId }) => householdId === requested)
+		: context.principal.effectiveHouseholds;
+	if (requested && households.length === 0) {
+		throw toolError('household_forbidden', 'This MCP key cannot access that household.');
+	}
+	const proof = households.find(({ permissions }) => permissions.includes(permission));
+	if (!proof) {
+		throw toolError(
+			'insufficient_role_permission',
+			`The MCP key owner does not have ${permission} in a granted paid household.`
+		);
+	}
+	return proof;
 };

@@ -2,6 +2,11 @@ import type { Meal } from '$lib/plan/plan-types';
 
 export type ScheduleMode = 'daily' | 'multi-day' | 'monthly';
 
+export type DailyScrollState = {
+	date: string;
+	offset: number;
+};
+
 export type {
 	HouseholdMember,
 	Meal,
@@ -18,8 +23,7 @@ export type MealCheckInHandler = (meal: Meal) => void;
 export type MealAddHandler = (date?: string) => void;
 
 export type MealDropTarget =
-	| { kind: 'pool'; index: number }
-	| { kind: 'date'; date: string; index: number };
+	{ kind: 'pool'; index: number } | { kind: 'date'; date: string; index: number };
 
 export const scheduleDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 export const sundayFirstScheduleDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;

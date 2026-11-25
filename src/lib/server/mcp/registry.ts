@@ -1,88 +1,67 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import {
-	CallToolRequestSchema,
-	ListToolsRequestSchema,
-	type Tool,
-	type ToolAnnotations
-} from '@modelcontextprotocol/sdk/types.js';
-import * as Schema from 'effect/Schema';
-import type { McpContext } from './context';
-import type { InputSchema } from './schemas';
-import { isRecord } from './scalars';
-import { toolError, toolResult } from './results';
+import { Server, type Tool } from '@modelcontextprotocol/server';
+import { JSONSchema, Schema } from 'effect';
 
-export type ToolHandler = (context: McpContext, args: Record<string, unknown>) => Promise<unknown>;
+import type { McpContext } from './context.js';
+import { isToolError, toolError, toolResult } from './results.js';
+import type { ToolDefinition } from './tools.js';
 
-export type ToolDefinition = {
-	name: string;
-	description: string;
-	inputSchema: InputSchema;
-	annotations?: ToolAnnotations;
-	handler: ToolHandler;
+export const schemaForToolList = (schema: ToolDefinition['inputSchema']): Tool['inputSchema'] => {
+	const jsonSchema = JSONSchema.make(schema) as unknown as Record<string, unknown>;
+	return (
+		jsonSchema.type ? jsonSchema : { type: 'object', properties: {}, additionalProperties: false }
+	) as Tool['inputSchema'];
 };
-
-export const schemaForToolList = (schema: InputSchema): Tool['inputSchema'] => {
-	const jsonSchema = Schema.toJsonSchemaDocument(schema).schema as Record<string, unknown>;
-	if (!jsonSchema.type) {
-		return { type: 'object', properties: {}, additionalProperties: false };
-	}
-	return jsonSchema as Tool['inputSchema'];
-};
-
-const invalidInputFromDecodeFailure = (cause: unknown) =>
-	toolError(
-		'invalid_input',
-		cause instanceof Error ? cause.message : 'Tool arguments are invalid.'
-	);
 
 export const registerToolHandlers = (
 	server: Server,
 	context: McpContext,
-	tools: ToolDefinition[]
-) => {
-	const toolMap = new Map<string, ToolDefinition>();
-	for (const tool of tools) {
-		if (toolMap.has(tool.name)) throw new Error(`Duplicate MCP tool name: ${tool.name}`);
-		toolMap.set(tool.name, tool);
+	definitions: readonly ToolDefinition[]
+): void => {
+	const byName = new Map<string, ToolDefinition>();
+	for (const definition of definitions) {
+		if (byName.has(definition.name)) {
+			throw new TypeError(`Duplicate MCP tool name: ${definition.name}`);
+		}
+		byName.set(definition.name, definition);
 	}
-
-	server.setRequestHandler(ListToolsRequestSchema, () => ({
-		tools: tools.map((tool) => ({
-			name: tool.name,
-			description: tool.description,
-			inputSchema: schemaForToolList(tool.inputSchema),
-			annotations: tool.annotations
+	server.setRequestHandler('tools/list', async () => ({
+		tools: definitions.map((definition) => ({
+			name: definition.name,
+			description: definition.description,
+			inputSchema: schemaForToolList(definition.inputSchema),
+			annotations: definition.annotations
 		}))
 	}));
-
-	server.setRequestHandler(CallToolRequestSchema, async (request) => {
-		const tool = toolMap.get(request.params.name);
-		if (!tool) {
-			return { isError: true, ...toolResult(toolError('unknown_tool', 'Unknown tool.')) };
-		}
+	server.setRequestHandler('tools/call', async (request) => {
+		const definition = byName.get(request.params.name);
+		if (!definition) return toolResult(toolError('unknown_tool', 'Unknown tool.'), true);
 		let args: Record<string, unknown>;
 		try {
-			const decodedArgs = Schema.decodeUnknownSync(tool.inputSchema)(
+			const decoded = Schema.decodeUnknownSync(definition.inputSchema)(
 				request.params.arguments ?? {}
 			);
-			if (!isRecord(decodedArgs))
-				throw toolError('invalid_input', 'Tool arguments must be an object.');
-			args = decodedArgs;
-		} catch (cause) {
-			const data =
-				isRecord(cause) && typeof cause.code === 'string'
-					? cause
-					: invalidInputFromDecodeFailure(cause);
-			return { isError: true, ...toolResult(data) };
+			if (typeof decoded !== 'object' || decoded === null || Array.isArray(decoded)) {
+				throw new TypeError('Arguments must be an object.');
+			}
+			args = decoded as Record<string, unknown>;
+		} catch {
+			return toolResult(toolError('invalid_input', 'Tool arguments are invalid.'), true);
 		}
 		try {
-			return toolResult(await tool.handler(context, args));
+			return server.projectCallToolResult(
+				toolResult(await definition.handler(context, args)),
+				undefined
+			);
 		} catch (cause) {
-			const data =
-				isRecord(cause) && typeof cause.code === 'string'
-					? cause
-					: toolError('tool_failed', cause instanceof Error ? cause.message : 'Tool failed.');
-			return { isError: true, ...toolResult(data) };
+			const safe = isToolError(cause)
+				? cause
+				: toolError(
+						cause && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string'
+							? cause.code
+							: 'tool_failed',
+						'The tool could not complete this request.'
+					);
+			return server.projectCallToolResult(toolResult(safe, true), undefined);
 		}
 	});
 };

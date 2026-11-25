@@ -103,8 +103,7 @@
 					value={instruction.text}
 					oninput={(event) => updateInstructionText(instruction.draftId, event.currentTarget.value)}
 					aria-label={`Instruction ${instruction.position} text`}
-					class={`${textareaClass} min-h-[5.75rem]`}
-				></textarea>
+					class={`${textareaClass} min-h-[5.75rem]`}></textarea>
 				<div class="flex flex-wrap gap-1 sm:flex-col sm:self-start">
 					<Button.Root
 						type="button"

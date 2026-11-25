@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { page } from '$app/state';
 	import type { Snippet } from 'svelte';
 	import Anchor from './anchor.svelte';
 	import Footer from './footer.svelte';
@@ -11,7 +10,7 @@
 	let { children }: { children: Snippet } = $props();
 
 	const brand = '#fe7156';
-	const startPlanningHref = $derived(page.data.session ? resolve('/plan') : resolve('/auth/login'));
+	const startPlanningHref = resolve('/auth/login');
 </script>
 
 <div

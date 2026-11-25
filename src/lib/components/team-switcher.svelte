@@ -1,86 +1,73 @@
 <script lang="ts">
-	import * as m from '$lib/paraglide/messages';
-	import { goto, invalidateAll } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { liveQuery } from 'dexie';
+	import { onMount } from 'svelte';
+	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
+	import PlusIcon from '@lucide/svelte/icons/plus';
+
+	import type { MaalDatabase } from '$lib/client/local/database.js';
+	import {
+		activeHouseholdKey,
+		listHouseholdsForProfile,
+		setActiveHousehold,
+		type ProfileHouseholdView
+	} from '$lib/client/local/index.js';
 	import { HomeIcon } from '$lib/components/icons/solar-outline';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { useSidebar } from '$lib/components/ui/sidebar/index.js';
-	import {
-		activeHouseholdId as activeHouseholdIdStore,
-		setActiveHouseholdId,
-		writeActiveHouseholdCookie
-	} from '$lib/stores/active-household';
-	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
-	import PlusIcon from '@lucide/svelte/icons/plus';
-	import { onDestroy, onMount } from 'svelte';
 
-	type Household = { id: string; name: string };
-
-	let {
-		households = [],
-		activeHouseholdId = null,
-		label = m.settings_households()
-	}: { households?: Household[]; activeHouseholdId?: string | null; label?: string } = $props();
+	let { database, label = 'Households' }: { database: MaalDatabase; label?: string } = $props();
 	const sidebar = useSidebar();
-	let clientActiveHouseholdId = $state<string | null>(null);
-	let lastServerActiveHouseholdId = $state<string | null>(null);
+	let households = $state<readonly ProfileHouseholdView[]>([]);
+	let activeProfileId = $state<string | null>(null);
+	let activeHouseholdId = $state<string | null>(null);
 	let switchError = $state<string | null>(null);
-	let storedActiveHouseholdId = $state<string | null>(null);
-	let switchRequestId = 0;
 
-	const activeHousehold = $derived(
-		households.find((household) => household.id === clientActiveHouseholdId) ??
+	const activeView = $derived(
+		households.find(({ household }) => household.householdId === activeHouseholdId) ??
 			households[0] ??
 			null
 	);
-	const householdName = $derived(activeHousehold?.name ?? m.app_no_household());
+	const householdName = $derived(activeView?.household.name ?? 'No household');
 	const householdMeta = $derived(
-		activeHousehold ? m.app_household_meta() : m.app_create_household_from_meal_plan()
+		activeView?.detached
+			? 'Detached local snapshot'
+			: activeView
+				? 'Household'
+				: 'Create a household'
 	);
-	const isKnownHouseholdId = (householdId: string | null): householdId is string =>
-		Boolean(householdId && households.some((household) => household.id === householdId));
-	const startHouseholdCreation = () => goto(resolve('/onboarding?new=1'));
-	const switchHousehold = async (householdId: string) => {
-		if (householdId === clientActiveHouseholdId) return;
-		const requestId = ++switchRequestId;
-		const previousHouseholdId = clientActiveHouseholdId;
-		switchError = null;
-		clientActiveHouseholdId = householdId;
-		setActiveHouseholdId(householdId);
-		writeActiveHouseholdCookie(householdId);
 
+	onMount(() => {
+		const subscription = liveQuery(async () => {
+			const activeProfile = await database.uiState.get('activeProfileId');
+			const profileId = typeof activeProfile?.value === 'string' ? activeProfile.value : null;
+			if (!profileId) return { profileId: null, activeHouseholdId: null, households: [] };
+			const activeHousehold = await database.uiState.get(activeHouseholdKey(profileId));
+			return {
+				profileId,
+				activeHouseholdId:
+					typeof activeHousehold?.value === 'string' ? activeHousehold.value : null,
+				households: await listHouseholdsForProfile(database, profileId)
+			};
+		}).subscribe((value) => {
+			activeProfileId = value.profileId;
+			activeHouseholdId = value.activeHouseholdId;
+			households = value.households;
+		});
+		return () => subscription.unsubscribe();
+	});
+
+	const switchHousehold = async (householdId: string) => {
+		if (!activeProfileId || householdId === activeHouseholdId) return;
+		switchError = null;
 		try {
-			await invalidateAll();
-		} catch (cause) {
-			if (requestId !== switchRequestId) return;
-			console.error('Failed to switch household', cause);
-			clientActiveHouseholdId = previousHouseholdId;
-			setActiveHouseholdId(previousHouseholdId);
-			writeActiveHouseholdCookie(previousHouseholdId);
-			switchError = m.app_could_not_switch_households();
+			await setActiveHousehold(database, activeProfileId, householdId);
+		} catch {
+			switchError = 'Could not switch households.';
 		}
 	};
-
-	$effect(() => {
-		if (activeHouseholdId !== lastServerActiveHouseholdId) {
-			lastServerActiveHouseholdId = activeHouseholdId;
-			clientActiveHouseholdId = activeHouseholdId;
-		}
-	});
-
-	$effect(() => {
-		if (!isKnownHouseholdId(storedActiveHouseholdId)) return;
-		clientActiveHouseholdId = storedActiveHouseholdId;
-	});
-
-	let unsubscribeActiveHousehold: (() => void) | null = null;
-	onMount(() => {
-		unsubscribeActiveHousehold = activeHouseholdIdStore.subscribe((householdId) => {
-			storedActiveHouseholdId = householdId;
-		});
-	});
-	onDestroy(() => unsubscribeActiveHousehold?.());
 </script>
 
 <Sidebar.Menu>
@@ -90,7 +77,7 @@
 				{#snippet child({ props })}
 					<Sidebar.MenuButton
 						{...props}
-						class="h-9 gap-2 p-0 pr-3 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-0! data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+						class="h-9 gap-2 p-0 pe-3 group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:p-0! data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
 					>
 						<span
 							class="flex size-9 shrink-0 items-center justify-center bg-[var(--brand-salmon)] text-white"
@@ -112,30 +99,32 @@
 				sideOffset={4}
 			>
 				<DropdownMenu.Label class="text-xs text-muted-foreground">{label}</DropdownMenu.Label>
-				{#if switchError}
-					<p class="px-2 py-1 text-xs text-destructive">{switchError}</p>
-				{/if}
+				{#if switchError}<p class="px-2 py-1 text-xs text-destructive">{switchError}</p>{/if}
 				{#if households.length > 0}
-					{#each households as household (household.id)}
+					{#each households as view (view.household.householdId)}
 						<DropdownMenu.Item
 							class="gap-2 p-2"
-							disabled={household.id === clientActiveHouseholdId}
-							onclick={() => switchHousehold(household.id)}
+							disabled={view.household.householdId === activeHouseholdId}
+							onclick={() => void switchHousehold(view.household.householdId)}
 						>
 							<HomeIcon class="size-5 shrink-0 text-primary" />
-							<span class="truncate">{household.name}</span>
+							<div class="grid min-w-0 flex-1">
+								<span class="truncate">{view.household.name}</span>
+								{#if view.detached}<span class="text-xs text-muted-foreground"
+										>Detached snapshot</span
+									>{/if}
+							</div>
 						</DropdownMenu.Item>
 					{/each}
 				{:else}
 					<DropdownMenu.Item disabled class="gap-2 p-2 text-muted-foreground">
-						<HomeIcon class="size-5 shrink-0" />
-						{m.app_no_household_yet()}
+						<HomeIcon class="size-5 shrink-0" /> No household yet
 					</DropdownMenu.Item>
 				{/if}
 				<DropdownMenu.Separator />
-				<DropdownMenu.Item class="gap-2 p-2" onclick={startHouseholdCreation}>
+				<DropdownMenu.Item class="gap-2 p-2" onclick={() => goto(resolve('/household?create=1'))}>
 					<PlusIcon class="size-5 shrink-0" />
-					<span class="truncate">{m.app_new_household()}</span>
+					<span class="truncate">New household</span>
 				</DropdownMenu.Item>
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>

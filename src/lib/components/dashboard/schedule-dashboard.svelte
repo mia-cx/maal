@@ -2,71 +2,89 @@
 	import * as m from '$lib/paraglide/messages';
 	import { untrack } from 'svelte';
 	import { keyboardShortcut } from '$lib/actions/keyboard-shortcut';
-	import {
-		addScheduleMealFromRecipe,
-		deleteScheduleMeal,
-		hydrateScheduleMeals,
-		mergeHydratedScheduleMeals,
-		moveScheduleMealToDropTarget,
-		scheduleMealStore,
-		selectScheduleMeal,
-		selectedMealStore,
-		updateScheduleMealSchedule
-	} from '$lib/stores/schedule-meals';
-	import { createMenuRecipe, hydrateMenuRecipes, menuRecipesStore } from '$lib/stores/menu-recipes';
-	import { fetchRecipePickerRecipes } from '$lib/menu/menu-client';
-	import { createDraftRecipe } from '$lib/menu/recipe-draft';
-	import {
-		clearScheduleDailyScroll,
-		scheduleUiState,
-		setScheduleDailyScroll,
-		updateScheduleUiState
-	} from '$lib/stores/schedule-ui-state';
+	import { createDraftRecipe } from '$lib/menu/recipe-draft.js';
+	import type { UnitPreferences } from '$lib/recipes/ingredient-text.js';
 	import AddMealDialog from './add-meal-dialog.svelte';
 	import ContinuousSchedule from './continuous-schedule.svelte';
-	import { RecipeEditSheet, type RecipeMenuItem } from '$lib/components/menu';
+	import { RecipeEditSheet, type RecipeMenuItem } from '$lib/components/menu/index.js';
 	import MealCheckInDialog, { type MealCheckInPayload } from './meal-check-in-dialog.svelte';
 	import MealDragOverlay from './meal-drag-overlay.svelte';
 	import MealPreviewDialog from './meal-preview-dialog.svelte';
 	import MonthSchedule from './month-schedule.svelte';
 	import MultiDaySchedule from './multi-day-schedule.svelte';
 	import ScheduleHeader from './schedule-header.svelte';
-	import { addDays, addMonths, dateFromKey, dateKey, startOfDay } from './schedule-date';
-	import { dropTargetFromPointer } from './schedule-dnd';
-	import { isMealInPool, sortMealPool } from './schedule-ordering';
-	import { submitMealCheckIn } from './schedule-check-ins';
-	import { fetchScheduleMealRange, ScheduleMealClientError } from './schedule-meal-client';
-	import { cardDirectionByKey, focusMealCard } from './schedule-keyboard';
-	import { hasLoadedMealRange, missingMealRanges, type MealRange } from './schedule-ranges';
-	import type { UnitPreferences } from '$lib/recipes/ingredient-text';
-	import type { HouseholdMember, Meal, MealDropTarget, ScheduleMode } from './schedule-types';
+	import { addDays, addMonths, dateFromKey, dateKey, startOfDay } from './schedule-date.js';
+	import { dropTargetFromPointer, moveMealToDropTarget } from './schedule-dnd.js';
+	import { cardDirectionByKey, focusMealCard } from './schedule-keyboard.js';
+	import { isMealInPool, sortMealPool } from './schedule-ordering.js';
+	import type { MealRange } from './schedule-ranges.js';
+	import type {
+		DailyScrollState,
+		HouseholdMember,
+		Meal,
+		MealDropTarget,
+		ScheduleMode
+	} from './schedule-types.js';
+
+	type ScheduleUiSnapshot = {
+		scheduleMode: ScheduleMode;
+		scheduleAnchorDate: string;
+		dailyScroll: DailyScrollState | null;
+	};
 
 	let {
-		meals: initialMeals = [],
-		recipes: initialRecipes = [],
-		defaultMealServings = 1,
+		meals: incomingMeals = [],
+		recipes = [],
 		weekStartsOn = 'monday',
-		initialMealRange,
+		householdTimeZone,
 		currentUserId,
 		householdMembers = [],
-		unitPreferences = {}
+		unitPreferences = {},
+		initialUiState,
+		error: loadError = null,
+		onplanrecipe,
+		onmealchange,
+		onmealsreorder,
+		onmealdelete,
+		onmealcheckin,
+		onmealopen,
+		oncreaterecipe,
+		onimporturl,
+		onloadedrangechange,
+		onuistatechange
 	}: {
 		meals?: Meal[];
 		recipes?: RecipeMenuItem[];
-		defaultMealServings?: number;
 		weekStartsOn?: 'sunday' | 'monday';
-		initialMealRange?: { start: string; end: string };
+		householdTimeZone?: string;
 		currentUserId?: string;
 		householdMembers?: HouseholdMember[];
 		unitPreferences?: UnitPreferences;
+		initialUiState: ScheduleUiSnapshot;
+		/** A local read or write failure owned by the route, shown in the schedule notice bar. */
+		error?: string | null;
+		onplanrecipe?: (recipe: RecipeMenuItem, date?: string) => Promise<Meal>;
+		onmealchange?: (meal: Meal, previous?: Meal) => void | Promise<void>;
+		/** Drag gesture touching several meals: one call so the route can commit it atomically. */
+		onmealsreorder?: (moves: { meal: Meal; previous?: Meal }[]) => void | Promise<void>;
+		onmealdelete?: (meal: Meal) => void | Promise<void>;
+		onmealcheckin?: (payload: MealCheckInPayload) => Promise<Meal>;
+		/** The person opened a meal's preview. */
+		onmealopen?: (meal: Meal) => void;
+		oncreaterecipe?: (recipe: RecipeMenuItem, date?: string) => Promise<Meal>;
+		onimporturl?: (url: string, date?: string) => Promise<Meal>;
+		onloadedrangechange?: (range: MealRange) => void;
+		onuistatechange?: (state: ScheduleUiSnapshot) => void | Promise<void>;
 	} = $props();
 
-	const initialUiState = scheduleUiState.get();
 	const mealPoolImageMinHeight = 760;
-
-	let mode = $state<ScheduleMode>(initialUiState.scheduleMode);
-	let anchorDate = $state(dateFromKey(initialUiState.scheduleAnchorDate));
-	let dailyScroll = $state(initialUiState.dailyScroll);
+	const startingUiState = untrack(() => initialUiState);
+	// The stored meals, overwritten optimistically by drags and sheet edits until the next emission.
+	let scheduleMeals = $derived<Meal[]>([...incomingMeals]);
+	let selectedMealId = $state<string | null>(null);
+	let mode = $state<ScheduleMode>(startingUiState.scheduleMode);
+	let anchorDate = $state(dateFromKey(startingUiState.scheduleAnchorDate));
+	let dailyScroll = $state<DailyScrollState | null>(startingUiState.dailyScroll);
 	let multiDayStep = $state(7);
 	let todaySignal = $state(0);
 	let dayNavigationSignal = $state(0);
@@ -80,38 +98,30 @@
 	let addMealDate = $state<string | undefined>();
 	let addMealBusy = $state(false);
 	let addMealError = $state<string | null>(null);
-	let pickerRecipesLoading = $state(false);
-	let pickerRecipesLoaded = $state(false);
 	let recipeEditorOpen = $state(false);
 	let draftRecipe = $state<RecipeMenuItem | null>(null);
 	let dragX = $state(0);
 	let dragY = $state(0);
 	let dropTarget = $state<MealDropTarget | null>(null);
+	let mealWriteError = $state<string | null>(null);
 	let secondaryScrollPointerId: number | null = null;
 	let secondaryScrollElement: HTMLElement | null = null;
 	let secondaryScrollX = 0;
 	let secondaryScrollY = 0;
-	let hydratedMealsSignature = $state('');
-	let hydratedRecipesSignature = $state('');
-	let loadedMealRanges = $state<MealRange[]>([]);
-	let loadingMealRangeKey = $state('');
-	let pendingMealRange = $state<MealRange | null>(null);
-	let mealRangeError = $state<string | null>(null);
-	let renderedMealRange = $state<{ start: string; end: string } | null>(null);
+	let renderedMealRangeKey = '';
 
-	const mealPool = $derived(sortMealPool($scheduleMealStore.filter(isMealInPool)));
-	const plannedMeals = $derived($scheduleMealStore.filter((meal) => !isMealInPool(meal)));
-	const selectedMeal = $derived($selectedMealStore);
-	const menuRecipes = $derived($menuRecipesStore);
-	const showDateControls = $derived(mode === 'daily' || mode === 'multi-day' || mode === 'monthly');
+	const mealPool = $derived(sortMealPool(scheduleMeals.filter(isMealInPool)));
+	const plannedMeals = $derived(scheduleMeals.filter((meal) => !isMealInPool(meal)));
+	const selectedMeal = $derived(scheduleMeals.find((meal) => meal.id === selectedMealId) ?? null);
+	const showDateControls = $derived(true);
 	const showStepControls = $derived(mode === 'multi-day' || mode === 'monthly');
 	const showMealPoolImages = $derived(dashboardHeight >= mealPoolImageMinHeight);
+	const notice = $derived(mealWriteError ?? loadError);
 	const scheduleModeByKey: Record<string, ScheduleMode> = {
 		d: 'daily',
 		w: 'multi-day',
 		m: 'monthly'
 	};
-
 	const scheduleShortcutCombos = [
 		'ArrowLeft',
 		'ArrowRight',
@@ -126,72 +136,14 @@
 		'm'
 	].map((key) => ({ key, meta: false, ctrl: false, alt: false }));
 
-	const loadMealRangeSegment = async (range: MealRange) => {
-		const key = `${range.start}:${range.end}`;
-		if (loadingMealRangeKey === key) return;
-		loadingMealRangeKey = key;
-		try {
-			const meals = await fetchScheduleMealRange(range);
-			mealRangeError = null;
-			mergeHydratedScheduleMeals(meals, range.start, range.end);
-			loadedMealRanges = [...loadedMealRanges, { start: range.start, end: range.end }];
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Failed to load meal range.';
-			mealRangeError = message;
-			if (!(error instanceof ScheduleMealClientError) || error.status !== 402) {
-				console.error('Failed to load meal range', error);
-			}
-		} finally {
-			if (loadingMealRangeKey === key) loadingMealRangeKey = '';
-		}
-	};
-
-	const loadMealRange = async (range: MealRange) => {
-		if (hasLoadedMealRange(loadedMealRanges, range.start, range.end)) return;
-		if (loadingMealRangeKey) {
-			pendingMealRange = range;
-			return;
-		}
-		try {
-			for (const missingRange of missingMealRanges(loadedMealRanges, range)) {
-				await loadMealRangeSegment(missingRange);
-			}
-		} finally {
-			const pendingRange = pendingMealRange;
-			pendingMealRange = null;
-			if (
-				pendingRange &&
-				!hasLoadedMealRange(loadedMealRanges, pendingRange.start, pendingRange.end)
-			) {
-				void loadMealRange(pendingRange);
-			}
-		}
-	};
-
-	const loadPickerRecipes = async () => {
-		if (pickerRecipesLoaded || pickerRecipesLoading || $menuRecipesStore.length > 0) return;
-		pickerRecipesLoading = true;
-		try {
-			hydrateMenuRecipes(await fetchRecipePickerRecipes());
-			pickerRecipesLoaded = true;
-		} catch (error) {
-			addMealError = error instanceof Error ? error.message : 'Could not load recipes.';
-		} finally {
-			pickerRecipesLoading = false;
-		}
-	};
-
-	const updateRenderedMealRange = (range: { start: string; end: string }) => {
-		if (renderedMealRange?.start === range.start && renderedMealRange.end === range.end) return;
-		renderedMealRange = range;
+	const clearDailyScroll = () => {
+		dailyScroll = null;
 	};
 
 	const moveByDay = (dayDelta: number) => {
 		anchorDate = startOfDay(addDays(anchorDate, dayDelta));
 		dayNavigationSignal += 1;
-		if (mode !== 'daily') return;
-		dailyScroll = null;
-		clearScheduleDailyScroll();
+		if (mode === 'daily') clearDailyScroll();
 	};
 
 	const moveByMonthRow = (rowDelta: number): boolean => {
@@ -212,133 +164,154 @@
 			focusMealCard(activeMealCard, cardDirection);
 			return;
 		}
-
 		if (event.key === 'ArrowLeft' || event.key.toLowerCase() === 'h') {
 			event.preventDefault();
 			moveByDay(-1);
 			return;
 		}
-
 		if (event.key === 'ArrowRight' || event.key.toLowerCase() === 'l') {
 			event.preventDefault();
 			moveByDay(1);
 			return;
 		}
-
 		if (event.key === 'ArrowUp' || event.key.toLowerCase() === 'k') {
 			if (moveByMonthRow(-1)) event.preventDefault();
 			return;
 		}
-
 		if (event.key === 'ArrowDown' || event.key.toLowerCase() === 'j') {
 			if (moveByMonthRow(1)) event.preventDefault();
 			return;
 		}
-
 		const nextMode = scheduleModeByKey[event.key.toLowerCase()];
-		if (!nextMode || nextMode === mode) return;
-		event.preventDefault();
-		mode = nextMode;
+		if (nextMode && nextMode !== mode) {
+			event.preventDefault();
+			mode = nextMode;
+		}
 	};
 
 	const previous = () => {
 		anchorDate =
 			mode === 'multi-day' ? addDays(anchorDate, -multiDayStep) : addMonths(anchorDate, -1);
 	};
-
 	const next = () => {
 		anchorDate =
 			mode === 'multi-day' ? addDays(anchorDate, multiDayStep) : addMonths(anchorDate, 1);
 	};
-
+	const todayKey = (): string => {
+		if (!householdTimeZone) return dateKey(new Date());
+		const parts = Object.fromEntries(
+			new Intl.DateTimeFormat('en-CA', {
+				timeZone: householdTimeZone,
+				year: 'numeric',
+				month: '2-digit',
+				day: '2-digit'
+			})
+				.formatToParts(new Date())
+				.map(({ type, value }) => [type, value])
+		);
+		return `${parts.year}-${parts.month}-${parts.day}`;
+	};
 	const today = () => {
-		anchorDate = startOfDay(new Date());
-		dailyScroll = null;
-		clearScheduleDailyScroll();
+		anchorDate = dateFromKey(todayKey());
+		clearDailyScroll();
 		todaySignal += 1;
 	};
-
 	const openDay = (date: Date) => {
 		anchorDate = startOfDay(date);
-		dailyScroll = null;
-		clearScheduleDailyScroll();
+		clearDailyScroll();
 		mode = 'daily';
 	};
-
-	const updateDailyScroll = (scrollState: NonNullable<typeof dailyScroll>) => {
+	const updateDailyScroll = (scrollState: DailyScrollState) => {
 		dailyScroll = scrollState;
-		setScheduleDailyScroll(scrollState);
 	};
-
 	const updateVisibleAnchor = (date: Date) => {
 		anchorDate = startOfDay(date);
 	};
-
-	const previewMeal = (meal: Meal) => {
-		selectScheduleMeal(meal.id);
-		previewOpen = true;
+	const updateRenderedMealRange = (range: MealRange) => {
+		const key = `${range.start}:${range.end}`;
+		if (key === renderedMealRangeKey) return;
+		renderedMealRangeKey = key;
+		onloadedrangechange?.(range);
 	};
 
-	const openMealCheckIn = (meal: Meal) => {
-		checkInMeal = meal;
-		checkInOpen = true;
+	const replaceMeal = (nextMeal: Meal) => {
+		scheduleMeals = scheduleMeals.map((meal) => (meal.id === nextMeal.id ? nextMeal : meal));
+		if (checkInMeal?.id === nextMeal.id) checkInMeal = nextMeal;
 	};
 
-	const saveMealCheckIn = async (payload: MealCheckInPayload) => {
-		updateScheduleMealSchedule(await submitMealCheckIn(payload), 'external');
-	};
-
-	const createMeal = (date?: string) => {
-		addMealDate = date;
-		addMealError = null;
-		addMealOpen = true;
-	};
-
-	const previewAddedRecipe = (recipe: RecipeMenuItem) => {
-		const meal = addScheduleMealFromRecipe(
-			recipe,
-			addMealDate,
-			defaultMealServings,
-			unitPreferences
-		);
-		selectScheduleMeal(meal.id);
-		previewOpen = true;
-		addMealOpen = false;
-		addMealDate = undefined;
-	};
-
-	const readAddMealError = (error: unknown): string => {
-		if (error instanceof Error) return error.message;
-		return m.menu_could_not_add_that_recipe();
-	};
-
-	const createRecipeFromTitle = (title: string) => {
-		draftRecipe = createDraftRecipe(() => crypto.randomUUID(), title);
-		addMealOpen = false;
-		recipeEditorOpen = true;
-	};
-
-	const saveDraftRecipe = async (recipe: RecipeMenuItem) => {
+	const planAndPreview = async (recipe: RecipeMenuItem, date = addMealDate) => {
+		if (!onplanrecipe) return;
 		addMealBusy = true;
 		addMealError = null;
 		try {
-			previewAddedRecipe(await createMenuRecipe({ recipe }));
-			draftRecipe = null;
+			const meal = await onplanrecipe(recipe, date);
+			scheduleMeals = [...scheduleMeals.filter((candidate) => candidate.id !== meal.id), meal];
+			selectedMealId = meal.id;
+			previewOpen = true;
+			addMealOpen = false;
+			addMealDate = undefined;
 		} catch (error) {
-			addMealError = readAddMealError(error);
-			addMealOpen = true;
+			addMealError = error instanceof Error ? error.message : m.menu_could_not_add_that_recipe();
 		} finally {
 			addMealBusy = false;
 		}
 	};
 
-	const importRecipeFromUrl = async (url: string) => {
+	const previewMeal = (meal: Meal) => {
+		selectedMealId = meal.id;
+		previewOpen = true;
+		onmealopen?.(meal);
+	};
+	const openMealCheckIn = (meal: Meal) => {
+		checkInMeal = meal;
+		checkInOpen = true;
+	};
+	const saveMealCheckIn = async (payload: MealCheckInPayload) => {
+		if (!onmealcheckin) return;
+		replaceMeal(await onmealcheckin(payload));
+	};
+	const createMeal = (date?: string) => {
+		addMealDate = date;
+		addMealError = null;
+		addMealOpen = true;
+	};
+	const createRecipeFromTitle = (title: string) => {
+		draftRecipe = createDraftRecipe(() => crypto.randomUUID(), title);
+		addMealOpen = false;
+		recipeEditorOpen = true;
+	};
+	const saveDraftRecipe = async (recipe: RecipeMenuItem) => {
+		if (!oncreaterecipe) return;
 		addMealBusy = true;
 		addMealError = null;
 		try {
-			previewAddedRecipe(await createMenuRecipe({ url }));
+			const meal = await oncreaterecipe(recipe, addMealDate);
+			scheduleMeals = [...scheduleMeals, meal];
+			selectedMealId = meal.id;
+			previewOpen = true;
+			draftRecipe = null;
 		} catch (error) {
-			addMealError = readAddMealError(error);
+			addMealError = error instanceof Error ? error.message : m.menu_could_not_add_that_recipe();
+			addMealOpen = true;
+		} finally {
+			addMealBusy = false;
+		}
+	};
+	const importRecipeFromUrl = async (url: string) => {
+		if (!onimporturl) {
+			addMealError = 'URL import requires the Maal plan.';
+			return;
+		}
+		addMealBusy = true;
+		addMealError = null;
+		try {
+			const meal = await onimporturl(url, addMealDate);
+			scheduleMeals = [...scheduleMeals, meal];
+			selectedMealId = meal.id;
+			previewOpen = true;
+			addMealOpen = false;
+		} catch (error) {
+			addMealError = error instanceof Error ? error.message : 'Could not import that recipe.';
 		} finally {
 			addMealBusy = false;
 		}
@@ -350,9 +323,8 @@
 		draggedPointerId = event.pointerId;
 		dragX = event.clientX;
 		dragY = event.clientY;
-		dropTarget = dropTargetFromPointer(event, meal, $scheduleMealStore);
+		dropTarget = dropTargetFromPointer(event, meal, scheduleMeals);
 	};
-
 	const startSecondaryTouchScroll = (event: PointerEvent) => {
 		if (!draggedMeal || event.pointerType !== 'touch' || event.pointerId === draggedPointerId)
 			return;
@@ -367,7 +339,6 @@
 		secondaryScrollX = event.clientX;
 		secondaryScrollY = event.clientY;
 	};
-
 	const moveSecondaryTouchScroll = (event: PointerEvent): boolean => {
 		if (secondaryScrollPointerId !== event.pointerId || !secondaryScrollElement) return false;
 		secondaryScrollElement.scrollLeft -= event.clientX - secondaryScrollX;
@@ -377,31 +348,55 @@
 		event.preventDefault();
 		return true;
 	};
-
 	const clearSecondaryTouchScroll = (event: PointerEvent): boolean => {
 		if (secondaryScrollPointerId !== event.pointerId) return false;
 		secondaryScrollPointerId = null;
 		secondaryScrollElement = null;
 		return true;
 	};
-
 	const moveMealDrag = (event: PointerEvent) => {
 		if (moveSecondaryTouchScroll(event)) return;
 		if (!draggedMeal || draggedPointerId !== event.pointerId) return;
 		dragX = event.clientX;
 		dragY = event.clientY;
-		dropTarget = dropTargetFromPointer(event, draggedMeal, $scheduleMealStore);
+		dropTarget = dropTargetFromPointer(event, draggedMeal, scheduleMeals);
 	};
-
-	const updateDraggedMeal = (target: MealDropTarget) => {
+	/** Puts the stored meals back on screen after a failed local write and says why. */
+	const rollBackMealWrite = (error: unknown) => {
+		scheduleMeals = [...incomingMeals];
+		mealWriteError = error instanceof Error ? error.message : 'Could not save that meal.';
+	};
+	const updateDraggedMeal = async (target: MealDropTarget) => {
 		if (!draggedMeal) return;
-		moveScheduleMealToDropTarget(draggedMeal, target, defaultMealServings);
+		const previousById = new Map(scheduleMeals.map((meal) => [meal.id, meal]));
+		const nextMeals = moveMealToDropTarget(scheduleMeals, draggedMeal, target);
+		const changed = nextMeals.filter((meal) => {
+			const before = previousById.get(meal.id);
+			return (
+				before &&
+				(before.date !== meal.date ||
+					before.time !== meal.time ||
+					before.sortOrder !== meal.sortOrder)
+			);
+		});
+		scheduleMeals = nextMeals;
+		try {
+			if (onmealsreorder) {
+				await onmealsreorder(
+					changed.map((meal) => ({ meal, previous: previousById.get(meal.id) }))
+				);
+			} else {
+				for (const meal of changed) await onmealchange?.(meal, previousById.get(meal.id));
+			}
+			mealWriteError = null;
+		} catch (error) {
+			rollBackMealWrite(error);
+		}
 	};
-
 	const stopMealDrag = (event: PointerEvent) => {
 		if (clearSecondaryTouchScroll(event)) return;
 		if (!draggedMeal || draggedPointerId !== event.pointerId) return;
-		if (dropTarget) updateDraggedMeal(dropTarget);
+		if (dropTarget) void updateDraggedMeal(dropTarget);
 		draggedMeal = null;
 		draggedPointerId = null;
 		dropTarget = null;
@@ -409,38 +404,33 @@
 		secondaryScrollElement = null;
 	};
 
-	$effect(() => {
-		const signature = initialMeals.map((meal) => meal.id).join('|');
-		if (signature === hydratedMealsSignature) return;
-		hydratedMealsSignature = signature;
-		hydrateScheduleMeals(initialMeals);
-		loadedMealRanges = initialMealRange ? [initialMealRange] : [];
-	});
+	const saveMealChange = async (meal: Meal) => {
+		const previous = scheduleMeals.find(({ id }) => id === meal.id);
+		replaceMeal(meal);
+		try {
+			await onmealchange?.(meal, previous);
+			mealWriteError = null;
+		} catch (error) {
+			rollBackMealWrite(error);
+		}
+	};
+	const removeMeal = async (meal: Meal) => {
+		scheduleMeals = scheduleMeals.filter(({ id }) => id !== meal.id);
+		selectedMealId = null;
+		try {
+			await onmealdelete?.(meal);
+			mealWriteError = null;
+		} catch (error) {
+			rollBackMealWrite(error);
+		}
+	};
 
 	$effect(() => {
-		const signature = initialRecipes.map((recipe) => recipe.id).join('|');
-		if (signature === hydratedRecipesSignature) return;
-		hydratedRecipesSignature = signature;
-		hydrateMenuRecipes(initialRecipes);
-	});
-
-	$effect(() => {
-		const range = renderedMealRange;
-		if (!range) return;
-		untrack(() => {
-			void loadMealRange(range);
+		void onuistatechange?.({
+			scheduleMode: mode,
+			scheduleAnchorDate: dateKey(anchorDate),
+			dailyScroll
 		});
-	});
-
-	$effect(() => {
-		if (!addMealOpen) return;
-		untrack(() => {
-			void loadPickerRecipes();
-		});
-	});
-
-	$effect(() => {
-		updateScheduleUiState({ scheduleMode: mode, scheduleAnchorDate: dateKey(anchorDate) });
 	});
 </script>
 
@@ -478,9 +468,9 @@
 		ontoday={today}
 	/>
 
-	{#if mealRangeError}
+	{#if notice}
 		<div class="border-b border-border bg-secondary px-4 py-2 text-sm text-muted-foreground">
-			{mealRangeError}
+			{notice}
 		</div>
 	{/if}
 
@@ -548,10 +538,10 @@
 	<AddMealDialog
 		bind:open={addMealOpen}
 		date={addMealDate}
-		recipes={menuRecipes}
-		busy={addMealBusy || pickerRecipesLoading}
+		{recipes}
+		busy={addMealBusy}
 		error={addMealError}
-		onexisting={previewAddedRecipe}
+		onexisting={(recipe) => void planAndPreview(recipe)}
 		onnewrecipe={createRecipeFromTitle}
 		onurl={importRecipeFromUrl}
 	/>
@@ -561,8 +551,8 @@
 		meal={selectedMeal}
 		{householdMembers}
 		{unitPreferences}
-		onmealchange={updateScheduleMealSchedule}
-		onmealdelete={deleteScheduleMeal}
+		onmealchange={(meal) => void saveMealChange(meal)}
+		onmealdelete={(meal) => void removeMeal(meal)}
 	/>
 	<MealCheckInDialog
 		bind:open={checkInOpen}

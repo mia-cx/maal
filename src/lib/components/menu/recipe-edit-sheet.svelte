@@ -37,6 +37,7 @@
 	} = $props();
 
 	let editingRecipeId = $state<string | null>(null);
+	let importedCandidate = $state<RecipeMenuItem['importedCandidate']>();
 	let title = $state('');
 	let sourceUrl = $state('');
 	let sourceSiteName = $state('');
@@ -91,6 +92,7 @@
 	const syncRecipe = (nextRecipe: RecipeMenuItem | null) => {
 		const nextInstructions = nextRecipe ? defaultInstructions(nextRecipe) : [];
 		editingRecipeId = nextRecipe?.id ?? null;
+		importedCandidate = nextRecipe?.importedCandidate;
 		title = nextRecipe?.title ?? '';
 		sourceUrl = nextRecipe?.sourceUrl ?? '';
 		sourceSiteName = nextRecipe?.sourceSiteName ?? '';
@@ -340,7 +342,7 @@
 
 	const savedInstructions = (): RecipeInstructionItem[] =>
 		instructions
-			.map(({ position, text }) => ({ position, text: text.trim() }))
+			.map(({ id, position, text }) => ({ id, position, text: text.trim() }))
 			.filter((instruction) => instruction.text)
 			.toSorted((left, right) => left.position - right.position)
 			.map((instruction, index) => ({ ...instruction, position: index + 1 }));
@@ -364,7 +366,8 @@
 		if (!recipe || saveBusy) return;
 
 		const savedIngredients = ingredients
-			.map(({ amount, unit, item }) => ({
+			.map(({ id, amount, unit, item }) => ({
+				id,
 				amount: amount.trim(),
 				unit: unit?.trim() || undefined,
 				item: item.trim()
@@ -375,6 +378,7 @@
 		try {
 			await onsaved?.({
 				...recipe,
+				importedCandidate,
 				title: title.trim() || recipe.title,
 				sourceUrl: sourceUrl.trim() || undefined,
 				sourceSiteName: sourceSiteName.trim() || undefined,
@@ -414,7 +418,7 @@
 			deleteConfirmOpen = false;
 			open = false;
 		} catch (error) {
-			deleteError = error instanceof Error ? error.message : 'Could not archive recipe.';
+			deleteError = error instanceof Error ? error.message : 'Could not delete recipe.';
 		} finally {
 			deleteBusy = false;
 		}
@@ -543,8 +547,8 @@
 	bind:open={deleteConfirmOpen}
 	title={m.menu_archive_this_recipe()}
 	description="This removes the recipe from My Menu. Planned meals keep their saved recipe snapshot."
-	confirmLabel="Archive recipe"
-	confirmingLabel="Archiving…"
+	confirmLabel="Delete recipe"
+	confirmingLabel="Deleting…"
 	cancelLabel="Keep recipe"
 	busy={deleteBusy}
 	error={deleteError}

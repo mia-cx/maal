@@ -1,13 +1,19 @@
 <script lang="ts">
+	import type { Pathname } from '$app/types';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { ModeWatcher } from 'mode-watcher';
 	import type { Snippet } from 'svelte';
-	import { locales, localizeHref } from '$lib/paraglide/runtime';
+	import { deLocalizeUrl, locales, localizeHref } from '$lib/paraglide/runtime';
+	import AuthCallbackProjector from '$lib/components/auth-callback-projector.svelte';
+	import PwaUpdatePrompt from '$lib/components/pwa-update-prompt.svelte';
 	import './layout.css';
 
 	let { children }: { children: Snippet } = $props();
+	const resolvePathname = resolve as unknown as (pathname: Pathname) => string;
 
 	let faviconHref = $state('/favicon.svg');
+	const recoveryOnly = $derived(deLocalizeUrl(page.url).pathname === '/recovery');
 
 	$effect(() => {
 		const colorScheme = window.matchMedia('(prefers-color-scheme: dark)');
@@ -30,11 +36,16 @@
 	<meta name="apple-mobile-web-app-status-bar-style" content="default" />
 </svelte:head>
 <ModeWatcher />
+{#if !recoveryOnly}
+	<AuthCallbackProjector />
+	<PwaUpdatePrompt />
+{/if}
 
 {@render children()}
 
 <div style="display:none">
 	{#each locales as locale (locale)}
-		<a href={localizeHref(page.url.pathname, { locale })}>{locale}</a>
+		<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- localizeHref returns a generated localized pathname -->
+		<a href={resolvePathname(localizeHref(page.url.pathname, { locale }) as Pathname)}>{locale}</a>
 	{/each}
 </div>
