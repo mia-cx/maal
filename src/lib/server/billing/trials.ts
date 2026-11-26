@@ -73,7 +73,8 @@ export const startMaalTrial = async (input: {
 					lookup_keys: [MAAL_PRICE_LOOKUP_KEYS.month]
 				})
 			).data.find((candidate) => decodeMaalPrice(candidate, productId)?.interval === 'month');
-	if (!price?.recurring?.trial_period_days) throw new TrialConfigurationError();
+	const stripeTrialDays = price?.recurring?.trial_period_days;
+	if (!price || !stripeTrialDays) throw new TrialConfigurationError();
 	const claimId = crypto.randomUUID();
 	try {
 		await input.repository.reserveTrial({
@@ -110,7 +111,7 @@ export const startMaalTrial = async (input: {
 				customer: customer.id,
 				items: [{ price: price.id }],
 				metadata: { householdId: input.householdId, workosUserId: input.workosUserId },
-				trial_from_plan: true,
+				trial_period_days: stripeTrialDays,
 				trial_settings: { end_behavior: { missing_payment_method: 'cancel' } }
 			},
 			{ idempotencyKey: `maal-trial-subscription:${claimId}` }
@@ -122,7 +123,6 @@ export const startMaalTrial = async (input: {
 			stripeSubscriptionId: subscriptionId,
 			updatedAt: input.now
 		});
-		if (subscription.status !== 'trialing') throw new TrialConfigurationError();
 		const projection = projectionFromStripeSubscription({
 			subscription,
 			householdId: input.householdId,

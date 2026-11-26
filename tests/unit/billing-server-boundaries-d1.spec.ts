@@ -894,7 +894,7 @@ describe('Stripe-managed trial and promotion settings', () => {
 		now: iso(t0)
 	};
 
-	test('requests a trial using the selected Stripe price without overriding its duration', async () => {
+	test('requests the trial duration read from the selected Stripe price', async () => {
 		const { stripe, calls } = fakeStripe();
 		await expect(
 			startMaalTrial({
@@ -907,10 +907,10 @@ describe('Stripe-managed trial and promotion settings', () => {
 		const request = calls.find(({ method }) => method === 'subscriptions.create')?.args[0];
 		expect(request).toMatchObject({
 			items: [{ price: 'price_monthly' }],
-			trial_from_plan: true,
+			trial_period_days: 45,
 			trial_settings: { end_behavior: { missing_payment_method: 'cancel' } }
 		});
-		expect(request).not.toHaveProperty('trial_period_days');
+		expect(request).not.toHaveProperty('trial_from_plan');
 		expect(request).not.toHaveProperty('trial_end');
 	});
 

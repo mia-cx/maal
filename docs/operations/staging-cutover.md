@@ -162,7 +162,8 @@ per-unit, licensed recurring Prices on it, using the desired currency and amount
 All three prices grant the same Maal capability. Set the default trial on each Stripe price used for
 trials (`recurring.trial_period_days` on creation, or `trial_period_days` via the
 [Update Plan API](https://docs.stripe.com/api/plans/update)). Maal uses the monthly price at onboarding
-and the selected price for trials started from the plan picker.
+and offers a trial on the monthly card only when Stripe has one configured. Otherwise the monthly
+card opens paid Checkout.
 
 Create a coupon and promotion code in the Stripe Dashboard for special offers. For a free first year
 on the yearly plan, create a 100%-off coupon with duration **Once**, then share its promotion code

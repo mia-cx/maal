@@ -103,6 +103,41 @@ const monthlyPrice = {
 	intervalCount: 1
 } as const;
 
+test.each([
+	{ trialConfigured: false, action: 'Start subscription', endpoint: 'checkout' },
+	{ trialConfigured: true, action: 'Start trial', endpoint: 'trial' }
+])(
+	'offers $action on a monthly price with trial configured: $trialConfigured',
+	async ({ trialConfigured, action, endpoint }) => {
+		const capability: BillingCapability = {
+			...paidCapability,
+			state: 'disabled',
+			stripeStatus: null,
+			subscriberUserId: null,
+			validUntil: null
+		};
+		const fetcher = vi.fn<typeof fetch>(async (input) =>
+			String(input).includes('/billing/status')
+				? Response.json({
+						schemaVersion: 1,
+						capability,
+						prices: [{ ...monthlyPrice, trialConfigured }],
+						trialAvailable: true,
+						trialUnavailableReason: null,
+						refreshedAt: timestamp
+					})
+				: Response.json({ error: { _tag: 'BillingUnavailable' } }, { status: 503 })
+		);
+		vi.stubGlobal('fetch', fetcher);
+		const screen = await renderForBob(['households:write', 'meals:read'], capability);
+		await screen.getByRole('button', { name: 'See plans' }).click();
+		await screen.getByRole('button', { name: action }).click();
+		await expect
+			.poll(() => String(fetcher.mock.calls.at(-1)?.[0]))
+			.toContain(`/billing/${endpoint}`);
+	}
+);
+
 /** Stripe still retries the old subscription, so the Worker refuses a second checkout. */
 const stubOpenSubscription = () => {
 	const fetcher = vi.fn<typeof fetch>(async (input) =>

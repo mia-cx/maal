@@ -32,7 +32,8 @@ export const decodeMaalPrice = (price: Stripe.Price, productId: string): Billing
 		amountMinor: price.unit_amount,
 		currency: price.currency,
 		interval: price.recurring.interval,
-		intervalCount: price.recurring.interval_count
+		intervalCount: price.recurring.interval_count,
+		trialConfigured: Boolean(price.recurring.trial_period_days)
 	};
 };
 
