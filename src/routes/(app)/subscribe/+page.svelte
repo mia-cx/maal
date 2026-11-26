@@ -147,7 +147,8 @@
 		error = null;
 		try {
 			const { url } = await beginCheckout(database, view.profileId, view.householdId, priceId);
-			window.location.assign(url);
+			if (url) window.location.assign(url);
+			else busy = false;
 		} catch {
 			error = m.billing_checkout_failed();
 			busy = false;
