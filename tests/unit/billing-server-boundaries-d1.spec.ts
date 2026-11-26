@@ -1355,6 +1355,7 @@ describe('client capability renewal tolerance', () => {
 				productId: 'prod_maal',
 				householdId,
 				workosUserId: 'user_alice',
+				billingGrant: false,
 				now
 			});
 
@@ -1411,5 +1412,51 @@ describe('household sync gates', () => {
 			mutations: []
 		});
 		expect([push.status, backfill.status]).toEqual([403, 403]);
+	});
+});
+
+describe('WorkOS billing grants', () => {
+	const now = '2026-10-01T00:00:00.000Z';
+	const granted = aliceLive.map((membership) => ({ ...membership, billingGrant: true }));
+	const gates = (memberships: LiveWorkOSMembership[]) => [
+		d1HouseholdSyncCapabilityAuthorizer.authorize({
+			database,
+			workosUserId: 'user_alice',
+			householdId,
+			activeWorkOSMemberships: memberships,
+			permission: 'meals:read',
+			now
+		}),
+		d1UserSyncCapabilityAuthorizer.authorize({
+			database,
+			workosUserId: 'user_alice',
+			activeWorkOSMemberships: memberships,
+			permission: 'recipes:read',
+			now
+		}),
+		assertMcpKeyManagementCapability({
+			database,
+			ownerUserId: 'user_alice',
+			liveMemberships: memberships,
+			now
+		})
+	];
+
+	test('a grant opens sync and MCP for a household without a subscription', async () => {
+		for (const gate of gates(aliceLive)) await expect(gate).rejects.toBeTruthy();
+		for (const gate of gates(granted)) await expect(gate).resolves.not.toBeInstanceOf(Error);
+	});
+
+	test('a grant does not reopen a household while its deletion is pending', async () => {
+		await database
+			.prepare(
+				`INSERT INTO household_deletion_requests
+				 (household_id, requester_user_id, state, refunded_amount_minor, requested_at,
+				  recoverable_until, updated_at)
+				 VALUES (?, 'user_alice', 'recoverable', 0, ?, ?, ?)`
+			)
+			.bind(householdId, now, '2026-11-01T00:00:00.000Z', now)
+			.run();
+		for (const gate of gates(granted)) await expect(gate).rejects.toBeTruthy();
 	});
 });

@@ -2,8 +2,8 @@ import { ServerSyncCapabilityDenied, ServerSyncPermissionDenied } from './errors
 import type { LiveWorkOSMembership } from '$lib/server/auth-slots/adapter.js';
 import { expandWorkOSPermissions } from '$lib/domain/household/permissions.js';
 import {
-	renewalCutoff,
-	subscriptionEnablesRemoteService
+	householdEnablesRemoteService,
+	type HouseholdRemoteServiceState
 } from '$lib/server/billing/entitlement.js';
 
 export type UserSyncPermission = 'recipes:read' | 'recipes:write';
@@ -49,13 +49,23 @@ interface CapabilityRow {
 	membership_id: string;
 	role_slug: string;
 	permissions: string;
-	status: string;
+	/** Stripe status; null when the household has no subscription, as with a WorkOS grant. */
+	status: string | null;
 	grace_until: string | null;
 	current_period_end: string | null;
 	deletion_state: string | null;
 	stripe_subscription_id: string | null;
 	stripe_cancellation_id: string | null;
 }
+
+const remoteServiceState = (row: CapabilityRow): HouseholdRemoteServiceState => ({
+	status: row.status,
+	currentPeriodEnd: row.current_period_end,
+	graceUntil: row.grace_until,
+	stripeSubscriptionId: row.stripe_subscription_id,
+	deletionState: row.deletion_state,
+	stripeCancellationId: row.stripe_cancellation_id
+});
 
 const permissionsFor = (encoded: string): readonly string[] => {
 	try {
@@ -79,49 +89,42 @@ export const d1UserSyncCapabilityAuthorizer: UserSyncCapabilityAuthorizer = {
 			});
 		}
 		const placeholders = input.activeWorkOSMemberships.map(() => '?').join(', ');
-		const statement = input.database
+		const result = await input.database
 			.prepare(
 				`SELECT hm.household_id, hm.membership_id, hm.role_slug, hm.permissions,
 				        bs.status, bs.current_period_end, bs.grace_until, bs.stripe_subscription_id,
 				        hdr.state AS deletion_state, hdr.stripe_cancellation_id
 				 FROM household_memberships hm
-				 JOIN billing_subscriptions bs ON bs.household_id = hm.household_id
+				 LEFT JOIN billing_subscriptions bs ON bs.household_id = hm.household_id
 				 LEFT JOIN household_deletion_requests hdr ON hdr.household_id = hm.household_id
 				 WHERE hm.workos_user_id = ?
 				   AND hm.status = 'active'
-				   AND hm.household_id IN (${placeholders})
-				   AND (
-				     hdr.state IS NULL OR (
-				       hdr.state = 'recovered'
-				       AND bs.stripe_subscription_id IS NOT NULL
-				       AND (
-				         hdr.stripe_cancellation_id IS NULL
-				         OR bs.stripe_subscription_id <> hdr.stripe_cancellation_id
-				       )
-				     )
-				   )
-				   AND (
-				     (bs.status IN ('active', 'trialing') AND bs.current_period_end > ?)
-				     OR (bs.status IN ('past_due', 'paused') AND bs.grace_until IS NOT NULL AND bs.grace_until > ?)
-				   )`
+				   AND hm.household_id IN (${placeholders})`
 			)
 			.bind(
 				input.workosUserId,
-				...input.activeWorkOSMemberships.map(({ householdId }) => householdId),
-				renewalCutoff(input.now),
-				input.now
+				...input.activeWorkOSMemberships.map(({ householdId }) => householdId)
+			)
+			.all<CapabilityRow>();
+		const liveFor = (row: CapabilityRow) =>
+			input.activeWorkOSMemberships.find(
+				(membership) => membership.householdId === row.household_id
 			);
-		const result = await statement.all<CapabilityRow>();
-		if (result.results.length === 0) {
+		const enabled = result.results.filter((row) =>
+			householdEnablesRemoteService(
+				remoteServiceState(row),
+				liveFor(row)?.billingGrant ?? false,
+				input.now
+			)
+		);
+		if (enabled.length === 0) {
 			throw new ServerSyncCapabilityDenied({
 				code: 'maal_plan_required',
 				message: 'An active or grace Maal plan is required.'
 			});
 		}
-		const permitted = result.results.find((row) => {
-			const live = input.activeWorkOSMemberships.find(
-				(membership) => membership.householdId === row.household_id
-			);
+		const permitted = enabled.find((row) => {
+			const live = liveFor(row);
 			return (
 				live?.membershipId === row.membership_id &&
 				live.roleSlug === row.role_slug &&
@@ -168,13 +171,7 @@ export const d1HouseholdSyncCapabilityAuthorizer: HouseholdSyncCapabilityAuthori
 				message: 'The current D1 membership projection denies this household.'
 			});
 		}
-		if (
-			row.deletion_state !== null &&
-			(row.deletion_state !== 'recovered' ||
-				row.stripe_subscription_id === null ||
-				(row.stripe_cancellation_id !== null &&
-					row.stripe_subscription_id === row.stripe_cancellation_id))
-		) {
+		if (row.deletion_state !== null && row.deletion_state !== 'recovered') {
 			throw new ServerSyncCapabilityDenied({
 				code: 'household_deletion_pending',
 				message: 'Synchronization is disabled while household deletion is in progress.'
@@ -191,11 +188,9 @@ export const d1HouseholdSyncCapabilityAuthorizer: HouseholdSyncCapabilityAuthori
 				message: 'The current household membership lacks the required permission.'
 			});
 		}
-		const enabled = subscriptionEnablesRemoteService(
-			{ status: row.status, currentPeriodEnd: row.current_period_end, graceUntil: row.grace_until },
-			input.now
-		);
-		if (!enabled) {
+		if (
+			!householdEnablesRemoteService(remoteServiceState(row), live.billingGrant ?? false, input.now)
+		) {
 			throw new ServerSyncCapabilityDenied({
 				code: 'maal_plan_required',
 				message: 'An active or grace Maal plan is required.'

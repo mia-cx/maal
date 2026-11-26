@@ -24,7 +24,30 @@ export interface BillingProjectionInput {
 	readonly graceUntil: string | null;
 }
 
+/**
+ * How long a device trusts a WorkOS grant before asking again. Grants have no end date; the device
+ * re-reads them when a profile opens, at launch, and on every server check, which also enforce them.
+ */
+export const BILLING_GRANT_VALIDITY_MILLISECONDS = 24 * 60 * 60 * 1_000;
+
+/** The capability a WorkOS metadata grant gives a household; see `$lib/domain/billing/grants.ts`. */
+export const grantedBillingCapability = (householdId: string, now: string): BillingCapability => ({
+	householdId,
+	state: 'enabled',
+	stripeStatus: null,
+	subscriberUserId: null,
+	stripePriceId: null,
+	currentPeriodEnd: null,
+	interruptionStartedAt: null,
+	graceUntil: null,
+	validUntil: asUtc(Date.parse(now) + BILLING_GRANT_VALIDITY_MILLISECONDS),
+	cancelAtPeriodEnd: false,
+	stale: false,
+	source: 'workos-grant'
+});
+
 export const billingCapabilityWasPreviouslyPaid = (capability: BillingCapability): boolean =>
+	capability.source === 'workos-grant' ||
 	capability.stripeStatus !== null ||
 	capability.subscriberUserId !== null ||
 	capability.stripePriceId !== null ||

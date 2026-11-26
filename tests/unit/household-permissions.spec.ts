@@ -17,7 +17,11 @@ vi.mock('@workos-inc/node', () => ({
 						createdAt: '2026-08-22T09:00:00.000Z'
 					}
 				]
-			})
+			}),
+			getUser: async () => ({ metadata: { maal_grant: 'beta household:org_family' } })
+		};
+		organizations = {
+			getOrganization: async () => ({ metadata: {} })
 		};
 		authorization = {
 			getOrganizationRole: async () => ({
@@ -60,7 +64,7 @@ describe('expandWorkOSPermissions', () => {
 		expect(expandWorkOSPermissions(expanded)).toEqual(expanded);
 	});
 
-	test('live WorkOS memberships carry the expanded permissions', async () => {
+	test('live WorkOS memberships carry the expanded permissions and metadata grant', async () => {
 		const adapter = createWorkOSAuthSlotAdapter({
 			apiKey: 'test-key-not-used',
 			clientId: 'client_test',
@@ -75,5 +79,6 @@ describe('expandWorkOSPermissions', () => {
 			'meals:read',
 			'meals:write'
 		]);
+		expect(membership?.billingGrant).toBe(true);
 	});
 });

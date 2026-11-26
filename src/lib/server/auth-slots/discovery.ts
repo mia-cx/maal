@@ -1,6 +1,9 @@
 import { Schema } from 'effect';
 
-import { projectBillingCapability } from '$lib/domain/billing/capability.js';
+import {
+	grantedBillingCapability,
+	projectBillingCapability
+} from '$lib/domain/billing/capability.js';
 import {
 	StripeSubscriptionStatusSchema,
 	type BillingCapability
@@ -51,7 +54,21 @@ const localDeletionState = (state: string | null): Household['deletionState'] =>
 				? 'active'
 				: 'deletionPending';
 
-const capabilityFor = (row: DiscoveryRow, now: string): BillingCapability => {
+/** A paying household keeps its Stripe capability, so its billing owner can still manage it. */
+const capabilityFor = (
+	row: DiscoveryRow,
+	billingGrant: boolean,
+	now: string
+): BillingCapability => {
+	const stripe = stripeCapabilityFor(row, now);
+	return billingGrant &&
+		stripe.state !== 'enabled' &&
+		(row.deletion_state === null || row.deletion_state === 'recovered')
+		? grantedBillingCapability(row.household_id, now)
+		: stripe;
+};
+
+const stripeCapabilityFor = (row: DiscoveryRow, now: string): BillingCapability => {
 	const status = Schema.is(StripeSubscriptionStatusSchema)(row.billing_status)
 		? row.billing_status
 		: null;
@@ -187,7 +204,11 @@ export const discoverActiveHouseholds = async (input: {
 				denialCode: null,
 				source: 'workos'
 			};
-			return { household, membership, capability: capabilityFor(row, input.now) };
+			return {
+				household,
+				membership,
+				capability: capabilityFor(row, live.billingGrant ?? false, input.now)
+			};
 		})
 	);
 };

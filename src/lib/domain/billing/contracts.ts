@@ -31,7 +31,7 @@ export const BillingCapabilitySchema = Schema.Struct({
 	validUntil: Schema.NullOr(UtcInstantSchema),
 	cancelAtPeriodEnd: Schema.Boolean,
 	stale: Schema.Boolean,
-	source: Schema.Literal('stripe-d1')
+	source: Schema.Literal('stripe-d1', 'workos-grant')
 });
 export type BillingCapability = typeof BillingCapabilitySchema.Type;
 
