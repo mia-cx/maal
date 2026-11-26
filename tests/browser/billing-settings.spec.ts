@@ -138,52 +138,6 @@ test.each([
 	}
 );
 
-test('replaces stale monthly Checkout with the trial now offered by Stripe', async () => {
-	const capability: BillingCapability = {
-		...paidCapability,
-		state: 'disabled',
-		stripeStatus: null,
-		subscriberUserId: null,
-		validUntil: null
-	};
-	const fetcher = vi.fn<typeof fetch>(async (input) =>
-		String(input).endsWith('/billing/checkout')
-			? Response.json(
-					{ error: { _tag: 'BillingConflictError', reason: 'trial_available' } },
-					{ status: 409 }
-				)
-			: Response.json({
-					schemaVersion: 1,
-					capability,
-					prices: [{ ...monthlyPrice, trialConfigured: true }],
-					trialAvailable: true,
-					trialUnavailableReason: null,
-					refreshedAt: timestamp
-				})
-	);
-	vi.stubGlobal('fetch', fetcher);
-	const screen = await renderForBob(['households:write'], capability, (database) =>
-		database.remoteProjectionMeta.put({
-			key: 'billing:org_kitchen',
-			refreshedAt: timestamp,
-			decodeVersion: 1,
-			value: {
-				prices: [{ ...monthlyPrice, trialConfigured: false }],
-				trialAvailable: true,
-				trialUnavailableReason: null
-			}
-		})
-	);
-
-	await screen.getByRole('button', { name: 'Start subscription' }).click();
-
-	await expect.element(screen.getByRole('button', { name: 'Start trial' })).toBeEnabled();
-	expect(fetcher.mock.calls.map(([input]) => String(input).split('/billing/')[1])).toEqual([
-		'checkout',
-		'status?householdId=org_kitchen'
-	]);
-});
-
 /** Stripe still retries the old subscription, so the Worker refuses a second checkout. */
 const stubOpenSubscription = () => {
 	const fetcher = vi.fn<typeof fetch>(async (input) =>

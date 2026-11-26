@@ -927,7 +927,7 @@ describe('Stripe-managed trial and promotion settings', () => {
 	});
 
 	test('new Checkout sessions accept promotion codes configured on Stripe', async () => {
-		const { stripe, calls } = fakeStripe(new Map(), { trialPeriodDays: null });
+		const { stripe, calls } = fakeStripe();
 		await expect(
 			createMaalCheckout({
 				stripe,
@@ -942,25 +942,6 @@ describe('Stripe-managed trial and promotion settings', () => {
 			mode: 'subscription',
 			allow_promotion_codes: true
 		});
-	});
-
-	test('paid Checkout refuses an eligible monthly purchase when Stripe now offers a trial', async () => {
-		const { stripe, calls } = fakeStripe();
-		const repository = new BillingRepository(database);
-		await expect(
-			createMaalCheckout({
-				stripe,
-				repository,
-				...billingActor,
-				priceId: 'price_monthly',
-				origin: 'https://maal.test',
-				idempotencyKey: 'checkout-stale-monthly-price'
-			})
-		).rejects.toMatchObject({ reason: 'trial_available' });
-		expect(calls).toHaveLength(0);
-		await expect(
-			repository.trialClaimAvailability(billingActor.workosUserId, householdId)
-		).resolves.toBe('available');
 	});
 });
 

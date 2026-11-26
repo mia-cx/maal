@@ -17,7 +17,7 @@ export const createMaalCheckout = async (input: {
 	idempotencyKey: string;
 	now: string;
 }): Promise<{ url: string }> => {
-	const price = await requireMaalPrice(input.stripe, input.productId, input.priceId);
+	await requireMaalPrice(input.stripe, input.productId, input.priceId);
 	const [existing, deletion] = await Promise.all([
 		input.repository.subscription(input.householdId),
 		input.repository.deletionRequest(input.householdId)
@@ -26,25 +26,8 @@ export const createMaalCheckout = async (input: {
 		throw new BillingConflictError('household_deletion_pending');
 	}
 
-	const checkOpenSubscriptions = async (customerId: string) => {
-		// A subscription that Stripe still retries, or whose webhook has not landed, must not be doubled.
-		if ((await openStripeSubscriptions(input.stripe, customerId)).length > 0) {
-			throw new BillingConflictError('already_subscribed');
-		}
-	};
-	const existingCustomerId = existing?.stripeCustomerId;
-	if (existingCustomerId) await checkOpenSubscriptions(existingCustomerId);
-	if (
-		price.recurring?.interval === 'month' &&
-		price.recurring.trial_period_days &&
-		(await input.repository.trialClaimAvailability(input.workosUserId, input.householdId)) ===
-			'available'
-	) {
-		throw new BillingConflictError('trial_available');
-	}
-
 	const customerId =
-		existingCustomerId ??
+		existing?.stripeCustomerId ??
 		(
 			await input.stripe.customers.create(
 				{
@@ -54,7 +37,11 @@ export const createMaalCheckout = async (input: {
 				{ idempotencyKey: `maal-customer:${input.householdId}` }
 			)
 		).id;
-	if (!existingCustomerId) await checkOpenSubscriptions(customerId);
+	// Stripe, not the projection, decides: a lapsed subscription that Stripe still retries, or a
+	// completed checkout whose webhook has not landed, must be paid or cancelled, never doubled.
+	if ((await openStripeSubscriptions(input.stripe, customerId)).length > 0) {
+		throw new BillingConflictError('already_subscribed');
+	}
 	const session = await input.stripe.checkout.sessions.create(
 		{
 			mode: 'subscription',

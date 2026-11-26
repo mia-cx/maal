@@ -19,20 +19,11 @@ const slotForProfile = async (database: MaalDatabase, profileId: string): Promis
 const route = (slotId: string, action: string): string =>
 	`/api/auth-slots/${encodeURIComponent(slotId)}/billing/${action}`;
 
-const requestFailure = async (response: Response): Promise<LocalBillingRequestFailed> => {
+const errorTag = async (response: Response): Promise<string> => {
 	const body = await response.json().catch(() => null);
-	const error = typeof body === 'object' && body !== null && 'error' in body ? body.error : null;
-	const reason =
-		typeof error === 'object' &&
-		error !== null &&
-		'reason' in error &&
-		typeof error.reason === 'string'
-			? error.reason
-			: undefined;
-	return new LocalBillingRequestFailed(
-		error === null ? `HTTP ${response.status}` : JSON.stringify(error),
-		reason
-	);
+	return typeof body === 'object' && body !== null && 'error' in body
+		? JSON.stringify(body.error)
+		: `HTTP ${response.status}`;
 };
 
 const post = async <T>(
@@ -49,7 +40,7 @@ const post = async <T>(
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify(body)
 	});
-	if (!response.ok) throw await requestFailure(response);
+	if (!response.ok) throw new LocalBillingRequestFailed(await errorTag(response));
 	return (await response.json()) as T;
 };
 
@@ -87,7 +78,7 @@ export const refreshBillingProjection = async (
 	const response = await fetcher(
 		`${route(slotId, 'status')}?householdId=${encodeURIComponent(householdId)}`
 	);
-	if (!response.ok) throw await requestFailure(response);
+	if (!response.ok) throw new LocalBillingRequestFailed(await errorTag(response));
 	const decoded = Schema.decodeUnknownSync(BillingProjectionEnvelopeSchema)(await response.json());
 	await applyBillingProjection(database, decoded);
 	return decoded;
@@ -204,30 +195,21 @@ export const refreshBillingOnLoad = async (
 	}
 };
 
-export const beginCheckout = async (
+export const beginCheckout = (
 	database: MaalDatabase,
 	profileId: string,
 	householdId: string,
 	priceId: string,
 	fetcher?: Fetch
-): Promise<{ url: string | null }> => {
-	try {
-		return await post<{ url: string }>(
-			database,
-			profileId,
-			'checkout',
-			{ householdId, priceId, idempotencyKey: crypto.randomUUID() },
-			'POST',
-			fetcher
-		);
-	} catch (cause) {
-		if (!(cause instanceof LocalBillingRequestFailed) || cause.reason !== 'trial_available') {
-			throw cause;
-		}
-		await refreshBillingProjection(database, profileId, householdId, fetcher);
-		return { url: null };
-	}
-};
+): Promise<{ url: string }> =>
+	post(
+		database,
+		profileId,
+		'checkout',
+		{ householdId, priceId, idempotencyKey: crypto.randomUUID() },
+		'POST',
+		fetcher
+	);
 
 export const beginTrial = (
 	database: MaalDatabase,
@@ -317,10 +299,7 @@ export class LocalBillingAuthRequired extends Error {
 
 export class LocalBillingRequestFailed extends Error {
 	readonly _tag = 'LocalBillingRequestFailed';
-	constructor(
-		readonly safeMessage: string,
-		readonly reason?: string
-	) {
+	constructor(readonly safeMessage: string) {
 		super('The billing request failed.');
 	}
 }

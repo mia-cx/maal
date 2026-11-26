@@ -128,12 +128,14 @@
 		error = null;
 		try {
 			const { url } = await beginCheckout(database, profileId, householdId, priceId);
-			if (url) window.location.assign(url);
-			else busy = false;
+			window.location.assign(url);
 		} catch (cause) {
 			// The Worker refuses a second checkout while Stripe still holds a subscription; the
 			// billing owner fixes that in the portal, anyone else just needs to know why.
-			if (cause instanceof LocalBillingRequestFailed && cause.reason === 'already_subscribed') {
+			if (
+				cause instanceof LocalBillingRequestFailed &&
+				cause.safeMessage.includes('already_subscribed')
+			) {
 				if (ownsBilling) return portal();
 				error = m.billing_checkout_already_subscribed();
 			} else {
