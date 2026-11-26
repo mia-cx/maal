@@ -16,6 +16,8 @@ export interface BillingActor {
 	readonly workosUserId: string;
 	readonly email: string;
 	readonly organizationId: string | null;
+	/** WorkOS metadata grants this actor the Maal plan in the household; see `LiveWorkOSMembership`. */
+	readonly billingGrant: boolean;
 }
 
 export const requireBillingActor = async (
@@ -77,7 +79,8 @@ export const requireBillingActor = async (
 		authSlotId,
 		workosUserId: authentication.user.id,
 		email: authentication.user.email,
-		organizationId: authentication.organizationId
+		organizationId: authentication.organizationId,
+		billingGrant: liveMembership.billingGrant ?? false
 	};
 };
 

@@ -128,6 +128,7 @@ describe('Stripe subscription projection', () => {
 				productId: 'prod_maal',
 				householdId: 'org_kitchen',
 				workosUserId: 'user_alice',
+				billingGrant: false,
 				now: '2026-08-22T12:00:00.000Z'
 			});
 

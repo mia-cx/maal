@@ -1,6 +1,7 @@
 import { WorkOS } from '@workos-inc/node';
 import type { AuthSlotId, AuthSlotStatus } from '$lib/auth-slots';
 import type { HouseholdPermission } from '$lib/domain/household/contracts.js';
+import { workosMetadataGrantsHousehold } from '$lib/domain/billing/grants.js';
 import { expandWorkOSPermissions } from '$lib/domain/household/permissions.js';
 
 export interface AuthenticatedSlot {
@@ -33,6 +34,8 @@ export interface LiveWorkOSMembership {
 	readonly permissions: readonly HouseholdPermission[];
 	readonly directoryManaged?: boolean;
 	readonly workosCreatedAt?: string;
+	/** WorkOS user or organization metadata grants this member the Maal plan here; absent is false. */
+	readonly billingGrant?: boolean;
 }
 
 export interface NewSlotSession extends AuthenticatedSlot {
@@ -144,17 +147,26 @@ export function createWorkOSAuthSlotAdapter(config: AuthSlotServerConfig): AuthS
 		},
 
 		async listActiveMemberships(userId) {
-			const page = await workos.userManagement.listOrganizationMemberships({
-				userId,
-				statuses: ['active']
-			});
-			const memberships = await page.autoPagination();
+			const [memberships, user] = await Promise.all([
+				workos.userManagement
+					.listOrganizationMemberships({ userId, statuses: ['active'] })
+					.then((page) => page.autoPagination()),
+				workos.userManagement.getUser(userId)
+			]);
 			return Promise.all(
 				memberships.map(async (membership) => {
-					const role = await workos.authorization
-						.getOrganizationRole(membership.organizationId, membership.role.slug)
-						.catch(() => workos.authorization.getEnvironmentRole(membership.role.slug));
+					const [role, organization] = await Promise.all([
+						workos.authorization
+							.getOrganizationRole(membership.organizationId, membership.role.slug)
+							.catch(() => workos.authorization.getEnvironmentRole(membership.role.slug)),
+						workos.organizations.getOrganization(membership.organizationId)
+					]);
 					return {
+						billingGrant: workosMetadataGrantsHousehold({
+							householdId: membership.organizationId,
+							userMetadata: user.metadata,
+							organizationMetadata: organization.metadata
+						}),
 						membershipId: membership.id,
 						householdId: membership.organizationId,
 						householdName: membership.organizationName,

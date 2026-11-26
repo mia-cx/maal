@@ -15,6 +15,8 @@ import {
 	activeHouseholdKey,
 	pinResetKey,
 	profileLockKey,
+	readActiveProfile,
+	readLockedActiveProfile,
 	signedOutAuthSlotId
 } from '$lib/client/local/profiles.js';
 import type { AuthSlotRecord } from '$lib/client/local/records.js';
@@ -271,53 +273,89 @@ const upsertAuthenticatedSlot = async (
 	return { state: 'authenticated', profileId: projectedProfileId, authSlotId: metadata.authSlotId };
 };
 
-export const projectAuthCallback = async (
+interface ProjectionOptions {
+	readonly fetcher?: Fetch;
+	readonly locale?: string;
+	readonly timezone?: string | null;
+	readonly now?: string;
+}
+
+export const projectAuthCallback = (
 	database: MaalDatabase,
 	marker: AuthCallbackMarker,
-	options: {
-		readonly fetcher?: Fetch;
-		readonly locale?: string;
-		readonly timezone?: string | null;
-		readonly now?: string;
-	} = {}
+	options: ProjectionOptions = {}
+): Promise<AuthProjectionOutcome> => projectAuthSlot(database, marker.authSlotId, options, true);
+
+/**
+ * Re-reads the active profile's slot once it opens (PIN entry, switching or launch), so household,
+ * role and plan changes made elsewhere, such as a WorkOS grant, reach this device without a new
+ * sign-in. Being offline or a server error leaves the profile as it is; a refused session still
+ * marks it for sign-in. Returns `null` when there is nothing to refresh.
+ */
+export const refreshActiveProfileSlot = async (
+	database: MaalDatabase,
+	options: ProjectionOptions = {}
+): Promise<AuthProjectionOutcome | null> => {
+	if (await readLockedActiveProfile(database)) return null;
+	const profile = await readActiveProfile(database);
+	if (!profile || (profile.authState !== 'authenticated' && profile.authState !== 'stale')) {
+		return null;
+	}
+	const slot = await database.authSlots.where('profileId').equals(profile.profileId).first();
+	if (!slot || slot.sessionState === 'revoked' || !isAuthSlotId(slot.authSlotId)) return null;
+	return projectAuthSlot(database, slot.authSlotId, options, false);
+};
+
+/** `marksUnavailableStale`: a sign-in that cannot be verified marks the profile `stale`. */
+const projectAuthSlot = async (
+	database: MaalDatabase,
+	authSlotId: AuthSlotId,
+	options: ProjectionOptions,
+	marksUnavailableStale: boolean
 ): Promise<AuthProjectionOutcome> => {
+	const markUnavailable = async () => {
+		if (marksUnavailableStale) await markSlotState(database, authSlotId, 'stale');
+	};
 	const fetcher = options.fetcher ?? globalThis.fetch;
 	let response: Response;
 	try {
-		response = await fetcher(`/api/auth-slots/${encodeURIComponent(marker.authSlotId)}/`, {
+		response = await fetcher(`/api/auth-slots/${encodeURIComponent(authSlotId)}/`, {
 			method: 'GET',
 			credentials: 'same-origin',
 			cache: 'no-store',
 			headers: { accept: 'application/json' }
 		});
 	} catch {
-		await markSlotState(database, marker.authSlotId, 'stale');
-		throw new AuthSlotMetadataUnavailable({ authSlotId: marker.authSlotId, status: null });
+		await markUnavailable();
+		throw new AuthSlotMetadataUnavailable({ authSlotId, status: null });
 	}
 
 	if (!response.ok) {
-		const state = response.status === 401 || response.status === 403 ? 'reauthRequired' : 'stale';
-		await markSlotState(database, marker.authSlotId, state);
-		throw new AuthSlotMetadataUnavailable({
-			authSlotId: marker.authSlotId,
-			status: response.status
-		});
+		if (response.status === 401 || response.status === 403) {
+			await markSlotState(database, authSlotId, 'reauthRequired');
+		} else {
+			await markUnavailable();
+		}
+		throw new AuthSlotMetadataUnavailable({ authSlotId, status: response.status });
 	}
 
 	let metadata: AuthSlotMetadataType;
 	try {
 		metadata = Schema.decodeUnknownSync(AuthSlotMetadata)(await response.json());
 	} catch {
-		await markSlotState(database, marker.authSlotId, 'stale');
-		throw new AuthSlotMetadataInvalid({ authSlotId: marker.authSlotId });
+		await markUnavailable();
+		throw new AuthSlotMetadataInvalid({ authSlotId });
 	}
-	if (metadata.authSlotId !== marker.authSlotId) {
-		await markSlotState(database, marker.authSlotId, 'stale');
-		throw new AuthSlotMetadataInvalid({ authSlotId: marker.authSlotId });
+	if (metadata.authSlotId !== authSlotId) {
+		await markUnavailable();
+		throw new AuthSlotMetadataInvalid({ authSlotId });
 	}
 
+	if (metadata.status === 'stale' && !marksUnavailableStale) {
+		throw new AuthSlotMetadataUnavailable({ authSlotId, status: response.status });
+	}
 	if (metadata.status !== 'authenticated') {
-		return markSlotState(database, marker.authSlotId, metadata.status);
+		return markSlotState(database, authSlotId, metadata.status);
 	}
 
 	try {
@@ -328,14 +366,13 @@ export const projectAuthCallback = async (
 		});
 	} catch (cause) {
 		if (cause instanceof AuthSlotProjectionIdentityMismatch) {
-			await markSlotState(database, marker.authSlotId, 'reauthRequired');
+			await markSlotState(database, authSlotId, 'reauthRequired');
 		}
 		if (cause instanceof AuthSlotCapacityExceeded) {
 			// Revoke the ninth session, but retain its owner binding so reauthentication can be retried.
-			await fetcher(
-				`/api/auth-slots/${encodeURIComponent(marker.authSlotId)}/?preserveIdentity=true`,
-				{ method: 'DELETE' }
-			);
+			await fetcher(`/api/auth-slots/${encodeURIComponent(authSlotId)}/?preserveIdentity=true`, {
+				method: 'DELETE'
+			});
 		}
 		throw cause;
 	}

@@ -1,7 +1,7 @@
 import type { LiveWorkOSMembership } from '$lib/server/auth-slots/adapter.js';
 import { authSlotAdapterFor } from '$lib/server/auth-slots/index.js';
 import { expandWorkOSPermissions } from '$lib/domain/household/permissions.js';
-import { subscriptionEnablesRemoteService } from '$lib/server/billing/entitlement.js';
+import { householdEnablesRemoteService } from '$lib/server/billing/entitlement.js';
 
 import {
 	MCP_KEY_PREFIX,
@@ -52,22 +52,23 @@ const stringArray = (encoded: string): readonly string[] => {
 	}
 };
 
-const planAllowsRemote = (row: D1CapabilityRow, now: string): boolean =>
-	subscriptionEnablesRemoteService(
+const remoteServiceEnabled = (
+	row: D1CapabilityRow,
+	live: LiveWorkOSMembership,
+	now: string
+): boolean =>
+	householdEnablesRemoteService(
 		{
 			status: row.billing_status,
 			currentPeriodEnd: row.current_period_end,
-			graceUntil: row.grace_until
+			graceUntil: row.grace_until,
+			stripeSubscriptionId: row.stripe_subscription_id,
+			deletionState: row.deletion_state,
+			stripeCancellationId: row.stripe_cancellation_id
 		},
+		live.billingGrant ?? false,
 		now
 	);
-
-const deletionAllowsRemote = (row: D1CapabilityRow): boolean =>
-	row.deletion_state === null ||
-	(row.deletion_state === 'recovered' &&
-		row.stripe_subscription_id !== null &&
-		(row.stripe_cancellation_id === null ||
-			row.stripe_subscription_id !== row.stripe_cancellation_id));
 
 const effectiveCapabilityRows = (
 	rows: readonly D1CapabilityRow[],
@@ -82,8 +83,7 @@ const effectiveCapabilityRows = (
 			row.status === 'active' &&
 			row.membership_id === live.membershipId &&
 			row.role_slug === live.roleSlug &&
-			planAllowsRemote(row, now) &&
-			deletionAllowsRemote(row)
+			remoteServiceEnabled(row, live, now)
 		);
 	});
 };

@@ -1,6 +1,10 @@
 import type Stripe from 'stripe';
 
-import { graceWindowForStatus, projectBillingCapability } from '$lib/domain/billing/capability.js';
+import {
+	graceWindowForStatus,
+	grantedBillingCapability,
+	projectBillingCapability
+} from '$lib/domain/billing/capability.js';
 import type {
 	BillingProjectionEnvelope,
 	StripeSubscriptionStatus
@@ -104,6 +108,8 @@ export const loadBillingProjection = async (input: {
 	productId: string;
 	householdId: string;
 	workosUserId: string;
+	/** The actor's WorkOS metadata grant; see `BillingActor.billingGrant`. */
+	billingGrant: boolean;
 	now: string;
 }): Promise<BillingProjectionEnvelope> => {
 	const [subscription, availability, prices] = await Promise.all([
@@ -127,6 +133,14 @@ export const loadBillingProjection = async (input: {
 	const deletion = await input.repository.deletionRequest(input.householdId);
 	if (!deletionAllowsProjectedSubscription(deletion, subscription)) {
 		capability = { ...capability, state: 'disabled', validUntil: null };
+	}
+	// A paying household keeps its Stripe capability, so its billing owner can still manage it.
+	if (
+		input.billingGrant &&
+		capability.state !== 'enabled' &&
+		(deletion === null || deletion.state === 'recovered')
+	) {
+		capability = grantedBillingCapability(input.householdId, input.now);
 	}
 	const alreadySubscribed =
 		capability.state !== 'disabled' || householdHasOpenSubscription(subscription, deletion);

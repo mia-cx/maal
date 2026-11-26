@@ -26,6 +26,7 @@ export const GET: RequestHandler = async (event) => {
 				productId: stripeProductId(event.platform?.env),
 				householdId: decoded.householdId,
 				workosUserId: actor.workosUserId,
+				billingGrant: actor.billingGrant,
 				now: new Date().toISOString()
 			})
 		);
