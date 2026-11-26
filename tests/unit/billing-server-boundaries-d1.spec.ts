@@ -986,7 +986,6 @@ describe('household deletion and billing', () => {
 				householdId,
 				workosUserId: 'user_alice',
 				email: 'alice@example.test',
-				trialDays: 30,
 				now: '2026-09-01T00:00:00.000Z'
 			})
 		).rejects.toMatchObject({ reason: 'household_deletion_pending' });

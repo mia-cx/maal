@@ -81,6 +81,11 @@ afterEach(async () => miniflare.dispose());
 
 describe('scheduled trial maintenance', () => {
 	test('retains a consumed claim when projection fails after Stripe created the trial', async () => {
+		const create = vi.fn(async () => ({
+			...stripeSubscription('trialing'),
+			id: 'sub_created',
+			customer: 'cus_created'
+		}));
 		await expect(
 			startMaalTrial({
 				repository: new BillingRepository(database),
@@ -91,11 +96,7 @@ describe('scheduled trial maintenance', () => {
 						del: async () => ({ id: 'cus_created', deleted: true })
 					},
 					subscriptions: {
-						create: async () => ({
-							...stripeSubscription('trialing'),
-							id: 'sub_created',
-							customer: 'cus_created'
-						}),
+						create,
 						update: async () => stripeSubscription('trialing'),
 						cancel: async () => stripeSubscription('canceled')
 					}
@@ -105,10 +106,13 @@ describe('scheduled trial maintenance', () => {
 				workosUserId: 'user_projection_missing',
 				email: 'missing@example.test',
 				priceId: 'price_maal',
-				trialDays: 14,
 				now
 			})
 		).rejects.toMatchObject({ _tag: 'TrialStartError', reason: 'rolled_back' });
+		expect(create).toHaveBeenCalledExactlyOnceWith(
+			expect.objectContaining({ trial_period_days: 30 }),
+			expect.anything()
+		);
 		await expect(
 			database
 				.prepare(

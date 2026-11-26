@@ -6,19 +6,20 @@ import type { BillingCapability } from '$lib/domain/billing/contracts.js';
 import { TrialUnavailableError } from './errors.js';
 import { listMaalPrices, requireMaalPrice } from './pricing.js';
 import type { BillingRepository, SubscriptionProjectionWrite } from './repository.js';
-import { configuredTrialDays, createStripeClient, stripeProductId } from './stripe.js';
+import { createStripeClient, stripeProductId } from './stripe.js';
 import { deletionAllowsProjectedSubscription } from './subscription-identity.js';
 import { assertTrialAvailable, projectionFromStripeSubscription } from './subscriptions.js';
 
+const MAAL_TRIAL_DAYS = 30;
+
 export const startConfiguredMaalTrial = (
 	environment: unknown,
-	input: Omit<Parameters<typeof startMaalTrial>[0], 'stripe' | 'productId' | 'trialDays'>
+	input: Omit<Parameters<typeof startMaalTrial>[0], 'stripe' | 'productId'>
 ): Promise<SubscriptionProjectionWrite> =>
 	startMaalTrial({
 		...input,
 		stripe: createStripeClient(environment),
-		productId: stripeProductId(environment),
-		trialDays: configuredTrialDays(environment)
+		productId: stripeProductId(environment)
 	});
 
 export const attemptOnboardingTrial = async (
@@ -61,7 +62,6 @@ export const startMaalTrial = async (input: {
 	workosUserId: string;
 	email: string;
 	priceId?: string;
-	trialDays: number;
 	now: string;
 }): Promise<SubscriptionProjectionWrite> => {
 	await assertTrialAvailable(input.repository, input.workosUserId, input.householdId);
@@ -107,7 +107,7 @@ export const startMaalTrial = async (input: {
 				customer: customer.id,
 				items: [{ price: price.id }],
 				metadata: { householdId: input.householdId, workosUserId: input.workosUserId },
-				trial_period_days: input.trialDays,
+				trial_period_days: MAAL_TRIAL_DAYS,
 				trial_settings: { end_behavior: { missing_payment_method: 'cancel' } }
 			},
 			{ idempotencyKey: `maal-trial-subscription:${claimId}` }
