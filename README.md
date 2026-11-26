@@ -52,10 +52,10 @@ Non-secret deployed values can go in the matching environment's `vars` in `wrang
 | `STRIPE_SECRET_KEY` | Stripe API access for billing. |
 | `STRIPE_WEBHOOK_SECRET` | Verifies Stripe events at `/api/billing/webhook`. |
 | `STRIPE_PRODUCT_ID` | Stripe product for the household subscription. |
-| `MAAL_TRIAL_DAYS` | Trial length, 1–90 days. Defaults to 30. |
 | `BILLING_MAINTENANCE_SECRET` | Bearer secret for `POST /api/billing/purge`. |
 
 WorkOS and Stripe configuration readers also accept process environment variables.
+Stripe prices set trial lengths. Stripe coupons and promotion codes apply discounts at Checkout.
 The purge endpoint reads its maintenance secret from the Worker environment.
 WorkOS handles the callback at `/api/auth/callback`; register its full URL in your WorkOS application.
 

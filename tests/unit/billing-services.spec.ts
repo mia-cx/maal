@@ -67,6 +67,17 @@ const subscription = (overrides: Partial<Stripe.Subscription> = {}): Stripe.Subs
 	}) as Stripe.Subscription;
 
 describe('Maal Stripe catalog', () => {
+	it('exposes whether Stripe has configured a trial without exposing its duration', () => {
+		const monthly = price();
+		expect(decodeMaalPrice(monthly, 'prod_maal')).toHaveProperty('trialConfigured', false);
+		expect(
+			decodeMaalPrice(
+				{ ...monthly, recurring: { ...monthly.recurring!, trial_period_days: 45 } },
+				'prod_maal'
+			)
+		).toHaveProperty('trialConfigured', true);
+	});
+
 	it('accepts the three supported intervals only on the configured product and lookup keys', () => {
 		expect(decodeMaalPrice(price(), 'prod_maal')).toMatchObject({
 			interval: 'month',

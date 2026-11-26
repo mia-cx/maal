@@ -32,7 +32,8 @@ export const decodeMaalPrice = (price: Stripe.Price, productId: string): Billing
 		amountMinor: price.unit_amount,
 		currency: price.currency,
 		interval: price.recurring.interval,
-		intervalCount: price.recurring.interval_count
+		intervalCount: price.recurring.interval_count,
+		trialConfigured: Boolean(price.recurring.trial_period_days)
 	};
 };
 
@@ -56,9 +57,9 @@ export const requireMaalPrice = async (
 	stripe: Stripe,
 	productId: string,
 	priceId: string
-): Promise<BillingPrice> => {
-	const price = decodeMaalPrice(await stripe.prices.retrieve(priceId), productId);
-	if (!price) throw new BillingPriceRejected();
+): Promise<Stripe.Price> => {
+	const price = await stripe.prices.retrieve(priceId);
+	if (!decodeMaalPrice(price, productId)) throw new BillingPriceRejected();
 	return price;
 };
 

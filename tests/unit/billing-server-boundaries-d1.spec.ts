@@ -112,7 +112,12 @@ const price = {
 	currency: 'eur',
 	lookup_key: MAAL_PRICE_LOOKUP_KEYS.month,
 	product: 'prod_maal',
-	recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed' },
+	recurring: {
+		interval: 'month',
+		interval_count: 1,
+		usage_type: 'licensed',
+		trial_period_days: 45
+	},
 	type: 'recurring',
 	unit_amount: 500
 };
@@ -136,6 +141,7 @@ const fakeStripe = (
 	subscriptions = new Map<string, Stripe.Subscription>(),
 	options: {
 		paymentMethods?: { id: string; created: number }[];
+		trialPeriodDays?: number | null;
 		failOn?:
 			| 'subscriptions.update'
 			| 'customers.update'
@@ -143,6 +149,16 @@ const fakeStripe = (
 			| 'paymentMethods.detach';
 	} = {}
 ) => {
+	const selectedPrice = {
+		...price,
+		recurring: {
+			...price.recurring,
+			trial_period_days:
+				options.trialPeriodDays === undefined
+					? price.recurring.trial_period_days
+					: options.trialPeriodDays
+		}
+	};
 	const paymentMethods = new Map(
 		(options.paymentMethods ?? [{ id: 'pm_alice', created: 1_700_000_000 }]).map((method) => [
 			method.id,
@@ -177,7 +193,10 @@ const fakeStripe = (
 			})
 		},
 		refunds: { retrieve: async () => null },
-		prices: { retrieve: async () => price, list: async () => ({ data: [price] }) },
+		prices: {
+			retrieve: async () => selectedPrice,
+			list: async () => ({ data: [selectedPrice] })
+		},
 		customers: {
 			create: record('customers.create', () => ({ id: 'cus_family' })),
 			update: record('customers.update', () => ({ id: 'cus_family' })),
@@ -866,6 +885,66 @@ describe('Stripe grace projection', () => {
 	});
 });
 
+describe('Stripe-managed trial and promotion settings', () => {
+	const billingActor = {
+		productId: 'prod_maal',
+		householdId,
+		workosUserId: 'user_alice',
+		email: 'alice@example.test',
+		now: iso(t0)
+	};
+
+	test('requests the trial duration read from the selected Stripe price', async () => {
+		const { stripe, calls } = fakeStripe();
+		await expect(
+			startMaalTrial({
+				stripe,
+				repository: new BillingRepository(database),
+				...billingActor,
+				priceId: 'price_monthly'
+			})
+		).resolves.toMatchObject({ status: 'trialing' });
+		const request = calls.find(({ method }) => method === 'subscriptions.create')?.args[0];
+		expect(request).toMatchObject({
+			items: [{ price: 'price_monthly' }],
+			trial_period_days: 45,
+			trial_settings: { end_behavior: { missing_payment_method: 'cancel' } }
+		});
+		expect(request).not.toHaveProperty('trial_from_plan');
+		expect(request).not.toHaveProperty('trial_end');
+	});
+
+	test('a monthly price without a configured trial does not start a subscription or consume a claim', async () => {
+		const { stripe, calls } = fakeStripe(new Map(), { trialPeriodDays: null });
+		const repository = new BillingRepository(database);
+		await expect(startMaalTrial({ stripe, repository, ...billingActor })).rejects.toMatchObject({
+			_tag: 'TrialConfigurationError'
+		});
+		expect(calls).toHaveLength(0);
+		await expect(
+			repository.trialClaimAvailability(billingActor.workosUserId, householdId)
+		).resolves.toBe('available');
+	});
+
+	test('new Checkout sessions accept promotion codes configured on Stripe', async () => {
+		const { stripe, calls } = fakeStripe();
+		await expect(
+			createMaalCheckout({
+				stripe,
+				repository: new BillingRepository(database),
+				...billingActor,
+				priceId: 'price_monthly',
+				origin: 'https://maal.test',
+				idempotencyKey: 'checkout-promo'
+			})
+		).resolves.toEqual({ url: 'https://checkout.test/s' });
+		expect(calls.find(({ method }) => method === 'checkout.create')?.args[0]).toMatchObject({
+			mode: 'subscription',
+			allow_promotion_codes: true
+		});
+	});
+});
+
 describe('one live subscription per household', () => {
 	test('checkout refuses while Stripe still retries the previous subscription', async () => {
 		const repository = new BillingRepository(database);
@@ -986,7 +1065,6 @@ describe('household deletion and billing', () => {
 				householdId,
 				workosUserId: 'user_alice',
 				email: 'alice@example.test',
-				trialDays: 30,
 				now: '2026-09-01T00:00:00.000Z'
 			})
 		).rejects.toMatchObject({ reason: 'household_deletion_pending' });

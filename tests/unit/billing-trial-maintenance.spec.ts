@@ -44,7 +44,12 @@ const stripePrice = (): Stripe.Price =>
 		product: 'prod_maal',
 		type: 'recurring',
 		unit_amount: 500,
-		recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed' }
+		recurring: {
+			interval: 'month',
+			interval_count: 1,
+			usage_type: 'licensed',
+			trial_period_days: 14
+		}
 	}) as Stripe.Price;
 
 beforeEach(async () => {
@@ -105,7 +110,6 @@ describe('scheduled trial maintenance', () => {
 				workosUserId: 'user_projection_missing',
 				email: 'missing@example.test',
 				priceId: 'price_maal',
-				trialDays: 14,
 				now
 			})
 		).rejects.toMatchObject({ _tag: 'TrialStartError', reason: 'rolled_back' });

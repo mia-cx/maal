@@ -4,21 +4,20 @@ import { projectBillingCapability } from '$lib/domain/billing/capability.js';
 import type { BillingCapability } from '$lib/domain/billing/contracts.js';
 
 import { TrialUnavailableError } from './errors.js';
-import { listMaalPrices, requireMaalPrice } from './pricing.js';
+import { decodeMaalPrice, MAAL_PRICE_LOOKUP_KEYS, requireMaalPrice } from './pricing.js';
 import type { BillingRepository, SubscriptionProjectionWrite } from './repository.js';
-import { configuredTrialDays, createStripeClient, stripeProductId } from './stripe.js';
+import { createStripeClient, stripeProductId } from './stripe.js';
 import { deletionAllowsProjectedSubscription } from './subscription-identity.js';
 import { assertTrialAvailable, projectionFromStripeSubscription } from './subscriptions.js';
 
 export const startConfiguredMaalTrial = (
 	environment: unknown,
-	input: Omit<Parameters<typeof startMaalTrial>[0], 'stripe' | 'productId' | 'trialDays'>
+	input: Omit<Parameters<typeof startMaalTrial>[0], 'stripe' | 'productId'>
 ): Promise<SubscriptionProjectionWrite> =>
 	startMaalTrial({
 		...input,
 		stripe: createStripeClient(environment),
-		productId: stripeProductId(environment),
-		trialDays: configuredTrialDays(environment)
+		productId: stripeProductId(environment)
 	});
 
 export const attemptOnboardingTrial = async (
@@ -61,16 +60,21 @@ export const startMaalTrial = async (input: {
 	workosUserId: string;
 	email: string;
 	priceId?: string;
-	trialDays: number;
 	now: string;
 }): Promise<SubscriptionProjectionWrite> => {
 	await assertTrialAvailable(input.repository, input.workosUserId, input.householdId);
+	const { stripe, productId } = input;
 	const price = input.priceId
-		? await requireMaalPrice(input.stripe, input.productId, input.priceId)
-		: (await listMaalPrices(input.stripe, input.productId)).find(
-				({ interval }) => interval === 'month'
-			);
-	if (!price) throw new TrialConfigurationError();
+		? await requireMaalPrice(stripe, productId, input.priceId)
+		: (
+				await stripe.prices.list({
+					product: productId,
+					active: true,
+					lookup_keys: [MAAL_PRICE_LOOKUP_KEYS.month]
+				})
+			).data.find((candidate) => decodeMaalPrice(candidate, productId)?.interval === 'month');
+	const stripeTrialDays = price?.recurring?.trial_period_days;
+	if (!price || !stripeTrialDays) throw new TrialConfigurationError();
 	const claimId = crypto.randomUUID();
 	try {
 		await input.repository.reserveTrial({
@@ -107,7 +111,7 @@ export const startMaalTrial = async (input: {
 				customer: customer.id,
 				items: [{ price: price.id }],
 				metadata: { householdId: input.householdId, workosUserId: input.workosUserId },
-				trial_period_days: input.trialDays,
+				trial_period_days: stripeTrialDays,
 				trial_settings: { end_behavior: { missing_payment_method: 'cancel' } }
 			},
 			{ idempotencyKey: `maal-trial-subscription:${claimId}` }
@@ -179,7 +183,7 @@ export const startMaalTrial = async (input: {
 export class TrialConfigurationError extends Error {
 	readonly _tag = 'TrialConfigurationError';
 	constructor() {
-		super('A monthly Maal price is required for trials.');
+		super('The Maal price must have a trial configured in Stripe.');
 	}
 }
 

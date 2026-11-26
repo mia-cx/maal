@@ -44,7 +44,8 @@ export const BillingPriceSchema = Schema.Struct({
 	amountMinor: Schema.NonNegativeInt,
 	currency: Schema.String,
 	interval: BillingPriceIntervalSchema,
-	intervalCount: Schema.Number.pipe(Schema.int(), Schema.positive())
+	intervalCount: Schema.Number.pipe(Schema.int(), Schema.positive()),
+	trialConfigured: Schema.optional(Schema.Boolean)
 });
 export type BillingPrice = typeof BillingPriceSchema.Type;
 

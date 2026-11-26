@@ -59,7 +59,7 @@
 					{useCase(price.interval)}
 				</p>
 				<div class="mt-6 grid gap-2">
-					{#if trialAvailable && price.interval === 'month'}
+					{#if trialAvailable && price.interval === 'month' && price.trialConfigured === true}
 						<Button
 							type="button"
 							size="lg"
