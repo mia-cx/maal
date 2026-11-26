@@ -159,10 +159,19 @@ per-unit, licensed recurring Prices on it, using the desired currency and amount
 | month    | `maal_monthly_v1` |
 | year     | `maal_yearly_v1`  |
 
-All three prices grant the same Maal capability. Trial length is application configuration
-(`MAAL_TRIAL_DAYS`, default `30`), not another product or tier. D1's Stripe webhook projection is canonical;
-do not make a WorkOS entitlement a v1 correctness dependency. Stripe documents multiple prices and stable
-lookup keys in [Manage products and prices](https://docs.stripe.com/products-prices/manage-prices).
+All three prices grant the same Maal capability. Set the default trial on each Stripe price used for
+trials (`recurring.trial_period_days` on creation, or `trial_period_days` via the
+[Update Plan API](https://docs.stripe.com/api/plans/update)). Maal uses the monthly price at onboarding
+and the selected price for trials started from the plan picker.
+
+Create a coupon and promotion code in the Stripe Dashboard for special offers. For a free first year
+on the yearly plan, create a 100%-off coupon with duration **Once**, then share its promotion code
+with instructions to select the yearly plan in Checkout. Codes apply to new Checkout subscriptions;
+existing subscriptions are managed in Stripe.
+
+D1's Stripe webhook projection is canonical; do not make a WorkOS entitlement a v1 correctness dependency.
+Stripe documents multiple prices and stable lookup keys in
+[Manage products and prices](https://docs.stripe.com/products-prices/manage-prices).
 
 Create one **test-mode** webhook endpoint at:
 
@@ -200,7 +209,6 @@ WORKOS_COOKIE_PASSWORD
 STRIPE_SECRET_KEY
 STRIPE_WEBHOOK_SECRET
 STRIPE_PRODUCT_ID
-MAAL_TRIAL_DAYS
 BILLING_MAINTENANCE_SECRET
 ```
 

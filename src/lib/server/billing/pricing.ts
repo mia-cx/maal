@@ -56,9 +56,9 @@ export const requireMaalPrice = async (
 	stripe: Stripe,
 	productId: string,
 	priceId: string
-): Promise<BillingPrice> => {
-	const price = decodeMaalPrice(await stripe.prices.retrieve(priceId), productId);
-	if (!price) throw new BillingPriceRejected();
+): Promise<Stripe.Price> => {
+	const price = await stripe.prices.retrieve(priceId);
+	if (!decodeMaalPrice(price, productId)) throw new BillingPriceRejected();
 	return price;
 };
 

@@ -45,6 +45,7 @@ export const createMaalCheckout = async (input: {
 	const session = await input.stripe.checkout.sessions.create(
 		{
 			mode: 'subscription',
+			allow_promotion_codes: true,
 			customer: customerId,
 			client_reference_id: input.householdId,
 			line_items: [{ price: input.priceId, quantity: 1 }],
